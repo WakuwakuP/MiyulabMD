@@ -1,0 +1,20 @@
+{
+  "name": "@miyulabmd/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@miyulabmd/shared": "workspace:*",
+    "elysia": "^1.4.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "wrangler": "^4.28.0"
+  }
+}

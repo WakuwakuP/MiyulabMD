@@ -1,0 +1,36 @@
+name = "miyulabmd"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "miyulabmd"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "src/db/migrations"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "miyulabmd-images"
+
+[durable_objects]
+bindings = [{ name = "DOCUMENT_ROOM", class_name = "DocumentRoom" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DocumentRoom"]
+
+[vars]
+ALLOW_ANONYMOUS = "false"
+ALLOW_ANONYMOUS_EDITS = "true"
+ALLOW_ANONYMOUS_VIEWS = "true"
+DEFAULT_PERMISSION = "editable"
+ACCESS_TEAM_DOMAIN = "example.cloudflareaccess.com"
+
+# wrangler secret put SESSION_SECRET
+# wrangler secret put ACCESS_AUD

@@ -1,0 +1,11 @@
+{
+  "name": "miyulabmd",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "dev": "pnpm --filter @miyulabmd/web dev",
+    "dev:worker": "pnpm --filter @miyulabmd/worker dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
