@@ -7,11 +7,12 @@ compatibility_flags = ["nodejs_compat"]
 directory = "../web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/auth/*", "/ws/*", "/mcp", "/mcp/*"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "miyulabmd"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "f17b1a84-e201-47a4-a841-e874236f9a17"
 migrations_dir = "src/db/migrations"
 
 [[r2_buckets]]
@@ -30,7 +31,8 @@ ALLOW_ANONYMOUS = "false"
 ALLOW_ANONYMOUS_EDITS = "true"
 ALLOW_ANONYMOUS_VIEWS = "true"
 DEFAULT_PERMISSION = "editable"
-ACCESS_TEAM_DOMAIN = "example.cloudflareaccess.com"
+ACCESS_TEAM_DOMAIN = "miyulab.cloudflareaccess.com"
+DEV_AUTH = "false"
 
 # wrangler secret put SESSION_SECRET
 # wrangler secret put ACCESS_AUD

@@ -4,7 +4,7 @@ export const MCP_TOOLS = [
   "create_note",
   "update_note",
   "delete_note",
-  "set_note_permission",
+  "set_note_access",
   "invite_collaborator",
   "search_notes",
 ] as const;

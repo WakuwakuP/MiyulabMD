@@ -9,10 +9,22 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.9",
     "@miyulabmd/shared": "workspace:*",
+    "codemirror": "^6.0.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "react-router": "^7.8.0"
+    "react-router": "^7.8.0",
+    "rehype-sanitize": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark": "^15.0.1",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5",
+    "y-codemirror.next": "^0.3.6",
+    "y-websocket": "^3.1.0",
+    "yjs": "^13.6.32"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",

@@ -11,6 +11,7 @@ export function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/f/:folderId" element={<HomePage />} />
           <Route path="/n/:id" element={<EditorPage />} />
           <Route path="/s/:id" element={<SharePage />} />
           <Route path="/settings" element={<SettingsPage />} />

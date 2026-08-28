@@ -1,0 +1,7 @@
+# apps/worker/.dev.vars にコピーして使う（git 管理外）
+SESSION_SECRET=change-me-to-a-long-random-string
+DEV_AUTH=true
+
+# ローカル / agent-browser は DEV_AUTH=true で /auth/login?email=... のモックログイン。
+# ACCESS_AUD を置かないこと（置くと Access 扱いになる）。
+# 本番 wrangler.toml は DEV_AUTH=false。ACCESS_AUD は wrangler secret で設定する。

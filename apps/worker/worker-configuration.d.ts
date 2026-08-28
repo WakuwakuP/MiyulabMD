@@ -1,7 +1,12 @@
+declare class DocumentRoom extends DurableObject {
+  applyMarkdown(markdown: string): Promise<void>;
+  getMarkdown(): Promise<string>;
+}
+
 interface Env {
   DB: D1Database;
   IMAGES: R2Bucket;
-  DOCUMENT_ROOM: DurableObjectNamespace;
+  DOCUMENT_ROOM: DurableObjectNamespace<DocumentRoom>;
   ASSETS: Fetcher;
   ALLOW_ANONYMOUS: string;
   ALLOW_ANONYMOUS_EDITS: string;
@@ -10,4 +15,5 @@ interface Env {
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD?: string;
   SESSION_SECRET?: string;
+  DEV_AUTH: string;
 }

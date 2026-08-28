@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "pnpm --filter @miyulabmd/web dev",
     "dev:worker": "pnpm --filter @miyulabmd/worker dev",
+    "db:migrate": "pnpm --filter @miyulabmd/worker db:migrate",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   }
