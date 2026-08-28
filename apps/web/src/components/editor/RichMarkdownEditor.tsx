@@ -5,7 +5,7 @@ import { Markdown } from "@tiptap/markdown";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type * as Y from "yjs";
 import { fetchOgPreview, uploadImage } from "../../lib/api.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
@@ -20,9 +20,13 @@ import {
 } from "../../lib/markdown-pm-map.ts";
 import { readRemoteMarkdownCursors, writeMarkdownCursor } from "../../lib/rich-awareness.ts";
 import { applyTextDiff, inspectPlainTextDelta, type YTextDeltaItem } from "../../lib/y-text-diff.ts";
+import { BlockHandle } from "./BlockHandle.tsx";
+import { AutoLinkCard } from "./extensions/auto-link-card.ts";
 import { CollabCarets, collabCaretsKey } from "./extensions/collab-carets.ts";
 import { OgCard } from "./extensions/og-card.ts";
 import { SafeParagraph } from "./extensions/safe-paragraph.ts";
+import { LinkModal } from "./LinkModal.tsx";
+import { SelectionToolbar } from "./SelectionToolbar.tsx";
 import { SlashCommandMenu } from "./SlashCommandMenu.tsx";
 
 type Props = {
@@ -155,6 +159,7 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
       Image,
       Youtube.configure({ controls: true, nocookie: true, width: 640, height: 360 }),
       OgCard,
+      AutoLinkCard,
       Placeholder.configure({ placeholder: "「/」でブロックを挿入" }),
       CollabCarets.configure({
         getMap: () => mapRef.current,
@@ -255,6 +260,7 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
   }, [editor, readOnly]);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [linkModal, setLinkModal] = useState<"card" | "inline" | null>(null);
 
   async function insertImageFile(file: File) {
     const result = await uploadImage(noteId, file);
@@ -267,16 +273,25 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
     editor.chain().focus().setYoutubeVideo({ src: url }).run();
   }
 
-  async function insertOg() {
-    const url = window.prompt("リンクの URL（OGP カード）");
-    if (!url || !editor) return;
+  async function insertStandaloneLink(url: string) {
+    if (!editor) return;
     await fetchOgPreview(url);
     editor.chain().focus().insertContent({ type: "ogCard", attrs: { href: url } }).run();
+  }
+
+  function applyInlineLink(url: string) {
+    editor?.chain().focus().setLink({ href: url }).run();
   }
 
   if (!editor) {
     return <div className="rich-editor rich-editor--loading">読み込み中…</div>;
   }
+
+  const commandHandlers = {
+    onImage: () => imageInputRef.current?.click(),
+    onYoutube: insertYoutube,
+    onOgCard: () => setLinkModal("card"),
+  };
 
   return (
     <div className="rich-editor">
@@ -294,13 +309,23 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
       />
       <EditorContent editor={editor} className="rich-editor-content" />
       {!readOnly && (
-        <SlashCommandMenu
-          editor={editor}
-          handlers={{
-            onImage: () => imageInputRef.current?.click(),
-            onYoutube: insertYoutube,
-            onOgCard: () => void insertOg(),
+        <>
+          <SlashCommandMenu editor={editor} handlers={commandHandlers} />
+          <BlockHandle editor={editor} handlers={commandHandlers} />
+          <SelectionToolbar editor={editor} onLink={() => setLinkModal("inline")} />
+        </>
+      )}
+      {linkModal && (
+        <LinkModal
+          title={linkModal === "card" ? "リンクカード" : "リンク"}
+          initial={linkModal === "inline" ? String(editor.getAttributes("link").href ?? "") : ""}
+          submitLabel="挿入"
+          onSubmit={(url) => {
+            if (linkModal === "card") void insertStandaloneLink(url);
+            else applyInlineLink(url);
+            setLinkModal(null);
           }}
+          onClose={() => setLinkModal(null)}
         />
       )}
     </div>

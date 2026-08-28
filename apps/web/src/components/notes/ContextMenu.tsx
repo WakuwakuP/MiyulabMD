@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { MenuFixed, MenuItem } from "../ui/Menu.tsx";
 
 export type ContextMenuItem = {
   label: string;
@@ -35,27 +36,21 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   }, [onClose]);
 
   return (
-    <ul
-      className="context-menu"
-      style={{ left: x, top: y }}
-      role="menu"
-      onClick={(event) => event.stopPropagation()}
-    >
-      {items.map((item) => (
-        <li key={item.label}>
-          <button
-            type="button"
-            role="menuitem"
-            className={item.danger ? "is-danger" : undefined}
+    <div onClick={(event) => event.stopPropagation()}>
+      <MenuFixed x={x} y={y}>
+        {items.map((item) => (
+          <MenuItem
+            key={item.label}
+            danger={item.danger}
             onClick={() => {
               item.onSelect();
               onClose();
             }}
           >
             {item.label}
-          </button>
-        </li>
-      ))}
-    </ul>
+          </MenuItem>
+        ))}
+      </MenuFixed>
+    </div>
   );
 }

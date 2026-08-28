@@ -1,8 +1,9 @@
 import type { Note } from "@miyulabmd/shared";
-import { folderUrl, normalizeFolder, titleFromMarkdown } from "@miyulabmd/shared";
+import { normalizeFolder, titleFromMarkdown } from "@miyulabmd/shared";
 import { useEffect, useRef, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
+import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
@@ -10,6 +11,7 @@ import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx"
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
+import { Button } from "../components/ui/Button.tsx";
 import { fetchNote, updateNote } from "../lib/api.ts";
 import { applyAwarenessUser, createYjsSession, type YjsSession } from "../lib/collaboration.ts";
 import { writeEditorMode, type EditorMode } from "../lib/editor-mode.ts";
@@ -37,7 +39,6 @@ export function EditorPage() {
   const [collabReady, setCollabReady] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>("preview");
-  const [folderOpen, setFolderOpen] = useState(false);
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
 
@@ -197,56 +198,26 @@ export function EditorPage() {
     setHeader({
       layout: "editor",
       title: headingTitle,
-      actions: (
-        <div className="header-editor-actions">
-          <EditorModeSwitch value={viewMode} canEdit={canEdit} onChange={handleModeChange} />
-        </div>
-      ),
+      actions: <EditorModeSwitch value={viewMode} canEdit={canEdit} onChange={handleModeChange} />,
       end: (
-        <div className="header-editor-end">
-          <div className="header-folder">
-            <button type="button" className="header-secondary" onClick={() => setFolderOpen((value) => !value)}>
-              フォルダ
-            </button>
-            {folderOpen && (
-              <div className="header-folder-pop">
-                {isOwner ? (
-                  <>
-                    <input
-                      type="text"
-                      value={folder}
-                      onChange={(event) => setFolder(event.target.value)}
-                      onBlur={() => void handleFolderBlur()}
-                      placeholder="例: work/infra"
-                      aria-label="ノートのフォルダ"
-                    />
-                    <Link to={folderUrl(note.folderId)}>開く</Link>
-                  </>
-                ) : note.folderId ? (
-                  <Link to={folderUrl(note.folderId)}>フォルダを開く</Link>
-                ) : (
-                  <span>なし</span>
-                )}
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            className="header-share"
-            onClick={() => {
-              setFolderOpen(false);
-              setShareOpen(true);
-            }}
-          >
-            共有
-          </button>
+        <>
           {awareness && <PresenceBar awareness={awareness} />}
-        </div>
+          <FolderPopover
+            folder={folder}
+            folderId={note.folderId}
+            isOwner={isOwner}
+            onFolderChange={setFolder}
+            onFolderBlur={() => void handleFolderBlur()}
+          />
+          <Button variant="accent" onClick={() => setShareOpen(true)}>
+            共有
+          </Button>
+        </>
       ),
     });
 
     return () => setHeader(null);
-  }, [note, headingTitle, viewMode, canEdit, awareness, folderOpen, folder, isOwner, setHeader]);
+  }, [note, headingTitle, viewMode, canEdit, awareness, folder, isOwner, setHeader]);
 
   if (loading || userLoading) {
     return (
@@ -291,7 +262,7 @@ export function EditorPage() {
               yText={yMarkdown}
               awareness={awareness}
               readOnly={!canEdit}
-              lineNumbers={viewMode === "source"}
+              lineNumbers={viewMode === "source" || viewMode === "split"}
               scrollRatio={viewMode === "split" ? splitScroll : undefined}
               onScrollRatio={viewMode === "split" ? handleSplitScroll : undefined}
             />

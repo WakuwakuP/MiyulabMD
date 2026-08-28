@@ -1,0 +1,18 @@
+.list {
+  display: flex;
+  align-items: center;
+  padding: 0.15rem;
+}
+
+.item {
+  margin-left: 0.28rem;
+}
+
+.item:first-child {
+  margin-left: 0;
+}
+
+.packed .item {
+  margin-left: -0.45rem;
+  box-shadow: 0 0 0 2px var(--surface);
+}

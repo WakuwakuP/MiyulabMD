@@ -105,6 +105,24 @@ function atomBounds(markdown: string, name: string, idx: number, needle: string)
       end: end >= 0 ? end + 1 : idx + needle.length,
     };
   }
+  if (name === "ogCard") {
+    const fenceStart = markdown.lastIndexOf(":::ogCard", idx);
+    if (fenceStart >= 0 && !markdown.slice(fenceStart, idx).includes("\n\n")) {
+      const closer = markdown.indexOf(":::", idx + needle.length);
+      return {
+        start: fenceStart,
+        end: closer >= 0 ? closer + 3 : idx + needle.length,
+      };
+    }
+    if (idx > 0 && markdown[idx - 1] === "(") {
+      const bracket = markdown.lastIndexOf("[", idx);
+      const close = markdown.indexOf(")", idx + needle.length);
+      if (bracket >= 0 && close >= 0) {
+        return { start: bracket, end: close + 1 };
+      }
+    }
+    return { start: idx, end: idx + needle.length };
+  }
   const start = markdown.lastIndexOf(":::", idx);
   const closer = markdown.indexOf(":::", idx + needle.length);
   return {

@@ -31,4 +31,9 @@ export const OgCard = Node.create({
     requiredAttributes: ["href"],
     allowedAttributes: ["href"],
   }),
+
+  renderMarkdown: (node) => {
+    const href = typeof node.attrs?.href === "string" ? node.attrs.href : "";
+    return href;
+  },
 });

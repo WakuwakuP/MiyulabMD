@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { AwarenessUserState, CollabAwareness } from "../../lib/collaboration.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
-import { UserAvatar } from "../layout/UserAvatar.tsx";
+import { Avatar } from "../ui/Avatar.tsx";
+import styles from "./presence.module.css";
 
 type Props = {
   awareness: CollabAwareness;
@@ -56,12 +57,11 @@ export function PresenceBar({ awareness }: Props) {
   if (peers.length === 0) return null;
 
   return (
-    <div
-      className={peers.length >= 5 ? "presence-avatars is-packed" : "presence-avatars"}
-      aria-label="共同編集者"
-    >
+    <div className={`${styles.list} ${peers.length >= 5 ? styles.packed : ""}`} aria-label="共同編集者">
       {peers.map((peer) => (
-        <UserAvatar key={peer.clientId} name={peer.displayName} color={peer.color} />
+        <span key={peer.clientId} className={styles.item}>
+          <Avatar name={peer.displayName} color={peer.color} size="sm" />
+        </span>
       ))}
     </div>
   );

@@ -1,3 +1,5 @@
+import { collectStandaloneLinkUrls, mapLinesOutsideFences, standaloneLinkUrl } from "./standalone-link.ts";
+
 export type OgPreview = {
   url: string;
   title: string | null;
@@ -37,9 +39,13 @@ export function youtubeEmbedUrl(url: string): string | null {
 }
 
 export function normalizeEmbedMarkdown(markdown: string): string {
-  return markdown
+  const withLegacy = markdown
     .replace(YOUTUBE_IMAGE, (_all, url: string) => `:::youtube {src="${url}"}`)
-    .replace(OGP_LINK, (_all, url: string) => `:::ogCard {href="${url}"}`);
+    .replace(OGP_LINK, (_all, url: string) => `:::ogCard {href="${url}"} :::`);
+  return mapLinesOutsideFences(withLegacy, (line) => {
+    const url = standaloneLinkUrl(line);
+    return url ? `:::ogCard {href="${url}"} :::` : line;
+  });
 }
 
 export function canonicalizeEditorMarkdown(markdown: string): string {
@@ -50,14 +56,11 @@ export function canonicalizeEditorMarkdown(markdown: string): string {
       const src = attr(attrs, "src") ?? "";
       return `:::youtube {src="${src}"} :::`;
     })
-    .replace(OGP_BLOCK, (_all, attrs: string) => {
-      const href = attr(attrs, "href") ?? "";
-      return `:::ogCard {href="${href}"} :::`;
-    });
+    .replace(OGP_BLOCK, (_all, attrs: string) => attr(attrs, "href") ?? "");
 }
 
 export function collectOgUrls(markdown: string): string[] {
-  const urls = new Set<string>();
+  const urls = new Set<string>(collectStandaloneLinkUrls(markdown));
   for (const match of markdown.matchAll(OGP_BLOCK)) {
     const href = attr(match[1] ?? "", "href");
     if (href) urls.add(href);
@@ -68,9 +71,19 @@ export function collectOgUrls(markdown: string): string[] {
   return [...urls].filter(Boolean);
 }
 
+export function renderOgCardHtml(href: string, card?: OgPreview): string {
+  const title = card?.title || href;
+  const description = card?.description
+    ? `<span class="embed-og-desc">${escapeHtml(card.description)}</span>`
+    : "";
+  const image = card?.image ? `<img src="${escapeHtml(card.image)}" alt="" />` : "";
+  const site = card?.siteName ? `<small>${escapeHtml(card.siteName)}</small>` : "";
+  return `<div class="embed-og-wrap"><a class="embed-og" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${image}<span><strong>${escapeHtml(title)}</strong>${description}${site}</span></a></div>`;
+}
+
 export function expandEmbedsForPreview(markdown: string, cards: Map<string, OgPreview>): string {
   const normalized = normalizeEmbedMarkdown(markdown);
-  return normalized
+  const expanded = normalized
     .replace(YOUTUBE_BLOCK, (_all, attrs: string) => {
       const src = attr(attrs, "src") ?? "";
       const embed = youtubeEmbedUrl(src);
@@ -79,17 +92,12 @@ export function expandEmbedsForPreview(markdown: string, cards: Map<string, OgPr
     })
     .replace(OGP_BLOCK, (_all, attrs: string) => {
       const href = attr(attrs, "href") ?? "";
-      const card = cards.get(href);
-      const title = card?.title || href;
-      const description = card?.description
-        ? `<span class="embed-og-desc">${escapeHtml(card.description)}</span>`
-        : "";
-      const image = card?.image
-        ? `<img src="${escapeHtml(card.image)}" alt="" />`
-        : "";
-      const site = card?.siteName ? `<small>${escapeHtml(card.siteName)}</small>` : "";
-      return `<div class="embed-og-wrap"><a class="embed-og" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${image}<span><strong>${escapeHtml(title)}</strong>${description}${site}</span></a></div>`;
+      return renderOgCardHtml(href, cards.get(href));
     });
+  return mapLinesOutsideFences(expanded, (line) => {
+    const url = standaloneLinkUrl(line);
+    return url ? renderOgCardHtml(url, cards.get(url)) : line;
+  });
 }
 
 function escapeHtml(value: string): string {

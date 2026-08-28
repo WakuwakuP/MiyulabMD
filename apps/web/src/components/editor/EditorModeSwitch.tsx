@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useDismiss } from "../../hooks/use-dismiss.ts";
 import {
   EDIT_MODES,
   EDITOR_MODE_LABELS,
@@ -7,6 +8,8 @@ import {
   type EditMode,
   type EditorMode,
 } from "../../lib/editor-mode.ts";
+import { MenuItem, MenuPanel } from "../ui/Menu.tsx";
+import { SegmentedControl, SegmentedWrap } from "../ui/SegmentedControl.tsx";
 
 type Props = {
   value: EditorMode;
@@ -36,83 +39,66 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const editing = isEditMode(value);
+  useDismiss(menuOpen, () => setMenuOpen(false), rootRef);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-
-    function handlePointer(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    }
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setMenuOpen(false);
-    }
-    window.addEventListener("mousedown", handlePointer);
-    window.addEventListener("keydown", handleKey);
-    return () => {
-      window.removeEventListener("mousedown", handlePointer);
-      window.removeEventListener("keydown", handleKey);
-    };
-  }, [menuOpen]);
-
-  useEffect(() => {
-    if (!editing) setMenuOpen(false);
-  }, [editing]);
+  if (!canEdit) return null;
 
   function chooseEdit(mode: EditMode) {
     onChange(mode);
     setMenuOpen(false);
   }
 
-  if (!canEdit) return null;
-
   return (
-    <div className="mode-switch-wrap" ref={rootRef}>
-      <div className="mode-switch" role="group" aria-label="表示モード">
-        <button
-          type="button"
-          aria-pressed={!editing}
-          className={editing ? undefined : "is-active"}
-          onClick={() => {
-            setMenuOpen(false);
-            onChange("preview");
-          }}
-        >
-          <EyeIcon />
-          View
-        </button>
-        <button
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          aria-pressed={editing}
-          className={editing ? "is-active" : undefined}
-          onClick={() => {
-            if (!editing) {
-              onChange(readLastEditMode());
-              return;
-            }
-            setMenuOpen((open) => !open);
-          }}
-        >
-          <PencilIcon />
-          Edit
-        </button>
-      </div>
-      {menuOpen && editing && (
-        <div className="mode-switch-menu" role="menu">
-          {EDIT_MODES.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="menuitem"
-              className={value === mode ? "is-active" : undefined}
-              onClick={() => chooseEdit(mode)}
-            >
-              {EDITOR_MODE_LABELS[mode]}
-            </button>
-          ))}
-        </div>
-      )}
+    <div ref={rootRef}>
+      <SegmentedWrap>
+        <SegmentedControl
+          label="表示モード"
+          items={[
+            {
+              value: "preview",
+              label: (
+                <>
+                  <EyeIcon />
+                  View
+                </>
+              ),
+              pressed: !editing,
+              onClick: () => {
+                setMenuOpen(false);
+                onChange("preview");
+              },
+            },
+            {
+              value: "edit",
+              label: (
+                <>
+                  <PencilIcon />
+                  Edit
+                </>
+              ),
+              pressed: editing,
+              hasPopup: true,
+              expanded: menuOpen,
+              onClick: () => {
+                if (!editing) {
+                  onChange(readLastEditMode());
+                  return;
+                }
+                setMenuOpen((open) => !open);
+              },
+            },
+          ]}
+        />
+        {menuOpen && editing && (
+          <MenuPanel align="end">
+            {EDIT_MODES.map((mode) => (
+              <MenuItem key={mode} active={value === mode} onClick={() => chooseEdit(mode)}>
+                {EDITOR_MODE_LABELS[mode]}
+              </MenuItem>
+            ))}
+          </MenuPanel>
+        )}
+      </SegmentedWrap>
     </div>
   );
 }

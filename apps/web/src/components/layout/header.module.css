@@ -1,0 +1,63 @@
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.25rem;
+  padding: 0.4rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.start,
+.center,
+.end {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.start {
+  gap: 0.75rem;
+}
+
+.center {
+  justify-content: center;
+}
+
+.end {
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.brand {
+  flex: none;
+  font-weight: 700;
+  text-decoration: none;
+  color: inherit;
+}
+
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.loginInput {
+  min-width: 12rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+@media (max-width: 900px) {
+  .header {
+    grid-template-columns: 1fr auto;
+  }
+
+  .center {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}

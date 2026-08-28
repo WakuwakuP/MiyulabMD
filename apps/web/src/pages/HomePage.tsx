@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../components/notes/ConfirmDialog.tsx";
 import { ContextMenu, type ContextMenuItem } from "../components/notes/ContextMenu.tsx";
 import { NoteTree, type MenuTarget } from "../components/notes/NoteTree.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
+import { Button } from "../components/ui/Button.tsx";
 import {
   createFolder,
   createNote,
@@ -311,15 +312,15 @@ export function HomePage() {
       title,
       actions:
         folder || !folderId ? (
-          <div className="page-header-actions">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             {canAdmin && (
-              <button type="button" className="header-secondary" onClick={() => void handleNewFolder()}>
+              <Button variant="outline" onClick={() => void handleNewFolder()}>
                 フォルダ
-              </button>
+              </Button>
             )}
-            <button type="button" className="header-primary" onClick={() => void handleCreate()} disabled={creating}>
+            <Button variant="accent" onClick={() => void handleCreate()} disabled={creating}>
               {creating ? "作成中…" : "新規ノート"}
-            </button>
+            </Button>
           </div>
         ) : null,
     });
