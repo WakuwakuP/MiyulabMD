@@ -3,6 +3,7 @@ import type { AwarenessUserState, CollabAwareness } from "../../lib/collaboratio
 
 type Props = {
   awareness: CollabAwareness;
+  compact?: boolean;
 };
 
 function readAwarenessState(state: Record<string, unknown> | null): AwarenessUserState | null {
@@ -26,7 +27,7 @@ function readAwarenessState(state: Record<string, unknown> | null): AwarenessUse
   return { userId: userId ?? displayName, displayName, color };
 }
 
-export function PresenceBar({ awareness }: Props) {
+export function PresenceBar({ awareness, compact = false }: Props) {
   const [peers, setPeers] = useState<Array<AwarenessUserState & { clientId: number }>>([]);
 
   useEffect(() => {
@@ -51,15 +52,15 @@ export function PresenceBar({ awareness }: Props) {
   }, [awareness]);
 
   if (peers.length === 0) {
-    return <div className="presence-bar presence-bar--empty">共同編集者はまだいません</div>;
+    return compact ? null : <div className="presence-bar presence-bar--empty">共同編集者はまだいません</div>;
   }
 
   return (
-    <div className="presence-bar" aria-label="共同編集者">
+    <div className={compact ? "presence-bar presence-bar--compact" : "presence-bar"} aria-label="共同編集者">
       {peers.map((peer) => (
         <span key={peer.clientId} className="presence-chip" title={peer.displayName}>
           <span className="presence-dot" style={{ backgroundColor: peer.color }} aria-hidden />
-          {peer.displayName}
+          {compact ? null : peer.displayName}
         </span>
       ))}
     </div>

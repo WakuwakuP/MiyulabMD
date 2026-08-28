@@ -2,14 +2,17 @@ import type { Note } from "@miyulabmd/shared";
 import { folderUrl, normalizeFolder, titleFromMarkdown } from "@miyulabmd/shared";
 import { useEffect, useRef, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router";
+import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
+import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { fetchNote, updateNote } from "../lib/api.ts";
 import { applyAwarenessUser, createYjsSession, type YjsSession } from "../lib/collaboration.ts";
+import { readEditorMode, writeEditorMode, type EditorMode } from "../lib/editor-mode.ts";
 
 function draftFromNote(note: Note): AccessDraft {
   return {
@@ -22,7 +25,7 @@ function draftFromNote(note: Note): AccessDraft {
 
 export function EditorPage() {
   const { id = "" } = useParams();
-  const { user, userLoading } = useOutletContext<AppShellContext>();
+  const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
   const [note, setNote] = useState<Note | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [folder, setFolder] = useState("");
@@ -33,6 +36,8 @@ export function EditorPage() {
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [mode, setMode] = useState<EditorMode>(() => readEditorMode());
+  const [folderOpen, setFolderOpen] = useState(false);
 
   const hydratedRef = useRef(false);
 
@@ -149,9 +154,16 @@ export function EditorPage() {
     setAccessDraft(draftFromNote(result.data));
   }
 
+  function handleModeChange(next: EditorMode) {
+    setMode(next);
+    writeEditorMode(next);
+  }
+
   const isOwner = Boolean(user && note && user.id === note.ownerId);
   const canEdit = Boolean(note?.access.flags.canEdit);
   const headingTitle = titleFromMarkdown(markdown);
+  const awareness = collab?.awareness;
+  const yMarkdown = collab?.yMarkdown;
 
   useEffect(() => {
     const previous = document.title;
@@ -160,6 +172,62 @@ export function EditorPage() {
       document.title = previous;
     };
   }, [headingTitle]);
+
+  useEffect(() => {
+    if (!note) {
+      setHeader({ layout: "editor", title: "ノート" });
+      return () => setHeader(null);
+    }
+
+    setHeader({
+      layout: "editor",
+      title: headingTitle,
+      actions: (
+        <div className="header-editor-actions">
+          <EditorModeSwitch value={mode} onChange={handleModeChange} />
+          {awareness && <PresenceBar awareness={awareness} compact />}
+          <div className="header-folder">
+            <button type="button" onClick={() => setFolderOpen((value) => !value)}>
+              フォルダ
+            </button>
+            {folderOpen && (
+              <div className="header-folder-pop">
+                {isOwner ? (
+                  <>
+                    <input
+                      type="text"
+                      value={folder}
+                      onChange={(event) => setFolder(event.target.value)}
+                      onBlur={() => void handleFolderBlur()}
+                      placeholder="例: work/infra"
+                      aria-label="ノートのフォルダ"
+                    />
+                    <Link to={folderUrl(note.folderId)}>開く</Link>
+                  </>
+                ) : note.folderId ? (
+                  <Link to={folderUrl(note.folderId)}>フォルダを開く</Link>
+                ) : (
+                  <span>なし</span>
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="header-share"
+            onClick={() => {
+              setFolderOpen(false);
+              setShareOpen(true);
+            }}
+          >
+            共有
+          </button>
+        </div>
+      ),
+    });
+
+    return () => setHeader(null);
+  }, [note, headingTitle, mode, awareness, folderOpen, folder, isOwner, setHeader]);
 
   if (loading || userLoading) {
     return (
@@ -171,7 +239,7 @@ export function EditorPage() {
 
   if (loadError) {
     return (
-      <section className="editor-page">
+      <section className="editor-page editor-page--padded">
         <p className="page-error">{loadError}</p>
         {(loadError.includes("ログイン") || loadError.includes("権限")) && (
           <p>
@@ -188,57 +256,45 @@ export function EditorPage() {
     return null;
   }
 
-  const yMarkdown = collab?.yMarkdown;
-  const awareness = collab?.awareness;
+  const ready = Boolean(yMarkdown && awareness && collabReady);
+  const showSource = mode === "split" || mode === "source";
+  const showPreview = mode === "split" || mode === "preview";
+  const showRich = mode === "rich";
 
   return (
     <section className="editor-page">
-      <header className="editor-header">
-        <div className="editor-toolbar">
-          <label className="folder-field">
-            <span>フォルダ</span>
-            {isOwner ? (
-              <>
-                <input
-                  type="text"
-                  value={folder}
-                  onChange={(event) => setFolder(event.target.value)}
-                  onBlur={() => void handleFolderBlur()}
-                  placeholder="例: work/infra"
-                  aria-label="ノートのフォルダ"
-                />
-                <Link to={folderUrl(note.folderId)}>開く</Link>
-              </>
-            ) : note.folderId ? (
-              <Link to={folderUrl(note.folderId)}>フォルダを開く</Link>
-            ) : (
-              <span>なし</span>
-            )}
-          </label>
-          <span className="save-status">{!canEdit ? "閲覧のみ" : headingTitle}</span>
-          {awareness && <PresenceBar awareness={awareness} />}
-          <button type="button" className="share-header-button" onClick={() => setShareOpen(true)}>
-            共有
-          </button>
-        </div>
-      </header>
-      {saveError && <p className="page-error">{saveError}</p>}
-      <div className="editor-layout">
-        {yMarkdown && awareness && collabReady ? (
-          <MarkdownEditor
-            noteId={note.id}
-            yText={yMarkdown}
-            awareness={awareness}
-            readOnly={!canEdit}
-          />
-        ) : (
-          <div className="markdown-editor markdown-editor--loading">
-            <p>共同編集に接続中…</p>
-          </div>
-        )}
-        <MarkdownPreview markdown={markdown} />
+      {saveError && <p className="page-error editor-page-error">{saveError}</p>}
+      <div className={`editor-workspace editor-workspace--${mode}`}>
+        {showSource &&
+          (ready && yMarkdown && awareness ? (
+            <MarkdownEditor
+              noteId={note.id}
+              yText={yMarkdown}
+              awareness={awareness}
+              readOnly={!canEdit}
+            />
+          ) : (
+            <div className="markdown-editor markdown-editor--loading">
+              <p>共同編集に接続中…</p>
+            </div>
+          ))}
+        {showPreview && <MarkdownPreview markdown={markdown} />}
+        {showRich &&
+          (ready && yMarkdown && awareness ? (
+            <RichMarkdownEditor
+              key={note.id}
+              noteId={note.id}
+              yText={yMarkdown}
+              awareness={awareness}
+              readOnly={!canEdit}
+            />
+          ) : (
+            <div className="markdown-editor markdown-editor--loading">
+              <p>共同編集に接続中…</p>
+            </div>
+          ))}
       </div>
-      {shareOpen && accessDraft && (
+      {shareOpen && (
         <ShareModal
           title={headingTitle}
           linkUrl={`${window.location.origin}/n/${note.id}`}

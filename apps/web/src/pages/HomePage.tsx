@@ -56,7 +56,7 @@ type ConfirmState =
 export function HomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
-  const { user } = useOutletContext<AppShellContext>();
+  const { user, setHeader } = useOutletContext<AppShellContext>();
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [folder, setFolder] = useState<FolderAccess | null>(null);
   const [loading, setLoading] = useState(true);
@@ -306,23 +306,28 @@ export function HomePage() {
   const canAdmin = Boolean(folder?.flags.canAdmin);
   const title = folderId ? (folder?.name ?? "フォルダ") : "ノート";
 
-  return (
-    <section className="home-page">
-      <header className="page-header">
-        <h1>{title}</h1>
-        {(folder || !folderId) && (
+  useEffect(() => {
+    setHeader({
+      title,
+      actions:
+        folder || !folderId ? (
           <div className="page-header-actions">
             {canAdmin && (
-              <button type="button" onClick={() => void handleNewFolder()}>
-                フォルダを追加
+              <button type="button" className="header-secondary" onClick={() => void handleNewFolder()}>
+                フォルダ
               </button>
             )}
-            <button type="button" onClick={() => void handleCreate()} disabled={creating}>
+            <button type="button" className="header-primary" onClick={() => void handleCreate()} disabled={creating}>
               {creating ? "作成中…" : "新規ノート"}
             </button>
           </div>
-        )}
-      </header>
+        ) : null,
+    });
+    return () => setHeader(null);
+  }, [title, folder, folderId, canAdmin, creating, setHeader]);
+
+  return (
+    <section className="home-page">
       {error && <p className="page-error">{error}</p>}
       {loading ? (
         <p>読み込み中…</p>

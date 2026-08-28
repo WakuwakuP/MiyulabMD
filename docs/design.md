@@ -296,8 +296,9 @@ sequenceDiagram
 
 - `y-websocket` 互換、または薄い独自 provider
 - `y-codemirror.next` で CodeMirror にバインド
+- リッチ（TipTap）も同じ `Y.Text("markdown")` に差分（insert/delete）で載せる。`y-prosemirror` は使わない
 - `y-indexeddb` でオフライン下書き（再接続時にマージ）
-- awareness に displayName / color / cursor を載せる
+- awareness に displayName / color / cursor（Y.RelativePosition）を載せる
 
 閲覧のみのユーザーもプレビューをリアルタイム更新するため、view 権限があれば WS 接続を許す。書き込みフレームはサーバーで落とす。
 
@@ -381,7 +382,7 @@ Cursor 側の設定例:
 - `/s/:id` 読み取り専用プレビュー
 - `/settings` プロフィール表示、PAT 発行
 
-エディタは Markdown ソースを共同編集の対象にする。プレビューはローカルの Y.Text を購読して再描画する。画像ペーストは編集権限があるときだけ upload API を呼ぶ。
+エディタは Markdown ソースを共同編集の対象にする。ソースは `y-codemirror`、リッチは Markdown 文字列の差分を同じ `Y.Text("markdown")` に適用する。プレビューはローカルの Y.Text を購読して再描画する。画像ペーストは編集権限があるときだけ upload API を呼ぶ。
 
 ## 13. ディレクトリ構成
 

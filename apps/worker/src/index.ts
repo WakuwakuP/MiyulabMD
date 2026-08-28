@@ -9,6 +9,7 @@ import { imageRoutes } from "./routes/images.ts";
 import { noteRoutes } from "./routes/notes.ts";
 import { tokenRoutes } from "./routes/tokens.ts";
 import { folderRoutes } from "./routes/folders.ts";
+import { ogRoutes } from "./routes/og.ts";
 import { createNoteService } from "./services/notes.ts";
 
 export { DocumentRoom } from "./durable-objects/DocumentRoom.ts";
@@ -28,6 +29,7 @@ const api = new Elysia({ adapter: CloudflareAdapter })
   })
   .use(noteRoutes)
   .use(folderRoutes)
+  .use(ogRoutes)
   .use(tokenRoutes)
   .use(imageRoutes)
   .use(mcpRoutes)

@@ -19,7 +19,7 @@ function formatTimestamp(ms: number | null): string {
 }
 
 export function SettingsPage() {
-  const { user, setUser } = useOutletContext<AppShellContext>();
+  const { user, setUser, setHeader } = useOutletContext<AppShellContext>();
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +57,11 @@ export function SettingsPage() {
   useEffect(() => {
     void loadTokens();
   }, []);
+
+  useEffect(() => {
+    setHeader({ title: "設定" });
+    return () => setHeader(null);
+  }, [setHeader]);
 
   useEffect(() => {
     setDisplayName(user?.displayName ?? "");
@@ -123,10 +128,6 @@ export function SettingsPage() {
 
   return (
     <section className="settings-page">
-      <header className="page-header">
-        <h1>設定</h1>
-      </header>
-
       <section className="settings-section">
         <h2>プロフィール</h2>
         <p>

@@ -9,6 +9,7 @@ import type {
   PermissionPreset,
   SessionUser,
 } from "@miyulabmd/shared";
+import type { OgPreview } from "./embeds.ts";
 
 const fetchOpts: RequestInit = { credentials: "include" };
 
@@ -162,6 +163,14 @@ export async function updateFolderAccess(input: {
     return { ok: false, status: res.status, error: await parseError(res) };
   }
   return { ok: true, data: (await res.json()) as FolderAccess };
+}
+
+export async function fetchOgPreview(url: string): Promise<ApiResult<OgPreview>> {
+  const res = await fetch(`/api/og?url=${encodeURIComponent(url)}`, fetchOpts);
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  return { ok: true, data: (await res.json()) as OgPreview };
 }
 
 export async function uploadImage(
