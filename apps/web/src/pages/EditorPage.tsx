@@ -12,7 +12,7 @@ import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { fetchNote, updateNote } from "../lib/api.ts";
 import { applyAwarenessUser, createYjsSession, type YjsSession } from "../lib/collaboration.ts";
-import { readEditorMode, writeEditorMode, type EditorMode } from "../lib/editor-mode.ts";
+import { writeEditorMode, type EditorMode } from "../lib/editor-mode.ts";
 
 function draftFromNote(note: Note): AccessDraft {
   return {
@@ -36,7 +36,7 @@ export function EditorPage() {
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [mode, setMode] = useState<EditorMode>(() => readEditorMode());
+  const [mode, setMode] = useState<EditorMode>("preview");
   const [folderOpen, setFolderOpen] = useState(false);
 
   const hydratedRef = useRef(false);
@@ -48,6 +48,7 @@ export function EditorPage() {
     setSaveError(null);
     setCollab(null);
     setCollabReady(false);
+    setMode("preview");
 
     fetchNote(id).then((result) => {
       if (!result.ok) {
@@ -154,14 +155,16 @@ export function EditorPage() {
     setAccessDraft(draftFromNote(result.data));
   }
 
+  const isOwner = Boolean(user && note && user.id === note.ownerId);
+  const canEdit = Boolean(note?.access.flags.canEdit);
+  const viewMode: EditorMode = canEdit ? mode : "preview";
+  const headingTitle = titleFromMarkdown(markdown);
+
   function handleModeChange(next: EditorMode) {
+    if (!canEdit && next !== "preview") return;
     setMode(next);
     writeEditorMode(next);
   }
-
-  const isOwner = Boolean(user && note && user.id === note.ownerId);
-  const canEdit = Boolean(note?.access.flags.canEdit);
-  const headingTitle = titleFromMarkdown(markdown);
   const awareness = collab?.awareness;
   const yMarkdown = collab?.yMarkdown;
 
@@ -184,7 +187,7 @@ export function EditorPage() {
       title: headingTitle,
       actions: (
         <div className="header-editor-actions">
-          <EditorModeSwitch value={mode} onChange={handleModeChange} />
+          <EditorModeSwitch value={viewMode} canEdit={canEdit} onChange={handleModeChange} />
           {awareness && <PresenceBar awareness={awareness} compact />}
           <div className="header-folder">
             <button type="button" onClick={() => setFolderOpen((value) => !value)}>
@@ -227,7 +230,7 @@ export function EditorPage() {
     });
 
     return () => setHeader(null);
-  }, [note, headingTitle, mode, awareness, folderOpen, folder, isOwner, setHeader]);
+  }, [note, headingTitle, viewMode, canEdit, awareness, folderOpen, folder, isOwner, setHeader]);
 
   if (loading || userLoading) {
     return (
@@ -257,14 +260,14 @@ export function EditorPage() {
   }
 
   const ready = Boolean(yMarkdown && awareness && collabReady);
-  const showSource = mode === "split" || mode === "source";
-  const showPreview = mode === "split" || mode === "preview";
-  const showRich = mode === "rich";
+  const showSource = viewMode === "split" || viewMode === "source";
+  const showPreview = viewMode === "split" || viewMode === "preview";
+  const showRich = viewMode === "rich";
 
   return (
     <section className="editor-page">
       {saveError && <p className="page-error editor-page-error">{saveError}</p>}
-      <div className={`editor-workspace editor-workspace--${mode}`}>
+      <div className={`editor-workspace editor-workspace--${viewMode}`}>
         {showSource &&
           (ready && yMarkdown && awareness ? (
             <MarkdownEditor

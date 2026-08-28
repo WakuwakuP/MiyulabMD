@@ -914,23 +914,51 @@ select {
   cursor: pointer;
 }
 
-.mode-switch {
+.mode-switch-wrap {
+  position: relative;
   display: flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  overflow: hidden;
+  align-items: center;
+  gap: 0.45rem;
 }
 
-.mode-switch button {
-  border: none;
+.mode-switch-wrap > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.mode-switch-wrap > button.is-editing {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.mode-switch-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 30;
+  min-width: 7.5rem;
+  padding: 0.35rem 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: Canvas;
-  padding: 0.3rem 0.65rem;
+  box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 16%, transparent);
+}
+
+.mode-switch-menu button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0.4rem 0.85rem;
+  text-align: left;
   cursor: pointer;
 }
 
-.mode-switch button.is-active {
-  background: var(--accent);
-  color: #fff;
+.mode-switch-menu button:hover,
+.mode-switch-menu button.is-active {
+  background: var(--surface);
 }
 
 .account-menu {
