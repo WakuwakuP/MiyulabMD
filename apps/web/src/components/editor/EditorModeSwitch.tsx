@@ -8,6 +8,7 @@ import {
   type EditMode,
   type EditorMode,
 } from "../../lib/editor-mode.ts";
+import { ChevronDownIcon, EyeIcon, PencilIcon } from "../ui/icons.tsx";
 import { MenuItem, MenuPanel } from "../ui/Menu.tsx";
 import { SegmentedControl, SegmentedWrap } from "../ui/SegmentedControl.tsx";
 
@@ -16,24 +17,6 @@ type Props = {
   canEdit: boolean;
   onChange: (mode: EditorMode) => void;
 };
-
-function EyeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-    </svg>
-  );
-}
 
 export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -74,6 +57,7 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
                 <>
                   <PencilIcon />
                   Edit
+                  <ChevronDownIcon className="opacity-70" />
                 </>
               ),
               pressed: editing,

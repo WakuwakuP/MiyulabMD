@@ -1,5 +1,6 @@
 import type { NoteSummary } from "@miyulabmd/shared";
-import { Link } from "react-router";
+import { DriveList, DriveRow } from "../ui/DriveList.tsx";
+import { MarkdownIcon } from "../ui/icons.tsx";
 
 type Props = {
   notes: NoteSummary[];
@@ -11,12 +12,17 @@ export function NoteList({ notes }: Props) {
   }
 
   return (
-    <ul>
+    <DriveList>
       {notes.map((note) => (
-        <li key={note.id}>
-          <Link to={`/n/${note.id}`}>{note.title}</Link>
-        </li>
+        <DriveRow
+          key={note.id}
+          href={`/n/${note.id}`}
+          name={note.title}
+          icon={<MarkdownIcon />}
+          menuOpen={false}
+          onMenu={(event) => event.preventDefault()}
+        />
       ))}
-    </ul>
+    </DriveList>
   );
 }

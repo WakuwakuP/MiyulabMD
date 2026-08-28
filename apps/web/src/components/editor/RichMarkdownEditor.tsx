@@ -20,6 +20,9 @@ import {
 } from "../../lib/markdown-pm-map.ts";
 import { readRemoteMarkdownCursors, writeMarkdownCursor } from "../../lib/rich-awareness.ts";
 import { applyTextDiff, inspectPlainTextDelta, type YTextDeltaItem } from "../../lib/y-text-diff.ts";
+import { cn } from "../../lib/cn.ts";
+import { FileInput } from "../ui/FileInput.tsx";
+import { editorLoadingClass } from "../ui/prose.ts";
 import { BlockHandle } from "./BlockHandle.tsx";
 import { AutoLinkCard } from "./extensions/auto-link-card.ts";
 import { CollabCarets, collabCaretsKey } from "./extensions/collab-carets.ts";
@@ -284,7 +287,7 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
   }
 
   if (!editor) {
-    return <div className="rich-editor rich-editor--loading">読み込み中…</div>;
+    return <div className={editorLoadingClass}>読み込み中…</div>;
   }
 
   const commandHandlers = {
@@ -294,20 +297,29 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
   };
 
   return (
-    <div className="rich-editor">
-      <input
+    <div className="flex min-h-96 flex-col overflow-hidden [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
+      <FileInput
         ref={imageInputRef}
-        type="file"
         accept={[...IMAGE_TYPES].join(",")}
         aria-label="画像をアップロード"
-        className="rich-file-input"
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
           if (file) void insertImageFile(file);
         }}
       />
-      <EditorContent editor={editor} className="rich-editor-content" />
+      <EditorContent
+        editor={editor}
+        className={cn(
+          "rich-editor-content flex flex-1 justify-center overflow-auto px-5 py-4",
+          "[&_.tiptap]:min-h-full [&_.tiptap]:outline-none",
+          "[&_.tiptap_h1]:leading-tight [&_.tiptap_h2]:leading-tight [&_.tiptap_h3]:leading-tight",
+          "[&_.tiptap_img]:h-auto [&_.tiptap_img]:max-w-full",
+          "[[data-layout=editor]_&_.tiptap]:w-[min(100%,46rem)] [[data-layout=editor]_&_.tiptap]:px-6 [[data-layout=editor]_&_.tiptap]:py-9 [[data-layout=editor]_&_.tiptap]:pl-11 [[data-layout=editor]_&_.tiptap]:pb-20",
+          "[&_.tiptap_p.is-editor-empty:first-child]:before:pointer-events-none [&_.tiptap_p.is-editor-empty:first-child]:before:float-left [&_.tiptap_p.is-editor-empty:first-child]:before:h-0 [&_.tiptap_p.is-editor-empty:first-child]:before:text-muted [&_.tiptap_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]",
+          "[&_.tiptap_.is-empty.has-focus]:before:pointer-events-none [&_.tiptap_.is-empty.has-focus]:before:float-left [&_.tiptap_.is-empty.has-focus]:before:h-0 [&_.tiptap_.is-empty.has-focus]:before:text-muted [&_.tiptap_.is-empty.has-focus]:before:content-[attr(data-placeholder)]",
+        )}
+      />
       {!readOnly && (
         <>
           <SlashCommandMenu editor={editor} handlers={commandHandlers} />

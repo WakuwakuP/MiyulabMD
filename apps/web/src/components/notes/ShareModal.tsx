@@ -6,7 +6,15 @@ import {
   type AccessGrant,
   type AccessScope,
 } from "@miyulabmd/shared";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
+import { colorForEmail } from "../../lib/user-style.ts";
+import { Avatar } from "../ui/Avatar.tsx";
+import { Button } from "../ui/Button.tsx";
+import { CheckLabel, Row } from "../ui/Field.tsx";
+import { Input } from "../ui/Input.tsx";
+import { Modal, ModalFooter, ModalHeader } from "../ui/Modal.tsx";
+import { Select } from "../ui/Select.tsx";
+import { ErrorText, MutedText, SectionTitle } from "../ui/Text.tsx";
 import type { AccessDraft } from "./AccessPanel.tsx";
 
 type Props = {
@@ -45,14 +53,6 @@ export function ShareModal({
   const [email, setEmail] = useState("");
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-
   function update(patch: Partial<AccessDraft>) {
     const next = { ...value, ...patch };
     next.writeScope = clampWriteScope(next.readScope, next.writeScope);
@@ -80,39 +80,29 @@ export function ShareModal({
   }
 
   return (
-    <div className="share-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="share-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="share-modal-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="share-modal-header">
-          <div>
-            <h2 id="share-modal-title">共有</h2>
-            <p>{title}</p>
-            {subtitle && <p className="share-modal-sub">{subtitle}</p>}
-          </div>
-          <button type="button" className="share-modal-close" onClick={onClose} aria-label="閉じる">
-            ×
-          </button>
-        </header>
+    <Modal labelledBy="share-modal-title" onClose={onClose}>
+      <ModalHeader id="share-modal-title" title="共有" onClose={onClose}>
+        <p className="mt-[0.15rem] mb-0">{title}</p>
+        {subtitle && <MutedText className="mt-[0.15rem]">{subtitle}</MutedText>}
+      </ModalHeader>
 
-        {showInherit && (
-          <label className="share-inherit">
-            <input
-              type="checkbox"
-              checked={value.inherit}
-              disabled={disabled}
-              onChange={(event) => update({ inherit: event.target.checked })}
-            />
-            {inheritLabel ?? "親の設定に従う"}
-          </label>
-        )}
-
-        <form className="share-add" onSubmit={handleAdd}>
+      {showInherit && (
+        <CheckLabel className="mb-[0.85rem]">
           <input
+            type="checkbox"
+            checked={value.inherit}
+            disabled={disabled}
+            onChange={(event) => update({ inherit: event.target.checked })}
+          />
+          {inheritLabel ?? "親の設定に従う"}
+        </CheckLabel>
+      )}
+
+      <form className="mb-[1.1rem]" onSubmit={handleAdd}>
+        <Row>
+          <Input
+            variant="pill"
+            className="flex-1"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -120,117 +110,116 @@ export function ShareModal({
             disabled={disabled || value.inherit}
             aria-label="共有するユーザーのメールアドレス"
           />
-          <button type="submit" disabled={disabled || value.inherit || !email.trim()}>
+          <Button type="submit" disabled={disabled || value.inherit || !email.trim()}>
             送信
-          </button>
-        </form>
+          </Button>
+        </Row>
+      </form>
 
-        <section className="share-people">
-          <h3>アクセスできるユーザー</h3>
-          <ul>
-            <li>
-              <span className="share-avatar" aria-hidden>
-                {ownerLabel.slice(0, 1).toUpperCase()}
-              </span>
-              <div>
-                <strong>{ownerLabel}</strong>
-                <p>オーナー</p>
-              </div>
-              <span className="share-role-static">オーナー</span>
-            </li>
-            {value.grants.map((grant: AccessGrant) => (
-              <li key={grant.email}>
-                <span className="share-avatar" aria-hidden>
-                  {grant.email.slice(0, 1).toUpperCase()}
-                </span>
-                <div>
-                  <strong>{grant.email}</strong>
-                  <p>{grant.canWrite ? "編集者" : "閲覧者"}</p>
-                </div>
-                <select
-                  value={grant.canWrite ? "write" : "read"}
-                  disabled={disabled || value.inherit}
-                  aria-label={`${grant.email} の役割`}
-                  onChange={(event) =>
-                    update({
-                      grants: value.grants.map((item) =>
-                        item.email === grant.email
-                          ? { ...item, canWrite: event.target.value === "write" }
-                          : item,
-                      ),
-                    })
-                  }
-                >
-                  <option value="read">閲覧者</option>
-                  <option value="write">編集者</option>
-                </select>
-                <button
-                  type="button"
-                  className="share-remove"
-                  disabled={disabled || value.inherit}
-                  onClick={() =>
-                    update({ grants: value.grants.filter((item) => item.email !== grant.email) })
-                  }
-                >
-                  削除
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="share-general">
-          <h3>一般的なアクセス</h3>
-          <div className="share-general-card">
-            <span className="share-general-icon" aria-hidden>
-              {value.readScope === "public" ? "🔗" : "🔒"}
-            </span>
-            <div className="share-general-fields">
-              <label>
-                閲覧
-                <select
-                  value={value.readScope}
-                  disabled={disabled || value.inherit}
-                  onChange={(event) => update({ readScope: event.target.value as AccessScope })}
-                >
-                  {ACCESS_SCOPES.map((scope) => (
-                    <option key={scope} value={scope}>
-                      {ACCESS_SCOPE_LABELS[scope]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                編集
-                <select
-                  value={value.writeScope}
-                  disabled={disabled || value.inherit}
-                  onChange={(event) => update({ writeScope: event.target.value as AccessScope })}
-                >
-                  {writeOptions(value.readScope).map((scope) => (
-                    <option key={scope} value={scope}>
-                      {ACCESS_SCOPE_LABELS[scope]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p>{ACCESS_SCOPE_HINTS[value.readScope]}</p>
+      <section>
+        <SectionTitle>アクセスできるユーザー</SectionTitle>
+        <ul className="mb-4 list-none p-0">
+          <li className="grid grid-cols-[2rem_1fr_auto_auto] items-center gap-[0.65rem] py-[0.45rem]">
+            <Avatar name={ownerLabel} color={colorForEmail(ownerLabel)} variant="soft" />
+            <div>
+              <strong>{ownerLabel}</strong>
+              <MutedText className="text-[0.8rem]">オーナー</MutedText>
             </div>
+            <span className="text-[0.85rem] text-muted">オーナー</span>
+          </li>
+          {value.grants.map((grant: AccessGrant) => (
+            <li
+              key={grant.email}
+              className="grid grid-cols-[2rem_1fr_auto_auto] items-center gap-[0.65rem] py-[0.45rem]"
+            >
+              <Avatar name={grant.email} color={colorForEmail(grant.email)} variant="soft" />
+              <div>
+                <strong>{grant.email}</strong>
+                <MutedText className="text-[0.8rem]">{grant.canWrite ? "編集者" : "閲覧者"}</MutedText>
+              </div>
+              <Select
+                value={grant.canWrite ? "write" : "read"}
+                disabled={disabled || value.inherit}
+                aria-label={`${grant.email} の役割`}
+                onChange={(event) =>
+                  update({
+                    grants: value.grants.map((item) =>
+                      item.email === grant.email
+                        ? { ...item, canWrite: event.target.value === "write" }
+                        : item,
+                    ),
+                  })
+                }
+              >
+                <option value="read">閲覧者</option>
+                <option value="write">編集者</option>
+              </Select>
+              <button
+                type="button"
+                className="cursor-pointer border-0 bg-transparent text-muted disabled:cursor-default disabled:opacity-65"
+                disabled={disabled || value.inherit}
+                onClick={() =>
+                  update({ grants: value.grants.filter((item) => item.email !== grant.email) })
+                }
+              >
+                削除
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section>
+        <SectionTitle>一般的なアクセス</SectionTitle>
+        <div className="flex gap-3 rounded-[10px] border border-border bg-surface p-[0.85rem]">
+          <span className="text-xl" aria-hidden>
+            {value.readScope === "public" ? "🔗" : "🔒"}
+          </span>
+          <div className="grid flex-1 gap-[0.45rem]">
+            <label className="flex items-center justify-between gap-3">
+              閲覧
+              <Select
+                value={value.readScope}
+                disabled={disabled || value.inherit}
+                onChange={(event) => update({ readScope: event.target.value as AccessScope })}
+              >
+                {ACCESS_SCOPES.map((scope) => (
+                  <option key={scope} value={scope}>
+                    {ACCESS_SCOPE_LABELS[scope]}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex items-center justify-between gap-3">
+              編集
+              <Select
+                value={value.writeScope}
+                disabled={disabled || value.inherit}
+                onChange={(event) => update({ writeScope: event.target.value as AccessScope })}
+              >
+                {writeOptions(value.readScope).map((scope) => (
+                  <option key={scope} value={scope}>
+                    {ACCESS_SCOPE_LABELS[scope]}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <MutedText className="mt-1 text-[0.8rem]">{ACCESS_SCOPE_HINTS[value.readScope]}</MutedText>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {error && <p className="page-error">{error}</p>}
+      {error && <ErrorText>{error}</ErrorText>}
 
-        <footer className="share-modal-footer">
-          <button type="button" className="share-copy" onClick={() => void copyLink()}>
-            {copied ? "コピーしました" : "リンクをコピー"}
-          </button>
-          <button type="button" className="share-done" onClick={onClose}>
-            {saving ? "保存中…" : "完了"}
-          </button>
-        </footer>
-      </div>
-    </div>
+      <ModalFooter>
+        <Button variant="ghost" onClick={() => void copyLink()}>
+          {copied ? "コピーしました" : "リンクをコピー"}
+        </Button>
+        <Button variant="accent" onClick={onClose}>
+          {saving ? "保存中…" : "完了"}
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 

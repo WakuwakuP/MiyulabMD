@@ -2,8 +2,11 @@ import { folderUrl } from "@miyulabmd/shared";
 import { useRef, useState } from "react";
 import { Link } from "react-router";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
-import { Button } from "../ui/Button.tsx";
+import { HeaderButton } from "../ui/HeaderButton.tsx";
+import { FolderOutlineIcon } from "../ui/icons.tsx";
+import { Input } from "../ui/Input.tsx";
 import { MenuPanel } from "../ui/Menu.tsx";
+import { MutedText } from "../ui/Text.tsx";
 
 type Props = {
   folder: string;
@@ -20,16 +23,22 @@ export function FolderPopover({ folder, folderId, isOwner, onFolderChange, onFol
 
   return (
     <div className="relative" ref={rootRef}>
-      <Button variant="outline" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((value) => !value)}>
-        フォルダ
-      </Button>
+      <HeaderButton
+        variant="outline"
+        icon={<FolderOutlineIcon />}
+        label="フォルダ"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((value) => !value)}
+      />
       {open && (
         <MenuPanel role="dialog" width="16rem">
           <div className="grid gap-2 px-3 py-2">
             {isOwner ? (
               <>
-                <input
-                  className="w-full rounded-full border border-[var(--border)] px-3 py-2"
+                <Input
+                  variant="pill"
+                  className="w-full"
                   type="text"
                   value={folder}
                   onChange={(event) => onFolderChange(event.target.value)}
@@ -38,17 +47,17 @@ export function FolderPopover({ folder, folderId, isOwner, onFolderChange, onFol
                   aria-label="ノートのフォルダ"
                 />
                 {folderId && (
-                  <Link className="text-[var(--accent)] no-underline" to={folderUrl(folderId)}>
+                  <Link className="text-accent no-underline" to={folderUrl(folderId)}>
                     開く
                   </Link>
                 )}
               </>
             ) : folderId ? (
-              <Link className="text-[var(--accent)] no-underline" to={folderUrl(folderId)}>
+              <Link className="text-accent no-underline" to={folderUrl(folderId)}>
                 フォルダを開く
               </Link>
             ) : (
-              <span className="text-[var(--muted)]">なし</span>
+              <MutedText>なし</MutedText>
             )}
           </div>
         </MenuPanel>

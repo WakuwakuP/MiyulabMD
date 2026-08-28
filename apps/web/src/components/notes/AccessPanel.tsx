@@ -6,6 +6,11 @@ import {
   type AccessScope,
 } from "@miyulabmd/shared";
 import { useState, type FormEvent } from "react";
+import { Button } from "../ui/Button.tsx";
+import { CheckLabel, Row } from "../ui/Field.tsx";
+import { Input } from "../ui/Input.tsx";
+import { Select } from "../ui/Select.tsx";
+import { MutedText } from "../ui/Text.tsx";
 
 export type AccessDraft = {
   inherit: boolean;
@@ -59,23 +64,24 @@ export function AccessPanel({
   }
 
   return (
-    <fieldset className="access-panel" disabled={disabled}>
-      <legend>{title}</legend>
+    <fieldset className="m-[0.75rem_0_0] border-0 p-0" disabled={disabled}>
+      <legend className="p-0 font-semibold">{title}</legend>
       {showInherit && (
-        <label className="access-inherit">
+        <CheckLabel className="my-2">
           <input
             type="checkbox"
             checked={value.inherit}
             onChange={(event) => update({ inherit: event.target.checked })}
           />
           {inheritLabel}
-        </label>
+        </CheckLabel>
       )}
-      {value.inherit && sourceLabel && <p className="access-source">{sourceLabel}</p>}
-      <div className="access-scopes">
-        <label>
+      {value.inherit && sourceLabel && <MutedText className="mb-2">{sourceLabel}</MutedText>}
+      <div className="flex flex-wrap gap-x-5 gap-y-3">
+        <label className="flex items-center gap-[0.4rem]">
           読み取り
-          <select
+          <Select
+            className="ml-[0.35rem]"
             value={value.readScope}
             disabled={value.inherit}
             onChange={(event) => update({ readScope: event.target.value as AccessScope })}
@@ -85,11 +91,12 @@ export function AccessPanel({
                 {ACCESS_SCOPE_LABELS[scope]}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
-        <label>
+        <label className="flex items-center gap-[0.4rem]">
           書き込み
-          <select
+          <Select
+            className="ml-[0.35rem]"
             value={value.writeScope}
             disabled={value.inherit}
             onChange={(event) => update({ writeScope: event.target.value as AccessScope })}
@@ -99,32 +106,38 @@ export function AccessPanel({
                 {ACCESS_SCOPE_LABELS[scope]}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
       {needsUsers && (
-        <div className="access-grants">
-          <p>指定ユーザー</p>
-          <form className="access-grant-add" onSubmit={handleAddGrant}>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="user@example.com"
-              disabled={disabled}
-            />
-            <button type="submit" disabled={disabled || !email.trim()}>
-              追加
-            </button>
+        <div className="mt-3">
+          <p className="mb-[0.35rem] mt-0">指定ユーザー</p>
+          <form className="mb-2" onSubmit={handleAddGrant}>
+            <Row>
+              <Input
+                className="flex-1"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="user@example.com"
+                disabled={disabled}
+              />
+              <Button type="submit" disabled={disabled || !email.trim()}>
+                追加
+              </Button>
+            </Row>
           </form>
           {value.grants.length === 0 ? (
-            <p className="token-meta">まだ指定されていません。</p>
+            <MutedText>まだ指定されていません。</MutedText>
           ) : (
-            <ul>
+            <ul className="m-0 list-none p-0">
               {value.grants.map((grant) => (
-                <li key={grant.email}>
+                <li
+                  key={grant.email}
+                  className="flex flex-wrap items-center gap-3 border-b border-border py-[0.35rem]"
+                >
                   <span>{grant.email}</span>
-                  <label>
+                  <CheckLabel>
                     <input
                       type="checkbox"
                       checked={grant.canWrite}
@@ -139,15 +152,15 @@ export function AccessPanel({
                       }
                     />
                     書き込み
-                  </label>
-                  <button
-                    type="button"
+                  </CheckLabel>
+                  <Button
+                    variant="ghost"
                     onClick={() =>
                       update({ grants: value.grants.filter((item) => item.email !== grant.email) })
                     }
                   >
                     削除
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

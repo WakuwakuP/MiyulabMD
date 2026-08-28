@@ -8,7 +8,9 @@ import { ConfirmDialog } from "../components/notes/ConfirmDialog.tsx";
 import { ContextMenu, type ContextMenuItem } from "../components/notes/ContextMenu.tsx";
 import { NoteTree, type MenuTarget } from "../components/notes/NoteTree.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
-import { Button } from "../components/ui/Button.tsx";
+import { HeaderButton } from "../components/ui/HeaderButton.tsx";
+import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
+import { ErrorText } from "../components/ui/Text.tsx";
 import {
   createFolder,
   createNote,
@@ -310,26 +312,33 @@ export function HomePage() {
   useEffect(() => {
     setHeader({
       title,
-      actions:
+      end:
         folder || !folderId ? (
-          <div className="flex flex-wrap items-center justify-center gap-2">
+          <>
             {canAdmin && (
-              <Button variant="outline" onClick={() => void handleNewFolder()}>
-                フォルダ
-              </Button>
+              <HeaderButton
+                variant="outline"
+                icon={<FolderOutlineIcon />}
+                label="フォルダ"
+                onClick={() => void handleNewFolder()}
+              />
             )}
-            <Button variant="accent" onClick={() => void handleCreate()} disabled={creating}>
-              {creating ? "作成中…" : "新規ノート"}
-            </Button>
-          </div>
+            <HeaderButton
+              variant="accent"
+              icon={<PlusIcon />}
+              label={creating ? "作成中…" : "新規ノート"}
+              disabled={creating}
+              onClick={() => void handleCreate()}
+            />
+          </>
         ) : null,
     });
     return () => setHeader(null);
   }, [title, folder, folderId, canAdmin, creating, setHeader]);
 
   return (
-    <section className="home-page">
-      {error && <p className="page-error">{error}</p>}
+    <section>
+      {error && <ErrorText>{error}</ErrorText>}
       {loading ? (
         <p>読み込み中…</p>
       ) : folder || !folderId ? (

@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/react";
 import { useEffect, useRef, useState } from "react";
+import { IconButton } from "../ui/IconButton.tsx";
 import { CommandMenuList } from "./CommandMenuList.tsx";
 import { readSlashQuery, SLASH_ITEMS, type SlashCommandHandlers } from "./slash-items.ts";
 
@@ -103,10 +104,11 @@ export function BlockHandle({ editor, handlers }: Props) {
   if (!pos) return null;
 
   return (
-    <div ref={rootRef} className="block-handle" style={{ top: pos.top, left: pos.left }}>
-      <button
-        type="button"
-        className="block-handle-button"
+    <div ref={rootRef} className="fixed z-[25]" style={{ top: pos.top, left: pos.left }}>
+      <IconButton
+        variant="outline"
+        size="sm"
+        className="aria-expanded:bg-surface aria-expanded:text-ink"
         aria-label="ブロックコマンド"
         aria-expanded={open}
         onMouseDown={(event) => {
@@ -116,7 +118,7 @@ export function BlockHandle({ editor, handlers }: Props) {
         }}
       >
         +
-      </button>
+      </IconButton>
       {open && (
         <CommandMenuList
           items={SLASH_ITEMS}

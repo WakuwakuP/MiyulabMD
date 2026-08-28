@@ -2,6 +2,7 @@ import { titleFromMarkdown } from "@miyulabmd/shared";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
+import { ErrorText } from "../components/ui/Text.tsx";
 import { fetchNote } from "../lib/api.ts";
 
 export function SharePage() {
@@ -39,7 +40,7 @@ export function SharePage() {
 
   if (loading) {
     return (
-      <section className="share-page">
+      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
         <p>読み込み中…</p>
       </section>
     );
@@ -47,8 +48,8 @@ export function SharePage() {
 
   if (denied === 401) {
     return (
-      <section className="share-page">
-        <h1>ログインが必要です</h1>
+      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+        <h1 className="m-0 text-2xl font-bold">ログインが必要です</h1>
         <p>このノートを閲覧するにはサインインしてください。</p>
         <p>
           <a href="/auth/login?email=dev@example.com">ログイン</a>
@@ -59,8 +60,8 @@ export function SharePage() {
 
   if (denied === 403) {
     return (
-      <section className="share-page">
-        <h1>閲覧できません</h1>
+      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+        <h1 className="m-0 text-2xl font-bold">閲覧できません</h1>
         <p>このノートを閲覧する権限がありません。</p>
         <p>
           <Link to="/">ホームに戻る</Link>
@@ -73,8 +74,8 @@ export function SharePage() {
 
   if (error) {
     return (
-      <section className="share-page">
-        <p className="page-error">{error}</p>
+      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+        <ErrorText>{error}</ErrorText>
         <p>
           <Link to="/">ホームに戻る</Link>
         </p>
@@ -83,8 +84,8 @@ export function SharePage() {
   }
 
   return (
-    <section className="share-page">
-      <MarkdownPreview markdown={markdown} />
+    <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+      <MarkdownPreview className="max-w-[48rem]" markdown={markdown} />
     </section>
   );
 }

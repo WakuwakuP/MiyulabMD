@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/react";
 import { useEffect, useState } from "react";
+import { cn } from "../../lib/cn.ts";
 
 type Pos = { top: number; left: number };
 
@@ -43,11 +44,20 @@ export function SelectionToolbar({ editor, onLink }: Props) {
 
   if (!pos) return null;
 
+  const itemClass = (active: boolean) =>
+    cn(
+      "min-w-7 cursor-pointer rounded-[7px] border-0 bg-transparent px-[0.45rem] py-[0.3rem] hover:bg-surface",
+      active && "bg-surface",
+    );
+
   return (
-    <div className="selection-toolbar" style={{ top: pos.top, left: pos.left }}>
+    <div
+      className="fixed z-30 flex -translate-x-1/2 -translate-y-full gap-[0.15rem] rounded-[10px] border border-border bg-canvas p-1 shadow-menu"
+      style={{ top: pos.top, left: pos.left }}
+    >
       <button
         type="button"
-        className={editor.isActive("bold") ? "is-active" : undefined}
+        className={cn(itemClass(editor.isActive("bold")), "font-bold")}
         aria-label="太字"
         onMouseDown={(event) => {
           event.preventDefault();
@@ -58,7 +68,7 @@ export function SelectionToolbar({ editor, onLink }: Props) {
       </button>
       <button
         type="button"
-        className={editor.isActive("italic") ? "is-active" : undefined}
+        className={cn(itemClass(editor.isActive("italic")), "italic")}
         aria-label="斜体"
         onMouseDown={(event) => {
           event.preventDefault();
@@ -69,7 +79,7 @@ export function SelectionToolbar({ editor, onLink }: Props) {
       </button>
       <button
         type="button"
-        className={editor.isActive("strike") ? "is-active" : undefined}
+        className={cn(itemClass(editor.isActive("strike")), "line-through")}
         aria-label="打ち消し"
         onMouseDown={(event) => {
           event.preventDefault();
@@ -80,7 +90,7 @@ export function SelectionToolbar({ editor, onLink }: Props) {
       </button>
       <button
         type="button"
-        className={editor.isActive("code") ? "is-active" : undefined}
+        className={itemClass(editor.isActive("code"))}
         aria-label="コード"
         onMouseDown={(event) => {
           event.preventDefault();
@@ -91,7 +101,7 @@ export function SelectionToolbar({ editor, onLink }: Props) {
       </button>
       <button
         type="button"
-        className={editor.isActive("link") ? "is-active" : undefined}
+        className={itemClass(editor.isActive("link"))}
         aria-label="リンク"
         onMouseDown={(event) => {
           event.preventDefault();
