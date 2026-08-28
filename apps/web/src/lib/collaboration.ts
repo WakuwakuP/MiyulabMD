@@ -1,6 +1,7 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
+import { colorForEmail } from "./user-style.ts";
 
 export type CollabAwareness = WebsocketProvider["awareness"];
 
@@ -34,14 +35,9 @@ export function collaborationUrl(noteId: string): string {
   return `${collaborationWsBase()}/${noteId}`;
 }
 
-/** ユーザー ID から安定した表示色を生成する。 */
-export function colorForUser(userId: string): string {
-  let hash = 0;
-  for (let i = 0; i < userId.length; i += 1) {
-    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue} 65% 45%)`;
+/** メールアドレスから安定した表示色を生成する。 */
+export function colorForUser(emailOrId: string): string {
+  return colorForEmail(emailOrId, emailOrId);
 }
 
 export function awarenessLabel(user: SessionUser | null): string {
@@ -50,6 +46,9 @@ export function awarenessLabel(user: SessionUser | null): string {
 
 /** y-codemirror.next が読む `user.name` / `user.color` を含む awareness。 */
 function colorLightFor(color: string): string {
+  if (color.startsWith("#") && color.length === 7) {
+    return `${color}40`;
+  }
   if (color.startsWith("hsl(") && color.endsWith(")")) {
     return `${color.slice(0, -1)} / 0.25)`;
   }
@@ -61,7 +60,7 @@ export function awarenessUser(user: SessionUser | null): AwarenessUserState & {
 } {
   const userId = user?.id ?? "guest";
   const displayName = awarenessLabel(user);
-  const color = colorForUser(userId);
+  const color = colorForEmail(user?.email, userId);
   return {
     userId,
     displayName,
@@ -80,6 +79,7 @@ export function applyAwarenessUser(awareness: CollabAwareness, user: SessionUser
   awareness.setLocalState({
     ...current,
     ...next,
+    email: user?.email ?? null,
   });
 }
 

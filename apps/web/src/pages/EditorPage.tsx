@@ -200,13 +200,12 @@ export function EditorPage() {
       actions: (
         <div className="header-editor-actions">
           <EditorModeSwitch value={viewMode} canEdit={canEdit} onChange={handleModeChange} />
-          {awareness && <PresenceBar awareness={awareness} compact />}
         </div>
       ),
       end: (
         <div className="header-editor-end">
           <div className="header-folder">
-            <button type="button" onClick={() => setFolderOpen((value) => !value)}>
+            <button type="button" className="header-secondary" onClick={() => setFolderOpen((value) => !value)}>
               フォルダ
             </button>
             {folderOpen && (
@@ -241,6 +240,7 @@ export function EditorPage() {
           >
             共有
           </button>
+          {awareness && <PresenceBar awareness={awareness} />}
         </div>
       ),
     });

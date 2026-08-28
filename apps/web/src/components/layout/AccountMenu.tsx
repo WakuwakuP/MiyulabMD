@@ -1,6 +1,8 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { colorForEmail } from "../../lib/user-style.ts";
+import { UserAvatar } from "./UserAvatar.tsx";
 
 type Props = {
   user: SessionUser;
@@ -35,9 +37,7 @@ export function AccountMenu({ user }: Props) {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="account-avatar" aria-hidden>
-          {label.slice(0, 1).toUpperCase()}
-        </span>
+        <UserAvatar name={label} color={colorForEmail(user.email, user.id)} />
         <span className="account-name">{label}</span>
       </button>
       {open && (

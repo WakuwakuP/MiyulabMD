@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { AwarenessUserState, CollabAwareness } from "../../lib/collaboration.ts";
+import { colorForEmail } from "../../lib/user-style.ts";
+import { UserAvatar } from "../layout/UserAvatar.tsx";
 
 type Props = {
   awareness: CollabAwareness;
-  compact?: boolean;
 };
 
 function readAwarenessState(state: Record<string, unknown> | null): AwarenessUserState | null {
@@ -12,6 +13,7 @@ function readAwarenessState(state: Record<string, unknown> | null): AwarenessUse
   const nested =
     state.user && typeof state.user === "object" ? (state.user as Record<string, unknown>) : null;
   const userId = typeof state.userId === "string" ? state.userId : null;
+  const email = typeof state.email === "string" ? state.email : null;
   const displayName =
     (typeof state.displayName === "string" && state.displayName) ||
     (typeof nested?.name === "string" && nested.name) ||
@@ -19,15 +21,15 @@ function readAwarenessState(state: Record<string, unknown> | null): AwarenessUse
   const color =
     (typeof state.color === "string" && state.color) ||
     (typeof nested?.color === "string" && nested.color) ||
-    null;
+    colorForEmail(email, userId ?? displayName ?? "guest");
 
-  if (!displayName || !color) {
+  if (!displayName) {
     return null;
   }
   return { userId: userId ?? displayName, displayName, color };
 }
 
-export function PresenceBar({ awareness, compact = false }: Props) {
+export function PresenceBar({ awareness }: Props) {
   const [peers, setPeers] = useState<Array<AwarenessUserState & { clientId: number }>>([]);
 
   useEffect(() => {
@@ -51,17 +53,15 @@ export function PresenceBar({ awareness, compact = false }: Props) {
     };
   }, [awareness]);
 
-  if (peers.length === 0) {
-    return compact ? null : <div className="presence-bar presence-bar--empty">共同編集者はまだいません</div>;
-  }
+  if (peers.length === 0) return null;
 
   return (
-    <div className={compact ? "presence-bar presence-bar--compact" : "presence-bar"} aria-label="共同編集者">
+    <div
+      className={peers.length >= 5 ? "presence-avatars is-packed" : "presence-avatars"}
+      aria-label="共同編集者"
+    >
       {peers.map((peer) => (
-        <span key={peer.clientId} className="presence-chip" title={peer.displayName}>
-          <span className="presence-dot" style={{ backgroundColor: peer.color }} aria-hidden />
-          {compact ? null : peer.displayName}
-        </span>
+        <UserAvatar key={peer.clientId} name={peer.displayName} color={peer.color} />
       ))}
     </div>
   );
