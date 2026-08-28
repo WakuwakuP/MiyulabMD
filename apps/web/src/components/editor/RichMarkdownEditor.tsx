@@ -22,6 +22,8 @@ import { readRemoteMarkdownCursors, writeMarkdownCursor } from "../../lib/rich-a
 import { applyTextDiff, inspectPlainTextDelta, type YTextDeltaItem } from "../../lib/y-text-diff.ts";
 import { CollabCarets, collabCaretsKey } from "./extensions/collab-carets.ts";
 import { OgCard } from "./extensions/og-card.ts";
+import { SafeParagraph } from "./extensions/safe-paragraph.ts";
+import { SlashCommandMenu } from "./SlashCommandMenu.tsx";
 
 type Props = {
   noteId: string;
@@ -147,12 +149,13 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
     immediatelyRender: false,
     editable: !readOnly,
     extensions: [
-      StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
+      StarterKit.configure({ paragraph: false, link: { openOnClick: false, autolink: true } }),
+      SafeParagraph,
       Markdown,
       Image,
       Youtube.configure({ controls: true, nocookie: true, width: 640, height: 360 }),
       OgCard,
-      Placeholder.configure({ placeholder: "本文を入力" }),
+      Placeholder.configure({ placeholder: "「/」でブロックを挿入" }),
       CollabCarets.configure({
         getMap: () => mapRef.current,
         getPeers: () => readRemoteMarkdownCursors(awareness, yText),
@@ -277,47 +280,29 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
 
   return (
     <div className="rich-editor">
-      {!readOnly && (
-        <div className="rich-toolbar" role="toolbar" aria-label="書式">
-          <button type="button" onClick={() => editor.chain().focus().toggleBold().run()}>
-            太字
-          </button>
-          <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()}>
-            斜体
-          </button>
-          <button type="button" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
-            見出し
-          </button>
-          <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()}>
-            リスト
-          </button>
-          <button type="button" onClick={() => editor.chain().focus().toggleCodeBlock().run()}>
-            コード
-          </button>
-          <button type="button" onClick={() => imageInputRef.current?.click()}>
-            画像
-          </button>
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept={[...IMAGE_TYPES].join(",")}
-            aria-label="画像をアップロード"
-            className="rich-file-input"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void insertImageFile(file);
-            }}
-          />
-          <button type="button" onClick={insertYoutube}>
-            YouTube
-          </button>
-          <button type="button" onClick={() => void insertOg()}>
-            リンクカード
-          </button>
-        </div>
-      )}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept={[...IMAGE_TYPES].join(",")}
+        aria-label="画像をアップロード"
+        className="rich-file-input"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void insertImageFile(file);
+        }}
+      />
       <EditorContent editor={editor} className="rich-editor-content" />
+      {!readOnly && (
+        <SlashCommandMenu
+          editor={editor}
+          handlers={{
+            onImage: () => imageInputRef.current?.click(),
+            onYoutube: insertYoutube,
+            onOgCard: () => void insertOg(),
+          }}
+        />
+      )}
     </div>
   );
 }

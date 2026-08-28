@@ -1,6 +1,6 @@
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
-import { EditorView, highlightActiveLine } from "@codemirror/view";
+import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import { yCollab } from "y-codemirror.next";
 import * as Y from "yjs";
@@ -13,6 +13,9 @@ type Props = {
   yText: Y.Text;
   awareness: CollabAwareness;
   readOnly?: boolean;
+  lineNumbers?: boolean;
+  scrollRatio?: number;
+  onScrollRatio?: (ratio: number) => void;
 };
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -109,16 +112,38 @@ function imageUploadHandlers(
   });
 }
 
-export function MarkdownEditor({ noteId, yText, awareness, readOnly = false }: Props) {
+function scrollRatioFrom(el: HTMLElement): number {
+  const max = el.scrollHeight - el.clientHeight;
+  return max <= 0 ? 0 : el.scrollTop / max;
+}
+
+function applyScrollRatio(el: HTMLElement, ratio: number) {
+  const max = el.scrollHeight - el.clientHeight;
+  if (max <= 0) return;
+  el.scrollTop = max * ratio;
+}
+
+export function MarkdownEditor({
+  noteId,
+  yText,
+  awareness,
+  readOnly = false,
+  lineNumbers: showLineNumbers = false,
+  scrollRatio,
+  onScrollRatio,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const onContextMenuRef = useRef<(event: MouseEvent, view: EditorView) => void>(() => undefined);
+  const onScrollRatioRef = useRef(onScrollRatio);
+  const applyingScroll = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   onContextMenuRef.current = (event) => {
     setMenu({ x: event.clientX, y: event.clientY });
   };
+  onScrollRatioRef.current = onScrollRatio;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -130,6 +155,7 @@ export function MarkdownEditor({ noteId, yText, awareness, readOnly = false }: P
       doc: yText.toString(),
       extensions: [
         markdown(),
+        ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
         highlightActiveLine(),
         EditorView.lineWrapping,
         EditorView.theme({
@@ -141,6 +167,13 @@ export function MarkdownEditor({ noteId, yText, awareness, readOnly = false }: P
         imageUploadHandlers(noteId, yText, readOnly, (event, view) => {
           onContextMenuRef.current(event, view);
         }),
+        EditorView.domEventHandlers({
+          scroll(_event, view) {
+            if (applyingScroll.current) return false;
+            onScrollRatioRef.current?.(scrollRatioFrom(view.scrollDOM));
+            return false;
+          },
+        }),
       ],
     });
 
@@ -151,7 +184,19 @@ export function MarkdownEditor({ noteId, yText, awareness, readOnly = false }: P
       view.destroy();
       viewRef.current = null;
     };
-  }, [noteId, yText, awareness, readOnly]);
+  }, [noteId, yText, awareness, readOnly, showLineNumbers]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || scrollRatio == null) return;
+    if (Math.abs(scrollRatioFrom(view.scrollDOM) - scrollRatio) < 0.004) return;
+    applyingScroll.current = true;
+    applyScrollRatio(view.scrollDOM, scrollRatio);
+    const timer = window.requestAnimationFrame(() => {
+      applyingScroll.current = false;
+    });
+    return () => window.cancelAnimationFrame(timer);
+  }, [scrollRatio]);
 
   async function uploadAtCursor(file: File) {
     const view = viewRef.current;

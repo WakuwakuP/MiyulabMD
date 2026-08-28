@@ -506,6 +506,24 @@ select {
   border-radius: 0;
 }
 
+.app-main--editor .editor-workspace--preview {
+  display: block;
+  overflow: auto;
+  background: color-mix(in srgb, CanvasText 5%, Canvas);
+}
+
+.app-main--editor .editor-workspace--preview .markdown-preview {
+  width: min(calc(100% - 2rem), 46rem);
+  height: auto;
+  min-height: calc(100% - 4.5rem);
+  margin: 1.5rem auto 3rem;
+  padding: 2.5rem 2.5rem 4rem;
+  border: none;
+  border-radius: 10px;
+  background: Canvas;
+  box-shadow: 0 8px 28px color-mix(in srgb, CanvasText 8%, transparent);
+}
+
 .app-main--editor .editor-workspace--split > :first-child {
   border-right: 1px solid var(--border);
 }
@@ -518,6 +536,12 @@ select {
 .markdown-editor .cm-scroller {
   font-family: "IBM Plex Mono", "Consolas", monospace;
   font-size: 0.95rem;
+}
+
+.markdown-editor .cm-gutters {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  color: var(--muted);
 }
 
 .markdown-editor .cm-editor,
@@ -1071,21 +1095,61 @@ select {
   overflow: hidden;
 }
 
-.rich-toolbar {
+.rich-editor-content {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  padding: 0.45rem 0.7rem;
-  border-bottom: 1px solid var(--border);
+  justify-content: center;
+  flex: 1;
+  overflow: auto;
+  padding: 1rem 1.25rem;
+}
+
+.app-main--editor .rich-editor .tiptap {
+  width: min(100%, 46rem);
+  padding: 2.25rem 1.5rem 5rem;
+}
+
+.rich-editor .tiptap p.is-editor-empty:first-child::before,
+.rich-editor .tiptap .is-empty.has-focus::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.slash-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 16rem;
+  max-height: 18rem;
+  overflow: auto;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: Canvas;
+  box-shadow: 0 8px 24px color-mix(in srgb, CanvasText 16%, transparent);
+}
+
+.slash-menu button {
+  display: grid;
+  width: 100%;
+  gap: 0.1rem;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-menu button.is-active,
+.slash-menu button:hover {
   background: var(--surface);
 }
 
-.rich-toolbar button {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: Canvas;
-  padding: 0.2rem 0.5rem;
-  cursor: pointer;
+.slash-menu button span {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .rich-file-input {
@@ -1094,12 +1158,6 @@ select {
   height: 1px;
   opacity: 0;
   pointer-events: none;
-}
-
-.rich-editor-content {
-  flex: 1;
-  overflow: auto;
-  padding: 1rem 1.25rem;
 }
 
 .rich-editor .tiptap {

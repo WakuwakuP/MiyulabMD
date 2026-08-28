@@ -38,6 +38,8 @@ export function EditorPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>("preview");
   const [folderOpen, setFolderOpen] = useState(false);
+  const [splitScroll, setSplitScroll] = useState(0);
+  const splitScrollLock = useRef(false);
 
   const hydratedRef = useRef(false);
 
@@ -49,6 +51,7 @@ export function EditorPage() {
     setCollab(null);
     setCollabReady(false);
     setMode("preview");
+    setSplitScroll(0);
 
     fetchNote(id).then((result) => {
       if (!result.ok) {
@@ -165,6 +168,15 @@ export function EditorPage() {
     setMode(next);
     writeEditorMode(next);
   }
+
+  function handleSplitScroll(ratio: number) {
+    if (splitScrollLock.current) return;
+    splitScrollLock.current = true;
+    setSplitScroll(ratio);
+    window.requestAnimationFrame(() => {
+      splitScrollLock.current = false;
+    });
+  }
   const awareness = collab?.awareness;
   const yMarkdown = collab?.yMarkdown;
 
@@ -279,13 +291,22 @@ export function EditorPage() {
               yText={yMarkdown}
               awareness={awareness}
               readOnly={!canEdit}
+              lineNumbers={viewMode === "source"}
+              scrollRatio={viewMode === "split" ? splitScroll : undefined}
+              onScrollRatio={viewMode === "split" ? handleSplitScroll : undefined}
             />
           ) : (
             <div className="markdown-editor markdown-editor--loading">
               <p>共同編集に接続中…</p>
             </div>
           ))}
-        {showPreview && <MarkdownPreview markdown={markdown} />}
+        {showPreview && (
+          <MarkdownPreview
+            markdown={markdown}
+            scrollRatio={viewMode === "split" ? splitScroll : undefined}
+            onScrollRatio={viewMode === "split" ? handleSplitScroll : undefined}
+          />
+        )}
         {showRich &&
           (ready && yMarkdown && awareness ? (
             <RichMarkdownEditor
