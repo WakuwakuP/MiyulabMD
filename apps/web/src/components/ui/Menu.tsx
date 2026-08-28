@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router";
-import styles from "./menu.module.css";
+import { cn } from "../../lib/cn.ts";
 
 type PanelProps = {
   children: ReactNode;
@@ -11,10 +11,20 @@ type PanelProps = {
   style?: CSSProperties;
 };
 
-export function MenuPanel({ children, align = "end", role = "menu", labelledBy, width, style }: PanelProps) {
+const panelClass =
+  "z-40 min-w-40 rounded-xl border border-border bg-canvas py-[0.35rem] shadow-menu";
+
+export function MenuPanel({
+  children,
+  align = "end",
+  role = "menu",
+  labelledBy,
+  width,
+  style,
+}: PanelProps) {
   return (
     <div
-      className={`${styles.panel} ${styles.anchored} ${styles[align]}`}
+      className={cn(panelClass, "absolute top-[calc(100%+0.45rem)]", align === "end" ? "right-0" : "left-0")}
       role={role}
       aria-labelledby={labelledBy}
       style={{ minWidth: width, ...style }}
@@ -36,7 +46,7 @@ export function MenuFixed({
   role?: "menu";
 }) {
   return (
-    <div className={`${styles.panel} ${styles.fixed}`} role={role} style={{ left: x, top: y }}>
+    <div className={cn(panelClass, "fixed")} role={role} style={{ left: x, top: y }}>
       {children}
     </div>
   );
@@ -52,7 +62,12 @@ type ItemProps = {
 };
 
 export function MenuItem({ children, active, danger, onClick, to, href }: ItemProps) {
-  const className = `${styles.item} ${active ? styles.itemActive : ""} ${danger ? styles.danger : ""}`;
+  const className = cn(
+    "block w-full cursor-pointer border-0 bg-transparent px-4 py-2 text-left text-inherit no-underline",
+    "hover:bg-surface",
+    active && "bg-surface",
+    danger && "text-error",
+  );
 
   if (to) {
     return (
@@ -78,15 +93,15 @@ export function MenuItem({ children, active, danger, onClick, to, href }: ItemPr
 }
 
 export function MenuSeparator() {
-  return <hr className={styles.separator} />;
+  return <hr className="my-[0.35rem] h-px border-0 bg-border" />;
 }
 
 export function MenuHeader({ name, email, children }: { name: string; email: string; children: ReactNode }) {
   return (
-    <div className={styles.header}>
+    <div className="flex flex-col items-center gap-[0.45rem] px-[1.15rem] pt-4 pb-[0.85rem] text-center">
       {children}
-      <p className={styles.headerName}>{name}</p>
-      <p className={styles.headerEmail}>{email}</p>
+      <p className="m-0 font-semibold">{name}</p>
+      <p className="m-0 text-[0.85rem] text-muted">{email}</p>
     </div>
   );
 }

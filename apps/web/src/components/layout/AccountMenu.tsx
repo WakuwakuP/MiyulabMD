@@ -4,7 +4,6 @@ import { useDismiss } from "../../hooks/use-dismiss.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
 import { MenuHeader, MenuItem, MenuPanel, MenuSeparator } from "../ui/Menu.tsx";
-import styles from "./account-menu.module.css";
 
 type Props = {
   user: SessionUser;
@@ -17,10 +16,10 @@ export function AccountMenu({ user }: Props) {
   useDismiss(open, () => setOpen(false), rootRef);
 
   return (
-    <div className={styles.root} ref={rootRef}>
+    <div className="relative" ref={rootRef}>
       <button
         type="button"
-        className={styles.trigger}
+        className="grid cursor-pointer place-items-center rounded-full border-2 border-transparent bg-transparent p-0 hover:border-soft aria-expanded:border-soft"
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}

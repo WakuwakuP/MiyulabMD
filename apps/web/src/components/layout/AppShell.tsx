@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router";
 import { fetchAuthConfig, fetchMe, type AuthConfig } from "../../lib/api.ts";
+import { cn } from "../../lib/cn.ts";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext, HeaderLayout } from "./AppShellContext.ts";
 
@@ -14,6 +15,7 @@ export function AppShell() {
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [layout, setLayout] = useState<HeaderLayout>("page");
+  const editor = layout === "editor";
 
   useEffect(() => {
     Promise.all([fetchMe(), fetchAuthConfig()])
@@ -39,7 +41,10 @@ export function AppShell() {
   };
 
   return (
-    <div className={layout === "editor" ? "app-shell app-shell--editor" : "app-shell"}>
+    <div
+      data-layout={layout}
+      className={cn("flex min-h-dvh flex-col", editor && "h-dvh overflow-hidden")}
+    >
       <AppHeader
         title={headerTitle}
         actions={headerActions}
@@ -48,7 +53,12 @@ export function AppShell() {
         loading={loading}
         authConfig={authConfig}
       />
-      <main className={layout === "editor" ? "app-main app-main--editor" : "app-main"}>
+      <main
+        className={cn(
+          "mx-auto w-full max-w-[1400px] flex-1 p-5",
+          editor && "m-0 min-h-0 max-w-none overflow-hidden p-0",
+        )}
+      >
         <Outlet context={context} />
       </main>
     </div>
