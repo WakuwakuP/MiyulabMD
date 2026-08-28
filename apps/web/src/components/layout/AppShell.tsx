@@ -13,6 +13,7 @@ export function AppShell() {
   const [loginEmail, setLoginEmail] = useState("dev@example.com");
   const [headerTitle, setHeaderTitle] = useState<string | undefined>();
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
+  const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [layout, setLayout] = useState<HeaderLayout>("page");
 
   useEffect(() => {
@@ -34,6 +35,7 @@ export function AppShell() {
   const setHeader = useCallback((next: Parameters<AppShellContext["setHeader"]>[0]) => {
     setHeaderTitle(next?.title);
     setHeaderActions(next?.actions ?? null);
+    setHeaderEnd(next?.end ?? null);
     setLayout(next?.layout ?? "page");
   }, []);
 
@@ -55,6 +57,7 @@ export function AppShell() {
         </div>
         <div className="app-header-center">{headerActions}</div>
         <nav className="app-nav">
+          {headerEnd}
           {loading ? (
             <span className="app-auth">…</span>
           ) : user ? (

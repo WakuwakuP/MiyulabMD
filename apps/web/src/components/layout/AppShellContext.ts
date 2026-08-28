@@ -7,5 +7,7 @@ export type AppShellContext = {
   user: SessionUser | null;
   userLoading: boolean;
   setUser: (user: SessionUser | null) => void;
-  setHeader: (header: { title?: string; actions?: ReactNode; layout?: HeaderLayout } | null) => void;
+  setHeader: (
+    header: { title?: string; actions?: ReactNode; end?: ReactNode; layout?: HeaderLayout } | null,
+  ) => void;
 };

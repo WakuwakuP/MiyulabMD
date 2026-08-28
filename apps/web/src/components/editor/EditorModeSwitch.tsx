@@ -14,6 +14,24 @@ type Props = {
   onChange: (mode: EditorMode) => void;
 };
 
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+    </svg>
+  );
+}
+
 export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -49,34 +67,37 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
 
   return (
     <div className="mode-switch-wrap" ref={rootRef}>
-      {editing && (
+      <div className="mode-switch" role="group" aria-label="表示モード">
         <button
           type="button"
-          className="header-secondary"
+          aria-pressed={!editing}
+          className={editing ? undefined : "is-active"}
           onClick={() => {
             setMenuOpen(false);
             onChange("preview");
           }}
         >
-          閲覧
+          <EyeIcon />
+          View
         </button>
-      )}
-      <button
-        type="button"
-        className={editing ? "header-secondary is-editing" : "header-secondary"}
-        aria-haspopup={editing ? "menu" : undefined}
-        aria-expanded={editing ? menuOpen : undefined}
-        onClick={() => {
-          if (!editing) {
-            onChange(readLastEditMode());
-            return;
-          }
-          setMenuOpen((open) => !open);
-        }}
-      >
-        編集
-        {editing && <span aria-hidden>▾</span>}
-      </button>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-pressed={editing}
+          className={editing ? "is-active" : undefined}
+          onClick={() => {
+            if (!editing) {
+              onChange(readLastEditMode());
+              return;
+            }
+            setMenuOpen((open) => !open);
+          }}
+        >
+          <PencilIcon />
+          Edit
+        </button>
+      </div>
       {menuOpen && editing && (
         <div className="mode-switch-menu" role="menu">
           {EDIT_MODES.map((mode) => (
