@@ -24,6 +24,34 @@ function notesInFolder(notes: NoteSummary[], currentFolderId: string | null): No
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+function FolderIcon() {
+  return (
+    <svg className="drive-row-icon drive-row-icon--folder" viewBox="0 0 24 24" width="22" height="22" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M3.75 6.25A2.25 2.25 0 0 1 6 4h4.1l1.7 1.8H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25H6A2.25 2.25 0 0 1 3.75 18V6.25Z"
+      />
+    </svg>
+  );
+}
+
+function MarkdownIcon() {
+  return (
+    <svg className="drive-row-icon drive-row-icon--note" viewBox="0 0 24 24" width="22" height="22" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M7 3.5h7.3L19.5 8.7V19.5A1.75 1.75 0 0 1 17.75 21.25H6.25A1.75 1.75 0 0 1 4.5 19.5V5.25A1.75 1.75 0 0 1 6.25 3.5H7Z"
+        opacity="0.92"
+      />
+      <path fill="Canvas" d="M14.1 3.7v5.1h5.1" />
+      <path
+        fill="Canvas"
+        d="M7.4 13.1h1.5l1.15 2.35 1.15-2.35h1.5V18H11.3v-2.55L10.05 18h-.1L8.7 15.45V18H7.4Zm7.15 0h1.45l1.7 2.55V13.1H19.2V18h-1.45l-1.7-2.55V18h-1.5Z"
+      />
+    </svg>
+  );
+}
+
 function MoreButton({
   label,
   open,
@@ -118,6 +146,7 @@ export function NoteTree({
                 onContextMenu={(event) => handleRowMenu(event, target)}
               >
                 <Link to={folderUrl(folder.id)} className="drive-row-main">
+                  <FolderIcon />
                   <span className="drive-row-name">{folder.name}</span>
                 </Link>
                 <MoreButton
@@ -138,6 +167,7 @@ export function NoteTree({
                 onContextMenu={(event) => handleRowMenu(event, target)}
               >
                 <Link to={`/n/${note.id}`} className="drive-row-main">
+                  <MarkdownIcon />
                   <span className="drive-row-name">{note.title}</span>
                 </Link>
                 <MoreButton

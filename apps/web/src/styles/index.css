@@ -150,10 +150,23 @@ select {
   flex: 1;
   display: flex;
   align-items: center;
+  gap: 0.7rem;
   min-height: 3rem;
   padding: 0.55rem 0.9rem;
   text-decoration: none;
   color: inherit;
+}
+
+.drive-row-icon {
+  flex: none;
+}
+
+.drive-row-icon--folder {
+  color: #eab308;
+}
+
+.drive-row-icon--note {
+  color: #2563eb;
 }
 
 .drive-row-name {
