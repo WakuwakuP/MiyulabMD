@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import styles from "./segmented.module.css";
+import { cn } from "../../lib/cn.ts";
 
 type Item<T extends string> = {
   value: T;
@@ -17,7 +17,11 @@ type Props<T extends string> = {
 
 export function SegmentedControl<T extends string>({ label, items }: Props<T>) {
   return (
-    <div className={styles.track} role="group" aria-label={label}>
+    <div
+      className="flex min-h-9 items-center gap-[0.15rem] rounded-full border border-border bg-fill p-[0.15rem]"
+      role="group"
+      aria-label={label}
+    >
       {items.map((item) => (
         <button
           key={item.value}
@@ -25,7 +29,10 @@ export function SegmentedControl<T extends string>({ label, items }: Props<T>) {
           aria-pressed={item.pressed}
           aria-haspopup={item.hasPopup ? "menu" : undefined}
           aria-expanded={item.hasPopup ? item.expanded : undefined}
-          className={`${styles.item} ${item.pressed ? styles.active : ""}`}
+          className={cn(
+            "inline-flex cursor-pointer items-center justify-center gap-[0.35rem] rounded-full border-0 bg-transparent px-3 py-[0.28rem] leading-tight text-inherit",
+            item.pressed && "bg-canvas shadow-[0_0_0_1px_var(--color-border)]",
+          )}
           onClick={item.onClick}
         >
           {item.label}
@@ -36,5 +43,5 @@ export function SegmentedControl<T extends string>({ label, items }: Props<T>) {
 }
 
 export function SegmentedWrap({ children }: { children: ReactNode }) {
-  return <div className={styles.wrap}>{children}</div>;
+  return <div className="relative">{children}</div>;
 }

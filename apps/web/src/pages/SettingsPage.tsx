@@ -1,6 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
+import { Button } from "../components/ui/Button.tsx";
+import { Field, Row } from "../components/ui/Field.tsx";
+import { Input } from "../components/ui/Input.tsx";
+import { ErrorText, MutedText } from "../components/ui/Text.tsx";
 import {
   createToken,
   fetchMe,
@@ -35,9 +39,9 @@ export function SettingsPage() {
     setLoading(true);
     setError(null);
 
-    const user = await fetchMe();
-    setLoggedIn(user !== null);
-    if (!user) {
+    const nextUser = await fetchMe();
+    setLoggedIn(nextUser !== null);
+    if (!nextUser) {
       setTokens([]);
       setLoading(false);
       return;
@@ -98,11 +102,7 @@ export function SettingsPage() {
 
     const result = await createToken(trimmedName);
     if (!result.ok) {
-      setError(
-        result.status === 401
-          ? "トークンを発行するにはログインが必要です。"
-          : result.error,
-      );
+      setError(result.status === 401 ? "トークンを発行するにはログインが必要です。" : result.error);
       setCreating(false);
       return;
     }
@@ -127,76 +127,78 @@ export function SettingsPage() {
   }
 
   return (
-    <section className="settings-page">
-      <section className="settings-section">
-        <h2>プロフィール</h2>
+    <section className="max-w-xl">
+      <section className="mt-6">
+        <h2 className="text-[1.5em] font-bold">プロフィール</h2>
         <p>
           共同編集中のカーソル名に使います。空欄ならメールアドレスを表示します。必須ではありません。
         </p>
         {user ? (
-          <form className="profile-form" onSubmit={(event) => void handleProfileSave(event)}>
-            <label htmlFor="display-name">表示名</label>
-            <div className="token-create-row">
-              <input
-                id="display-name"
-                type="text"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder={user.email}
-                disabled={savingProfile}
-              />
-              <button type="submit" disabled={savingProfile}>
-                {savingProfile ? "保存中…" : "保存"}
-              </button>
-            </div>
-            {profileSaved && <p className="token-meta">保存しました。</p>}
+          <form onSubmit={(event) => void handleProfileSave(event)}>
+            <Field label="表示名" htmlFor="display-name">
+              <Row className="mt-[0.35rem]">
+                <Input
+                  id="display-name"
+                  className="flex-1"
+                  type="text"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder={user.email}
+                  disabled={savingProfile}
+                />
+                <Button variant="outline" type="submit" disabled={savingProfile}>
+                  {savingProfile ? "保存中…" : "保存"}
+                </Button>
+              </Row>
+            </Field>
+            {profileSaved && <MutedText className="mt-1">保存しました。</MutedText>}
           </form>
         ) : (
-          <p className="page-error">表示名を設定するにはログインしてください。</p>
+          <ErrorText>表示名を設定するにはログインしてください。</ErrorText>
         )}
       </section>
 
-      <section className="settings-section">
-        <h2>MCP 用 Personal Access Token</h2>
+      <section className="mt-6">
+        <h2 className="text-[1.5em] font-bold">MCP 用 Personal Access Token</h2>
         <p>
-          Cursor などの MCP クライアントから <code>/mcp</code> に接続するためのトークンです。
+          Cursor などの MCP クライアントから <code className="font-mono">/mcp</code> に接続するためのトークンです。
           発行時に一度だけ表示されます。
         </p>
 
-        {loggedIn === false && (
-          <p className="page-error">トークンを管理するにはログインしてください。</p>
-        )}
+        {loggedIn === false && <ErrorText>トークンを管理するにはログインしてください。</ErrorText>}
 
-        {error && <p className="page-error">{error}</p>}
+        {error && <ErrorText>{error}</ErrorText>}
 
         {loggedIn && (
           <>
-            <form className="token-create-form" onSubmit={handleCreate}>
-              <label htmlFor="token-name">トークン名</label>
-              <div className="token-create-row">
-                <input
-                  id="token-name"
-                  type="text"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="例: Cursor on laptop"
-                  disabled={creating}
-                />
-                <button type="submit" disabled={creating}>
-                  {creating ? "発行中…" : "トークンを発行"}
-                </button>
-              </div>
+            <form onSubmit={handleCreate}>
+              <Field label="トークン名" htmlFor="token-name">
+                <Row className="mt-[0.35rem]">
+                  <Input
+                    id="token-name"
+                    className="flex-1"
+                    type="text"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="例: Cursor on laptop"
+                    disabled={creating}
+                  />
+                  <Button variant="outline" type="submit" disabled={creating}>
+                    {creating ? "発行中…" : "トークンを発行"}
+                  </Button>
+                </Row>
+              </Field>
             </form>
 
             {createdToken && (
-              <div className="token-secret" role="status">
+              <div className="my-4 rounded-md border border-border bg-surface px-4 py-3" role="status">
                 <p>
                   <strong>{createdToken.name}</strong> を発行しました。この値は再表示できません。
                 </p>
-                <code>{createdToken.token}</code>
-                <button type="button" onClick={() => setCreatedToken(null)}>
+                <code className="my-2 block break-all font-mono">{createdToken.token}</code>
+                <Button variant="outline" onClick={() => setCreatedToken(null)}>
                   閉じる
-                </button>
+                </Button>
               </div>
             )}
 
@@ -205,19 +207,18 @@ export function SettingsPage() {
             ) : tokens.length === 0 ? (
               <p>発行済みトークンはありません。</p>
             ) : (
-              <ul className="token-list">
+              <ul className="list-none p-0">
                 {tokens.map((token) => (
-                  <li key={token.id} className="token-list-item">
+                  <li key={token.id} className="flex justify-between gap-4 border-b border-border py-3">
                     <div>
                       <strong>{token.name}</strong>
-                      <p className="token-meta">
-                        作成: {formatTimestamp(token.createdAt)} / 最終利用:{" "}
-                        {formatTimestamp(token.lastUsedAt)}
-                      </p>
+                      <MutedText className="mt-1">
+                        作成: {formatTimestamp(token.createdAt)} / 最終利用: {formatTimestamp(token.lastUsedAt)}
+                      </MutedText>
                     </div>
-                    <button type="button" onClick={() => void handleRevoke(token.id)}>
+                    <Button variant="outline" onClick={() => void handleRevoke(token.id)}>
                       失効
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>

@@ -14,15 +14,19 @@ type Options = {
 
 function caretDom(color: string, name: string): HTMLElement {
   const caret = document.createElement("span");
-  caret.className = "rich-collab-caret";
+  caret.className =
+    "relative inline-block w-0 align-text-bottom text-[length:inherit] leading-[inherit] pointer-events-none -mx-px";
   caret.style.setProperty("--caret-color", color);
 
   const bar = document.createElement("span");
-  bar.className = "rich-collab-caret-bar";
+  bar.className = "block h-[1.15em] w-0.5";
+  bar.style.background = color;
   bar.setAttribute("aria-hidden", "true");
 
   const label = document.createElement("span");
-  label.className = "rich-collab-caret-label";
+  label.className =
+    "absolute bottom-[calc(100%+2px)] left-0 z-[5] whitespace-nowrap rounded-t rounded-br px-[0.3rem] py-[0.05rem] text-[11px] font-semibold leading-tight text-white";
+  label.style.background = color;
   label.textContent = name;
 
   caret.append(bar, label);
@@ -41,7 +45,7 @@ function decorationsFor(doc: PMNode, options: Options): DecorationSet {
     if (from !== to) {
       widgets.push(
         Decoration.inline(from, to, {
-          class: "rich-collab-selection",
+          class: "rounded-sm",
           style: `background-color: ${peer.colorLight}`,
         }),
       );

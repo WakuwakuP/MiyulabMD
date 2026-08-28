@@ -11,7 +11,11 @@ import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx"
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
-import { Button } from "../components/ui/Button.tsx";
+import { HeaderButton } from "../components/ui/HeaderButton.tsx";
+import { ShareIcon } from "../components/ui/icons.tsx";
+import { editorLoadingClass } from "../components/ui/prose.ts";
+import { ErrorText } from "../components/ui/Text.tsx";
+import { cn } from "../lib/cn.ts";
 import { fetchNote, updateNote } from "../lib/api.ts";
 import { applyAwarenessUser, createYjsSession, type YjsSession } from "../lib/collaboration.ts";
 import { writeEditorMode, type EditorMode } from "../lib/editor-mode.ts";
@@ -209,9 +213,7 @@ export function EditorPage() {
             onFolderChange={setFolder}
             onFolderBlur={() => void handleFolderBlur()}
           />
-          <Button variant="accent" onClick={() => setShareOpen(true)}>
-            共有
-          </Button>
+          <HeaderButton variant="accent" icon={<ShareIcon />} label="共有" onClick={() => setShareOpen(true)} />
         </>
       ),
     });
@@ -221,7 +223,7 @@ export function EditorPage() {
 
   if (loading || userLoading) {
     return (
-      <section className="editor-page">
+      <section className="flex min-h-[calc(100vh-5rem)] flex-col [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
         <p>読み込み中…</p>
       </section>
     );
@@ -229,8 +231,8 @@ export function EditorPage() {
 
   if (loadError) {
     return (
-      <section className="editor-page editor-page--padded">
-        <p className="page-error">{loadError}</p>
+      <section className="flex min-h-[calc(100vh-5rem)] flex-col px-5 py-4 [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
+        <ErrorText>{loadError}</ErrorText>
         {(loadError.includes("ログイン") || loadError.includes("権限")) && (
           <p>
             <Link to="/">ホームに戻る</Link>
@@ -252,9 +254,17 @@ export function EditorPage() {
   const showRich = viewMode === "rich";
 
   return (
-    <section className="editor-page">
-      {saveError && <p className="page-error editor-page-error">{saveError}</p>}
-      <div className={`editor-workspace editor-workspace--${viewMode}`}>
+    <section className="flex min-h-[calc(100vh-5rem)] flex-col [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
+      {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
+      <div
+        className={cn(
+          "grid min-h-0 flex-1 [&>*]:min-h-0",
+          viewMode === "split" && "grid-cols-2 max-[900px]:grid-cols-1 [&>:first-child]:border-r [&>:first-child]:border-border",
+          viewMode !== "split" && "grid-cols-1",
+          viewMode === "preview" &&
+            "[[data-layout=editor]_&]:block [[data-layout=editor]_&]:overflow-auto [[data-layout=editor]_&]:bg-preview",
+        )}
+      >
         {showSource &&
           (ready && yMarkdown && awareness ? (
             <MarkdownEditor
@@ -267,12 +277,17 @@ export function EditorPage() {
               onScrollRatio={viewMode === "split" ? handleSplitScroll : undefined}
             />
           ) : (
-            <div className="markdown-editor markdown-editor--loading">
+            <div className={editorLoadingClass}>
               <p>共同編集に接続中…</p>
             </div>
           ))}
         {showPreview && (
           <MarkdownPreview
+            className={
+              viewMode === "preview"
+                ? "[[data-layout=editor]_&]:mx-auto [[data-layout=editor]_&]:my-6 [[data-layout=editor]_&]:mb-12 [[data-layout=editor]_&]:h-auto [[data-layout=editor]_&]:min-h-[calc(100%-4.5rem)] [[data-layout=editor]_&]:w-[min(calc(100%-2rem),46rem)] [[data-layout=editor]_&]:rounded-[10px] [[data-layout=editor]_&]:border-0 [[data-layout=editor]_&]:bg-canvas [[data-layout=editor]_&]:px-10 [[data-layout=editor]_&]:pt-10 [[data-layout=editor]_&]:pb-16 [[data-layout=editor]_&]:shadow-preview"
+                : undefined
+            }
             markdown={markdown}
             scrollRatio={viewMode === "split" ? splitScroll : undefined}
             onScrollRatio={viewMode === "split" ? handleSplitScroll : undefined}
@@ -288,7 +303,7 @@ export function EditorPage() {
               readOnly={!canEdit}
             />
           ) : (
-            <div className="markdown-editor markdown-editor--loading">
+            <div className={editorLoadingClass}>
               <p>共同編集に接続中…</p>
             </div>
           ))}

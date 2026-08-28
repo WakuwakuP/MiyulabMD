@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { normalizeHttpUrl } from "../../lib/http-url.ts";
+import { Button } from "../ui/Button.tsx";
+import { Field } from "../ui/Field.tsx";
+import { Input } from "../ui/Input.tsx";
+import { Modal, ModalFooter, ModalHeader } from "../ui/Modal.tsx";
+import { ErrorText } from "../ui/Text.tsx";
 
 type Props = {
   title: string;
@@ -19,62 +24,46 @@ export function LinkModal({ title, initial = "", submitLabel = "挿入", onSubmi
     inputRef.current?.select();
   }, []);
 
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="share-backdrop" role="presentation" onClick={onClose}>
-      <form
-        className="share-modal link-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="link-modal-title"
-        onClick={(event) => event.stopPropagation()}
-        onSubmit={(event) => {
-          event.preventDefault();
-          const url = normalizeHttpUrl(value);
-          if (!url) {
-            setError("http(s) の URL を入力してください");
-            return;
-          }
-          onSubmit(url);
-        }}
-      >
-        <header className="share-modal-header">
-          <h2 id="link-modal-title">{title}</h2>
-          <button type="button" className="share-modal-close" onClick={onClose} aria-label="閉じる">
-            ×
-          </button>
-        </header>
-        <label className="link-modal-field">
-          <span>URL</span>
-          <input
-            ref={inputRef}
-            type="url"
-            inputMode="url"
-            placeholder="https://example.com"
-            value={value}
-            onChange={(event) => {
-              setValue(event.target.value);
-              setError(null);
-            }}
-          />
-        </label>
-        {error && <p className="page-error">{error}</p>}
-        <footer className="share-modal-footer">
-          <button type="button" className="share-copy" onClick={onClose}>
-            キャンセル
-          </button>
-          <button type="submit" className="share-done">
-            {submitLabel}
-          </button>
-        </footer>
-      </form>
-    </div>
+    <Modal
+      as="form"
+      labelledBy="link-modal-title"
+      className="w-[min(26rem,100%)]"
+      onClose={onClose}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const url = normalizeHttpUrl(value);
+        if (!url) {
+          setError("http(s) の URL を入力してください");
+          return;
+        }
+        onSubmit(url);
+      }}
+    >
+      <ModalHeader id="link-modal-title" title={title} onClose={onClose} />
+      <Field label="URL">
+        <Input
+          ref={inputRef}
+          className="w-full"
+          type="url"
+          inputMode="url"
+          placeholder="https://example.com"
+          value={value}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setError(null);
+          }}
+        />
+      </Field>
+      {error && <ErrorText>{error}</ErrorText>}
+      <ModalFooter>
+        <Button variant="ghost" onClick={onClose}>
+          キャンセル
+        </Button>
+        <Button variant="accent" type="submit">
+          {submitLabel}
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
