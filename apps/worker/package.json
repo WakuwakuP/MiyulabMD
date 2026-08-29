@@ -9,7 +9,7 @@
     "db:migrate": "wrangler d1 migrations apply DB --local",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/ssr/*.test.ts",
+    "test": "node --experimental-strip-types --test src/ssr/*.test.ts src/services/*.test.ts",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {

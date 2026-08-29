@@ -1,7 +1,7 @@
 import type { Note } from "@miyulabmd/shared";
 import { type ApiResult, fetchNote } from "./api.ts";
 import { loadOgCards } from "./markdown.ts";
-import { readNoteBootstrap } from "./note-bootstrap.ts";
+import { consumeOgBootstrap, readNoteBootstrap } from "./note-bootstrap.ts";
 
 const noteCache = new Map<string, Note>();
 const noteInflight = new Map<string, Promise<ApiResult<Note>>>();
@@ -11,6 +11,7 @@ export function peekNote(id: string): Note | undefined {
 }
 
 export function noteFromCaches(id: string): Note | undefined {
+  consumeOgBootstrap();
   const peeked = peekNote(id);
   if (peeked) return peeked;
   const boot = readNoteBootstrap(id);

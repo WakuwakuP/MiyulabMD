@@ -20,19 +20,24 @@ export function injectNotePage(
   indexHtml: string,
   note: Note,
   previewHtml: string,
+  ogCards: Record<string, unknown> = {},
 ): string {
   const title = titleFromMarkdown(note.markdown) || note.title || "MiyulabMD";
   const preview = `<div id="ssr-preview" data-note-id="${escapeHtml(note.id)}" data-short-id="${escapeHtml(note.shortId)}"><article class="markdown-preview">${previewHtml}</article></div>`;
   const bootstrap = `<script type="application/json" id="note-bootstrap">${jsonForScript(note)}</script>`;
+  const ogBootstrap =
+    Object.keys(ogCards).length > 0
+      ? `<script type="application/json" id="og-bootstrap">${jsonForScript(ogCards)}</script>`
+      : "";
 
   const html = indexHtml.replace(
     /<title>[^<]*<\/title>/,
     `<title>${escapeHtml(title)} · MiyulabMD</title>`,
   );
   if (!html.includes("</body>")) {
-    return `${html}${preview}${bootstrap}`;
+    return `${html}${preview}${bootstrap}${ogBootstrap}`;
   }
-  return html.replace("</body>", `${preview}${bootstrap}</body>`);
+  return html.replace("</body>", `${preview}${bootstrap}${ogBootstrap}</body>`);
 }
 
 export function notePageId(pathname: string): string | null {

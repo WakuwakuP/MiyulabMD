@@ -40,20 +40,19 @@ export function MarkdownPreview({
 
   useEffect(() => {
     let cancelled = false;
-    void loadOgCards(deferredMarkdown).then((cards) => {
+    void loadOgCards(markdown).then((cards) => {
       if (cancelled || cards.size === 0) return;
       setEnhanced({
-        md: deferredMarkdown,
-        html: renderMarkdownHtml(deferredMarkdown, cards),
+        md: markdown,
+        html: renderMarkdownHtml(markdown, cards),
       });
     });
     return () => {
       cancelled = true;
     };
-  }, [deferredMarkdown]);
+  }, [markdown]);
 
-  const html =
-    enhanced?.md === deferredMarkdown ? enhanced.html : rendered.html;
+  const html = enhanced?.md === markdown ? enhanced.html : rendered.html;
   const error = rendered.error;
 
   useEffect(() => {

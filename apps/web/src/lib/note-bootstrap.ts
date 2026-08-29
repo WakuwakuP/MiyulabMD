@@ -1,6 +1,9 @@
 import type { Note } from "@miyulabmd/shared";
+import { seedOgPreviews } from "./api.ts";
+import type { OgPreview } from "./embeds.ts";
 
 const BOOTSTRAP_ID = "note-bootstrap";
+const OG_BOOTSTRAP_ID = "og-bootstrap";
 const SSR_PREVIEW_ID = "ssr-preview";
 
 function matchesNoteId(
@@ -10,7 +13,19 @@ function matchesNoteId(
   return note.id === id || note.shortId === id;
 }
 
+export function consumeOgBootstrap(): void {
+  const el = document.getElementById(OG_BOOTSTRAP_ID);
+  if (!el?.textContent) return;
+  try {
+    const cards = JSON.parse(el.textContent) as Record<string, OgPreview>;
+    seedOgPreviews(cards);
+  } catch {
+    // ignore malformed bootstrap
+  }
+}
+
 export function readNoteBootstrap(id: string): Note | null {
+  consumeOgBootstrap();
   const el = document.getElementById(BOOTSTRAP_ID);
   if (!el?.textContent) return null;
   try {

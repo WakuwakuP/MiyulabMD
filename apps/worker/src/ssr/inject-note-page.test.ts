@@ -60,6 +60,7 @@ test("injectNotePage writes bootstrap outside #root and escapes script", () => {
   assert.match(html, /<title>Hello · MiyulabMD<\/title>/);
   assert.match(html, /id="ssr-preview"/);
   assert.match(html, /id="note-bootstrap"/);
+  assert.doesNotMatch(html, /id="og-bootstrap"/);
   assert.match(html, /user-content-hello/);
   const rootAt = html.indexOf('<div id="root"></div>');
   const ssrAt = html.indexOf('id="ssr-preview"');
@@ -84,6 +85,25 @@ test("isPublicGuestCacheable only for anonymous public notes", () => {
     ),
     false,
   );
+});
+
+test("injectNotePage writes og-bootstrap when cards exist", () => {
+  const html = injectNotePage(
+    '<html><head><title>MiyulabMD</title></head><body><div id="root"></div></body></html>',
+    sampleNote(),
+    "<p>card</p>",
+    {
+      "https://x.com/norotororo": {
+        url: "https://x.com/norotororo",
+        title: "noro",
+        description: null,
+        image: null,
+        siteName: "X",
+      },
+    },
+  );
+  assert.match(html, /id="og-bootstrap"/);
+  assert.match(html, /norotororo/);
 });
 
 test("jsonForScript escapes HTML delimiters", () => {
