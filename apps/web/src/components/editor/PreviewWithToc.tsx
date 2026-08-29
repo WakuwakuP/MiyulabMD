@@ -5,10 +5,12 @@ import {
   shouldShowPreviewToc,
   type TocEntry,
 } from "../../lib/note-toc.ts";
+import {
+  documentColumnWidthClass,
+  documentShellClass,
+  documentViewColumnClass,
+} from "../ui/prose.ts";
 import { MarkdownPreview } from "./MarkdownPreview.tsx";
-
-const previewCardClass =
-  "mx-auto my-6 mb-12 h-auto w-[min(calc(100%-2rem),46rem)] rounded-[10px] border-0 bg-canvas px-10 pt-10 pb-16 shadow-preview";
 
 type Props = {
   markdown: string;
@@ -89,23 +91,30 @@ export function PreviewWithToc({
     };
   }, []);
 
-  const cardClass = cn(previewCardClass, className);
+  const columnClass = cn(documentViewColumnClass, className);
 
   return (
     <div
       ref={layoutRef}
-      className="relative w-full [[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))] [[data-layout=editor]_&]:bg-preview"
+      className="relative w-full [[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))]"
     >
-      <MarkdownPreview
-        markdown={markdown}
-        scrollRatio={scrollRatio}
-        onScrollRatio={onScrollRatio}
-        documentScroll={documentScroll}
-        className={cardClass}
-      />
+      <div
+        className={cn(
+          documentShellClass,
+          "[[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))]",
+        )}
+      >
+        <MarkdownPreview
+          markdown={markdown}
+          scrollRatio={scrollRatio}
+          onScrollRatio={onScrollRatio}
+          documentScroll={documentScroll}
+          className={columnClass}
+        />
+      </div>
       {showToc && entries.length > 0 && (
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
-          <div className="relative w-[min(calc(100%-2rem),46rem)]">
+          <div className={cn("relative", documentColumnWidthClass)}>
             <div className="pointer-events-auto absolute top-6 left-full ml-8">
               <TocNav entries={entries} />
             </div>
@@ -115,5 +124,3 @@ export function PreviewWithToc({
     </div>
   );
 }
-
-export { previewCardClass };
