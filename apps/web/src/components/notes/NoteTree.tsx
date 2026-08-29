@@ -3,8 +3,10 @@ import { folderUrl } from "@miyulabmd/shared";
 import type { MouseEvent } from "react";
 import { Link } from "react-router";
 import { cn } from "../../lib/cn.ts";
+import { prefetchFolder } from "../../lib/list-cache.ts";
 import { DriveList, DriveRow } from "../ui/DriveList.tsx";
 import { FolderIcon, MarkdownIcon } from "../ui/icons.tsx";
+import { AccessScopeMeta } from "./AccessScopeMeta.tsx";
 
 type Props = {
   notes: NoteSummary[];
@@ -14,6 +16,8 @@ type Props = {
   childrenFolders: FolderRecord[];
   showRootCrumb?: boolean;
   openMenuId?: string | null;
+  pending?: boolean;
+  placeholder?: boolean;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
 };
 
@@ -30,6 +34,22 @@ function notesInFolder(
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+function ListSkeleton() {
+  return (
+    <DriveList>
+      {[0, 1, 2].map((index) => (
+        <li
+          key={index}
+          className="flex min-h-12 items-center gap-[0.7rem] border-b border-border px-[0.9rem] py-[0.55rem] last:border-b-0"
+        >
+          <div className="size-[22px] shrink-0 animate-pulse rounded bg-surface" />
+          <div className="h-4 max-w-[12rem] flex-1 animate-pulse rounded bg-surface" />
+        </li>
+      ))}
+    </DriveList>
+  );
+}
+
 export function NoteTree({
   notes,
   currentFolderId,
@@ -38,6 +58,8 @@ export function NoteTree({
   childrenFolders,
   showRootCrumb = false,
   openMenuId = null,
+  pending = false,
+  placeholder = false,
   onItemMenu,
 }: Props) {
   const items = notesInFolder(notes, currentFolderId);
@@ -64,6 +86,7 @@ export function NoteTree({
               "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
               !currentFolderId ? "cursor-default text-muted" : "cursor-pointer",
             )}
+            onPointerEnter={() => prefetchFolder()}
           >
             ルート
           </Link>
@@ -79,6 +102,7 @@ export function NoteTree({
                   "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
                   current ? "cursor-default text-muted" : "cursor-pointer",
                 )}
+                onPointerEnter={() => prefetchFolder(crumb.id)}
                 onContextMenu={(event) =>
                   handleRowMenu(event, {
                     kind: "folder",
@@ -98,15 +122,22 @@ export function NoteTree({
         <Link
           className="mb-3 block border-0 bg-transparent p-0 font-inherit text-accent no-underline"
           to={folderUrl(parentId)}
+          onPointerEnter={() => prefetchFolder(parentId)}
         >
           上のフォルダへ
         </Link>
       )}
 
-      {folders.length === 0 && items.length === 0 ? (
+      {placeholder ? (
+        <ListSkeleton />
+      ) : folders.length === 0 && items.length === 0 ? (
         <p>このフォルダは空です。</p>
       ) : (
-        <DriveList>
+        <DriveList
+          className={cn(
+            pending && "opacity-60 transition-opacity duration-150",
+          )}
+        >
           {folders.map((folder) => {
             const target = {
               kind: "folder" as const,
@@ -119,8 +150,14 @@ export function NoteTree({
                 href={folderUrl(folder.id)}
                 name={folder.name}
                 icon={<FolderIcon />}
+                meta={
+                  folder.readScope ? (
+                    <AccessScopeMeta scope={folder.readScope} />
+                  ) : undefined
+                }
                 menuOpen={openMenuId === folder.id}
                 onMenu={(event) => handleRowMenu(event, target)}
+                onPointerEnter={() => prefetchFolder(folder.id)}
               />
             );
           })}
@@ -132,6 +169,9 @@ export function NoteTree({
                 href={`/n/${note.id}`}
                 name={note.title}
                 icon={<MarkdownIcon />}
+                meta={
+                  <AccessScopeMeta scope={note.access.effectiveReadScope} />
+                }
                 menuOpen={openMenuId === note.id}
                 onMenu={(event) => handleRowMenu(event, target)}
               />

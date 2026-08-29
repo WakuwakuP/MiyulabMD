@@ -415,12 +415,25 @@ async function listVisibleChildren(
   const children: FolderRecord[] = [];
   for (const row of rows.results ?? []) {
     if (!row.folder || parentFolderPath(row.folder) !== folder) continue;
-    const flags = await folderViewFlags(env, ownerId, row.folder, user);
+    const effective = await loadFolderEffective(env, ownerId, row.folder);
+    const actor = actorFromUser(user, ownerId);
+    const grant = grantForActor(effective.grants, actor);
+    const flags = applyInstanceFlags(
+      evaluateAccess(
+        effective.effectiveReadScope,
+        effective.effectiveWriteScope,
+        actor,
+        grant,
+      ),
+      actor,
+      env,
+    );
     if (!flags.canView) continue;
     children.push({
       id: row.id,
       name: folderName(row.folder),
       parentId: currentId,
+      readScope: effective.effectiveReadScope,
       ...(isOwner ? { folder: row.folder } : {}),
     });
   }
@@ -440,6 +453,7 @@ function presentFolderAccess(
       id: child.id,
       name: child.name,
       parentId: child.parentId,
+      readScope: child.readScope,
     })),
   };
 }

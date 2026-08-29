@@ -22,10 +22,18 @@ import {
   deleteNote,
   fetchFolder,
   fetchNote,
-  fetchNotes,
   updateFolderAccess,
   updateNote,
 } from "../lib/api.ts";
+import {
+  invalidateFolderCache,
+  invalidateNotesCache,
+  loadFolder,
+  loadNotes,
+  peekFolder,
+  peekNotes,
+  seedFolderCache,
+} from "../lib/list-cache.ts";
 
 function draftFromFolder(access: FolderAccess): AccessDraft {
   return {
@@ -63,10 +71,12 @@ type ConfirmState =
 export function HomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
-  const { user, setHeader } = useOutletContext<AppShellContext>();
-  const [notes, setNotes] = useState<NoteSummary[]>([]);
-  const [folder, setFolder] = useState<FolderAccess | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
+  const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
+  const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(
+    () => peekFolder(folderId) ?? null,
+  );
+  const [folderPending, setFolderPending] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [share, setShare] = useState<ShareState | null>(null);
@@ -81,40 +91,59 @@ export function HomePage() {
     null,
   );
 
+  const sessionKey = user?.id ?? "guest";
+
   useEffect(() => {
+    if (userLoading) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    void sessionKey;
 
-    (async () => {
-      const noteList = await fetchNotes();
-      if (cancelled) return;
-      setNotes(noteList);
-
-      if (!folderId && !user) {
-        setFolder(null);
-        setLoading(false);
-        return;
-      }
-
-      const result = await fetchFolder(folderId);
-      if (cancelled) return;
-      if (!result.ok) {
-        setFolder(null);
-        setError(
-          result.status === 404 ? "フォルダが見つかりません。" : result.error,
-        );
-        setLoading(false);
-        return;
-      }
-      setFolder(result.data);
-      setLoading(false);
-    })();
+    invalidateNotesCache();
+    void loadNotes(true).then((noteList) => {
+      if (!cancelled) setNotes(noteList);
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [folderId, user]);
+  }, [sessionKey, userLoading]);
+
+  useEffect(() => {
+    if (userLoading) return;
+    let cancelled = false;
+    setError(null);
+
+    if (!folderId && !user) {
+      setVisibleFolder(null);
+      setFolderPending(false);
+      return;
+    }
+
+    const cached = peekFolder(folderId);
+    if (cached) {
+      setVisibleFolder(cached);
+      setFolderPending(false);
+      return;
+    }
+
+    setFolderPending(true);
+    void loadFolder(folderId).then((result) => {
+      if (cancelled) return;
+      setFolderPending(false);
+      if (!result.ok) {
+        if (!peekFolder(folderId)) setVisibleFolder(null);
+        setError(
+          result.status === 404 ? "フォルダが見つかりません。" : result.error,
+        );
+        return;
+      }
+      setVisibleFolder(result.data);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [folderId, user, userLoading]);
 
   async function handleCreate() {
     setCreating(true);
@@ -122,8 +151,8 @@ export function HomePage() {
 
     const result = await createNote({
       markdown: "# 無題\n",
-      folderId: folder?.id ?? undefined,
-      folder: folder?.folder,
+      folderId: visibleFolder?.id ?? undefined,
+      folder: visibleFolder?.folder,
       inheritAccess: true,
     });
     if (!result.ok) {
@@ -143,7 +172,7 @@ export function HomePage() {
     setFolderCreating(true);
     setFolderCreateError(null);
 
-    const result = await createFolder({ name, parentId: folder?.id });
+    const result = await createFolder({ name, parentId: visibleFolder?.id });
     if (!result.ok) {
       setFolderCreateError(result.error);
       setFolderCreating(false);
@@ -152,7 +181,10 @@ export function HomePage() {
 
     setFolderCreateOpen(false);
     setFolderCreating(false);
+    invalidateNotesCache();
+    if (visibleFolder?.id) invalidateFolderCache(visibleFolder.id);
     if (result.data.id) {
+      seedFolderCache(result.data);
       navigate(folderUrl(result.data.id));
       setShare({
         kind: "folder",
@@ -219,7 +251,10 @@ export function HomePage() {
         return;
       }
       setShare({ ...share, draft: draftFromFolder(result.data) });
-      if (folder?.id === share.folderId) setFolder(result.data);
+      seedFolderCache(result.data);
+      if (visibleFolder?.id === share.folderId) setVisibleFolder(result.data);
+      invalidateNotesCache();
+      void loadNotes(true).then(setNotes);
       return;
     }
 
@@ -241,6 +276,8 @@ export function HomePage() {
       name: result.data.title,
       draft: draftFromNote(result.data),
     });
+    invalidateNotesCache();
+    void loadNotes(true).then(setNotes);
   }
 
   function menuPosition(event: MouseEvent) {
@@ -268,7 +305,7 @@ export function HomePage() {
           onSelect: () => void openFolderShare(target.id, target.name),
         },
       ];
-      if (folder?.flags.canAdmin) {
+      if (visibleFolder?.flags.canAdmin) {
         items.push({
           label: "削除",
           danger: true,
@@ -304,24 +341,26 @@ export function HomePage() {
   }
 
   async function refreshList() {
-    const noteList = await fetchNotes();
+    invalidateNotesCache();
+    invalidateFolderCache();
+    const noteList = await loadNotes(true);
     setNotes(noteList);
     if (!folderId) {
       if (!user) {
-        setFolder(null);
+        setVisibleFolder(null);
         return;
       }
-      const root = await fetchFolder();
-      if (root.ok) setFolder(root.data);
+      const root = await loadFolder(undefined, true);
+      if (root.ok) setVisibleFolder(root.data);
       return;
     }
-    const result = await fetchFolder(folderId);
+    const result = await loadFolder(folderId, true);
     if (!result.ok) {
-      setFolder(null);
+      setVisibleFolder(null);
       navigate("/");
       return;
     }
-    setFolder(result.data);
+    setVisibleFolder(result.data);
   }
 
   async function persistDelete() {
@@ -340,7 +379,7 @@ export function HomePage() {
     setConfirm(null);
     setConfirmBusy(false);
     if (confirm.kind === "folder" && folderId === confirm.id) {
-      navigate(folderUrl(folder?.parentId));
+      navigate(folderUrl(visibleFolder?.parentId));
     }
     await refreshList();
   }
@@ -352,14 +391,21 @@ export function HomePage() {
         ? `${window.location.origin}/n/${share.id}`
         : "";
 
-  const canAdmin = Boolean(folder?.flags.canAdmin);
-  const title = folderId ? (folder?.name ?? "フォルダ") : "ノート";
+  const canAdmin = Boolean(visibleFolder?.flags.canAdmin);
+  const title = folderId ? (visibleFolder?.name ?? "フォルダ") : "ノート";
+  const needsFolder = Boolean(folderId || user);
+  const showPlaceholder =
+    (userLoading || (needsFolder && folderPending)) && !visibleFolder;
+  const listPending = folderPending && Boolean(visibleFolder);
+  const showTree =
+    (!folderId || visibleFolder || showPlaceholder) &&
+    !(folderId && error && !visibleFolder);
 
   useEffect(() => {
     setHeader({
       title,
       end:
-        folder || !folderId ? (
+        visibleFolder || !folderId ? (
           <>
             {canAdmin && (
               <HeaderButton
@@ -383,22 +429,22 @@ export function HomePage() {
         ) : null,
     });
     return () => setHeader(null);
-  }, [title, folder, folderId, canAdmin, creating, setHeader]);
+  }, [title, visibleFolder, folderId, canAdmin, creating, setHeader]);
 
   return (
     <section>
       {error && <ErrorText>{error}</ErrorText>}
-      {loading ? (
-        <p>読み込み中…</p>
-      ) : folder || !folderId ? (
+      {showTree ? (
         <NoteTree
           notes={notes}
-          currentFolderId={folder?.id ?? null}
-          crumbs={folder?.crumbs ?? []}
-          parentId={folder?.parentId ?? null}
-          childrenFolders={folder?.children ?? []}
+          currentFolderId={visibleFolder?.id ?? null}
+          crumbs={visibleFolder?.crumbs ?? []}
+          parentId={visibleFolder?.parentId ?? null}
+          childrenFolders={visibleFolder?.children ?? []}
           showRootCrumb={canAdmin}
           openMenuId={menu?.id}
+          pending={listPending}
+          placeholder={showPlaceholder}
           onItemMenu={handleItemMenu}
         />
       ) : null}

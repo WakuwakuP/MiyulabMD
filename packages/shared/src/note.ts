@@ -18,6 +18,8 @@ export type FolderRecord = {
   name: string;
   parentId: string | null;
   folder?: string;
+  /** Effective read scope for list display (not a path leak). */
+  readScope?: AccessScope;
 };
 
 export type FolderCrumb = {

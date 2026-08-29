@@ -26,6 +26,8 @@
   --shadow-menu: 0 8px 24px color-mix(in srgb, CanvasText 16%, transparent);
   --shadow-modal: 0 16px 48px color-mix(in srgb, CanvasText 22%, transparent);
   --shadow-preview: 0 8px 28px color-mix(in srgb, CanvasText 8%, transparent);
+
+  --header-height: 3.25rem;
 }
 
 @layer base {
@@ -53,6 +55,12 @@
   input,
   select {
     font: inherit;
+  }
+
+  .markdown-preview h1,
+  .markdown-preview h2,
+  .markdown-preview h3 {
+    scroll-margin-top: calc(var(--header-height) + 1rem);
   }
 }
 

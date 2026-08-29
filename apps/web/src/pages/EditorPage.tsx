@@ -7,6 +7,7 @@ import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
+import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
@@ -250,7 +251,7 @@ export function EditorPage() {
 
   if (loading || userLoading) {
     return (
-      <section className="flex min-h-[calc(100vh-5rem)] flex-col [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
+      <section className="flex flex-col px-5 py-4">
         <p>読み込み中…</p>
       </section>
     );
@@ -258,7 +259,7 @@ export function EditorPage() {
 
   if (loadError) {
     return (
-      <section className="flex min-h-[calc(100vh-5rem)] flex-col px-5 py-4 [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
+      <section className="flex flex-col px-5 py-4">
         <ErrorText>{loadError}</ErrorText>
         {(loadError.includes("ログイン") || loadError.includes("権限")) && (
           <p>
@@ -280,8 +281,14 @@ export function EditorPage() {
   const showPreview = viewMode === "split" || viewMode === "preview";
   const showRich = viewMode === "rich";
 
+  const paneHeightClass =
+    "min-h-[calc(100dvh-var(--header-height))] h-[calc(100dvh-var(--header-height))]";
+  const usesInternalScroll = viewMode !== "preview";
+
   return (
-    <section className="flex min-h-[calc(100vh-5rem)] flex-col [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
+    <section
+      className={cn("flex flex-col", usesInternalScroll && paneHeightClass)}
+    >
       {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
       <div
         className={cn(
@@ -289,8 +296,8 @@ export function EditorPage() {
           viewMode === "split" &&
             "grid-cols-2 max-[900px]:grid-cols-1 [&>:first-child]:border-r [&>:first-child]:border-border",
           viewMode !== "split" && "grid-cols-1",
-          viewMode === "preview" &&
-            "[[data-layout=editor]_&]:block [[data-layout=editor]_&]:overflow-auto [[data-layout=editor]_&]:bg-preview",
+          viewMode === "preview" && "block",
+          usesInternalScroll && "overflow-hidden",
         )}
       >
         {showSource &&
@@ -311,18 +318,16 @@ export function EditorPage() {
               <p>共同編集に接続中…</p>
             </div>
           ))}
-        {showPreview && (
-          <MarkdownPreview
-            className={
-              viewMode === "preview"
-                ? "[[data-layout=editor]_&]:mx-auto [[data-layout=editor]_&]:my-6 [[data-layout=editor]_&]:mb-12 [[data-layout=editor]_&]:h-auto [[data-layout=editor]_&]:min-h-[calc(100%-4.5rem)] [[data-layout=editor]_&]:w-[min(calc(100%-2rem),46rem)] [[data-layout=editor]_&]:rounded-[10px] [[data-layout=editor]_&]:border-0 [[data-layout=editor]_&]:bg-canvas [[data-layout=editor]_&]:px-10 [[data-layout=editor]_&]:pt-10 [[data-layout=editor]_&]:pb-16 [[data-layout=editor]_&]:shadow-preview"
-                : undefined
-            }
-            markdown={markdown}
-            scrollRatio={viewMode === "split" ? splitScroll : undefined}
-            onScrollRatio={viewMode === "split" ? handleSplitScroll : undefined}
-          />
-        )}
+        {showPreview &&
+          (viewMode === "preview" ? (
+            <PreviewWithToc markdown={markdown} documentScroll />
+          ) : (
+            <MarkdownPreview
+              markdown={markdown}
+              scrollRatio={splitScroll}
+              onScrollRatio={handleSplitScroll}
+            />
+          ))}
         {showRich &&
           (ready && yMarkdown && awareness ? (
             <RichMarkdownEditor

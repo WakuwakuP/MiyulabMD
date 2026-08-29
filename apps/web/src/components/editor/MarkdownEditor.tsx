@@ -1,4 +1,3 @@
-import { markdown } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import {
   EditorView,
@@ -12,8 +11,13 @@ import * as Y from "yjs";
 import { uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
+import "../../styles/cm-highlight.css";
 import { ContextMenu } from "../notes/ContextMenu.tsx";
 import { FileInput } from "../ui/FileInput.tsx";
+import {
+  markdownEditorHighlight,
+  markdownEditorLanguage,
+} from "./cmMarkdownExtensions.ts";
 
 type Props = {
   noteId: string;
@@ -168,7 +172,8 @@ export function MarkdownEditor({
     const state = EditorState.create({
       doc: yText.toString(),
       extensions: [
-        markdown(),
+        markdownEditorLanguage,
+        ...markdownEditorHighlight,
         ...(showLineNumbers
           ? [lineNumbers(), highlightActiveLineGutter()]
           : []),
