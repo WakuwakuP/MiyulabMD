@@ -31,6 +31,7 @@ import {
   loadFolder,
   loadNotes,
   peekFolder,
+  peekNotes,
   seedFolderCache,
 } from "../lib/list-cache.ts";
 
@@ -70,8 +71,8 @@ type ConfirmState =
 export function HomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
-  const { user, setHeader } = useOutletContext<AppShellContext>();
-  const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
+  const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
   const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(
     () => peekFolder(folderId) ?? null,
   );
@@ -93,6 +94,7 @@ export function HomePage() {
   const sessionKey = user?.id ?? "guest";
 
   useEffect(() => {
+    if (userLoading) return;
     let cancelled = false;
     void sessionKey;
 
@@ -104,9 +106,10 @@ export function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [sessionKey]);
+  }, [sessionKey, userLoading]);
 
   useEffect(() => {
+    if (userLoading) return;
     let cancelled = false;
     setError(null);
 
@@ -140,7 +143,7 @@ export function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [folderId, user]);
+  }, [folderId, user, userLoading]);
 
   async function handleCreate() {
     setCreating(true);
@@ -391,7 +394,8 @@ export function HomePage() {
   const canAdmin = Boolean(visibleFolder?.flags.canAdmin);
   const title = folderId ? (visibleFolder?.name ?? "フォルダ") : "ノート";
   const needsFolder = Boolean(folderId || user);
-  const showPlaceholder = needsFolder && folderPending && !visibleFolder;
+  const showPlaceholder =
+    (userLoading || (needsFolder && folderPending)) && !visibleFolder;
   const listPending = folderPending && Boolean(visibleFolder);
   const showTree =
     (!folderId || visibleFolder || showPlaceholder) &&
