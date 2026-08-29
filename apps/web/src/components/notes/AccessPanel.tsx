@@ -1,11 +1,11 @@
 import {
   ACCESS_SCOPE_LABELS,
   ACCESS_SCOPES,
-  clampWriteScope,
   type AccessGrant,
   type AccessScope,
+  clampWriteScope,
 } from "@miyulabmd/shared";
-import { useState, type FormEvent } from "react";
+import { type FormEvent, useState } from "react";
 import { Button } from "../ui/Button.tsx";
 import { CheckLabel, Row } from "../ui/Field.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -30,7 +30,9 @@ type Props = {
 };
 
 function writeOptions(readScope: AccessScope): AccessScope[] {
-  return ACCESS_SCOPES.filter((scope) => clampWriteScope(readScope, scope) === scope);
+  return ACCESS_SCOPES.filter(
+    (scope) => clampWriteScope(readScope, scope) === scope,
+  );
 }
 
 export function AccessPanel({
@@ -43,7 +45,8 @@ export function AccessPanel({
   onChange,
 }: Props) {
   const [email, setEmail] = useState("");
-  const needsUsers = value.readScope === "users" || value.writeScope === "users";
+  const needsUsers =
+    value.readScope === "users" || value.writeScope === "users";
 
   function update(patch: Partial<AccessDraft>) {
     const next = { ...value, ...patch };
@@ -58,7 +61,14 @@ export function AccessPanel({
       return;
     }
     update({
-      grants: [...value.grants, { email: nextEmail, userId: null, canWrite: value.writeScope !== "self" }],
+      grants: [
+        ...value.grants,
+        {
+          email: nextEmail,
+          userId: null,
+          canWrite: value.writeScope !== "self",
+        },
+      ],
     });
     setEmail("");
   }
@@ -76,7 +86,9 @@ export function AccessPanel({
           {inheritLabel}
         </CheckLabel>
       )}
-      {value.inherit && sourceLabel && <MutedText className="mb-2">{sourceLabel}</MutedText>}
+      {value.inherit && sourceLabel && (
+        <MutedText className="mb-2">{sourceLabel}</MutedText>
+      )}
       <div className="flex flex-wrap gap-x-5 gap-y-3">
         <label className="flex items-center gap-[0.4rem]">
           読み取り
@@ -84,7 +96,9 @@ export function AccessPanel({
             className="ml-[0.35rem]"
             value={value.readScope}
             disabled={value.inherit}
-            onChange={(event) => update({ readScope: event.target.value as AccessScope })}
+            onChange={(event) =>
+              update({ readScope: event.target.value as AccessScope })
+            }
           >
             {ACCESS_SCOPES.map((scope) => (
               <option key={scope} value={scope}>
@@ -99,7 +113,9 @@ export function AccessPanel({
             className="ml-[0.35rem]"
             value={value.writeScope}
             disabled={value.inherit}
-            onChange={(event) => update({ writeScope: event.target.value as AccessScope })}
+            onChange={(event) =>
+              update({ writeScope: event.target.value as AccessScope })
+            }
           >
             {writeOptions(value.readScope).map((scope) => (
               <option key={scope} value={scope}>
@@ -156,7 +172,11 @@ export function AccessPanel({
                   <Button
                     variant="ghost"
                     onClick={() =>
-                      update({ grants: value.grants.filter((item) => item.email !== grant.email) })
+                      update({
+                        grants: value.grants.filter(
+                          (item) => item.email !== grant.email,
+                        ),
+                      })
                     }
                   >
                     削除
@@ -171,6 +191,9 @@ export function AccessPanel({
   );
 }
 
-export function accessSummary(readScope: AccessScope, writeScope: AccessScope): string {
+export function accessSummary(
+  readScope: AccessScope,
+  writeScope: AccessScope,
+): string {
   return `読み ${ACCESS_SCOPE_LABELS[readScope]} / 書き ${ACCESS_SCOPE_LABELS[writeScope]}`;
 }

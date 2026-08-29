@@ -17,10 +17,18 @@ export function writeMarkdownCursor(
   mdHead: number,
 ): void {
   const length = yText.length;
-  const anchor = Y.createRelativePositionFromTypeIndex(yText, clampIndex(mdAnchor, length));
-  const head = Y.createRelativePositionFromTypeIndex(yText, clampIndex(mdHead, length));
+  const anchor = Y.createRelativePositionFromTypeIndex(
+    yText,
+    clampIndex(mdAnchor, length),
+  );
+  const head = Y.createRelativePositionFromTypeIndex(
+    yText,
+    clampIndex(mdHead, length),
+  );
   const current = awareness.getLocalState() ?? {};
-  const prev = current.cursor as { anchor?: unknown; head?: unknown } | undefined;
+  const prev = current.cursor as
+    | { anchor?: unknown; head?: unknown }
+    | undefined;
   if (prev?.anchor && prev.head) {
     const currentAnchor = Y.createRelativePositionFromJSON(prev.anchor);
     const currentHead = Y.createRelativePositionFromJSON(prev.head);
@@ -44,7 +52,9 @@ export function readRemoteMarkdownCursors(
   const peers: RemoteMarkdownCursor[] = [];
   awareness.getStates().forEach((state, clientId) => {
     if (clientId === awareness.doc.clientID) return;
-    const cursor = state.cursor as { anchor?: unknown; head?: unknown } | undefined;
+    const cursor = state.cursor as
+      | { anchor?: unknown; head?: unknown }
+      | undefined;
     if (!cursor?.anchor || !cursor.head) return;
     const anchor = Y.createAbsolutePositionFromRelativePosition(
       Y.createRelativePositionFromJSON(cursor.anchor),
@@ -54,9 +64,14 @@ export function readRemoteMarkdownCursors(
       Y.createRelativePositionFromJSON(cursor.head),
       doc,
     );
-    if (!anchor || !head || anchor.type !== yText || head.type !== yText) return;
+    if (!anchor || !head || anchor.type !== yText || head.type !== yText)
+      return;
 
-    const user = (state.user ?? {}) as { name?: string; color?: string; colorLight?: string };
+    const user = (state.user ?? {}) as {
+      name?: string;
+      color?: string;
+      colorLight?: string;
+    };
     const color = user.color ?? "#30bced";
     peers.push({
       clientId,

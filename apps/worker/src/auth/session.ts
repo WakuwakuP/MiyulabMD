@@ -1,5 +1,5 @@
-import { SignJWT, jwtVerify } from "jose";
 import type { SessionUser } from "@miyulabmd/shared";
+import { jwtVerify, SignJWT } from "jose";
 
 const COOKIE_NAME = "miyulabmd_session";
 const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7;
@@ -21,7 +21,10 @@ function parseCookie(header: string, name: string): string | null {
   return null;
 }
 
-export async function readSession(request: Request, env: Env): Promise<SessionUser | null> {
+export async function readSession(
+  request: Request,
+  env: Env,
+): Promise<SessionUser | null> {
   const secret = sessionSecret(env);
   if (!secret) {
     return null;
@@ -48,7 +51,10 @@ function cookieFlags(secure: boolean): string {
   return parts.join("; ");
 }
 
-export async function createSessionToken(user: SessionUser, env: Env): Promise<string> {
+export async function createSessionToken(
+  user: SessionUser,
+  env: Env,
+): Promise<string> {
   const secret = sessionSecret(env);
   if (!secret) {
     throw new Error("SESSION_SECRET is not configured");

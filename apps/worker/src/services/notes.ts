@@ -1,19 +1,19 @@
 import {
+  type AccessScope,
+  type CreateNoteInput,
   clampWriteScope,
   defaultNoteMarkdown,
   folderContains,
   isAccessScope,
   isPermissionPreset,
-  normalizeFolder,
-  presetFromScopes,
-  scopesFromPreset,
-  titleFromMarkdown,
-  type AccessScope,
-  type CreateNoteInput,
   type Note,
   type NoteSummary,
+  normalizeFolder,
   type PermissionPreset,
+  presetFromScopes,
   type SessionUser,
+  scopesFromPreset,
+  titleFromMarkdown,
   type UpdateNoteMetaInput,
 } from "@miyulabmd/shared";
 
@@ -28,10 +28,10 @@ import {
   folderViewFlags,
   getFolderById,
   listFolderGrantsForUser,
+  type NoteAccessFields,
   noteMatchesFolderGrant,
   replaceGrants,
   resolveNoteAccess,
-  type NoteAccessFields,
 } from "./access.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
@@ -51,7 +51,8 @@ type NoteRow = {
   updated_at: number;
 };
 
-const SHORT_ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const SHORT_ID_CHARS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const ANONYMOUS_OWNER_EMAIL = "anonymous@miyulabmd.local";
 const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
                   markdown_snapshot, created_at, updated_at`;
@@ -72,11 +73,17 @@ function accessFields(row: NoteRow): NoteAccessFields {
   };
 }
 
-async function toNote(env: Env, row: NoteRow, user?: SessionUser | null): Promise<Note> {
+async function toNote(
+  env: Env,
+  row: NoteRow,
+  user?: SessionUser | null,
+): Promise<Note> {
   const access = await resolveNoteAccess(env, accessFields(row), user);
   const isOwner = user?.id === row.owner_id;
   const folder = row.folder ?? "";
-  const folderId = folder ? await ensureFolderRow(env, row.owner_id, folder) : null;
+  const folderId = folder
+    ? await ensureFolderRow(env, row.owner_id, folder)
+    : null;
   let visibleFolderId = isOwner ? folderId : null;
   if (!isOwner && folderId && folder) {
     const flags = await folderViewFlags(env, row.owner_id, folder, user);
@@ -98,7 +105,11 @@ async function toNote(env: Env, row: NoteRow, user?: SessionUser | null): Promis
   };
 }
 
-async function toSummary(env: Env, row: NoteRow, user?: SessionUser | null): Promise<NoteSummary> {
+async function toSummary(
+  env: Env,
+  row: NoteRow,
+  user?: SessionUser | null,
+): Promise<NoteSummary> {
   const note = await toNote(env, row, user);
   const { markdown: _markdown, ...summary } = note;
   return summary;
@@ -107,7 +118,10 @@ async function toSummary(env: Env, row: NoteRow, user?: SessionUser | null): Pro
 function generateShortId(): string {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => SHORT_ID_CHARS[byte % SHORT_ID_CHARS.length]).join("");
+  return Array.from(
+    bytes,
+    (byte) => SHORT_ID_CHARS[byte % SHORT_ID_CHARS.length],
+  ).join("");
 }
 
 async function generateUniqueShortId(env: Env): Promise<string> {
@@ -140,7 +154,10 @@ export async function persistMarkdownSnapshot(
     .run();
 }
 
-async function findNoteRow(env: Env, idOrShortId: string): Promise<NoteRow | null> {
+async function findNoteRow(
+  env: Env,
+  idOrShortId: string,
+): Promise<NoteRow | null> {
   return db(env)
     .prepare(
       `SELECT ${NOTE_COLUMNS}
@@ -151,7 +168,10 @@ async function findNoteRow(env: Env, idOrShortId: string): Promise<NoteRow | nul
     .first<NoteRow>();
 }
 
-function rejectPublicWrite(env: Env, writeScope: AccessScope | null): string | null {
+function rejectPublicWrite(
+  env: Env,
+  writeScope: AccessScope | null,
+): string | null {
   if (writeScope === "public" && !instanceFlags(env).allowAnonymousEdits) {
     return "全体公開の書き込みは、匿名編集が無効なため使えません";
   }
@@ -168,8 +188,18 @@ function scopesFromInput(
   },
   current?: { readScope: AccessScope | null; writeScope: AccessScope | null },
 ):
-  | { inherit: true; readScope: null; writeScope: null; permission: PermissionPreset }
-  | { inherit: false; readScope: AccessScope; writeScope: AccessScope; permission: PermissionPreset }
+  | {
+      inherit: true;
+      readScope: null;
+      writeScope: null;
+      permission: PermissionPreset;
+    }
+  | {
+      inherit: false;
+      readScope: AccessScope;
+      writeScope: AccessScope;
+      permission: PermissionPreset;
+    }
   | { error: string } {
   if (input.inheritAccess === true) {
     const fallback = defaultScopes(env);
@@ -263,7 +293,11 @@ async function resolveOwnerForCreate(
     return { error: "login required" };
   }
 
-  const anonymousOwner = await upsertUserByEmail(env, ANONYMOUS_OWNER_EMAIL, "Anonymous");
+  const anonymousOwner = await upsertUserByEmail(
+    env,
+    ANONYMOUS_OWNER_EMAIL,
+    "Anonymous",
+  );
   return {
     id: anonymousOwner.id,
     email: anonymousOwner.email,
@@ -342,7 +376,11 @@ export function createNoteService(env: Env) {
       if (!note.access.flags.canView) {
         return {
           kind: "denied",
-          status: viewDeniedHttpStatus({ ownerId: row.owner_id, flags: note.access.flags }, user?.id, env),
+          status: viewDeniedHttpStatus(
+            { ownerId: row.owner_id, flags: note.access.flags },
+            user?.id,
+            env,
+          ),
         };
       }
 
@@ -429,7 +467,14 @@ export function createNoteService(env: Env) {
         if (!flags.canEdit) {
           return {
             kind: "denied",
-            status: user === undefined ? viewDeniedHttpStatus({ ownerId: row.owner_id, flags }, undefined, env) : 403,
+            status:
+              user === undefined
+                ? viewDeniedHttpStatus(
+                    { ownerId: row.owner_id, flags },
+                    undefined,
+                    env,
+                  )
+                : 403,
           };
         }
       }
@@ -446,7 +491,14 @@ export function createNoteService(env: Env) {
       if (adminFields && !flags.canAdmin) {
         return {
           kind: "denied",
-          status: user === undefined ? viewDeniedHttpStatus({ ownerId: row.owner_id, flags }, undefined, env) : 403,
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { ownerId: row.owner_id, flags },
+                  undefined,
+                  env,
+                )
+              : 403,
         };
       }
 
@@ -458,10 +510,13 @@ export function createNoteService(env: Env) {
         return { kind: "bad_request", error: scopes.error };
       }
 
-      const nextTitle = input.title !== undefined ? input.title.trim() || "無題" : row.title;
+      const nextTitle =
+        input.title !== undefined ? input.title.trim() || "無題" : row.title;
       const nextAlias = input.alias !== undefined ? input.alias : row.alias;
       const nextFolder =
-        input.folder !== undefined ? normalizeFolder(input.folder) : (row.folder ?? "");
+        input.folder !== undefined
+          ? normalizeFolder(input.folder)
+          : (row.folder ?? "");
       if (nextFolder) {
         await ensureFolderRow(env, row.owner_id, nextFolder);
       }
@@ -487,7 +542,13 @@ export function createNoteService(env: Env) {
         .run();
 
       if (input.grants) {
-        const replaced = await replaceGrants(env, row.owner_id, "note", row.id, input.grants);
+        const replaced = await replaceGrants(
+          env,
+          row.owner_id,
+          "note",
+          row.id,
+          input.grants,
+        );
         if ("error" in replaced) {
           return { kind: "bad_request", error: replaced.error };
         }
@@ -514,9 +575,14 @@ export function createNoteService(env: Env) {
       if (!current.access.flags.canEdit) {
         return {
           kind: "denied",
-          status: user === undefined
-            ? viewDeniedHttpStatus({ ownerId: row.owner_id, flags: current.access.flags }, undefined, env)
-            : 403,
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { ownerId: row.owner_id, flags: current.access.flags },
+                  undefined,
+                  env,
+                )
+              : 403,
         };
       }
 
@@ -536,7 +602,10 @@ export function createNoteService(env: Env) {
       return { kind: "ok", note: await toNote(env, updated, user) };
     },
 
-    async remove(idOrShortId: string, user: SessionUser | undefined): Promise<MutateNoteResult> {
+    async remove(
+      idOrShortId: string,
+      user: SessionUser | undefined,
+    ): Promise<MutateNoteResult> {
       const row = await findNoteRow(env, idOrShortId);
       if (!row) {
         return { kind: "not_found" };
@@ -546,22 +615,35 @@ export function createNoteService(env: Env) {
       if (!current.access.flags.canAdmin) {
         return {
           kind: "denied",
-          status: user === undefined
-            ? viewDeniedHttpStatus({ ownerId: row.owner_id, flags: current.access.flags }, undefined, env)
-            : 403,
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { ownerId: row.owner_id, flags: current.access.flags },
+                  undefined,
+                  env,
+                )
+              : 403,
         };
       }
 
       await createImageService(env).deleteAllForNote(row.id);
       await db(env)
-        .prepare("DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?")
+        .prepare(
+          "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+        )
         .bind(row.id)
         .run();
-      await db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id).run();
+      await db(env)
+        .prepare("DELETE FROM notes WHERE id = ?")
+        .bind(row.id)
+        .run();
       return { kind: "ok", note: current };
     },
 
-    async removeFolder(folderId: string, user: SessionUser | undefined): Promise<RemoveFolderResult> {
+    async removeFolder(
+      folderId: string,
+      user: SessionUser | undefined,
+    ): Promise<RemoveFolderResult> {
       const rec = await getFolderById(env, folderId);
       if (!rec) {
         return { kind: "not_found" };
@@ -579,10 +661,15 @@ export function createNoteService(env: Env) {
         if (!folderContains(rec.folder, row.folder ?? "")) continue;
         await images.deleteAllForNote(row.id);
         await db(env)
-          .prepare("DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?")
+          .prepare(
+            "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+          )
           .bind(row.id)
           .run();
-        await db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id).run();
+        await db(env)
+          .prepare("DELETE FROM notes WHERE id = ?")
+          .bind(row.id)
+          .run();
       }
 
       await deleteFolderTree(env, rec.owner_id, rec.folder);

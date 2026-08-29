@@ -29,7 +29,11 @@ export function ConfirmDialog({
   }, [busy, onClose]);
 
   return (
-    <Modal labelledBy="confirm-dialog-title" className="w-[min(26rem,100%)]" onClose={close}>
+    <Modal
+      labelledBy="confirm-dialog-title"
+      className="w-[min(26rem,100%)]"
+      onClose={close}
+    >
       <ModalHeader id="confirm-dialog-title" title={title} />
       <p className="mb-4 mt-0">{message}</p>
       {error && <ErrorText>{error}</ErrorText>}

@@ -11,10 +11,19 @@ const MAX_BYTES = 512_000;
 
 function isBlockedHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "::1") {
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host === "::1"
+  ) {
     return true;
   }
-  if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) {
+  if (
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  ) {
     return true;
   }
   return false;
@@ -59,7 +68,9 @@ function resolveUrl(base: string, value: string | null): string | null {
   }
 }
 
-export async function fetchOgPreview(rawUrl: string): Promise<OgPreview | { error: string; status: number }> {
+export async function fetchOgPreview(
+  rawUrl: string,
+): Promise<OgPreview | { error: string; status: number }> {
   let target: URL;
   try {
     target = new URL(rawUrl);
@@ -86,9 +97,17 @@ export async function fetchOgPreview(rawUrl: string): Promise<OgPreview | { erro
       return { error: "fetch failed", status: 502 };
     }
     const html = (await response.text()).slice(0, MAX_BYTES);
-    const title = metaContent(html, ["og:title", "twitter:title"]) ?? titleTag(html);
-    const description = metaContent(html, ["og:description", "twitter:description", "description"]);
-    const image = resolveUrl(target.toString(), metaContent(html, ["og:image", "twitter:image"]));
+    const title =
+      metaContent(html, ["og:title", "twitter:title"]) ?? titleTag(html);
+    const description = metaContent(html, [
+      "og:description",
+      "twitter:description",
+      "description",
+    ]);
+    const image = resolveUrl(
+      target.toString(),
+      metaContent(html, ["og:image", "twitter:image"]),
+    );
     const siteName = metaContent(html, ["og:site_name"]);
     return {
       url: target.toString(),

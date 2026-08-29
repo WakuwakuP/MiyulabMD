@@ -5,11 +5,11 @@ import { useNavigate, useOutletContext, useParams } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ConfirmDialog } from "../components/notes/ConfirmDialog.tsx";
-import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
 import {
   ContextMenu,
   type ContextMenuItem,
 } from "../components/notes/ContextMenu.tsx";
+import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
 import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";

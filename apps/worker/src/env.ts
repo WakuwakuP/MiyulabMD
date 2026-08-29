@@ -3,7 +3,9 @@ import { isPermissionPreset } from "@miyulabmd/shared";
 
 /** Elysia ルートからは `import { env } from "cloudflare:workers"` で参照する。 */
 export function instanceFlags(env: Env) {
-  const defaultPermission: PermissionPreset = isPermissionPreset(env.DEFAULT_PERMISSION)
+  const defaultPermission: PermissionPreset = isPermissionPreset(
+    env.DEFAULT_PERMISSION,
+  )
     ? env.DEFAULT_PERMISSION
     : "editable";
 

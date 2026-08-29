@@ -11,7 +11,11 @@ import {
   sessionCookieFromToken,
   sessionCookieHeader,
 } from "../auth/session.ts";
-import { toSessionUser, updateDisplayName, upsertUserByEmail } from "../db/users.ts";
+import {
+  toSessionUser,
+  updateDisplayName,
+  upsertUserByEmail,
+} from "../db/users.ts";
 
 function isDevAuthEnabled(env: Env): boolean {
   return env.DEV_AUTH === "true";
@@ -101,7 +105,11 @@ function accessFailurePage(reason: string): Response {
   });
 }
 
-function logoutResponse(request: Request, env: Env, preferRedirect: boolean): Response {
+function logoutResponse(
+  request: Request,
+  env: Env,
+  preferRedirect: boolean,
+): Response {
   const headers = new Headers({
     "Set-Cookie": clearSessionCookieHeader(requestIsHttps(request)),
   });
@@ -124,7 +132,10 @@ function logoutResponse(request: Request, env: Env, preferRedirect: boolean): Re
 }
 
 /** Access 通過後の生 Request を Elysia を介さず処理する。 */
-export async function handleAuthRequest(request: Request, env: Env): Promise<Response | null> {
+export async function handleAuthRequest(
+  request: Request,
+  env: Env,
+): Promise<Response | null> {
   const { pathname } = new URL(request.url);
   if (!pathname.startsWith("/auth/")) {
     return null;
@@ -146,9 +157,12 @@ export async function handleAuthRequest(request: Request, env: Env): Promise<Res
   if (pathname === "/auth/login" && shouldUseMockLogin(request, env)) {
     const email = mockEmail(request);
     if (!email) {
-      return new Response("email query parameter or X-Dev-User-Email header is required", {
-        status: 400,
-      });
+      return new Response(
+        "email query parameter or X-Dev-User-Email header is required",
+        {
+          status: 400,
+        },
+      );
     }
     return finishLogin(env, email, email.split("@")[0] ?? null);
   }
@@ -167,7 +181,10 @@ export async function handleAuthRequest(request: Request, env: Env): Promise<Res
   return new Response("Cloudflare Access is not configured", { status: 503 });
 }
 
-export async function handleUpdateMe(request: Request, env: Env): Promise<Response> {
+export async function handleUpdateMe(
+  request: Request,
+  env: Env,
+): Promise<Response> {
   const session = await readSession(request, env);
   if (!session) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -182,10 +199,13 @@ export async function handleUpdateMe(request: Request, env: Env): Promise<Respon
     if (typeof body.displayName === "string") {
       displayName = body.displayName;
     } else if (body.displayName !== null && body.displayName !== undefined) {
-      return new Response(JSON.stringify({ error: "displayName must be a string" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: "displayName must be a string" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
@@ -203,7 +223,11 @@ export async function handleUpdateMe(request: Request, env: Env): Promise<Respon
   }
 
   const user = toSessionUser(updated);
-  const setCookie = await sessionCookieHeader(user, env, requestIsHttps(request));
+  const setCookie = await sessionCookieHeader(
+    user,
+    env,
+    requestIsHttps(request),
+  );
   return new Response(JSON.stringify({ user }), {
     status: 200,
     headers: {
@@ -219,7 +243,10 @@ export async function handleEstablishSession(
   env: Env,
 ): Promise<Response> {
   if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { Allow: "POST" },
+    });
   }
 
   const contentType = request.headers.get("Content-Type") ?? "";

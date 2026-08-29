@@ -9,7 +9,8 @@ function readToolbarPos(editor: Editor): Pos | null {
   if (empty || from === to) return null;
   const start = editor.view.coordsAtPos(from);
   const end = editor.view.coordsAtPos(to);
-  const left = (Math.min(start.left, end.left) + Math.max(start.right, end.right)) / 2;
+  const left =
+    (Math.min(start.left, end.left) + Math.max(start.right, end.right)) / 2;
   const top = Math.min(start.top, end.top) - 8;
   return { top, left };
 }

@@ -38,13 +38,17 @@ function rowToSummary(row: {
 export async function hashToken(token: string): Promise<string> {
   const data = new TextEncoder().encode(token);
   const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 export function generatePlainToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
-  const random = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const random = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
   return `mlb_${random}`;
 }
 
@@ -90,7 +94,10 @@ export async function authenticateBearer(
   };
 }
 
-export async function listTokensForUser(env: Env, userId: string): Promise<ApiTokenSummary[]> {
+export async function listTokensForUser(
+  env: Env,
+  userId: string,
+): Promise<ApiTokenSummary[]> {
   const rows = await db(env)
     .prepare(
       `SELECT id, name, created_at, last_used_at

@@ -8,7 +8,13 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string;
 };
 
-export function HeaderButton({ variant = "outline", icon, label, className, ...props }: Props) {
+export function HeaderButton({
+  variant = "outline",
+  icon,
+  label,
+  className,
+  ...props
+}: Props) {
   return (
     <Button
       variant={variant}

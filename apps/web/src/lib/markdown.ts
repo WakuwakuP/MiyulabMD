@@ -4,14 +4,27 @@ import rehypeStringify from "rehype-stringify";
 import { remark } from "remark";
 import remarkRehype from "remark-rehype";
 import { fetchOgPreview } from "./api.ts";
-import { collectOgUrls, expandEmbedsForPreview, normalizeEmbedMarkdown, type OgPreview } from "./embeds.ts";
+import {
+  collectOgUrls,
+  expandEmbedsForPreview,
+  normalizeEmbedMarkdown,
+  type OgPreview,
+} from "./embeds.ts";
 
 const schema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames ?? []), "iframe", "small"],
   attributes: {
     ...defaultSchema.attributes,
-    iframe: ["src", "title", "allow", "allowFullScreen", "loading", "width", "height"],
+    iframe: [
+      "src",
+      "title",
+      "allow",
+      "allowFullScreen",
+      "loading",
+      "width",
+      "height",
+    ],
     div: ["className"],
     a: ["href", "target", "rel", "className"],
     img: ["src", "alt"],

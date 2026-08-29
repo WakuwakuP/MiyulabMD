@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
-import { Elysia } from "elysia";
 import type { CreateNoteInput, UpdateNoteMetaInput } from "@miyulabmd/shared";
+import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
 import { createNoteService } from "../services/notes.ts";
@@ -96,7 +96,11 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
     }
 
     if (markdown !== undefined) {
-      const markdownResult = await notes.updateMarkdown(params.id, user ?? undefined, markdown);
+      const markdownResult = await notes.updateMarkdown(
+        params.id,
+        user ?? undefined,
+        markdown,
+      );
       if (markdownResult.kind !== "ok") {
         if (markdownResult.kind === "not_found") {
           set.status = 404;
@@ -107,7 +111,9 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
           return { error: markdownResult.error };
         }
         set.status = markdownResult.status;
-        return { error: markdownResult.status === 401 ? "Unauthorized" : "Forbidden" };
+        return {
+          error: markdownResult.status === 401 ? "Unauthorized" : "Forbidden",
+        };
       }
       latest = markdownResult;
     }

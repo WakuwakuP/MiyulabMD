@@ -8,8 +8,11 @@ export const SafeParagraph = Paragraph.extend({
     if (!node) return "";
     const content = Array.isArray(node.content) ? node.content : [];
     if (content.length === 0) {
-      const previousContent = Array.isArray(ctx?.previousNode?.content) ? ctx.previousNode.content : [];
-      return ctx?.previousNode?.type === "paragraph" && previousContent.length === 0
+      const previousContent = Array.isArray(ctx?.previousNode?.content)
+        ? ctx.previousNode.content
+        : [];
+      return ctx?.previousNode?.type === "paragraph" &&
+        previousContent.length === 0
         ? EMPTY_PARAGRAPH_MARKDOWN
         : "";
     }

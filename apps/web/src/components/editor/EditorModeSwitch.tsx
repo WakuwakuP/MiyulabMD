@@ -3,10 +3,10 @@ import { useDismiss } from "../../hooks/use-dismiss.ts";
 import {
   EDIT_MODES,
   EDITOR_MODE_LABELS,
-  isEditMode,
-  readLastEditMode,
   type EditMode,
   type EditorMode,
+  isEditMode,
+  readLastEditMode,
 } from "../../lib/editor-mode.ts";
 import { ChevronDownIcon, EyeIcon, PencilIcon } from "../ui/icons.tsx";
 import { MenuItem, MenuPanel } from "../ui/Menu.tsx";
@@ -76,7 +76,11 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
         {menuOpen && editing && (
           <MenuPanel align="end">
             {EDIT_MODES.map((mode) => (
-              <MenuItem key={mode} active={value === mode} onClick={() => chooseEdit(mode)}>
+              <MenuItem
+                key={mode}
+                active={value === mode}
+                onClick={() => chooseEdit(mode)}
+              >
                 {EDITOR_MODE_LABELS[mode]}
               </MenuItem>
             ))}

@@ -19,7 +19,8 @@ export function paragraphStandaloneHref(node: PMNode): string | null {
   const child = node.firstChild;
   const link = child?.marks.find((mark) => mark.type.name === "link");
   const href = typeof link?.attrs.href === "string" ? link.attrs.href : "";
-  if (href && /^https?:\/\//.test(href) && child?.text?.trim() === trimmed) return href;
+  if (href && /^https?:\/\//.test(href) && child?.text?.trim() === trimmed)
+    return href;
   return null;
 }
 
@@ -31,14 +32,23 @@ export const AutoLinkCard = Extension.create({
       new Plugin({
         key: new PluginKey("autoLinkCard"),
         appendTransaction(transactions, _oldState, newState) {
-          if (!transactions.some((transaction) => transaction.docChanged || transaction.selectionSet)) {
+          if (
+            !transactions.some(
+              (transaction) =>
+                transaction.docChanged || transaction.selectionSet,
+            )
+          ) {
             return null;
           }
           const ogType = newState.schema.nodes.ogCard;
           if (!ogType) return null;
 
           const { selection, doc } = newState;
-          const replacements: Array<{ from: number; to: number; href: string }> = [];
+          const replacements: Array<{
+            from: number;
+            to: number;
+            href: string;
+          }> = [];
           doc.forEach((node, pos) => {
             const href = paragraphStandaloneHref(node);
             if (!href) return;

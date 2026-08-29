@@ -1,12 +1,11 @@
 import { env } from "cloudflare:workers";
 import { Elysia } from "elysia";
-
+import { readSession } from "../auth/session.ts";
 import {
   createTokenForUser,
   listTokensForUser,
   revokeTokenForUser,
 } from "../auth/tokens.ts";
-import { readSession } from "../auth/session.ts";
 
 type CreateTokenBody = {
   name?: string;

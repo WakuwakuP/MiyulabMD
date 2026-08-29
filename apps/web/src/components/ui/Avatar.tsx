@@ -18,7 +18,13 @@ const sizes: Record<Size, string> = {
   lg: "size-16 text-2xl",
 };
 
-export function Avatar({ name, color, size = "md", variant = "solid", title }: Props) {
+export function Avatar({
+  name,
+  color,
+  size = "md",
+  variant = "solid",
+  title,
+}: Props) {
   return (
     <span
       className={cn(
