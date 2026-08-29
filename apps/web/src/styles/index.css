@@ -55,3 +55,13 @@
     font: inherit;
   }
 }
+
+.rich-block-handle {
+  z-index: 20;
+}
+
+.rich-editor-content .ProseMirror-selectednode,
+.rich-editor-content .ProseMirror-selectednoderange {
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, CanvasText 5%, Canvas);
+}
