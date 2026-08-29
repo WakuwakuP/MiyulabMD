@@ -195,7 +195,11 @@ export async function fetchOgPreview(
       fetchOpts,
     );
     if (!res.ok) {
-      return { ok: false, status: res.status, error: await parseError(res) };
+      return {
+        ok: false as const,
+        status: res.status,
+        error: await parseError(res),
+      };
     }
     const data = (await res.json()) as OgPreview;
     ogPreviewCache.set(url, data);

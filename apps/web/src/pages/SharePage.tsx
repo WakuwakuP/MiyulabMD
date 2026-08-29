@@ -1,32 +1,50 @@
 import { titleFromMarkdown } from "@miyulabmd/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { fetchNote } from "../lib/api.ts";
+import {
+  dismissStaleSsrPreview,
+  removeSsrPreview,
+} from "../lib/note-bootstrap.ts";
+import { loadNote, noteFromCaches } from "../lib/note-cache.ts";
 
 export function SharePage() {
   const { id = "" } = useParams();
-  const [markdown, setMarkdown] = useState("");
-  const [loading, setLoading] = useState(true);
+  const cached = noteFromCaches(id);
+  const [markdown, setMarkdown] = useState(() => cached?.markdown ?? "");
+  const [loading, setLoading] = useState(() => !cached);
   const [denied, setDenied] = useState<401 | 403 | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
+    dismissStaleSsrPreview(id);
+    const hit = noteFromCaches(id);
     setDenied(null);
     setError(null);
 
-    fetchNote(id).then((result) => {
+    if (hit) {
+      setMarkdown(hit.markdown);
+      document.title = `${titleFromMarkdown(hit.markdown)} · MiyulabMD`;
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    let cancelled = false;
+    void loadNote(id, Boolean(hit)).then((result) => {
+      if (cancelled) return;
       if (!result.ok) {
-        if (result.status === 401) {
-          setDenied(401);
-        } else if (result.status === 403) {
-          setDenied(403);
-        } else if (result.status === 404) {
-          setError("ノートが見つかりません。");
-        } else {
-          setError(result.error);
+        if (!hit) {
+          if (result.status === 401) {
+            setDenied(401);
+          } else if (result.status === 403) {
+            setDenied(403);
+          } else if (result.status === 404) {
+            setError("ノートが見つかりません。");
+          } else {
+            setError(result.error);
+          }
         }
         setLoading(false);
         return;
@@ -36,7 +54,16 @@ export function SharePage() {
       document.title = `${titleFromMarkdown(result.data.markdown)} · MiyulabMD`;
       setLoading(false);
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
+  useLayoutEffect(() => {
+    dismissStaleSsrPreview(id);
+    if (!loading && markdown) removeSsrPreview();
+  }, [id, loading, markdown]);
 
   if (loading) {
     return (
