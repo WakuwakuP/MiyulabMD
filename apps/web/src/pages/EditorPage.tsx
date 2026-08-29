@@ -249,7 +249,7 @@ export function EditorPage() {
     setHeader,
   ]);
 
-  if (loading || userLoading) {
+  if (loading) {
     return (
       <section className="flex flex-col px-5 py-4">
         <p>読み込み中…</p>
