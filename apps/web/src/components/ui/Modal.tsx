@@ -95,5 +95,9 @@ export function ModalHeader({
 }
 
 export function ModalFooter({ children }: { children: ReactNode }) {
-  return <footer className="mt-[1.1rem] flex justify-between gap-3">{children}</footer>;
+  return (
+    <footer className="mt-[1.1rem] flex justify-between gap-3">
+      {children}
+    </footer>
+  );
 }

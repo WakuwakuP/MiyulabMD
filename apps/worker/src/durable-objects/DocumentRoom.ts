@@ -85,14 +85,19 @@ export class DocumentRoom extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+  async webSocketMessage(
+    ws: WebSocket,
+    message: ArrayBuffer | string,
+  ): Promise<void> {
     await this.ensureInitialized();
 
     const attachment = ws.deserializeAttachment() as WsAttachment | null;
     const canEdit = attachment?.canEdit ?? false;
 
     const data =
-      typeof message === "string" ? new TextEncoder().encode(message) : new Uint8Array(message);
+      typeof message === "string"
+        ? new TextEncoder().encode(message)
+        : new Uint8Array(message);
     const decoder = decoding.createDecoder(data);
     const messageType = decoding.readVarUint(decoder);
 
@@ -149,12 +154,21 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
-  async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
+  async webSocketClose(
+    ws: WebSocket,
+    _code: number,
+    _reason: string,
+    _wasClean: boolean,
+  ): Promise<void> {
     await this.ensureInitialized();
 
     const attachment = ws.deserializeAttachment() as WsAttachment | null;
     if (attachment?.awarenessClientIds.length) {
-      awarenessProtocol.removeAwarenessStates(this.awareness!, attachment.awarenessClientIds, ws);
+      awarenessProtocol.removeAwarenessStates(
+        this.awareness!,
+        attachment.awarenessClientIds,
+        ws,
+      );
     }
   }
 
@@ -208,7 +222,8 @@ export class DocumentRoom extends DurableObject<Env> {
     const doc = new Y.Doc();
     const awareness = new awarenessProtocol.Awareness(doc);
 
-    const storedUpdate = await this.ctx.storage.get<ArrayBuffer>(STORAGE_YJS_KEY);
+    const storedUpdate =
+      await this.ctx.storage.get<ArrayBuffer>(STORAGE_YJS_KEY);
     if (storedUpdate && storedUpdate.byteLength > 0) {
       Y.applyUpdate(doc, new Uint8Array(storedUpdate));
     } else {
@@ -239,7 +254,10 @@ export class DocumentRoom extends DurableObject<Env> {
     this.awareness = awareness;
   }
 
-  private async onDocUpdate(update: Uint8Array, origin: unknown): Promise<void> {
+  private async onDocUpdate(
+    update: Uint8Array,
+    origin: unknown,
+  ): Promise<void> {
     const doc = this.doc;
     if (!doc) {
       return;

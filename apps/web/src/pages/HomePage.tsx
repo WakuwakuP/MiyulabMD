@@ -1,12 +1,16 @@
 import type { FolderAccess, Note, NoteSummary } from "@miyulabmd/shared";
 import { folderUrl } from "@miyulabmd/shared";
-import { useEffect, useState, type MouseEvent } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ConfirmDialog } from "../components/notes/ConfirmDialog.tsx";
-import { ContextMenu, type ContextMenuItem } from "../components/notes/ContextMenu.tsx";
-import { NoteTree, type MenuTarget } from "../components/notes/NoteTree.tsx";
+import {
+  ContextMenu,
+  type ContextMenuItem,
+} from "../components/notes/ContextMenu.tsx";
+import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
+import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
@@ -71,6 +75,11 @@ export function HomePage() {
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [folderCreateOpen, setFolderCreateOpen] = useState(false);
+  const [folderCreating, setFolderCreating] = useState(false);
+  const [folderCreateError, setFolderCreateError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +101,9 @@ export function HomePage() {
       if (cancelled) return;
       if (!result.ok) {
         setFolder(null);
-        setError(result.status === 404 ? "フォルダが見つかりません。" : result.error);
+        setError(
+          result.status === 404 ? "フォルダが見つかりません。" : result.error,
+        );
         setLoading(false);
         return;
       }
@@ -128,16 +139,19 @@ export function HomePage() {
     navigate(`/n/${result.data.id}`);
   }
 
-  async function handleNewFolder() {
-    const name = window.prompt("フォルダ名");
-    if (!name) return;
+  async function persistNewFolder(name: string) {
+    setFolderCreating(true);
+    setFolderCreateError(null);
 
     const result = await createFolder({ name, parentId: folder?.id });
     if (!result.ok) {
-      setError(result.error);
+      setFolderCreateError(result.error);
+      setFolderCreating(false);
       return;
     }
 
+    setFolderCreateOpen(false);
+    setFolderCreating(false);
     if (result.data.id) {
       navigate(folderUrl(result.data.id));
       setShare({
@@ -160,7 +174,12 @@ export function HomePage() {
       setError("ルートディレクトリの範囲は自分のみで固定です。");
       return;
     }
-    setShare({ kind: "folder", folderId: result.data.id, name, draft: draftFromFolder(result.data) });
+    setShare({
+      kind: "folder",
+      folderId: result.data.id,
+      name,
+      draft: draftFromFolder(result.data),
+    });
     setShareError(null);
   }
 
@@ -170,7 +189,12 @@ export function HomePage() {
       setError(result.error);
       return;
     }
-    setShare({ kind: "note", id: note.id, name: result.data.title, draft: draftFromNote(result.data) });
+    setShare({
+      kind: "note",
+      id: note.id,
+      name: result.data.title,
+      draft: draftFromNote(result.data),
+    });
     setShareError(null);
   }
 
@@ -185,7 +209,10 @@ export function HomePage() {
         inherit: next.inherit,
         readScope: next.inherit ? undefined : next.readScope,
         writeScope: next.inherit ? undefined : next.writeScope,
-        grants: next.grants.map((grant) => ({ email: grant.email, canWrite: grant.canWrite })),
+        grants: next.grants.map((grant) => ({
+          email: grant.email,
+          canWrite: grant.canWrite,
+        })),
       });
       if (!result.ok) {
         setShareError(result.error);
@@ -200,20 +227,30 @@ export function HomePage() {
       inheritAccess: next.inherit,
       readScope: next.inherit ? null : next.readScope,
       writeScope: next.inherit ? null : next.writeScope,
-      grants: next.grants.map((grant) => ({ email: grant.email, canWrite: grant.canWrite })),
+      grants: next.grants.map((grant) => ({
+        email: grant.email,
+        canWrite: grant.canWrite,
+      })),
     });
     if (!result.ok) {
       setShareError(result.error);
       return;
     }
-    setShare({ ...share, name: result.data.title, draft: draftFromNote(result.data) });
+    setShare({
+      ...share,
+      name: result.data.title,
+      draft: draftFromNote(result.data),
+    });
   }
 
   function menuPosition(event: MouseEvent) {
     const target = event.currentTarget;
     if (target instanceof HTMLButtonElement) {
       const rect = target.getBoundingClientRect();
-      return { x: Math.min(rect.right - 10, window.innerWidth - 180), y: rect.bottom + 4 };
+      return {
+        x: Math.min(rect.right - 10, window.innerWidth - 180),
+        y: rect.bottom + 4,
+      };
     }
     return {
       x: Math.min(event.clientX, window.innerWidth - 180),
@@ -226,7 +263,10 @@ export function HomePage() {
     if (target.kind === "folder") {
       const items: ContextMenuItem[] = [
         { label: "開く", onSelect: () => navigate(folderUrl(target.id)) },
-        { label: "共有", onSelect: () => void openFolderShare(target.id, target.name) },
+        {
+          label: "共有",
+          onSelect: () => void openFolderShare(target.id, target.name),
+        },
       ];
       if (folder?.flags.canAdmin) {
         items.push({
@@ -251,7 +291,11 @@ export function HomePage() {
         label: "削除",
         danger: true,
         onSelect: () => {
-          setConfirm({ kind: "note", id: target.note.id, name: target.note.title });
+          setConfirm({
+            kind: "note",
+            id: target.note.id,
+            name: target.note.title,
+          });
           setConfirmError(null);
         },
       });
@@ -285,7 +329,9 @@ export function HomePage() {
     setConfirmBusy(true);
     setConfirmError(null);
     const result =
-      confirm.kind === "folder" ? await deleteFolder(confirm.id) : await deleteNote(confirm.id);
+      confirm.kind === "folder"
+        ? await deleteFolder(confirm.id)
+        : await deleteNote(confirm.id);
     if (!result.ok) {
       setConfirmError(result.error);
       setConfirmBusy(false);
@@ -320,7 +366,10 @@ export function HomePage() {
                 variant="outline"
                 icon={<FolderOutlineIcon />}
                 label="フォルダ"
-                onClick={() => void handleNewFolder()}
+                onClick={() => {
+                  setFolderCreateError(null);
+                  setFolderCreateOpen(true);
+                }}
               />
             )}
             <HeaderButton
@@ -353,7 +402,24 @@ export function HomePage() {
           onItemMenu={handleItemMenu}
         />
       ) : null}
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menu.items}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {folderCreateOpen && (
+        <FolderCreateModal
+          busy={folderCreating}
+          error={folderCreateError}
+          onSubmit={(name) => void persistNewFolder(name)}
+          onClose={() => {
+            if (!folderCreating) setFolderCreateOpen(false);
+          }}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           title={confirm.kind === "folder" ? "フォルダを削除" : "ノートを削除"}
@@ -378,7 +444,9 @@ export function HomePage() {
           value={share.draft}
           showInherit
           inheritLabel={
-            share.kind === "folder" ? "親ディレクトリの設定に従う" : "ディレクトリの設定に従う"
+            share.kind === "folder"
+              ? "親ディレクトリの設定に従う"
+              : "ディレクトリの設定に従う"
           }
           error={shareError}
           onChange={(next) => void persistShare(next)}

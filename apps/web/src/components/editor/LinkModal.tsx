@@ -14,7 +14,13 @@ type Props = {
   onClose: () => void;
 };
 
-export function LinkModal({ title, initial = "", submitLabel = "挿入", onSubmit, onClose }: Props) {
+export function LinkModal({
+  title,
+  initial = "",
+  submitLabel = "挿入",
+  onSubmit,
+  onClose,
+}: Props) {
   const [value, setValue] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);

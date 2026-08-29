@@ -70,7 +70,10 @@ export async function upsertUserByEmail(
   };
 }
 
-export async function findUserByEmail(env: Env, email: string): Promise<DbUser | null> {
+export async function findUserByEmail(
+  env: Env,
+  email: string,
+): Promise<DbUser | null> {
   const row = await db(env)
     .prepare("SELECT id, email, display_name FROM users WHERE email = ?")
     .bind(normalizeEmail(email))

@@ -18,7 +18,14 @@ type Props = {
   authConfig: AuthConfig;
 };
 
-export function AppHeader({ title, actions, end, user, loading, authConfig }: Props) {
+export function AppHeader({
+  title,
+  actions,
+  end,
+  user,
+  loading,
+  authConfig,
+}: Props) {
   const [loginEmail, setLoginEmail] = useState("dev@example.com");
 
   function handleLoginSubmit(event: FormEvent) {
@@ -41,7 +48,11 @@ export function AppHeader({ title, actions, end, user, loading, authConfig }: Pr
         <Link to="/" className="shrink-0 font-bold text-inherit no-underline">
           MiyulabMD
         </Link>
-        {title && <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{title}</span>}
+        {title && (
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">
+            {title}
+          </span>
+        )}
       </div>
       {actions && (
         <div className="flex min-w-0 items-center justify-center max-[900px]:order-3 max-[900px]:col-span-full">
@@ -59,7 +70,10 @@ export function AppHeader({ title, actions, end, user, loading, authConfig }: Pr
             ログイン
           </a>
         ) : (
-          <form className="flex items-center gap-2" onSubmit={handleLoginSubmit}>
+          <form
+            className="flex items-center gap-2"
+            onSubmit={handleLoginSubmit}
+          >
             <Input
               variant="pill"
               className="min-w-48"

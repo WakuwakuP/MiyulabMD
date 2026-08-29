@@ -3,8 +3,8 @@ import { useRef, useState } from "react";
 import { Link } from "react-router";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import { HeaderButton } from "../ui/HeaderButton.tsx";
-import { FolderOutlineIcon } from "../ui/icons.tsx";
 import { Input } from "../ui/Input.tsx";
+import { FolderOutlineIcon } from "../ui/icons.tsx";
 import { MenuPanel } from "../ui/Menu.tsx";
 import { MutedText } from "../ui/Text.tsx";
 
@@ -16,7 +16,13 @@ type Props = {
   onFolderBlur: () => void;
 };
 
-export function FolderPopover({ folder, folderId, isOwner, onFolderChange, onFolderBlur }: Props) {
+export function FolderPopover({
+  folder,
+  folderId,
+  isOwner,
+  onFolderChange,
+  onFolderBlur,
+}: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   useDismiss(open, () => setOpen(false), rootRef);
@@ -47,13 +53,19 @@ export function FolderPopover({ folder, folderId, isOwner, onFolderChange, onFol
                   aria-label="ノートのフォルダ"
                 />
                 {folderId && (
-                  <Link className="text-accent no-underline" to={folderUrl(folderId)}>
+                  <Link
+                    className="text-accent no-underline"
+                    to={folderUrl(folderId)}
+                  >
                     開く
                   </Link>
                 )}
               </>
             ) : folderId ? (
-              <Link className="text-accent no-underline" to={folderUrl(folderId)}>
+              <Link
+                className="text-accent no-underline"
+                to={folderUrl(folderId)}
+              >
                 フォルダを開く
               </Link>
             ) : (

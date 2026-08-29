@@ -9,7 +9,10 @@ export function standaloneLinkUrl(line: string): string | null {
   return md?.[2] ?? null;
 }
 
-export function mapLinesOutsideFences(markdown: string, mapLine: (line: string) => string): string {
+export function mapLinesOutsideFences(
+  markdown: string,
+  mapLine: (line: string) => string,
+): string {
   let inFence = false;
   return markdown
     .split("\n")

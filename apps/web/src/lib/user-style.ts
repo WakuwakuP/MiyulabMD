@@ -22,13 +22,20 @@ export function colorForSeed(seed: string): string {
   return USER_COLORS[Math.abs(hash) % USER_COLORS.length] ?? USER_COLORS[0];
 }
 
-export function colorForEmail(email: string | null | undefined, fallback = "guest"): string {
+export function colorForEmail(
+  email: string | null | undefined,
+  fallback = "guest",
+): string {
   return colorForSeed((email?.trim().toLowerCase() || fallback).trim());
 }
 
 export function initialFromName(label: string): string {
   const trimmed = label.trim();
   if (!trimmed) return "?";
-  const first = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(trimmed)][0];
+  const first = [
+    ...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
+      trimmed,
+    ),
+  ][0];
   return (first?.segment ?? trimmed[0] ?? "?").toUpperCase();
 }

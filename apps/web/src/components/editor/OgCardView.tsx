@@ -1,5 +1,5 @@
-import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
+import { NodeViewWrapper } from "@tiptap/react";
 import { useEffect, useState } from "react";
 import { fetchOgPreview } from "../../lib/api.ts";
 import type { OgPreview } from "../../lib/embeds.ts";
@@ -35,11 +35,21 @@ export function OgCardView({ node }: NodeViewProps) {
         target="_blank"
         rel="noreferrer"
       >
-        {card?.image && <img src={card.image} alt="" className="h-20 w-[7.5rem] rounded-md object-cover" />}
+        {card?.image && (
+          <img
+            src={card.image}
+            alt=""
+            className="h-20 w-[7.5rem] rounded-md object-cover"
+          />
+        )}
         <span>
           <strong>{loading ? "読み込み中…" : card?.title || href}</strong>
-          {card?.description && <MutedText className="mt-1">{card.description}</MutedText>}
-          {card?.siteName && <small className="mt-1 block text-muted">{card.siteName}</small>}
+          {card?.description && (
+            <MutedText className="mt-1">{card.description}</MutedText>
+          )}
+          {card?.siteName && (
+            <small className="mt-1 block text-muted">{card.siteName}</small>
+          )}
         </span>
       </a>
     </NodeViewWrapper>

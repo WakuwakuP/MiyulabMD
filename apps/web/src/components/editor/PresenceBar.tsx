@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import type { AwarenessUserState, CollabAwareness } from "../../lib/collaboration.ts";
 import { cn } from "../../lib/cn.ts";
+import type {
+  AwarenessUserState,
+  CollabAwareness,
+} from "../../lib/collaboration.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
 
@@ -8,11 +11,15 @@ type Props = {
   awareness: CollabAwareness;
 };
 
-function readAwarenessState(state: Record<string, unknown> | null): AwarenessUserState | null {
+function readAwarenessState(
+  state: Record<string, unknown> | null,
+): AwarenessUserState | null {
   if (!state) return null;
 
   const nested =
-    state.user && typeof state.user === "object" ? (state.user as Record<string, unknown>) : null;
+    state.user && typeof state.user === "object"
+      ? (state.user as Record<string, unknown>)
+      : null;
   const userId = typeof state.userId === "string" ? state.userId : null;
   const email = typeof state.email === "string" ? state.email : null;
   const displayName =
@@ -31,7 +38,9 @@ function readAwarenessState(state: Record<string, unknown> | null): AwarenessUse
 }
 
 export function PresenceBar({ awareness }: Props) {
-  const [peers, setPeers] = useState<Array<AwarenessUserState & { clientId: number }>>([]);
+  const [peers, setPeers] = useState<
+    Array<AwarenessUserState & { clientId: number }>
+  >([]);
 
   useEffect(() => {
     const sync = () => {
@@ -40,7 +49,9 @@ export function PresenceBar({ awareness }: Props) {
 
       awareness.getStates().forEach((state: unknown, clientId: number) => {
         if (clientId === localClientId) return;
-        const parsed = readAwarenessState(state as Record<string, unknown> | null);
+        const parsed = readAwarenessState(
+          state as Record<string, unknown> | null,
+        );
         if (parsed) next.push({ ...parsed, clientId });
       });
 
@@ -63,7 +74,13 @@ export function PresenceBar({ awareness }: Props) {
       {peers.map((peer, index) => (
         <span
           key={peer.clientId}
-          className={cn(packed ? "-ml-[0.45rem] shadow-[0_0_0_2px_var(--color-surface)] first:ml-0" : index === 0 ? "" : "ml-[0.28rem]")}
+          className={cn(
+            packed
+              ? "-ml-[0.45rem] shadow-[0_0_0_2px_var(--color-surface)] first:ml-0"
+              : index === 0
+                ? ""
+                : "ml-[0.28rem]",
+          )}
         >
           <Avatar name={peer.displayName} color={peer.color} size="sm" />
         </span>

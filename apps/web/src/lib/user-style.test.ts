@@ -3,8 +3,14 @@ import { test } from "node:test";
 import { colorForEmail, initialFromName } from "./user-style.ts";
 
 test("colorForEmail is deterministic for the same address", () => {
-  assert.equal(colorForEmail("alice@example.com"), colorForEmail("Alice@Example.com"));
-  assert.notEqual(colorForEmail("alice@example.com"), colorForEmail("bob@example.com"));
+  assert.equal(
+    colorForEmail("alice@example.com"),
+    colorForEmail("Alice@Example.com"),
+  );
+  assert.notEqual(
+    colorForEmail("alice@example.com"),
+    colorForEmail("bob@example.com"),
+  );
 });
 
 test("initialFromName uses the first character", () => {

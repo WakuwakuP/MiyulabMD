@@ -1,6 +1,6 @@
 import type { SessionUser } from "@miyulabmd/shared";
-import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
+import * as Y from "yjs";
 import { colorForEmail } from "./user-style.ts";
 
 export type CollabAwareness = WebsocketProvider["awareness"];
@@ -73,7 +73,10 @@ export function awarenessUser(user: SessionUser | null): AwarenessUserState & {
   };
 }
 
-export function applyAwarenessUser(awareness: CollabAwareness, user: SessionUser | null): void {
+export function applyAwarenessUser(
+  awareness: CollabAwareness,
+  user: SessionUser | null,
+): void {
   const next = awarenessUser(user);
   const current = awareness.getLocalState() ?? {};
   awareness.setLocalState({
@@ -84,7 +87,10 @@ export function applyAwarenessUser(awareness: CollabAwareness, user: SessionUser
 }
 
 /** Yjs ドキュメントと WebSocket プロバイダを初期化し、awareness にローカル状態を設定する。 */
-export function createYjsSession(noteId: string, user: SessionUser | null): YjsSession {
+export function createYjsSession(
+  noteId: string,
+  user: SessionUser | null,
+): YjsSession {
   const doc = new Y.Doc();
   const yMarkdown = doc.getText(MARKDOWN_FIELD);
   const provider = new WebsocketProvider(collaborationWsBase(), noteId, doc, {

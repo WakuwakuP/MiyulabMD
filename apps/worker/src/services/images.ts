@@ -28,7 +28,10 @@ type ImageRow = {
   content_type: string;
 };
 
-async function findNoteRow(env: Env, idOrShortId: string): Promise<NoteRow | null> {
+async function findNoteRow(
+  env: Env,
+  idOrShortId: string,
+): Promise<NoteRow | null> {
   return db(env)
     .prepare(
       "SELECT id, owner_id, folder, read_scope, write_scope FROM notes WHERE id = ? OR short_id = ?",
@@ -42,8 +45,12 @@ function accessFields(row: NoteRow) {
     id: row.id,
     ownerId: row.owner_id,
     folder: row.folder ?? "",
-    readScope: row.read_scope && isAccessScope(row.read_scope) ? row.read_scope : null,
-    writeScope: row.write_scope && isAccessScope(row.write_scope) ? row.write_scope : null,
+    readScope:
+      row.read_scope && isAccessScope(row.read_scope) ? row.read_scope : null,
+    writeScope:
+      row.write_scope && isAccessScope(row.write_scope)
+        ? row.write_scope
+        : null,
   };
 }
 
@@ -87,9 +94,14 @@ export function createImageService(env: Env) {
       if (!access.flags.canEdit) {
         return {
           kind: "denied",
-          status: user === undefined
-            ? viewDeniedHttpStatus({ ownerId: row.owner_id, flags: access.flags }, undefined, env)
-            : 403,
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { ownerId: row.owner_id, flags: access.flags },
+                  undefined,
+                  env,
+                )
+              : 403,
         };
       }
 
@@ -117,7 +129,15 @@ export function createImageService(env: Env) {
             `INSERT INTO images (id, note_id, r2_key, content_type, byte_size, uploader_id, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
           )
-          .bind(imageId, row.id, r2Key, contentType, file.size, user?.id ?? null, now)
+          .bind(
+            imageId,
+            row.id,
+            r2Key,
+            contentType,
+            file.size,
+            user?.id ?? null,
+            now,
+          )
           .run();
       } catch (error) {
         await env.IMAGES.delete(r2Key);
@@ -145,9 +165,14 @@ export function createImageService(env: Env) {
       if (!access.flags.canView) {
         return {
           kind: "denied",
-          status: user === undefined
-            ? viewDeniedHttpStatus({ ownerId: row.owner_id, flags: access.flags }, undefined, env)
-            : 403,
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { ownerId: row.owner_id, flags: access.flags },
+                  undefined,
+                  env,
+                )
+              : 403,
         };
       }
 
