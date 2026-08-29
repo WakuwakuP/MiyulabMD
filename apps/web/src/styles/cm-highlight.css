@@ -1,0 +1,126 @@
+/* CodeMirror syntax tokens — Canvas/CanvasText aware, no full editor reskin. */
+.cm-editor {
+  --cm-hl-keyword: light-dark(#6d28d9, #c4b5fd);
+  --cm-hl-literal: light-dark(#1d4ed8, #93c5fd);
+  --cm-hl-string: light-dark(#047857, #6ee7b7);
+  --cm-hl-number: light-dark(#c2410c, #fdba74);
+  --cm-hl-comment: light-dark(
+    color-mix(in srgb, CanvasText 52%, transparent),
+    color-mix(in srgb, CanvasText 48%, transparent)
+  );
+  --cm-hl-type: light-dark(#0e7490, #67e8f9);
+  --cm-hl-variable: light-dark(#b45309, #fcd34d);
+  --cm-hl-operator: light-dark(#be123c, #fda4af);
+  --cm-hl-meta: light-dark(#4338ca, #a5b4fc);
+  --cm-hl-invalid: light-dark(#dc2626, #fca5a5);
+  --cm-hl-markdown: light-dark(#2563eb, #93c5fd);
+  --cm-hl-inline-code: light-dark(
+    color-mix(in srgb, CanvasText 88%, Canvas),
+    color-mix(in srgb, CanvasText 90%, Canvas)
+  );
+  --cm-hl-inline-code-bg: color-mix(in srgb, CanvasText 10%, Canvas);
+}
+
+.cm-editor .tok-keyword,
+.cm-editor .tok-controlKeyword,
+.cm-editor .tok-moduleKeyword,
+.cm-editor .tok-operatorKeyword,
+.cm-editor .tok-definitionKeyword {
+  color: var(--cm-hl-keyword);
+}
+
+.cm-editor .tok-literal,
+.cm-editor .tok-bool,
+.cm-editor .tok-atom {
+  color: var(--cm-hl-literal);
+}
+
+.cm-editor .tok-string,
+.cm-editor .tok-string2,
+.cm-editor .tok-regexp {
+  color: var(--cm-hl-string);
+}
+
+.cm-editor .tok-number {
+  color: var(--cm-hl-number);
+}
+
+.cm-editor .tok-comment,
+.cm-editor .tok-lineComment,
+.cm-editor .tok-blockComment {
+  color: var(--cm-hl-comment);
+  font-style: italic;
+}
+
+.cm-editor .tok-typeName,
+.cm-editor .tok-className,
+.cm-editor .tok-namespace {
+  color: var(--cm-hl-type);
+}
+
+.cm-editor .tok-variableName,
+.cm-editor .tok-variableName2,
+.cm-editor .tok-propertyName,
+.cm-editor .tok-labelName,
+.cm-editor .tok-macroName {
+  color: var(--cm-hl-variable);
+}
+
+.cm-editor .tok-definition {
+  font-weight: 600;
+}
+
+.cm-editor .tok-operator,
+.cm-editor .tok-punctuation {
+  color: var(--cm-hl-operator);
+}
+
+.cm-editor .tok-meta {
+  color: var(--cm-hl-meta);
+}
+
+.cm-editor .tok-invalid {
+  color: var(--cm-hl-invalid);
+  text-decoration: underline wavy;
+}
+
+.cm-editor .tok-heading {
+  color: var(--cm-hl-markdown);
+  font-weight: 700;
+}
+
+.cm-editor .tok-emphasis {
+  font-style: italic;
+}
+
+.cm-editor .tok-strong {
+  font-weight: 700;
+}
+
+.cm-editor .tok-link,
+.cm-editor .tok-url {
+  color: var(--cm-hl-markdown);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.cm-editor .tok-strikethrough {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+
+.cm-editor .tok-monospace {
+  color: var(--cm-hl-inline-code);
+  background: var(--cm-hl-inline-code-bg);
+  border-radius: 0.2rem;
+  padding-inline: 0.15em;
+}
+
+.cm-editor .tok-inserted {
+  color: var(--cm-hl-string);
+}
+
+.cm-editor .tok-deleted {
+  color: var(--cm-hl-invalid);
+  text-decoration: line-through;
+}
