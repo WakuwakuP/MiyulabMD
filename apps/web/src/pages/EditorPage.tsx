@@ -1,6 +1,6 @@
 import type { Note } from "@miyulabmd/shared";
 import { normalizeFolder, titleFromMarkdown } from "@miyulabmd/shared";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
@@ -16,7 +16,7 @@ import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { fetchNote, updateNote } from "../lib/api.ts";
+import { updateNote } from "../lib/api.ts";
 import { cn } from "../lib/cn.ts";
 import {
   applyAwarenessUser,
@@ -24,6 +24,11 @@ import {
   type YjsSession,
 } from "../lib/collaboration.ts";
 import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
+import {
+  dismissStaleSsrPreview,
+  removeSsrPreview,
+} from "../lib/note-bootstrap.ts";
+import { loadNote, noteFromCaches, seedNoteCache } from "../lib/note-cache.ts";
 
 function draftFromNote(note: Note): AccessDraft {
   return {
@@ -34,15 +39,33 @@ function draftFromNote(note: Note): AccessDraft {
   };
 }
 
+function applyLoadedNote(
+  loaded: Note,
+  setters: {
+    setNote: (note: Note) => void;
+    setMarkdown: (markdown: string) => void;
+    setFolder: (folder: string) => void;
+    setAccessDraft: (draft: AccessDraft) => void;
+  },
+) {
+  setters.setNote(loaded);
+  setters.setMarkdown(loaded.markdown);
+  setters.setFolder(loaded.folder);
+  setters.setAccessDraft(draftFromNote(loaded));
+}
+
 export function EditorPage() {
   const { id = "" } = useParams();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
-  const [note, setNote] = useState<Note | null>(null);
-  const [markdown, setMarkdown] = useState("");
-  const [folder, setFolder] = useState("");
-  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(null);
+  const cached = noteFromCaches(id);
+  const [note, setNote] = useState<Note | null>(() => cached ?? null);
+  const [markdown, setMarkdown] = useState(() => cached?.markdown ?? "");
+  const [folder, setFolder] = useState(() => cached?.folder ?? "");
+  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(() =>
+    cached ? draftFromNote(cached) : null,
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !cached);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
@@ -54,8 +77,8 @@ export function EditorPage() {
   const hydratedRef = useRef(false);
 
   useEffect(() => {
-    hydratedRef.current = false;
-    setLoading(true);
+    dismissStaleSsrPreview(id);
+    const hit = noteFromCaches(id);
     setLoadError(null);
     setSaveError(null);
     setCollab(null);
@@ -63,7 +86,23 @@ export function EditorPage() {
     setMode("preview");
     setSplitScroll(0);
 
-    fetchNote(id).then((result) => {
+    if (hit) {
+      applyLoadedNote(hit, {
+        setNote,
+        setMarkdown,
+        setFolder,
+        setAccessDraft,
+      });
+      hydratedRef.current = true;
+      setLoading(false);
+    } else {
+      hydratedRef.current = false;
+      setLoading(true);
+    }
+
+    let cancelled = false;
+    void loadNote(id, Boolean(hit)).then((result) => {
+      if (cancelled) return;
       if (!result.ok) {
         if (result.status === 401) {
           setLoadError("このノートを表示するにはログインが必要です。");
@@ -74,35 +113,68 @@ export function EditorPage() {
         } else {
           setLoadError(result.error);
         }
-        setNote(null);
+        if (!noteFromCaches(id)) setNote(null);
         setLoading(false);
         return;
       }
 
-      const loaded = result.data;
-      setNote(loaded);
-      setMarkdown(loaded.markdown);
-      setFolder(loaded.folder);
-      setAccessDraft(draftFromNote(loaded));
-      hydratedRef.current = true;
+      if (hit) {
+        setNote(result.data);
+        setFolder(result.data.folder);
+        setAccessDraft(draftFromNote(result.data));
+      } else {
+        applyLoadedNote(result.data, {
+          setNote,
+          setMarkdown,
+          setFolder,
+          setAccessDraft,
+        });
+        hydratedRef.current = true;
+      }
       setLoading(false);
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   const noteId = note?.id;
   const userId = user?.id;
+  const isOwner = Boolean(user && note && user.id === note.ownerId);
+  const canEdit = Boolean(note?.access.flags.canEdit);
+  const viewMode: EditorMode = canEdit ? mode : "preview";
+  const sessionRef = useRef<YjsSession | null>(null);
+
+  useLayoutEffect(() => {
+    dismissStaleSsrPreview(id);
+    if (!loading && markdown) removeSsrPreview();
+  }, [id, loading, markdown]);
+
+  useEffect(() => {
+    return () => {
+      sessionRef.current?.destroy();
+      sessionRef.current = null;
+      setCollab(null);
+      setCollabReady(false);
+    };
+  }, [noteId, userId]);
 
   useEffect(() => {
     if (!noteId || !hydratedRef.current || userLoading) return;
+    if (viewMode === "preview") return;
+    if (sessionRef.current) return;
 
     const session = createYjsSession(noteId, user);
+    sessionRef.current = session;
     setCollab(session);
     setCollabReady(false);
 
     const onSynced = (synced: boolean) => {
       if (!synced) return;
       setCollabReady(true);
-      setMarkdown(session.yMarkdown.toString());
+      const next = session.yMarkdown.toString();
+      if (next.length > 0) setMarkdown(next);
     };
 
     if (session.provider.synced) {
@@ -115,15 +187,7 @@ export function EditorPage() {
       setMarkdown(session.yMarkdown.toString());
     };
     session.yMarkdown.observe(onMarkdownChange);
-
-    return () => {
-      session.provider.off("sync", onSynced);
-      session.yMarkdown.unobserve(onMarkdownChange);
-      session.destroy();
-      setCollab(null);
-      setCollabReady(false);
-    };
-  }, [noteId, userId, userLoading]);
+  }, [noteId, userLoading, viewMode, user]);
 
   useEffect(() => {
     if (!collab) return;
@@ -152,6 +216,7 @@ export function EditorPage() {
     }
     setNote(result.data);
     setAccessDraft(draftFromNote(result.data));
+    seedNoteCache(result.data);
   }
 
   async function handleFolderBlur() {
@@ -169,11 +234,9 @@ export function EditorPage() {
     setNote(result.data);
     setFolder(result.data.folder);
     setAccessDraft(draftFromNote(result.data));
+    seedNoteCache(result.data);
   }
 
-  const isOwner = Boolean(user && note && user.id === note.ownerId);
-  const canEdit = Boolean(note?.access.flags.canEdit);
-  const viewMode: EditorMode = canEdit ? mode : "preview";
   const headingTitle = titleFromMarkdown(markdown);
 
   function handleModeChange(next: EditorMode) {

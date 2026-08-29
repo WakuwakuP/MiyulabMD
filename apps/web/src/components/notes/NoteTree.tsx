@@ -4,6 +4,7 @@ import type { MouseEvent } from "react";
 import { Link } from "react-router";
 import { cn } from "../../lib/cn.ts";
 import { prefetchFolder } from "../../lib/list-cache.ts";
+import { prefetchNote } from "../../lib/note-cache.ts";
 import { DriveList, DriveRow } from "../ui/DriveList.tsx";
 import { FolderIcon, MarkdownIcon } from "../ui/icons.tsx";
 import { AccessScopeMeta } from "./AccessScopeMeta.tsx";
@@ -174,6 +175,7 @@ export function NoteTree({
                 }
                 menuOpen={openMenuId === note.id}
                 onMenu={(event) => handleRowMenu(event, target)}
+                onPointerEnter={() => prefetchNote(note.id)}
               />
             );
           })}

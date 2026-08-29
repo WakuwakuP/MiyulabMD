@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { renderMarkdownHtml } from "@miyulabmd/markdown";
 import { Elysia } from "elysia";
 import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { isAccessConfigured } from "./auth/access.ts";
@@ -15,6 +16,11 @@ import { noteRoutes } from "./routes/notes.ts";
 import { ogRoutes } from "./routes/og.ts";
 import { tokenRoutes } from "./routes/tokens.ts";
 import { createNoteService } from "./services/notes.ts";
+import {
+  injectNotePage,
+  isPublicGuestCacheable,
+  notePageId,
+} from "./ssr/inject-note-page.ts";
 
 export { DocumentRoom } from "./durable-objects/DocumentRoom.ts";
 
@@ -52,13 +58,69 @@ function isElysiaPath(pathname: string): boolean {
   );
 }
 
+function notePageCacheKey(url: URL): Request {
+  return new Request(`${url.origin}${url.pathname}`, { method: "GET" });
+}
+
+async function handleNotePage(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const id = notePageId(url.pathname);
+  if (!id || (request.method !== "GET" && request.method !== "HEAD")) {
+    return env.ASSETS.fetch(request);
+  }
+
+  const user = await readSession(request, env);
+  const cacheable = !user;
+  if (cacheable) {
+    const cached = await caches.default.match(notePageCacheKey(url));
+    if (cached) return cached;
+  }
+
+  const notes = createNoteService(env);
+  const [result, assets] = await Promise.all([
+    notes.get(id, user ?? undefined),
+    env.ASSETS.fetch(request),
+  ]);
+
+  if (result.kind !== "ok") {
+    return assets;
+  }
+
+  const indexHtml = await assets.text();
+  const previewHtml = renderMarkdownHtml(result.note.markdown);
+  const body = injectNotePage(indexHtml, result.note, previewHtml);
+  const publicCache = isPublicGuestCacheable(result.note, Boolean(user));
+  const headers = new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": publicCache ? "public, s-maxage=30" : "private, no-store",
+  });
+
+  if (request.method === "HEAD") {
+    return new Response(null, { status: 200, headers });
+  }
+
+  const response = new Response(body, { status: 200, headers });
+  if (publicCache) {
+    ctx.waitUntil(caches.default.put(notePageCacheKey(url), response.clone()));
+  }
+  return response;
+}
+
 export default {
   async fetch(
     request: Request,
     env: Env,
-    _ctx: ExecutionContext,
+    ctx: ExecutionContext,
   ): Promise<Response> {
     const { pathname } = new URL(request.url);
+
+    if (notePageId(pathname)) {
+      return handleNotePage(request, env, ctx);
+    }
 
     const noteId = noteIdFromWsPath(pathname);
     if (noteId) {
