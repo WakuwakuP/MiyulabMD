@@ -8,6 +8,9 @@ export const markdownProseClass = [
   "[&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-code [&_pre]:px-4 [&_pre]:py-3",
   "[&_code]:font-mono [&_code]:text-[0.9em]",
   "[&_blockquote]:my-[0.75em] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted",
+  "[&_table]:my-[0.75em] [&_table]:w-full [&_table]:border-collapse",
+  "[&_th]:border [&_th]:border-border [&_th]:bg-surface [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold",
+  "[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2",
 ].join(" ");
 
 export const embedClass = [
@@ -42,6 +45,10 @@ export const richEditorProseClass = [
   "[&_.tiptap_a]:underline [&_.tiptap_a]:underline-offset-2",
   "[&_.tiptap_[data-youtube-video]]:my-4 [&_.tiptap_[data-youtube-video]]:aspect-video [&_.tiptap_[data-youtube-video]]:w-[min(100%,40rem)]",
   "[&_.tiptap_[data-youtube-video]_iframe]:size-full [&_.tiptap_[data-youtube-video]_iframe]:rounded-lg [&_.tiptap_[data-youtube-video]_iframe]:border-0",
+  "[&_.tiptap_.tableWrapper]:my-[0.75em] [&_.tiptap_.tableWrapper]:w-full [&_.tiptap_.tableWrapper]:overflow-x-auto",
+  "[&_.tiptap_table]:w-full [&_.tiptap_table]:border-collapse",
+  "[&_.tiptap_th]:border [&_.tiptap_th]:border-border [&_.tiptap_th]:bg-surface [&_.tiptap_th]:px-3 [&_.tiptap_th]:py-2 [&_.tiptap_th]:text-left [&_.tiptap_th]:font-semibold",
+  "[&_.tiptap_td]:border [&_.tiptap_td]:border-border [&_.tiptap_td]:px-3 [&_.tiptap_td]:py-2",
 ].join(" ");
 
 export const richEditorPlaceholderClass = [
