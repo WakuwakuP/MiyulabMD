@@ -40,9 +40,10 @@ export const documentProseClass = [
   "[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2",
   "[&_th_p]:my-0 [&_td_p]:my-0",
   "[&_.embed-og-wrap]:my-4",
-  "[&_.embed-og]:m-0 [&_.embed-og]:flex [&_.embed-og]:gap-3 [&_.embed-og]:rounded-[10px] [&_.embed-og]:border [&_.embed-og]:border-border [&_.embed-og]:bg-surface [&_.embed-og]:p-3 [&_.embed-og]:text-inherit [&_.embed-og]:no-underline",
-  "[&_.embed-og_img]:h-20 [&_.embed-og_img]:w-[7.5rem] [&_.embed-og_img]:rounded-md [&_.embed-og_img]:object-cover",
-  "[&_.embed-og-desc]:mt-1 [&_.embed-og-desc]:text-muted [&_.embed-og_small]:mt-1 [&_.embed-og_small]:text-muted",
+  "[&_.embed-og]:m-0 [&_.embed-og]:flex [&_.embed-og]:w-full [&_.embed-og]:gap-3 [&_.embed-og]:rounded-[10px] [&_.embed-og]:border [&_.embed-og]:border-border [&_.embed-og]:bg-surface [&_.embed-og]:p-3 [&_.embed-og]:text-left [&_.embed-og]:text-inherit [&_.embed-og]:no-underline",
+  "[&_.embed-og_img]:my-3 [&_.embed-og_img]:h-auto [&_.embed-og_img]:w-[7.5rem] [&_.embed-og_img]:shrink-0 [&_.embed-og_img]:rounded-lg [&_.embed-og_img]:object-cover",
+  "[&_.embed-og-desc]:my-[0.2em] [&_.embed-og-desc]:block [&_.embed-og-desc]:text-[0.85rem] [&_.embed-og-desc]:leading-[1.7] [&_.embed-og-desc]:text-muted",
+  "[&_.embed-og_small]:mt-1 [&_.embed-og_small]:block [&_.embed-og_small]:text-muted",
 ].join(" ");
 
 export const markdownProseClass = documentProseClass;
