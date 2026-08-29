@@ -174,14 +174,38 @@ export async function updateFolderAccess(input: {
   return { ok: true, data: (await res.json()) as FolderAccess };
 }
 
+const ogPreviewCache = new Map<string, OgPreview>();
+const ogPreviewInflight = new Map<string, Promise<ApiResult<OgPreview>>>();
+
+export function peekOgPreview(url: string): OgPreview | undefined {
+  return ogPreviewCache.get(url);
+}
+
 export async function fetchOgPreview(
   url: string,
 ): Promise<ApiResult<OgPreview>> {
-  const res = await fetch(`/api/og?url=${encodeURIComponent(url)}`, fetchOpts);
-  if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
-  }
-  return { ok: true, data: (await res.json()) as OgPreview };
+  const cached = ogPreviewCache.get(url);
+  if (cached) return { ok: true, data: cached };
+  const inflight = ogPreviewInflight.get(url);
+  if (inflight) return inflight;
+
+  const pending = (async () => {
+    const res = await fetch(
+      `/api/og?url=${encodeURIComponent(url)}`,
+      fetchOpts,
+    );
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: await parseError(res) };
+    }
+    const data = (await res.json()) as OgPreview;
+    ogPreviewCache.set(url, data);
+    return { ok: true, data } as const;
+  })().finally(() => {
+    ogPreviewInflight.delete(url);
+  });
+
+  ogPreviewInflight.set(url, pending);
+  return pending;
 }
 
 export async function uploadImage(
