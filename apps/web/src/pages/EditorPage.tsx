@@ -24,6 +24,7 @@ import {
   type YjsSession,
 } from "../lib/collaboration.ts";
 import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
+import { loadOgCards } from "../lib/markdown.ts";
 import {
   dismissStaleSsrPreview,
   removeSsrPreview,
@@ -95,6 +96,7 @@ export function EditorPage() {
       });
       hydratedRef.current = true;
       setLoading(false);
+      void loadOgCards(hit.markdown);
     } else {
       hydratedRef.current = false;
       setLoading(true);
@@ -132,6 +134,7 @@ export function EditorPage() {
         hydratedRef.current = true;
       }
       setLoading(false);
+      void loadOgCards(result.data.markdown);
     });
 
     return () => {

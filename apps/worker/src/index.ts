@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { renderMarkdownHtml } from "@miyulabmd/markdown";
+import { collectOgUrls, renderMarkdownHtml } from "@miyulabmd/markdown";
 import { Elysia } from "elysia";
 import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { isAccessConfigured } from "./auth/access.ts";
@@ -16,6 +16,7 @@ import { noteRoutes } from "./routes/notes.ts";
 import { ogRoutes } from "./routes/og.ts";
 import { tokenRoutes } from "./routes/tokens.ts";
 import { createNoteService } from "./services/notes.ts";
+import { peekOgCards, warmOgCards } from "./services/og.ts";
 import {
   injectNotePage,
   isPublicGuestCacheable,
@@ -91,9 +92,18 @@ async function handleNotePage(
   }
 
   const indexHtml = await assets.text();
-  const previewHtml = renderMarkdownHtml(result.note.markdown);
-  const body = injectNotePage(indexHtml, result.note, previewHtml);
-  const publicCache = isPublicGuestCacheable(result.note, Boolean(user));
+  const ogUrls = collectOgUrls(result.note.markdown);
+  const ogCards = await peekOgCards(url.origin, ogUrls);
+  const missingOg = ogUrls.filter((href) => !ogCards.has(href));
+  if (missingOg.length > 0) {
+    ctx.waitUntil(warmOgCards(url.origin, missingOg));
+  }
+  const previewHtml = renderMarkdownHtml(result.note.markdown, ogCards);
+  const ogRecord = Object.fromEntries(ogCards);
+  const body = injectNotePage(indexHtml, result.note, previewHtml, ogRecord);
+  const publicCache =
+    isPublicGuestCacheable(result.note, Boolean(user)) &&
+    missingOg.length === 0;
   const headers = new Headers({
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": publicCache ? "public, s-maxage=30" : "private, no-store",

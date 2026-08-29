@@ -181,6 +181,18 @@ export function peekOgPreview(url: string): OgPreview | undefined {
   return ogPreviewCache.get(url);
 }
 
+export function seedOgPreviews(
+  cards: Record<string, OgPreview> | Map<string, OgPreview>,
+): void {
+  const entries =
+    cards instanceof Map ? cards.entries() : Object.entries(cards);
+  for (const [url, card] of entries) {
+    if (!card) continue;
+    ogPreviewCache.set(url, card);
+    if (card.url) ogPreviewCache.set(card.url, card);
+  }
+}
+
 export async function fetchOgPreview(
   url: string,
 ): Promise<ApiResult<OgPreview>> {

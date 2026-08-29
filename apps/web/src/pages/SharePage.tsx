@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
+import { loadOgCards } from "../lib/markdown.ts";
 import {
   dismissStaleSsrPreview,
   removeSsrPreview,
@@ -27,6 +28,7 @@ export function SharePage() {
       setMarkdown(hit.markdown);
       document.title = `${titleFromMarkdown(hit.markdown)} · MiyulabMD`;
       setLoading(false);
+      void loadOgCards(hit.markdown);
     } else {
       setLoading(true);
     }
@@ -53,6 +55,7 @@ export function SharePage() {
       setMarkdown(result.data.markdown);
       document.title = `${titleFromMarkdown(result.data.markdown)} · MiyulabMD`;
       setLoading(false);
+      void loadOgCards(result.data.markdown);
     });
 
     return () => {
