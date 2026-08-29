@@ -4,9 +4,20 @@ import { cn } from "../../lib/cn.ts";
 import { IconButton } from "./IconButton.tsx";
 import { MoreIcon } from "./icons.tsx";
 
-export function DriveList({ children }: { children: ReactNode }) {
+export function DriveList({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <ul className="m-0 list-none overflow-hidden rounded-xl border border-border bg-canvas p-0">
+    <ul
+      className={cn(
+        "m-0 list-none overflow-hidden rounded-xl border border-border bg-canvas p-0",
+        className,
+      )}
+    >
       {children}
     </ul>
   );
@@ -16,14 +27,18 @@ export function DriveRow({
   href,
   name,
   icon,
+  meta,
   menuOpen,
   onMenu,
+  onPointerEnter,
 }: {
   href: string;
   name: string;
   icon: ReactNode;
+  meta?: ReactNode;
   menuOpen: boolean;
   onMenu: (event: MouseEvent) => void;
+  onPointerEnter?: () => void;
 }) {
   return (
     <li
@@ -35,13 +50,15 @@ export function DriveRow({
     >
       <Link
         to={href}
-        className="flex min-h-12 flex-1 items-center gap-[0.7rem] px-[0.9rem] py-[0.55rem] text-inherit no-underline"
+        className="flex min-h-12 min-w-0 flex-1 items-center gap-[0.7rem] px-[0.9rem] py-[0.55rem] text-inherit no-underline"
+        onPointerEnter={onPointerEnter}
       >
         {icon}
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
           {name}
         </span>
       </Link>
+      {meta ? <span className="mr-1 shrink-0">{meta}</span> : null}
       <IconButton
         className={cn(
           "mr-[0.4rem] size-9 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",

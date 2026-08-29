@@ -163,6 +163,19 @@ export const SLASH_ITEMS: SlashItem[] = [
     run: (editor) => editor.chain().focus().setHorizontalRule().run(),
   },
   {
+    id: "table",
+    label: "表",
+    hint: "テーブル",
+    group: "block",
+    aliases: ["table", "表"],
+    run: (editor) =>
+      editor
+        .chain()
+        .focus()
+        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .run(),
+  },
+  {
     id: "image",
     label: "画像",
     hint: "アップロード",

@@ -38,7 +38,7 @@ export function AppHeader({
   return (
     <header
       className={cn(
-        "grid min-h-[3.25rem] items-center gap-3 border-b border-border bg-surface px-[0.9rem] py-[0.4rem]",
+        "fixed inset-x-0 top-0 z-40 grid min-h-[3.25rem] items-center gap-3 border-b border-border bg-surface px-[0.9rem] py-[0.4rem]",
         actions
           ? "grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] max-[900px]:grid-cols-[1fr_auto]"
           : "grid-cols-[minmax(0,1fr)_auto]",

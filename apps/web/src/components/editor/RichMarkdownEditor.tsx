@@ -1,6 +1,7 @@
 import Image from "@tiptap/extension-image";
 import { NodeRange } from "@tiptap/extension-node-range";
 import Placeholder from "@tiptap/extension-placeholder";
+import { TableKit } from "@tiptap/extension-table";
 import Youtube from "@tiptap/extension-youtube";
 import { Markdown } from "@tiptap/markdown";
 import type { Editor } from "@tiptap/react";
@@ -203,6 +204,9 @@ export function RichMarkdownEditor({
       }),
       NodeRange,
       SafeParagraph,
+      TableKit.configure({
+        table: { resizable: false },
+      }),
       Markdown,
       Image,
       Youtube.configure({
