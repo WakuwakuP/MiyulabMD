@@ -25,12 +25,20 @@ export function AccountMenu({ user }: Props) {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <Avatar name={label} color={colorForEmail(user.email, user.id)} size="md" />
+        <Avatar
+          name={label}
+          color={colorForEmail(user.email, user.id)}
+          size="md"
+        />
       </button>
       {open && (
         <MenuPanel width="18rem">
           <MenuHeader name={label} email={user.email}>
-            <Avatar name={label} color={colorForEmail(user.email, user.id)} size="lg" />
+            <Avatar
+              name={label}
+              color={colorForEmail(user.email, user.id)}
+              size="lg"
+            />
           </MenuHeader>
           <MenuSeparator />
           <MenuItem to="/settings" onClick={() => setOpen(false)}>

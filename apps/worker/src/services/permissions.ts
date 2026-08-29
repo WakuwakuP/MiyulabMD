@@ -2,10 +2,7 @@ import type { Actor, PermissionFlags, SessionUser } from "@miyulabmd/shared";
 import { actorFromUser } from "@miyulabmd/shared";
 
 import { instanceFlags } from "../env.ts";
-import {
-  resolveNoteAccess,
-  type NoteAccessFields,
-} from "./access.ts";
+import { type NoteAccessFields, resolveNoteAccess } from "./access.ts";
 
 export type PermissionContext = {
   ownerId: string;

@@ -10,7 +10,10 @@ export type AccessVerifyResult =
   | { ok: false; reason: string };
 
 function teamIssuer(env: Env): string {
-  const domain = env.ACCESS_TEAM_DOMAIN.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const domain = env.ACCESS_TEAM_DOMAIN.replace(/^https?:\/\//, "").replace(
+    /\/$/,
+    "",
+  );
   return `https://${domain}`;
 }
 
@@ -51,7 +54,10 @@ function stringClaim(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function emailFromPayload(payload: Record<string, unknown>, request: Request): string | null {
+function emailFromPayload(
+  payload: Record<string, unknown>,
+  request: Request,
+): string | null {
   const identity =
     payload.identity && typeof payload.identity === "object"
       ? (payload.identity as Record<string, unknown>)
@@ -66,7 +72,9 @@ function emailFromPayload(payload: Record<string, unknown>, request: Request): s
   );
 }
 
-function displayNameFromPayload(payload: Record<string, unknown>): string | null {
+function displayNameFromPayload(
+  payload: Record<string, unknown>,
+): string | null {
   const identity =
     payload.identity && typeof payload.identity === "object"
       ? (payload.identity as Record<string, unknown>)
@@ -103,7 +111,10 @@ export async function verifyAccessJwt(
       const verified = await jwtVerify(token, jwks, { audience });
       payload = verified.payload as Record<string, unknown>;
       if (firstError instanceof Error) {
-        console.warn("access jwt issuer mismatch, accepted by aud+signature", firstError.message);
+        console.warn(
+          "access jwt issuer mismatch, accepted by aud+signature",
+          firstError.message,
+        );
       }
     }
 

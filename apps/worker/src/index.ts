@@ -4,12 +4,16 @@ import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { isAccessConfigured } from "./auth/access.ts";
 import { readSession } from "./auth/session.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
-import { handleAuthRequest, handleEstablishSession, handleUpdateMe } from "./routes/auth.ts";
+import {
+  handleAuthRequest,
+  handleEstablishSession,
+  handleUpdateMe,
+} from "./routes/auth.ts";
+import { folderRoutes } from "./routes/folders.ts";
 import { imageRoutes } from "./routes/images.ts";
 import { noteRoutes } from "./routes/notes.ts";
-import { tokenRoutes } from "./routes/tokens.ts";
-import { folderRoutes } from "./routes/folders.ts";
 import { ogRoutes } from "./routes/og.ts";
+import { tokenRoutes } from "./routes/tokens.ts";
 import { createNoteService } from "./services/notes.ts";
 
 export { DocumentRoom } from "./durable-objects/DocumentRoom.ts";
@@ -49,7 +53,11 @@ function isElysiaPath(pathname: string): boolean {
 }
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     const noteId = noteIdFromWsPath(pathname);
@@ -69,9 +77,12 @@ export default {
         return new Response("Not found", { status: 404 });
       }
       if (result.kind === "denied") {
-        return new Response(result.status === 401 ? "Unauthorized" : "Forbidden", {
-          status: result.status,
-        });
+        return new Response(
+          result.status === 401 ? "Unauthorized" : "Forbidden",
+          {
+            status: result.status,
+          },
+        );
       }
 
       const note = result.note;
@@ -87,7 +98,10 @@ export default {
         }
       }
 
-      const doRequest = new Request(request.url, { headers, method: request.method });
+      const doRequest = new Request(request.url, {
+        headers,
+        method: request.method,
+      });
       return env.DOCUMENT_ROOM.get(id).fetch(doRequest);
     }
 

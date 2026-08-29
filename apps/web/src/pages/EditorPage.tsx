@@ -15,10 +15,14 @@ import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { cn } from "../lib/cn.ts";
 import { fetchNote, updateNote } from "../lib/api.ts";
-import { applyAwarenessUser, createYjsSession, type YjsSession } from "../lib/collaboration.ts";
-import { writeEditorMode, type EditorMode } from "../lib/editor-mode.ts";
+import { cn } from "../lib/cn.ts";
+import {
+  applyAwarenessUser,
+  createYjsSession,
+  type YjsSession,
+} from "../lib/collaboration.ts";
+import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
 
 function draftFromNote(note: Note): AccessDraft {
   return {
@@ -135,7 +139,10 @@ export function EditorPage() {
       inheritAccess: next.inherit,
       readScope: next.inherit ? null : next.readScope,
       writeScope: next.inherit ? null : next.writeScope,
-      grants: next.grants.map((grant) => ({ email: grant.email, canWrite: grant.canWrite })),
+      grants: next.grants.map((grant) => ({
+        email: grant.email,
+        canWrite: grant.canWrite,
+      })),
     });
     if (!result.ok) {
       setSaveError(result.error);
@@ -202,7 +209,13 @@ export function EditorPage() {
     setHeader({
       layout: "editor",
       title: headingTitle,
-      actions: <EditorModeSwitch value={viewMode} canEdit={canEdit} onChange={handleModeChange} />,
+      actions: (
+        <EditorModeSwitch
+          value={viewMode}
+          canEdit={canEdit}
+          onChange={handleModeChange}
+        />
+      ),
       end: (
         <>
           {awareness && <PresenceBar awareness={awareness} />}
@@ -213,13 +226,27 @@ export function EditorPage() {
             onFolderChange={setFolder}
             onFolderBlur={() => void handleFolderBlur()}
           />
-          <HeaderButton variant="accent" icon={<ShareIcon />} label="共有" onClick={() => setShareOpen(true)} />
+          <HeaderButton
+            variant="accent"
+            icon={<ShareIcon />}
+            label="共有"
+            onClick={() => setShareOpen(true)}
+          />
         </>
       ),
     });
 
     return () => setHeader(null);
-  }, [note, headingTitle, viewMode, canEdit, awareness, folder, isOwner, setHeader]);
+  }, [
+    note,
+    headingTitle,
+    viewMode,
+    canEdit,
+    awareness,
+    folder,
+    isOwner,
+    setHeader,
+  ]);
 
   if (loading || userLoading) {
     return (
@@ -259,7 +286,8 @@ export function EditorPage() {
       <div
         className={cn(
           "grid min-h-0 flex-1 [&>*]:min-h-0",
-          viewMode === "split" && "grid-cols-2 max-[900px]:grid-cols-1 [&>:first-child]:border-r [&>:first-child]:border-border",
+          viewMode === "split" &&
+            "grid-cols-2 max-[900px]:grid-cols-1 [&>:first-child]:border-r [&>:first-child]:border-border",
           viewMode !== "split" && "grid-cols-1",
           viewMode === "preview" &&
             "[[data-layout=editor]_&]:block [[data-layout=editor]_&]:overflow-auto [[data-layout=editor]_&]:bg-preview",
@@ -274,7 +302,9 @@ export function EditorPage() {
               readOnly={!canEdit}
               lineNumbers={viewMode === "source" || viewMode === "split"}
               scrollRatio={viewMode === "split" ? splitScroll : undefined}
-              onScrollRatio={viewMode === "split" ? handleSplitScroll : undefined}
+              onScrollRatio={
+                viewMode === "split" ? handleSplitScroll : undefined
+              }
             />
           ) : (
             <div className={editorLoadingClass}>

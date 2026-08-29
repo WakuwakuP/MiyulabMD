@@ -2,14 +2,17 @@ import type { SessionUser } from "@miyulabmd/shared";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router";
-import { fetchAuthConfig, fetchMe, type AuthConfig } from "../../lib/api.ts";
+import { type AuthConfig, fetchAuthConfig, fetchMe } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext, HeaderLayout } from "./AppShellContext.ts";
 
 export function AppShell() {
   const [user, setUser] = useState<SessionUser | null>(null);
-  const [authConfig, setAuthConfig] = useState<AuthConfig>({ access: false, mock: true });
+  const [authConfig, setAuthConfig] = useState<AuthConfig>({
+    access: false,
+    mock: true,
+  });
   const [loading, setLoading] = useState(true);
   const [headerTitle, setHeaderTitle] = useState<string | undefined>();
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
@@ -26,12 +29,15 @@ export function AppShell() {
       .finally(() => setLoading(false));
   }, []);
 
-  const setHeader = useCallback((next: Parameters<AppShellContext["setHeader"]>[0]) => {
-    setHeaderTitle(next?.title);
-    setHeaderActions(next?.actions ?? null);
-    setHeaderEnd(next?.end ?? null);
-    setLayout(next?.layout ?? "page");
-  }, []);
+  const setHeader = useCallback(
+    (next: Parameters<AppShellContext["setHeader"]>[0]) => {
+      setHeaderTitle(next?.title);
+      setHeaderActions(next?.actions ?? null);
+      setHeaderEnd(next?.end ?? null);
+      setLayout(next?.layout ?? "page");
+    },
+    [],
+  );
 
   const context: AppShellContext = {
     user,
@@ -43,7 +49,10 @@ export function AppShell() {
   return (
     <div
       data-layout={layout}
-      className={cn("flex min-h-dvh flex-col", editor && "h-dvh overflow-hidden")}
+      className={cn(
+        "flex min-h-dvh flex-col",
+        editor && "h-dvh overflow-hidden",
+      )}
     >
       <AppHeader
         title={headerTitle}

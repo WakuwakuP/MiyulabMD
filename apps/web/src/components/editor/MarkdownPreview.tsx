@@ -15,7 +15,12 @@ function scrollRatioFrom(el: HTMLElement): number {
   return max <= 0 ? 0 : el.scrollTop / max;
 }
 
-export function MarkdownPreview({ markdown, scrollRatio, onScrollRatio, className }: Props) {
+export function MarkdownPreview({
+  markdown,
+  scrollRatio,
+  onScrollRatio,
+  className,
+}: Props) {
   const articleRef = useRef<HTMLElement>(null);
   const applyingScroll = useRef(false);
   const [html, setHtml] = useState("");
@@ -72,6 +77,7 @@ export function MarkdownPreview({ markdown, scrollRatio, onScrollRatio, classNam
     <article
       ref={articleRef}
       className={shell}
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: rehype-sanitize 済み
       dangerouslySetInnerHTML={{ __html: html }}
       onScroll={(event) => {
         if (applyingScroll.current) return;

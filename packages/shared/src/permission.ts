@@ -34,8 +34,13 @@ export function isAccessScope(value: string): value is AccessScope {
 }
 
 /** 書き込み範囲は読み取り範囲より広くできない。 */
-export function clampWriteScope(readScope: AccessScope, writeScope: AccessScope): AccessScope {
-  return ACCESS_SCOPE_RANK[writeScope] < ACCESS_SCOPE_RANK[readScope] ? readScope : writeScope;
+export function clampWriteScope(
+  readScope: AccessScope,
+  writeScope: AccessScope,
+): AccessScope {
+  return ACCESS_SCOPE_RANK[writeScope] < ACCESS_SCOPE_RANK[readScope]
+    ? readScope
+    : writeScope;
 }
 
 export type AccessGrant = {
@@ -106,7 +111,10 @@ export function scopesFromPreset(preset: PermissionPreset): {
   }
 }
 
-export function presetFromScopes(readScope: AccessScope, writeScope: AccessScope): PermissionPreset {
+export function presetFromScopes(
+  readScope: AccessScope,
+  writeScope: AccessScope,
+): PermissionPreset {
   const write = clampWriteScope(readScope, writeScope);
   if (write === "public") return "freely";
   if (write === "signed_in") {
@@ -132,7 +140,10 @@ export function actorFromUser(
   return { kind: "signed_in", userId: user.id, email: user.email };
 }
 
-export function grantForActor(grants: AccessGrant[], actor: Actor): AccessGrant | null {
+export function grantForActor(
+  grants: AccessGrant[],
+  actor: Actor,
+): AccessGrant | null {
   if (!actor.userId && !actor.email) return null;
   const email = actor.email?.trim().toLowerCase();
   return (
@@ -184,9 +195,17 @@ export function evaluatePermission(
   const { readScope, writeScope } = scopesFromPreset(preset);
   const grant =
     collaboratorRole === "editor"
-      ? { email: actor.email ?? "", userId: actor.userId ?? null, canWrite: true }
+      ? {
+          email: actor.email ?? "",
+          userId: actor.userId ?? null,
+          canWrite: true,
+        }
       : collaboratorRole === "viewer"
-        ? { email: actor.email ?? "", userId: actor.userId ?? null, canWrite: false }
+        ? {
+            email: actor.email ?? "",
+            userId: actor.userId ?? null,
+            canWrite: false,
+          }
         : null;
   return evaluateAccess(readScope, writeScope, actor, grant);
 }

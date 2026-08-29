@@ -97,13 +97,23 @@ export const SLASH_ITEMS: SlashItem[] = [
 export function matchesSlashItem(item: SlashItem, query: string): boolean {
   const needle = query.toLowerCase();
   if (!needle) return true;
-  return item.label.includes(query) || item.aliases.some((alias) => alias.includes(needle));
+  return (
+    item.label.includes(query) ||
+    item.aliases.some((alias) => alias.includes(needle))
+  );
 }
 
-export function readSlashQuery(editor: Editor): { query: string; from: number; to: number } | null {
+export function readSlashQuery(
+  editor: Editor,
+): { query: string; from: number; to: number } | null {
   const { empty, $from } = editor.state.selection;
   if (!empty || !$from.parent.isTextblock) return null;
-  const text = $from.parent.textBetween(0, $from.parentOffset, undefined, "\uFFFC");
+  const text = $from.parent.textBetween(
+    0,
+    $from.parentOffset,
+    undefined,
+    "\uFFFC",
+  );
   const match = /(^| )\/([^\s/]*)$/.exec(text);
   if (!match) return null;
   const query = match[2] ?? "";

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useOutletContext } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import { Button } from "../components/ui/Button.tsx";
@@ -6,13 +6,13 @@ import { Field, Row } from "../components/ui/Field.tsx";
 import { Input } from "../components/ui/Input.tsx";
 import { ErrorText, MutedText } from "../components/ui/Text.tsx";
 import {
+  type ApiTokenCreated,
+  type ApiTokenSummary,
   createToken,
   fetchMe,
   fetchTokens,
   revokeToken,
   updateProfile,
-  type ApiTokenCreated,
-  type ApiTokenSummary,
 } from "../lib/api.ts";
 
 function formatTimestamp(ms: number | null): string {
@@ -29,7 +29,9 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [createdToken, setCreatedToken] = useState<ApiTokenCreated | null>(null);
+  const [createdToken, setCreatedToken] = useState<ApiTokenCreated | null>(
+    null,
+  );
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [savingProfile, setSavingProfile] = useState(false);
@@ -79,7 +81,11 @@ export function SettingsPage() {
 
     const result = await updateProfile(displayName.trim() || null);
     if (!result.ok) {
-      setError(result.status === 401 ? "表示名を保存するにはログインが必要です。" : result.error);
+      setError(
+        result.status === 401
+          ? "表示名を保存するにはログインが必要です。"
+          : result.error,
+      );
       setSavingProfile(false);
       return;
     }
@@ -102,7 +108,11 @@ export function SettingsPage() {
 
     const result = await createToken(trimmedName);
     if (!result.ok) {
-      setError(result.status === 401 ? "トークンを発行するにはログインが必要です。" : result.error);
+      setError(
+        result.status === 401
+          ? "トークンを発行するにはログインが必要です。"
+          : result.error,
+      );
       setCreating(false);
       return;
     }
@@ -146,12 +156,18 @@ export function SettingsPage() {
                   placeholder={user.email}
                   disabled={savingProfile}
                 />
-                <Button variant="outline" type="submit" disabled={savingProfile}>
+                <Button
+                  variant="outline"
+                  type="submit"
+                  disabled={savingProfile}
+                >
                   {savingProfile ? "保存中…" : "保存"}
                 </Button>
               </Row>
             </Field>
-            {profileSaved && <MutedText className="mt-1">保存しました。</MutedText>}
+            {profileSaved && (
+              <MutedText className="mt-1">保存しました。</MutedText>
+            )}
           </form>
         ) : (
           <ErrorText>表示名を設定するにはログインしてください。</ErrorText>
@@ -161,11 +177,14 @@ export function SettingsPage() {
       <section className="mt-6">
         <h2 className="text-[1.5em] font-bold">MCP 用 Personal Access Token</h2>
         <p>
-          Cursor などの MCP クライアントから <code className="font-mono">/mcp</code> に接続するためのトークンです。
+          Cursor などの MCP クライアントから{" "}
+          <code className="font-mono">/mcp</code> に接続するためのトークンです。
           発行時に一度だけ表示されます。
         </p>
 
-        {loggedIn === false && <ErrorText>トークンを管理するにはログインしてください。</ErrorText>}
+        {loggedIn === false && (
+          <ErrorText>トークンを管理するにはログインしてください。</ErrorText>
+        )}
 
         {error && <ErrorText>{error}</ErrorText>}
 
@@ -191,11 +210,17 @@ export function SettingsPage() {
             </form>
 
             {createdToken && (
-              <div className="my-4 rounded-md border border-border bg-surface px-4 py-3" role="status">
+              <div
+                className="my-4 rounded-md border border-border bg-surface px-4 py-3"
+                role="status"
+              >
                 <p>
-                  <strong>{createdToken.name}</strong> を発行しました。この値は再表示できません。
+                  <strong>{createdToken.name}</strong>{" "}
+                  を発行しました。この値は再表示できません。
                 </p>
-                <code className="my-2 block break-all font-mono">{createdToken.token}</code>
+                <code className="my-2 block break-all font-mono">
+                  {createdToken.token}
+                </code>
                 <Button variant="outline" onClick={() => setCreatedToken(null)}>
                   閉じる
                 </Button>
@@ -209,14 +234,21 @@ export function SettingsPage() {
             ) : (
               <ul className="list-none p-0">
                 {tokens.map((token) => (
-                  <li key={token.id} className="flex justify-between gap-4 border-b border-border py-3">
+                  <li
+                    key={token.id}
+                    className="flex justify-between gap-4 border-b border-border py-3"
+                  >
                     <div>
                       <strong>{token.name}</strong>
                       <MutedText className="mt-1">
-                        作成: {formatTimestamp(token.createdAt)} / 最終利用: {formatTimestamp(token.lastUsedAt)}
+                        作成: {formatTimestamp(token.createdAt)} / 最終利用:{" "}
+                        {formatTimestamp(token.lastUsedAt)}
                       </MutedText>
                     </div>
-                    <Button variant="outline" onClick={() => void handleRevoke(token.id)}>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleRevoke(token.id)}
+                    >
                       失効
                     </Button>
                   </li>

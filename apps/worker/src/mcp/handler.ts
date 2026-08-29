@@ -1,5 +1,5 @@
-import { createMcpHandler } from "agents/mcp/server";
 import { env } from "cloudflare:workers";
+import { createMcpHandler } from "agents/mcp/server";
 
 import { authenticateBearer } from "../auth/tokens.ts";
 import { createMcpServerFactory } from "./tools.ts";

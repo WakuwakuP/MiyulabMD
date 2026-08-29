@@ -24,7 +24,11 @@ export function MenuPanel({
 }: PanelProps) {
   return (
     <div
-      className={cn(panelClass, "absolute top-[calc(100%+0.45rem)]", align === "end" ? "right-0" : "left-0")}
+      className={cn(
+        panelClass,
+        "absolute top-[calc(100%+0.45rem)]",
+        align === "end" ? "right-0" : "left-0",
+      )}
       role={role}
       aria-labelledby={labelledBy}
       style={{ minWidth: width, ...style }}
@@ -46,7 +50,11 @@ export function MenuFixed({
   role?: "menu";
 }) {
   return (
-    <div className={cn(panelClass, "fixed")} role={role} style={{ left: x, top: y }}>
+    <div
+      className={cn(panelClass, "fixed")}
+      role={role}
+      style={{ left: x, top: y }}
+    >
       {children}
     </div>
   );
@@ -61,7 +69,14 @@ type ItemProps = {
   href?: string;
 };
 
-export function MenuItem({ children, active, danger, onClick, to, href }: ItemProps) {
+export function MenuItem({
+  children,
+  active,
+  danger,
+  onClick,
+  to,
+  href,
+}: ItemProps) {
   const className = cn(
     "block w-full cursor-pointer border-0 bg-transparent px-4 py-2 text-left text-inherit no-underline",
     "hover:bg-surface",
@@ -86,7 +101,12 @@ export function MenuItem({ children, active, danger, onClick, to, href }: ItemPr
   }
 
   return (
-    <button type="button" role="menuitem" className={className} onClick={onClick}>
+    <button
+      type="button"
+      role="menuitem"
+      className={className}
+      onClick={onClick}
+    >
       {children}
     </button>
   );
@@ -96,7 +116,15 @@ export function MenuSeparator() {
   return <hr className="my-[0.35rem] h-px border-0 bg-border" />;
 }
 
-export function MenuHeader({ name, email, children }: { name: string; email: string; children: ReactNode }) {
+export function MenuHeader({
+  name,
+  email,
+  children,
+}: {
+  name: string;
+  email: string;
+  children: ReactNode;
+}) {
   return (
     <div className="flex flex-col items-center gap-[0.45rem] px-[1.15rem] pt-4 pb-[0.85rem] text-center">
       {children}

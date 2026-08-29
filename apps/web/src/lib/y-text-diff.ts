@@ -13,7 +13,11 @@ export type YTextDeltaItem = {
 
 const STRUCTURAL = /[\n`*_#[\]()!<>]/;
 
-export function applyTextDiff(yText: Y.Text, next: string, origin?: unknown): boolean {
+export function applyTextDiff(
+  yText: Y.Text,
+  next: string,
+  origin?: unknown,
+): boolean {
   const current = yText.toString();
   if (current === next) return false;
 
@@ -37,7 +41,10 @@ export function applyTextDiff(yText: Y.Text, next: string, origin?: unknown): bo
 
 export function inspectPlainTextDelta(
   delta: YTextDeltaItem[],
-): { kind: "insert"; index: number; text: string } | { kind: "delete"; index: number; length: number } | null {
+):
+  | { kind: "insert"; index: number; text: string }
+  | { kind: "delete"; index: number; length: number }
+  | null {
   let index = 0;
   let found:
     | { kind: "insert"; index: number; text: string }

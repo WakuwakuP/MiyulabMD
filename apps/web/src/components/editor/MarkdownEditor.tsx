@@ -1,12 +1,17 @@
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
-import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from "@codemirror/view";
+import {
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  lineNumbers,
+} from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import { yCollab } from "y-codemirror.next";
 import * as Y from "yjs";
-import type { CollabAwareness } from "../../lib/collaboration.ts";
 import { uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
+import type { CollabAwareness } from "../../lib/collaboration.ts";
 import { ContextMenu } from "../notes/ContextMenu.tsx";
 import { FileInput } from "../ui/FileInput.tsx";
 
@@ -20,7 +25,12 @@ type Props = {
   onScrollRatio?: (ratio: number) => void;
 };
 
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
 
 function imageFileFromClipboard(data: DataTransfer | null): File | null {
   if (!data) return null;
@@ -137,7 +147,9 @@ export function MarkdownEditor({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const onContextMenuRef = useRef<(event: MouseEvent, view: EditorView) => void>(() => undefined);
+  const onContextMenuRef = useRef<
+    (event: MouseEvent, view: EditorView) => void
+  >(() => undefined);
   const onScrollRatioRef = useRef(onScrollRatio);
   const applyingScroll = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -157,7 +169,9 @@ export function MarkdownEditor({
       doc: yText.toString(),
       extensions: [
         markdown(),
-        ...(showLineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
+        ...(showLineNumbers
+          ? [lineNumbers(), highlightActiveLineGutter()]
+          : []),
         highlightActiveLine(),
         EditorView.lineWrapping,
         EditorView.theme({

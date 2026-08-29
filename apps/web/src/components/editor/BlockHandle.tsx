@@ -2,7 +2,11 @@ import type { Editor } from "@tiptap/react";
 import { useEffect, useRef, useState } from "react";
 import { IconButton } from "../ui/IconButton.tsx";
 import { CommandMenuList } from "./CommandMenuList.tsx";
-import { readSlashQuery, SLASH_ITEMS, type SlashCommandHandlers } from "./slash-items.ts";
+import {
+  readSlashQuery,
+  SLASH_ITEMS,
+  type SlashCommandHandlers,
+} from "./slash-items.ts";
 
 type Pos = { top: number; left: number };
 
@@ -76,7 +80,9 @@ export function BlockHandle({ editor, handlers }: Props) {
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setIndex((value) => (value - 1 + SLASH_ITEMS.length) % SLASH_ITEMS.length);
+        setIndex(
+          (value) => (value - 1 + SLASH_ITEMS.length) % SLASH_ITEMS.length,
+        );
         return;
       }
       if (event.key === "Enter") {
@@ -104,7 +110,11 @@ export function BlockHandle({ editor, handlers }: Props) {
   if (!pos) return null;
 
   return (
-    <div ref={rootRef} className="fixed z-[25]" style={{ top: pos.top, left: pos.left }}>
+    <div
+      ref={rootRef}
+      className="fixed z-[25]"
+      style={{ top: pos.top, left: pos.left }}
+    >
       <IconButton
         variant="outline"
         size="sm"

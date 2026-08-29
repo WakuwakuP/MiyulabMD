@@ -4,11 +4,20 @@ import { Editor } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
 import { canonicalizeEditorMarkdown } from "./embeds.ts";
-import { buildOffsetMap, mapThrough, markdownEquivalent, mdToPm, pmToMd } from "./markdown-pm-map.ts";
+import {
+  buildOffsetMap,
+  mapThrough,
+  markdownEquivalent,
+  mdToPm,
+  pmToMd,
+} from "./markdown-pm-map.ts";
 
 function editorFor(markdown: string): Editor {
   return new Editor({
-    extensions: [StarterKit.configure({ link: { openOnClick: false } }), Markdown],
+    extensions: [
+      StarterKit.configure({ link: { openOnClick: false } }),
+      Markdown,
+    ],
     content: markdown,
     contentType: "markdown",
   });
@@ -80,7 +89,8 @@ test("list markers map to the item text", () => {
 
 test("markdownEquivalent ignores youtube default attrs and shorthand", () => {
   const source = "![youtube](https://www.youtube.com/watch?v=jNQXAC9IVRw)\n";
-  const editor = ':::youtube {src="https://www.youtube.com/watch?v=jNQXAC9IVRw" width="640" height="360" start="0"} :::';
+  const editor =
+    ':::youtube {src="https://www.youtube.com/watch?v=jNQXAC9IVRw" width="640" height="360" start="0"} :::';
   assert.equal(markdownEquivalent(source, editor), true);
   assert.equal(
     canonicalizeEditorMarkdown(editor),

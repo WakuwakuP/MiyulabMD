@@ -12,7 +12,10 @@ export type OffsetMap = {
 };
 
 export function markdownEquivalent(a: string, b: string): boolean {
-  return stripTrailing(canonicalizeEditorMarkdown(a)) === stripTrailing(canonicalizeEditorMarkdown(b));
+  return (
+    stripTrailing(canonicalizeEditorMarkdown(a)) ===
+    stripTrailing(canonicalizeEditorMarkdown(b))
+  );
 }
 
 function stripTrailing(value: string): string {
@@ -89,14 +92,24 @@ export function alignTextSegments(
   });
 }
 
-function atomNeedle(name: string, attrs: Record<string, unknown>): string | null {
+function atomNeedle(
+  name: string,
+  attrs: Record<string, unknown>,
+): string | null {
   if (name === "image") return typeof attrs.src === "string" ? attrs.src : null;
-  if (name === "youtube") return typeof attrs.src === "string" ? attrs.src : null;
-  if (name === "ogCard") return typeof attrs.href === "string" ? attrs.href : null;
+  if (name === "youtube")
+    return typeof attrs.src === "string" ? attrs.src : null;
+  if (name === "ogCard")
+    return typeof attrs.href === "string" ? attrs.href : null;
   return null;
 }
 
-function atomBounds(markdown: string, name: string, idx: number, needle: string): { start: number; end: number } {
+function atomBounds(
+  markdown: string,
+  name: string,
+  idx: number,
+  needle: string,
+): { start: number; end: number } {
   if (name === "image") {
     const start = markdown.lastIndexOf("![", idx);
     const end = markdown.indexOf(")", idx + needle.length);
@@ -144,7 +157,11 @@ function skipNewlines(markdown: string, index: number): number {
 function skipMarkWrappers(markdown: string, index: number): number {
   let next = index;
   while (next < markdown.length) {
-    if (startsWith(markdown, next, "**") || startsWith(markdown, next, "__") || startsWith(markdown, next, "~~")) {
+    if (
+      startsWith(markdown, next, "**") ||
+      startsWith(markdown, next, "__") ||
+      startsWith(markdown, next, "~~")
+    ) {
       next += 2;
       continue;
     }
@@ -180,7 +197,11 @@ function consumeHeadingOpen(markdown: string, index: number): number {
 }
 
 function consumeFenceOpen(markdown: string, index: number): number {
-  if (!startsWith(markdown, index, "```") && !startsWith(markdown, index, "~~~")) return index;
+  if (
+    !startsWith(markdown, index, "```") &&
+    !startsWith(markdown, index, "~~~")
+  )
+    return index;
   const newline = markdown.indexOf("\n", index);
   return newline === -1 ? markdown.length : newline + 1;
 }
@@ -199,7 +220,11 @@ function consumeFenceClose(markdown: string, index: number): number {
 function consumeListMarker(markdown: string, index: number): number {
   let next = index;
   while (markdown[next] === " " || markdown[next] === "\t") next += 1;
-  if (markdown[next] === "-" || markdown[next] === "*" || markdown[next] === "+") {
+  if (
+    markdown[next] === "-" ||
+    markdown[next] === "*" ||
+    markdown[next] === "+"
+  ) {
     if (markdown[next + 1] === " ") return next + 2;
   }
   const digits = markdown.slice(next).match(/^\d+\. /);
@@ -244,7 +269,10 @@ export function buildOffsetMap(doc: PMNode, markdown: string): OffsetMap {
       return;
     }
 
-    const needle = atomNeedle(node.type.name, node.attrs as Record<string, unknown>);
+    const needle = atomNeedle(
+      node.type.name,
+      node.attrs as Record<string, unknown>,
+    );
     if (needle) {
       const idx = markdown.indexOf(needle, md);
       if (idx === -1) return;
@@ -297,7 +325,10 @@ export function buildOffsetMap(doc: PMNode, markdown: string): OffsetMap {
 
 function buildPointsFromWalk(
   markdown: string,
-  walk: (emit: (pm: number, md: number) => void, advance: (md: number) => void) => void,
+  walk: (
+    emit: (pm: number, md: number) => void,
+    advance: (md: number) => void,
+  ) => void,
 ): OffsetPoint[] {
   const points: OffsetPoint[] = [{ pm: 0, md: 0 }];
   walk(

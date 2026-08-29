@@ -22,14 +22,19 @@ test("paragraph markdown like ## stays a paragraph after reload", () => {
     ],
     content: {
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "## aaaaa" }] }],
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "## aaaaa" }] },
+      ],
     },
   });
 
   const markdown = editor.getMarkdown();
   assert.match(markdown, /\\#\\# aaaaa/);
 
-  editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
+  editor.commands.setContent(markdown, {
+    contentType: "markdown",
+    emitUpdate: false,
+  });
   assert.equal(editor.state.doc.firstChild?.type.name, "paragraph");
   assert.equal(editor.state.doc.textContent, "## aaaaa");
   editor.destroy();

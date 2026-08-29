@@ -53,7 +53,11 @@ export const imageRoutes = new Elysia({ prefix: "/api/notes" })
   })
   .get("/:id/images/:imageId", async ({ request, params, set }) => {
     const user = await readSession(request, env);
-    const result = await images.get(params.id, params.imageId, user ?? undefined);
+    const result = await images.get(
+      params.id,
+      params.imageId,
+      user ?? undefined,
+    );
 
     if (result.kind === "not_found") {
       set.status = 404;
