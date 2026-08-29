@@ -1,9 +1,11 @@
 import type { Editor } from "@tiptap/react";
+import { Bold, Code, Italic, Link, Strikethrough } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import { cn } from "../../lib/cn.ts";
 import { ChevronDownIcon } from "../ui/icons.tsx";
 import { MenuItem, MenuPanel } from "../ui/Menu.tsx";
+import { SlashItemIcon } from "./slash-icons.tsx";
 import {
   applyBlockType,
   BLOCK_TYPES,
@@ -105,7 +107,10 @@ export function SelectionToolbar({ editor, onLink }: Props) {
                 active={item.id === activeType}
                 onClick={() => turnInto(item.id)}
               >
-                {item.label}
+                <span className="flex items-center gap-2">
+                  <SlashItemIcon id={item.id} />
+                  {item.label}
+                </span>
               </MenuItem>
             ))}
           </MenuPanel>
@@ -114,58 +119,73 @@ export function SelectionToolbar({ editor, onLink }: Props) {
       <span className="mx-[0.1rem] h-5 w-px bg-border" />
       <button
         type="button"
-        className={cn(itemClass(editor.isActive("bold")), "font-bold")}
+        className={cn(
+          itemClass(editor.isActive("bold")),
+          "grid place-items-center",
+        )}
         aria-label="太字"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleBold().run();
         }}
       >
-        B
+        <Bold aria-hidden className="size-4" />
       </button>
       <button
         type="button"
-        className={cn(itemClass(editor.isActive("italic")), "italic")}
+        className={cn(
+          itemClass(editor.isActive("italic")),
+          "grid place-items-center",
+        )}
         aria-label="斜体"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleItalic().run();
         }}
       >
-        I
+        <Italic aria-hidden className="size-4" />
       </button>
       <button
         type="button"
-        className={cn(itemClass(editor.isActive("strike")), "line-through")}
+        className={cn(
+          itemClass(editor.isActive("strike")),
+          "grid place-items-center",
+        )}
         aria-label="打ち消し"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleStrike().run();
         }}
       >
-        S
+        <Strikethrough aria-hidden className="size-4" />
       </button>
       <button
         type="button"
-        className={itemClass(editor.isActive("code"))}
+        className={cn(
+          itemClass(editor.isActive("code")),
+          "grid place-items-center",
+        )}
         aria-label="コード"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleCode().run();
         }}
       >
-        {"</>"}
+        <Code aria-hidden className="size-4" />
       </button>
       <button
         type="button"
-        className={itemClass(editor.isActive("link"))}
+        className={cn(
+          itemClass(editor.isActive("link")),
+          "grid place-items-center",
+        )}
         aria-label="リンク"
         onMouseDown={(event) => {
           event.preventDefault();
           onLink();
         }}
       >
-        リンク
+        <Link aria-hidden className="size-4" />
       </button>
     </div>
   );
