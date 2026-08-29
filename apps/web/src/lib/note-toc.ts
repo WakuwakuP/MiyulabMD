@@ -1,5 +1,8 @@
 import GithubSlugger from "github-slugger";
 
+/** Matches rehype-sanitize default `clobberPrefix`. */
+export const TOC_ID_PREFIX = "user-content-";
+
 export type TocEntry = {
   level: 1 | 2 | 3;
   text: string;
@@ -42,7 +45,7 @@ export function extractNoteToc(markdown: string): TocEntry[] {
     entries.push({
       level,
       text,
-      id: slugger.slug(text),
+      id: `${TOC_ID_PREFIX}${slugger.slug(text)}`,
     });
   }
 

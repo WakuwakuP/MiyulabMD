@@ -90,18 +90,24 @@ export function PreviewWithToc({
   return (
     <div
       ref={layoutRef}
-      className="flex w-full justify-center px-4 [[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))] [[data-layout=editor]_&]:bg-preview"
+      className="relative w-full [[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))] [[data-layout=editor]_&]:bg-preview"
     >
-      <div className="flex w-full max-w-[calc(46rem+12rem+4rem)] items-start justify-center gap-8">
-        <MarkdownPreview
-          markdown={markdown}
-          scrollRatio={scrollRatio}
-          onScrollRatio={onScrollRatio}
-          documentScroll={documentScroll}
-          className={cardClass}
-        />
-        {showToc && entries.length > 0 && <TocNav entries={entries} />}
-      </div>
+      <MarkdownPreview
+        markdown={markdown}
+        scrollRatio={scrollRatio}
+        onScrollRatio={onScrollRatio}
+        documentScroll={documentScroll}
+        className={cardClass}
+      />
+      {showToc && entries.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
+          <div className="relative w-[min(calc(100%-2rem),46rem)]">
+            <div className="pointer-events-auto absolute top-6 left-full ml-8">
+              <TocNav entries={entries} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
