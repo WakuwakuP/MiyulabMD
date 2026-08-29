@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useOutletContext } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
+import { McpClientGuide } from "../components/settings/McpClientGuide.tsx";
+import { McpSetupHelp } from "../components/settings/McpSetupHelp.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { Field, Row } from "../components/ui/Field.tsx";
 import { Input } from "../components/ui/Input.tsx";
@@ -137,7 +139,7 @@ export function SettingsPage() {
   }
 
   return (
-    <section className="max-w-xl">
+    <section className="max-w-2xl">
       <section className="mt-6">
         <h2 className="text-[1.5em] font-bold">プロフィール</h2>
         <p>
@@ -177,9 +179,9 @@ export function SettingsPage() {
       <section className="mt-6">
         <h2 className="text-[1.5em] font-bold">MCP 用 Personal Access Token</h2>
         <p>
-          Cursor などの MCP クライアントから{" "}
+          Cursor / Claude Code / VS Code などの MCP クライアントから{" "}
           <code className="font-mono">/mcp</code> に接続するためのトークンです。
-          発行時に一度だけ表示されます。
+          発行時に接続先とクライアント別の設定を一度だけ表示します。
         </p>
 
         {loggedIn === false && (
@@ -209,22 +211,15 @@ export function SettingsPage() {
               </Field>
             </form>
 
-            {createdToken && (
-              <div
-                className="my-4 rounded-md border border-border bg-surface px-4 py-3"
-                role="status"
-              >
-                <p>
-                  <strong>{createdToken.name}</strong>{" "}
-                  を発行しました。この値は再表示できません。
-                </p>
-                <code className="my-2 block break-all font-mono">
-                  {createdToken.token}
-                </code>
-                <Button variant="outline" onClick={() => setCreatedToken(null)}>
-                  閉じる
-                </Button>
-              </div>
+            {createdToken ? (
+              <McpSetupHelp
+                origin={window.location.origin}
+                token={createdToken.token}
+                tokenName={createdToken.name}
+                onClose={() => setCreatedToken(null)}
+              />
+            ) : (
+              <McpClientGuide origin={window.location.origin} />
             )}
 
             {loading ? (
