@@ -1,13 +1,17 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { Outlet } from "react-router";
+import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig, fetchMe } from "../../lib/api.ts";
-import { cn } from "../../lib/cn.ts";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext, HeaderLayout } from "./AppShellContext.ts";
 
+function isEditorPath(pathname: string): boolean {
+  return pathname.startsWith("/n/") || pathname.startsWith("/s/");
+}
+
 export function AppShell() {
+  const { pathname } = useLocation();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [authConfig, setAuthConfig] = useState<AuthConfig>({
     access: false,
@@ -18,7 +22,7 @@ export function AppShell() {
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [layout, setLayout] = useState<HeaderLayout>("page");
-  const editor = layout === "editor";
+  const editor = isEditorPath(pathname) || layout === "editor";
 
   useEffect(() => {
     Promise.all([fetchMe(), fetchAuthConfig()])
@@ -47,7 +51,10 @@ export function AppShell() {
   };
 
   return (
-    <div data-layout={layout} className="flex min-h-dvh flex-col">
+    <div
+      data-layout={editor ? "editor" : "page"}
+      className="flex min-h-dvh flex-col"
+    >
       <AppHeader
         title={headerTitle}
         actions={headerActions}
@@ -57,10 +64,11 @@ export function AppShell() {
         authConfig={authConfig}
       />
       <main
-        className={cn(
-          "mx-auto w-full max-w-[1400px] flex-1 p-5 pt-[calc(var(--header-height)+1.25rem)]",
-          editor && "m-0 max-w-none p-0 pt-[var(--header-height)]",
-        )}
+        className={
+          editor
+            ? "w-full flex-1 pt-[var(--header-height)]"
+            : "mx-auto w-full max-w-[1400px] flex-1 p-5 pt-[calc(var(--header-height)+1.25rem)]"
+        }
       >
         <Outlet context={context} />
       </main>
