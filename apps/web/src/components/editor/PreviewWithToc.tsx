@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import {
   extractNoteToc,
@@ -64,7 +64,11 @@ export function PreviewWithToc({
 }: Props) {
   const layoutRef = useRef<HTMLDivElement>(null);
   const [showToc, setShowToc] = useState(false);
-  const entries = extractNoteToc(markdown);
+  const deferredMarkdown = useDeferredValue(markdown);
+  const entries = useMemo(
+    () => extractNoteToc(deferredMarkdown),
+    [deferredMarkdown],
+  );
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1200px)");

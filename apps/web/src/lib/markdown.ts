@@ -5,7 +5,7 @@ import rehypeStringify from "rehype-stringify";
 import { remark } from "remark";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
-import { fetchOgPreview } from "./api.ts";
+import { fetchOgPreview, peekOgPreview } from "./api.ts";
 import {
   collectOgUrls,
   expandEmbedsForPreview,
@@ -53,23 +53,51 @@ const schema = {
   },
 };
 
-export async function renderMarkdown(markdown: string): Promise<string> {
-  const normalized = normalizeEmbedMarkdown(markdown);
+const processor = remark()
+  .use(remarkGfm)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeRaw)
+  .use(rehypeSlug)
+  .use(rehypeSanitize, schema)
+  .use(rehypeStringify);
+
+function ogUrls(markdown: string): string[] {
+  return collectOgUrls(normalizeEmbedMarkdown(markdown));
+}
+
+export function peekOgCards(markdown: string): Map<string, OgPreview> {
+  const cards = new Map<string, OgPreview>();
+  for (const url of ogUrls(markdown)) {
+    const card = peekOgPreview(url);
+    if (card) cards.set(url, card);
+  }
+  return cards;
+}
+
+export function renderMarkdownHtml(
+  markdown: string,
+  cards: Map<string, OgPreview> = peekOgCards(markdown),
+): string {
+  const expanded = expandEmbedsForPreview(
+    normalizeEmbedMarkdown(markdown),
+    cards,
+  );
+  return String(processor.processSync(expanded));
+}
+
+export async function loadOgCards(
+  markdown: string,
+): Promise<Map<string, OgPreview>> {
   const cards = new Map<string, OgPreview>();
   await Promise.all(
-    collectOgUrls(normalized).map(async (url) => {
+    ogUrls(markdown).map(async (url) => {
       const result = await fetchOgPreview(url);
       if (result.ok) cards.set(url, result.data);
     }),
   );
-  const expanded = expandEmbedsForPreview(normalized, cards);
-  const file = await remark()
-    .use(remarkGfm)
-    .use(remarkRehype, { allowDangerousHtml: true })
-    .use(rehypeRaw)
-    .use(rehypeSlug)
-    .use(rehypeSanitize, schema)
-    .use(rehypeStringify)
-    .process(expanded);
-  return String(file);
+  return cards;
+}
+
+export async function renderMarkdown(markdown: string): Promise<string> {
+  return renderMarkdownHtml(markdown, await loadOgCards(markdown));
 }
