@@ -35,9 +35,11 @@ import {
 } from "../../lib/y-text-diff.ts";
 import { FileInput } from "../ui/FileInput.tsx";
 import {
+  documentScrollPadClass,
   editorLoadingClass,
   richEditorPlaceholderClass,
   richEditorProseClass,
+  richEditorTiptapClass,
 } from "../ui/prose.ts";
 import { BlockHandle } from "./BlockHandle.tsx";
 import { AutoLinkCard } from "./extensions/auto-link-card.ts";
@@ -234,6 +236,9 @@ export function RichMarkdownEditor({
     content: normalizeEmbedMarkdown(yText.toString()),
     contentType: "markdown",
     editorProps: {
+      attributes: {
+        class: richEditorTiptapClass,
+      },
       handleDOMEvents: {
         compositionstart: () => {
           composing.current = true;
@@ -380,8 +385,8 @@ export function RichMarkdownEditor({
       <EditorContent
         editor={editor}
         className={cn(
-          "rich-editor-content flex flex-1 justify-center overflow-auto px-5 py-4",
-          "[[data-layout=editor]_&_.tiptap]:w-[min(100%,46rem)] [[data-layout=editor]_&_.tiptap]:px-6 [[data-layout=editor]_&_.tiptap]:py-10 [[data-layout=editor]_&_.tiptap]:pl-14 [[data-layout=editor]_&_.tiptap]:pb-24",
+          "rich-editor-content flex flex-1 justify-center overflow-auto",
+          documentScrollPadClass,
           richEditorProseClass,
           richEditorPlaceholderClass,
         )}
