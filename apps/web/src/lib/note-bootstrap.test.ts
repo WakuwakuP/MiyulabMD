@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { peekOgPreview } from "./api.ts";
 import {
+  consumeOgBootstrap,
   dismissStaleSsrPreview,
   readNoteBootstrap,
   removeSsrPreview,
@@ -60,6 +62,30 @@ test("readNoteBootstrap accepts matching id or shortId", () => {
     assert.equal(readNoteBootstrap("note-1")?.id, "note-1");
     assert.equal(readNoteBootstrap("abc123")?.id, "note-1");
     assert.equal(readNoteBootstrap("other"), null);
+  } finally {
+    restore();
+  }
+});
+
+test("consumeOgBootstrap seeds the client OG cache", () => {
+  elementsRef = {
+    "og-bootstrap": el(
+      {},
+      JSON.stringify({
+        "https://x.com/norotororo": {
+          url: "https://x.com/norotororo",
+          title: "noro",
+          description: null,
+          image: null,
+          siteName: "X",
+        },
+      }),
+    ),
+  };
+  const restore = installDocument(elementsRef);
+  try {
+    consumeOgBootstrap();
+    assert.equal(peekOgPreview("https://x.com/norotororo")?.title, "noro");
   } finally {
     restore();
   }
