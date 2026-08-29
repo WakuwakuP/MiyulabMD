@@ -1,8 +1,9 @@
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import type { Editor } from "@tiptap/react";
+import { GripVertical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
-import { GripIcon, PlusIcon } from "../ui/icons.tsx";
+import { PlusIcon } from "../ui/icons.tsx";
 import { CommandMenuList } from "./CommandMenuList.tsx";
 import {
   readSlashQuery,
@@ -118,9 +119,9 @@ export function BlockHandle({ editor, handlers }: Props) {
           </button>
           <span
             className="grid size-6 cursor-grab place-items-center rounded-md hover:bg-surface hover:text-ink active:cursor-grabbing"
-            aria-hidden
+            aria-label="ブロックを移動"
           >
-            <GripIcon className="size-3.5" />
+            <GripVertical aria-hidden className="size-4" />
           </span>
         </div>
       </DragHandle>
