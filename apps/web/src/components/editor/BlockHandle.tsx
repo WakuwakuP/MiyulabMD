@@ -1,6 +1,8 @@
+import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import type { Editor } from "@tiptap/react";
 import { useEffect, useRef, useState } from "react";
-import { IconButton } from "../ui/IconButton.tsx";
+import { cn } from "../../lib/cn.ts";
+import { GripIcon, PlusIcon } from "../ui/icons.tsx";
 import { CommandMenuList } from "./CommandMenuList.tsx";
 import {
   readSlashQuery,
@@ -8,59 +10,29 @@ import {
   type SlashCommandHandlers,
 } from "./slash-items.ts";
 
-type Pos = { top: number; left: number };
-
-function readHandlePos(editor: Editor): Pos | null {
-  const { empty, $from } = editor.state.selection;
-  if (!empty || readSlashQuery(editor)) return null;
-  if (!$from.parent.isTextblock) return null;
-
-  const start = $from.start();
-  const coords = editor.view.coordsAtPos(start);
-  const wrap = editor.view.dom.getBoundingClientRect();
-  const scroller = editor.view.dom.closest(".rich-editor-content");
-  if (scroller) {
-    const rect = scroller.getBoundingClientRect();
-    if (coords.top < rect.top + 4 || coords.top > rect.bottom - 8) return null;
-  }
-
-  return {
-    top: coords.top + (coords.bottom - coords.top) / 2 - 12,
-    left: wrap.left + 6,
-  };
-}
-
 type Props = {
   editor: Editor;
   handlers: SlashCommandHandlers;
 };
 
 export function BlockHandle({ editor, handlers }: Props) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<Pos | null>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(
+    null,
+  );
 
   useEffect(() => {
-    const sync = () => {
-      const next = readHandlePos(editor);
-      setPos(next);
-      if (!next) {
-        setOpen(false);
-        setIndex(0);
-      }
-    };
+    const sync = () => setSlashOpen(Boolean(readSlashQuery(editor)));
     editor.on("update", sync);
     editor.on("selectionUpdate", sync);
-    const scroller = editor.view.dom.closest(".rich-editor-content");
-    scroller?.addEventListener("scroll", sync);
-    window.addEventListener("resize", sync);
     sync();
     return () => {
       editor.off("update", sync);
       editor.off("selectionUpdate", sync);
-      scroller?.removeEventListener("scroll", sync);
-      window.removeEventListener("resize", sync);
     };
   }, [editor]);
 
@@ -68,7 +40,13 @@ export function BlockHandle({ editor, handlers }: Props) {
     if (!open) return;
 
     function onPointer(event: MouseEvent) {
-      if (rootRef.current?.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      if (
+        handleRef.current?.contains(target) ||
+        menuRef.current?.contains(target)
+      ) {
+        return;
+      }
       setOpen(false);
     }
 
@@ -107,40 +85,59 @@ export function BlockHandle({ editor, handlers }: Props) {
     };
   }, [editor, handlers, index, open]);
 
-  if (!pos) return null;
+  function toggleMenu() {
+    const rect = handleRef.current?.getBoundingClientRect();
+    setMenuPos(
+      rect ? { left: rect.right + 6, top: rect.top } : { left: 0, top: 0 },
+    );
+    setOpen((value) => !value);
+    setIndex(0);
+  }
 
   return (
-    <div
-      ref={rootRef}
-      className="fixed z-[25]"
-      style={{ top: pos.top, left: pos.left }}
-    >
-      <IconButton
-        variant="outline"
-        size="sm"
-        className="aria-expanded:bg-surface aria-expanded:text-ink"
-        aria-label="ブロックコマンド"
-        aria-expanded={open}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          setOpen((value) => !value);
-          setIndex(0);
-        }}
+    <>
+      <DragHandle
+        editor={editor}
+        nested={{ edgeDetection: { threshold: -16 } }}
+        computePositionConfig={{ placement: "left", strategy: "absolute" }}
+        className={cn("rich-block-handle", slashOpen && "hidden")}
       >
-        +
-      </IconButton>
-      {open && (
-        <CommandMenuList
-          items={SLASH_ITEMS}
-          activeIndex={index}
-          label="ブロックコマンド"
-          style={{ position: "absolute", left: "calc(100% + 6px)", top: 0 }}
-          onPick={(item) => {
-            item.run(editor, handlers);
-            setOpen(false);
-          }}
-        />
+        <div ref={handleRef} className="flex items-center text-muted">
+          <button
+            type="button"
+            className="grid size-6 cursor-pointer place-items-center rounded-md border-0 bg-transparent hover:bg-surface hover:text-ink"
+            aria-label="ブロックを挿入"
+            aria-expanded={open}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              toggleMenu();
+            }}
+          >
+            <PlusIcon className="size-3.5" />
+          </button>
+          <span
+            className="grid size-6 cursor-grab place-items-center rounded-md hover:bg-surface hover:text-ink active:cursor-grabbing"
+            aria-hidden
+          >
+            <GripIcon className="size-3.5" />
+          </span>
+        </div>
+      </DragHandle>
+      {open && menuPos && (
+        <div ref={menuRef}>
+          <CommandMenuList
+            items={SLASH_ITEMS}
+            activeIndex={index}
+            label="ブロックコマンド"
+            style={{ left: menuPos.left, top: menuPos.top }}
+            onPick={(item) => {
+              item.run(editor, handlers);
+              setOpen(false);
+            }}
+          />
+        </div>
       )}
-    </div>
+    </>
   );
 }

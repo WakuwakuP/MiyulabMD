@@ -110,6 +110,24 @@ export function PlusIcon({ className }: IconProps) {
   );
 }
 
+export function GripIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+      className={cn("size-4", className)}
+    >
+      <circle cx="9" cy="7" r="1.35" />
+      <circle cx="15" cy="7" r="1.35" />
+      <circle cx="9" cy="12" r="1.35" />
+      <circle cx="15" cy="12" r="1.35" />
+      <circle cx="9" cy="17" r="1.35" />
+      <circle cx="15" cy="17" r="1.35" />
+    </svg>
+  );
+}
+
 export function ShareIcon({ className }: IconProps) {
   return (
     <svg
