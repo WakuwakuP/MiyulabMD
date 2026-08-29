@@ -1,7 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import { loadOgCards, renderMarkdownHtml } from "../../lib/markdown.ts";
-import { embedClass, markdownProseClass } from "../ui/prose.ts";
+import {
+  documentPaneScrollClass,
+  documentProseClass,
+  richEditorColumnClass,
+} from "../ui/prose.ts";
 
 type Props = {
   markdown: string;
@@ -23,7 +27,7 @@ export function MarkdownPreview({
   className,
   documentScroll = false,
 }: Props) {
-  const articleRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const applyingScroll = useRef(false);
   const deferredMarkdown = useDeferredValue(markdown);
   const [enhanced, setEnhanced] = useState<{ md: string; html: string } | null>(
@@ -56,7 +60,8 @@ export function MarkdownPreview({
   const error = rendered.error;
 
   useEffect(() => {
-    const el = articleRef.current;
+    if (documentScroll) return;
+    const el = scrollRef.current;
     if (!el || scrollRatio == null) return;
     if (Math.abs(scrollRatioFrom(el) - scrollRatio) < 0.004) return;
     applyingScroll.current = true;
@@ -66,33 +71,68 @@ export function MarkdownPreview({
       applyingScroll.current = false;
     });
     return () => window.cancelAnimationFrame(timer);
-  }, [html, scrollRatio]);
+  }, [documentScroll, html, scrollRatio]);
 
-  const shell = cn(
-    "markdown-preview min-h-96 overflow-auto rounded-md border border-border bg-surface px-5 py-4",
-    !documentScroll &&
-      "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0 [[data-layout=editor]_&]:rounded-none [[data-layout=editor]_&]:border-0",
-    documentScroll &&
-      "[[data-layout=editor]_&]:overflow-visible [[data-layout=editor]_&]:min-h-0",
-    markdownProseClass,
-    embedClass,
-    className,
+  const columnClass = cn(
+    "markdown-preview min-h-96",
+    documentScroll
+      ? cn(
+          "[[data-layout=editor]_&]:overflow-visible [[data-layout=editor]_&]:min-h-0",
+          className,
+        )
+      : cn(
+          "mx-auto",
+          richEditorColumnClass,
+          "[[data-layout=editor]_&]:min-h-0",
+          className,
+        ),
+    documentProseClass,
   );
 
   if (error) {
-    return <article className={cn(shell, "text-error")}>{error}</article>;
+    if (documentScroll) {
+      return (
+        <article className={cn(columnClass, "text-error")}>{error}</article>
+      );
+    }
+    return (
+      <div
+        ref={scrollRef}
+        className={cn(
+          documentPaneScrollClass,
+          "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0",
+        )}
+      >
+        <article className={cn(columnClass, "text-error")}>{error}</article>
+      </div>
+    );
+  }
+
+  const article = (
+    <article
+      className={columnClass}
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: rehype-sanitize 済み
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+
+  if (documentScroll) {
+    return article;
   }
 
   return (
-    <article
-      ref={articleRef}
-      className={shell}
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: rehype-sanitize 済み
-      dangerouslySetInnerHTML={{ __html: html }}
+    <div
+      ref={scrollRef}
+      className={cn(
+        documentPaneScrollClass,
+        "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0",
+      )}
       onScroll={(event) => {
         if (applyingScroll.current) return;
         onScrollRatio?.(scrollRatioFrom(event.currentTarget));
       }}
-    />
+    >
+      {article}
+    </div>
   );
 }
