@@ -1,7 +1,7 @@
 import { titleFromMarkdown } from "@miyulabmd/shared";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
-import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
+import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { fetchNote } from "../lib/api.ts";
 
@@ -40,7 +40,7 @@ export function SharePage() {
 
   if (loading) {
     return (
-      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+      <section className="flex flex-col">
         <p>読み込み中…</p>
       </section>
     );
@@ -48,7 +48,7 @@ export function SharePage() {
 
   if (denied === 401) {
     return (
-      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+      <section className="flex flex-col">
         <h1 className="m-0 text-2xl font-bold">ログインが必要です</h1>
         <p>このノートを閲覧するにはサインインしてください。</p>
         <p>
@@ -60,7 +60,7 @@ export function SharePage() {
 
   if (denied === 403) {
     return (
-      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+      <section className="flex flex-col">
         <h1 className="m-0 text-2xl font-bold">閲覧できません</h1>
         <p>このノートを閲覧する権限がありません。</p>
         <p>
@@ -74,7 +74,7 @@ export function SharePage() {
 
   if (error) {
     return (
-      <section className="flex min-h-[calc(100vh-5rem)] flex-col">
+      <section className="flex flex-col">
         <ErrorText>{error}</ErrorText>
         <p>
           <Link to="/">ホームに戻る</Link>
@@ -84,8 +84,8 @@ export function SharePage() {
   }
 
   return (
-    <section className="flex min-h-[calc(100vh-5rem)] flex-col">
-      <MarkdownPreview className="max-w-[48rem]" markdown={markdown} />
+    <section className="flex flex-col">
+      <PreviewWithToc markdown={markdown} documentScroll />
     </section>
   );
 }

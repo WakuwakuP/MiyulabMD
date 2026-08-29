@@ -1,5 +1,6 @@
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSlug from "rehype-slug";
 import rehypeStringify from "rehype-stringify";
 import { remark } from "remark";
 import remarkGfm from "remark-gfm";
@@ -46,6 +47,9 @@ const schema = {
     a: ["href", "target", "rel", "className"],
     img: ["src", "alt"],
     span: ["className"],
+    h1: ["id"],
+    h2: ["id"],
+    h3: ["id"],
   },
 };
 
@@ -63,6 +67,7 @@ export async function renderMarkdown(markdown: string): Promise<string> {
     .use(remarkGfm)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
+    .use(rehypeSlug)
     .use(rehypeSanitize, schema)
     .use(rehypeStringify)
     .process(expanded);

@@ -8,6 +8,7 @@ type Props = {
   scrollRatio?: number;
   onScrollRatio?: (ratio: number) => void;
   className?: string;
+  documentScroll?: boolean;
 };
 
 function scrollRatioFrom(el: HTMLElement): number {
@@ -20,6 +21,7 @@ export function MarkdownPreview({
   scrollRatio,
   onScrollRatio,
   className,
+  documentScroll = false,
 }: Props) {
   const articleRef = useRef<HTMLElement>(null);
   const applyingScroll = useRef(false);
@@ -62,8 +64,11 @@ export function MarkdownPreview({
   }, [html, scrollRatio]);
 
   const shell = cn(
-    "min-h-96 overflow-auto rounded-md border border-border bg-surface px-5 py-4",
-    "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0 [[data-layout=editor]_&]:rounded-none [[data-layout=editor]_&]:border-0",
+    "markdown-preview min-h-96 overflow-auto rounded-md border border-border bg-surface px-5 py-4",
+    !documentScroll &&
+      "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0 [[data-layout=editor]_&]:rounded-none [[data-layout=editor]_&]:border-0",
+    documentScroll &&
+      "[[data-layout=editor]_&]:overflow-visible [[data-layout=editor]_&]:min-h-0",
     markdownProseClass,
     embedClass,
     className,
