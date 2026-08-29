@@ -61,7 +61,9 @@ export async function fetchNote(id: string): Promise<ApiResult<Note>> {
   return { ok: true, data: (await res.json()) as Note };
 }
 
-export async function createNote(input: CreateNoteInput = {}): Promise<ApiResult<Note>> {
+export async function createNote(
+  input: CreateNoteInput = {},
+): Promise<ApiResult<Note>> {
   const res = await fetch("/api/notes", {
     ...fetchOpts,
     method: "POST",
@@ -74,7 +76,9 @@ export async function createNote(input: CreateNoteInput = {}): Promise<ApiResult
   return { ok: true, data: (await res.json()) as Note };
 }
 
-export async function updateProfile(displayName: string | null): Promise<ApiResult<SessionUser>> {
+export async function updateProfile(
+  displayName: string | null,
+): Promise<ApiResult<SessionUser>> {
   const res = await fetch("/api/me", {
     ...fetchOpts,
     method: "PATCH",
@@ -138,8 +142,13 @@ export async function createFolder(input: {
   return { ok: true, data: (await res.json()) as FolderAccess };
 }
 
-export async function fetchFolder(id?: string | null): Promise<ApiResult<FolderAccess>> {
-  const res = await fetch(id ? `/api/folders/${id}` : "/api/folders", fetchOpts);
+export async function fetchFolder(
+  id?: string | null,
+): Promise<ApiResult<FolderAccess>> {
+  const res = await fetch(
+    id ? `/api/folders/${id}` : "/api/folders",
+    fetchOpts,
+  );
   if (!res.ok) {
     return { ok: false, status: res.status, error: await parseError(res) };
   }
@@ -165,7 +174,9 @@ export async function updateFolderAccess(input: {
   return { ok: true, data: (await res.json()) as FolderAccess };
 }
 
-export async function fetchOgPreview(url: string): Promise<ApiResult<OgPreview>> {
+export async function fetchOgPreview(
+  url: string,
+): Promise<ApiResult<OgPreview>> {
   const res = await fetch(`/api/og?url=${encodeURIComponent(url)}`, fetchOpts);
   if (!res.ok) {
     return { ok: false, status: res.status, error: await parseError(res) };
@@ -236,7 +247,9 @@ export async function fetchTokens(): Promise<ApiResult<ApiTokenSummary[]>> {
   return { ok: true, data: body.tokens };
 }
 
-export async function createToken(name: string): Promise<ApiResult<ApiTokenCreated>> {
+export async function createToken(
+  name: string,
+): Promise<ApiResult<ApiTokenCreated>> {
   const res = await fetch("/api/tokens", {
     ...fetchOpts,
     method: "POST",

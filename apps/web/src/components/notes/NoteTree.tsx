@@ -21,7 +21,10 @@ export type MenuTarget =
   | { kind: "folder"; id: string; name: string }
   | { kind: "note"; note: NoteSummary };
 
-function notesInFolder(notes: NoteSummary[], currentFolderId: string | null): NoteSummary[] {
+function notesInFolder(
+  notes: NoteSummary[],
+  currentFolderId: string | null,
+): NoteSummary[] {
   return notes
     .filter((note) => (note.folderId ?? null) === currentFolderId)
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -38,7 +41,9 @@ export function NoteTree({
   onItemMenu,
 }: Props) {
   const items = notesInFolder(notes, currentFolderId);
-  const folders = [...childrenFolders].sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  const folders = [...childrenFolders].sort((a, b) =>
+    a.name.localeCompare(b.name, "ja"),
+  );
 
   function handleRowMenu(event: MouseEvent, target: MenuTarget) {
     event.preventDefault();
@@ -48,7 +53,10 @@ export function NoteTree({
 
   return (
     <div>
-      <nav className="mb-3 flex flex-wrap items-center gap-[0.15rem] text-[0.9rem]" aria-label="フォルダ">
+      <nav
+        className="mb-3 flex flex-wrap items-center gap-[0.15rem] text-[0.9rem]"
+        aria-label="フォルダ"
+      >
         {showRootCrumb && (
           <Link
             to="/"
@@ -72,7 +80,11 @@ export function NoteTree({
                   current ? "cursor-default text-muted" : "cursor-pointer",
                 )}
                 onContextMenu={(event) =>
-                  handleRowMenu(event, { kind: "folder", id: crumb.id, name: crumb.name })
+                  handleRowMenu(event, {
+                    kind: "folder",
+                    id: crumb.id,
+                    name: crumb.name,
+                  })
                 }
               >
                 {crumb.name}
@@ -83,7 +95,10 @@ export function NoteTree({
       </nav>
 
       {currentFolderId && (
-        <Link className="mb-3 block border-0 bg-transparent p-0 font-inherit text-accent no-underline" to={folderUrl(parentId)}>
+        <Link
+          className="mb-3 block border-0 bg-transparent p-0 font-inherit text-accent no-underline"
+          to={folderUrl(parentId)}
+        >
           上のフォルダへ
         </Link>
       )}
@@ -93,7 +108,11 @@ export function NoteTree({
       ) : (
         <DriveList>
           {folders.map((folder) => {
-            const target = { kind: "folder" as const, id: folder.id, name: folder.name };
+            const target = {
+              kind: "folder" as const,
+              id: folder.id,
+              name: folder.name,
+            };
             return (
               <DriveRow
                 key={folder.id}

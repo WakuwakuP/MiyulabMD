@@ -1,14 +1,15 @@
 import { env } from "cloudflare:workers";
-import { Elysia } from "elysia";
 import {
+  type AccessGrantInput,
   clampWriteScope,
   isAccessScope,
   normalizeFolder,
-  type AccessGrantInput,
   type UpdateFolderAccessInput,
 } from "@miyulabmd/shared";
+import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
+import { instanceFlags } from "../env.ts";
 import {
   createOwnedFolder,
   deleteFolderPolicy,
@@ -20,7 +21,6 @@ import {
   upsertFolderPolicy,
 } from "../services/access.ts";
 import { createNoteService } from "../services/notes.ts";
-import { instanceFlags } from "../env.ts";
 
 const notes = createNoteService(env);
 
@@ -44,10 +44,17 @@ async function applyFolderAccessPatch(
   body: UpdateFolderAccessInput,
 ): Promise<{ error: string; status: number } | null> {
   if (!folder) {
-    return { error: "ルートディレクトリの範囲は自分のみで固定です", status: 400 };
+    return {
+      error: "ルートディレクトリの範囲は自分のみで固定です",
+      status: 400,
+    };
   }
 
-  const current = await resolveFolderAccess(env, ownerId, folder, { id: ownerId, email: "", displayName: null });
+  const current = await resolveFolderAccess(env, ownerId, folder, {
+    id: ownerId,
+    email: "",
+    displayName: null,
+  });
 
   if (body.inherit === true) {
     await deleteFolderPolicy(env, ownerId, folder);
@@ -60,19 +67,32 @@ async function applyFolderAccessPatch(
       readScope: current.effectiveReadScope,
       writeScope: current.effectiveWriteScope,
     };
-    const readScope = isAccessScope(body.readScope ?? "") ? body.readScope! : fallback.readScope;
+    const readScope = isAccessScope(body.readScope ?? "")
+      ? body.readScope!
+      : fallback.readScope;
     const writeScope = clampWriteScope(
       readScope,
-      isAccessScope(body.writeScope ?? "") ? body.writeScope! : fallback.writeScope,
+      isAccessScope(body.writeScope ?? "")
+        ? body.writeScope!
+        : fallback.writeScope,
     );
     if (writeScope === "public" && !instanceFlags(env).allowAnonymousEdits) {
-      return { error: "全体公開の書き込みは、匿名編集が無効なため使えません", status: 400 };
+      return {
+        error: "全体公開の書き込みは、匿名編集が無効なため使えません",
+        status: 400,
+      };
     }
     await upsertFolderPolicy(env, ownerId, folder, readScope, writeScope);
   }
 
   if (body.grants) {
-    const replaced = await replaceGrants(env, ownerId, "folder", folder, body.grants as AccessGrantInput[]);
+    const replaced = await replaceGrants(
+      env,
+      ownerId,
+      "folder",
+      folder,
+      body.grants as AccessGrantInput[],
+    );
     if ("error" in replaced) {
       return { error: replaced.error, status: 400 };
     }
@@ -99,7 +119,12 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       return { error: "Not found" };
     }
 
-    const access = await resolveFolderAccess(env, rec.owner_id, rec.folder, user);
+    const access = await resolveFolderAccess(
+      env,
+      rec.owner_id,
+      rec.folder,
+      user,
+    );
     if (!access.flags.canView) {
       set.status = 404;
       return { error: "Not found" };
@@ -113,7 +138,9 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       return { error: "Unauthorized" };
     }
 
-    const path = normalizeFolder(new URL(request.url).searchParams.get("path") ?? "");
+    const path = normalizeFolder(
+      new URL(request.url).searchParams.get("path") ?? "",
+    );
     const access = await resolveFolderAccess(env, user.id, path, user);
     return access;
   })
@@ -124,7 +151,11 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       return { error: "Unauthorized" };
     }
 
-    const body = await parseJsonBody<{ folder?: string; name?: string; parentId?: string }>(request);
+    const body = await parseJsonBody<{
+      folder?: string;
+      name?: string;
+      parentId?: string;
+    }>(request);
     let folder = normalizeFolder(body?.folder ?? "");
 
     if (!folder && body?.name) {
@@ -152,7 +183,12 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
 
     const parent = parentFolderPath(folder);
     if (parent) {
-      const parentAccess = await resolveFolderAccess(env, user.id, parent, user);
+      const parentAccess = await resolveFolderAccess(
+        env,
+        user.id,
+        parent,
+        user,
+      );
       if (!parentAccess.flags.canAdmin) {
         set.status = 403;
         return { error: "このフォルダには作成権限がありません" };

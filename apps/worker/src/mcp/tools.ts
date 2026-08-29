@@ -1,7 +1,7 @@
+import { env } from "cloudflare:workers";
 import { ACCESS_SCOPES, type SessionUser } from "@miyulabmd/shared";
 import { McpServer } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
-import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { createNoteService } from "../services/notes.ts";
@@ -55,7 +55,10 @@ export function createMcpServerFactory() {
     {
       description: "List notes owned by or shared with the authenticated user.",
       inputSchema: {
-        query: z.string().optional().describe("Optional title filter (case-insensitive substring)"),
+        query: z
+          .string()
+          .optional()
+          .describe("Optional title filter (case-insensitive substring)"),
       },
     },
     async ({ query }) => {
@@ -114,7 +117,14 @@ export function createMcpServerFactory() {
         writeScope: z.enum(ACCESS_SCOPES).optional(),
       },
     },
-    async ({ title, markdown, folder, inheritAccess, readScope, writeScope }) => {
+    async ({
+      title,
+      markdown,
+      folder,
+      inheritAccess,
+      readScope,
+      writeScope,
+    }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -209,7 +219,8 @@ export function createMcpServerFactory() {
   server.registerTool(
     "set_note_access",
     {
-      description: "Change note read/write access (requires owner). inheritAccess follows the folder policy.",
+      description:
+        "Change note read/write access (requires owner). inheritAccess follows the folder policy.",
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
         inheritAccess: z.boolean().optional(),
@@ -223,7 +234,11 @@ export function createMcpServerFactory() {
         return textError("Unauthorized");
       }
 
-      const result = await notes.updateMeta(id, user, { inheritAccess, readScope, writeScope });
+      const result = await notes.updateMeta(id, user, {
+        inheritAccess,
+        readScope,
+        writeScope,
+      });
       if (result.kind === "not_found") {
         return textError("Not found");
       }
@@ -269,8 +284,12 @@ export function createMcpServerFactory() {
 
       const result = await notes.updateMeta(id, user, {
         inheritAccess: current.note.access.inherit,
-        readScope: current.note.access.inherit ? undefined : current.note.access.effectiveReadScope,
-        writeScope: current.note.access.inherit ? undefined : current.note.access.effectiveWriteScope,
+        readScope: current.note.access.inherit
+          ? undefined
+          : current.note.access.effectiveReadScope,
+        writeScope: current.note.access.inherit
+          ? undefined
+          : current.note.access.effectiveWriteScope,
         grants,
       });
       if (result.kind === "not_found") {
@@ -290,7 +309,8 @@ export function createMcpServerFactory() {
   server.registerTool(
     "search_notes",
     {
-      description: "Search accessible notes by title or markdown snapshot substring.",
+      description:
+        "Search accessible notes by title or markdown snapshot substring.",
       inputSchema: {
         query: z.string().describe("Search query"),
       },
@@ -308,7 +328,9 @@ export function createMcpServerFactory() {
 
       const list = await notes.listForUser(user);
       const needle = trimmedQuery.toLowerCase();
-      const notesFound = list.filter((note) => note.title.toLowerCase().includes(needle));
+      const notesFound = list.filter((note) =>
+        note.title.toLowerCase().includes(needle),
+      );
 
       return textResult({ notes: notesFound, query: trimmedQuery });
     },

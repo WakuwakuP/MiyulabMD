@@ -1,24 +1,24 @@
 import {
-  actorFromUser,
-  clampWriteScope,
-  evaluateAccess,
-  folderAncestors,
-  folderContains,
-  grantForActor,
-  isAccessScope,
-  presetFromScopes,
-  ROOT_SCOPES,
   type AccessGrant,
   type AccessGrantInput,
   type AccessScope,
   type AccessSource,
+  type Actor,
+  actorFromUser,
+  clampWriteScope,
   type EffectiveAccess,
+  evaluateAccess,
   type FolderAccess,
   type FolderCrumb,
   type FolderRecord,
+  folderAncestors,
+  folderContains,
+  grantForActor,
+  isAccessScope,
   type NoteAccess,
-  type Actor,
   type PermissionFlags,
+  presetFromScopes,
+  ROOT_SCOPES,
   type SessionUser,
 } from "@miyulabmd/shared";
 
@@ -26,7 +26,11 @@ import { db } from "../db/client.ts";
 import { findUserByEmail } from "../db/users.ts";
 import { instanceFlags } from "../env.ts";
 
-function applyInstanceFlags(flags: PermissionFlags, actor: Actor, env: Env): PermissionFlags {
+function applyInstanceFlags(
+  flags: PermissionFlags,
+  actor: Actor,
+  env: Env,
+): PermissionFlags {
   if (actor.kind !== "guest") {
     return flags;
   }
@@ -82,7 +86,10 @@ function rowToGrant(row: GrantRow): AccessGrant {
   };
 }
 
-export function defaultScopes(_env?: Env): { readScope: AccessScope; writeScope: AccessScope } {
+export function defaultScopes(_env?: Env): {
+  readScope: AccessScope;
+  writeScope: AccessScope;
+} {
   return { ...ROOT_SCOPES };
 }
 
@@ -100,7 +107,10 @@ async function loadFolderPolicies(
   folders: string[],
 ): Promise<Map<string, { readScope: AccessScope; writeScope: AccessScope }>> {
   const unique = [...new Set(folders)];
-  const map = new Map<string, { readScope: AccessScope; writeScope: AccessScope }>();
+  const map = new Map<
+    string,
+    { readScope: AccessScope; writeScope: AccessScope }
+  >();
   if (unique.length === 0) return map;
 
   const placeholders = unique.map(() => "?").join(", ");
@@ -117,7 +127,10 @@ async function loadFolderPolicies(
     const readScope = parseScope(row.read_scope);
     const writeScope = parseScope(row.write_scope);
     if (readScope && writeScope) {
-      map.set(row.folder, { readScope, writeScope: clampWriteScope(readScope, writeScope) });
+      map.set(row.folder, {
+        readScope,
+        writeScope: clampWriteScope(readScope, writeScope),
+      });
     }
   }
   return map;
@@ -131,7 +144,9 @@ async function loadGrants(
 ): Promise<AccessGrant[]> {
   const folderKeys = folders.length > 0 ? folders : [""];
   const folderPlaceholders = folderKeys.map(() => "?").join(", ");
-  const clauses = [`(target_kind = 'folder' AND target_key IN (${folderPlaceholders}))`];
+  const clauses = [
+    `(target_kind = 'folder' AND target_key IN (${folderPlaceholders}))`,
+  ];
   const binds: unknown[] = [ownerId];
   if (noteId) {
     clauses.unshift("(target_kind = 'note' AND target_key = ?)");
@@ -163,7 +178,10 @@ async function loadGrants(
 function resolveFromPolicies(
   folder: string,
   policies: Map<string, { readScope: AccessScope; writeScope: AccessScope }>,
-): Pick<EffectiveAccess, "effectiveReadScope" | "effectiveWriteScope" | "source" | "sourceFolder"> {
+): Pick<
+  EffectiveAccess,
+  "effectiveReadScope" | "effectiveWriteScope" | "source" | "sourceFolder"
+> {
   for (const ancestor of folderAncestors(folder)) {
     if (ancestor === "") {
       return {
@@ -251,10 +269,15 @@ export function parentFolderPath(folder: string): string {
   return parts.join("/");
 }
 
-export async function getFolderById(env: Env, id: string): Promise<FolderRow | null> {
+export async function getFolderById(
+  env: Env,
+  id: string,
+): Promise<FolderRow | null> {
   return (
     (await db(env)
-      .prepare("SELECT id, owner_id, folder, created_at FROM folders WHERE id = ?")
+      .prepare(
+        "SELECT id, owner_id, folder, created_at FROM folders WHERE id = ?",
+      )
       .bind(id)
       .first<FolderRow>()) ?? null
   );
@@ -268,7 +291,9 @@ export async function getFolderByPath(
   if (!folder) return null;
   return (
     (await db(env)
-      .prepare("SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? AND folder = ?")
+      .prepare(
+        "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? AND folder = ?",
+      )
       .bind(ownerId, folder)
       .first<FolderRow>()) ?? null
   );
@@ -339,7 +364,12 @@ export async function folderViewFlags(
   const actor = actorFromUser(user, ownerId);
   const grant = grantForActor(effective.grants, actor);
   return applyInstanceFlags(
-    evaluateAccess(effective.effectiveReadScope, effective.effectiveWriteScope, actor, grant),
+    evaluateAccess(
+      effective.effectiveReadScope,
+      effective.effectiveWriteScope,
+      actor,
+      grant,
+    ),
     actor,
     env,
   );
@@ -376,7 +406,9 @@ async function listVisibleChildren(
 ): Promise<FolderRecord[]> {
   const isOwner = user?.id === ownerId;
   const rows = await db(env)
-    .prepare("SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder")
+    .prepare(
+      "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+    )
     .bind(ownerId)
     .all<FolderRow>();
 
@@ -395,7 +427,10 @@ async function listVisibleChildren(
   return children.sort((a, b) => a.name.localeCompare(b.name, "ja"));
 }
 
-function presentFolderAccess(access: FolderAccess, isOwner: boolean): FolderAccess {
+function presentFolderAccess(
+  access: FolderAccess,
+  isOwner: boolean,
+): FolderAccess {
   if (isOwner) return access;
   return {
     ...access,
@@ -419,13 +454,19 @@ export async function resolveFolderAccess(
   const actor = actorFromUser(user, ownerId);
   const grant = grantForActor(effective.grants, actor);
   const flags = applyInstanceFlags(
-    evaluateAccess(effective.effectiveReadScope, effective.effectiveWriteScope, actor, grant),
+    evaluateAccess(
+      effective.effectiveReadScope,
+      effective.effectiveWriteScope,
+      actor,
+      grant,
+    ),
     actor,
     env,
   );
   const id = folder ? await ensureFolderRow(env, ownerId, folder) : null;
   const crumbs = folder ? await visibleCrumbs(env, ownerId, folder, user) : [];
-  const parentId = crumbs.length >= 2 ? (crumbs[crumbs.length - 2]?.id ?? null) : null;
+  const parentId =
+    crumbs.length >= 2 ? (crumbs[crumbs.length - 2]?.id ?? null) : null;
   const children = await listVisibleChildren(env, ownerId, folder, id, user);
   const isOwner = user?.id === ownerId;
 
@@ -444,7 +485,11 @@ export async function resolveFolderAccess(
   );
 }
 
-export async function ensureFolderRow(env: Env, ownerId: string, folder: string): Promise<string | null> {
+export async function ensureFolderRow(
+  env: Env,
+  ownerId: string,
+  folder: string,
+): Promise<string | null> {
   if (!folder) return null;
 
   const parent = parentFolderPath(folder);
@@ -458,7 +503,9 @@ export async function ensureFolderRow(env: Env, ownerId: string, folder: string)
   const id = crypto.randomUUID();
   try {
     await db(env)
-      .prepare("INSERT INTO folders (id, owner_id, folder, created_at) VALUES (?, ?, ?, ?)")
+      .prepare(
+        "INSERT INTO folders (id, owner_id, folder, created_at) VALUES (?, ?, ?, ?)",
+      )
       .bind(id, ownerId, folder, Date.now())
       .run();
     return id;
@@ -468,9 +515,14 @@ export async function ensureFolderRow(env: Env, ownerId: string, folder: string)
   }
 }
 
-export async function listOwnedFolders(env: Env, ownerId: string): Promise<FolderRecord[]> {
+export async function listOwnedFolders(
+  env: Env,
+  ownerId: string,
+): Promise<FolderRecord[]> {
   const rows = await db(env)
-    .prepare("SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder")
+    .prepare(
+      "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+    )
     .bind(ownerId)
     .all<FolderRow>();
   const byPath = new Map((rows.results ?? []).map((row) => [row.folder, row]));
@@ -491,7 +543,12 @@ export async function createOwnedFolder(
   user?: SessionUser | null,
 ): Promise<FolderAccess> {
   await ensureFolderRow(env, ownerId, folder);
-  const current = await resolveFolderAccess(env, ownerId, folder, user ?? { id: ownerId, email: "", displayName: null });
+  const current = await resolveFolderAccess(
+    env,
+    ownerId,
+    folder,
+    user ?? { id: ownerId, email: "", displayName: null },
+  );
   if (current.inherit) {
     await upsertFolderPolicy(
       env,
@@ -501,7 +558,12 @@ export async function createOwnedFolder(
       current.effectiveWriteScope,
     );
   }
-  return resolveFolderAccess(env, ownerId, folder, user ?? { id: ownerId, email: "", displayName: null });
+  return resolveFolderAccess(
+    env,
+    ownerId,
+    folder,
+    user ?? { id: ownerId, email: "", displayName: null },
+  );
 }
 
 export async function replaceGrants(
@@ -530,7 +592,9 @@ export async function replaceGrants(
   }
 
   await db(env)
-    .prepare("DELETE FROM access_grants WHERE owner_id = ? AND target_kind = ? AND target_key = ?")
+    .prepare(
+      "DELETE FROM access_grants WHERE owner_id = ? AND target_kind = ? AND target_key = ?",
+    )
     .bind(ownerId, targetKind, targetKey)
     .run();
 
@@ -582,14 +646,22 @@ export async function upsertFolderPolicy(
     .run();
 }
 
-export async function deleteFolderPolicy(env: Env, ownerId: string, folder: string): Promise<void> {
+export async function deleteFolderPolicy(
+  env: Env,
+  ownerId: string,
+  folder: string,
+): Promise<void> {
   await db(env)
     .prepare("DELETE FROM folder_policies WHERE owner_id = ? AND folder = ?")
     .bind(ownerId, folder)
     .run();
 }
 
-export async function deleteFolderTree(env: Env, ownerId: string, folder: string): Promise<void> {
+export async function deleteFolderTree(
+  env: Env,
+  ownerId: string,
+  folder: string,
+): Promise<void> {
   if (!folder) return;
   const rows = await db(env)
     .prepare("SELECT folder FROM folders WHERE owner_id = ?")
@@ -600,7 +672,9 @@ export async function deleteFolderTree(env: Env, ownerId: string, folder: string
     if (!folderContains(folder, row.folder)) continue;
     await deleteFolderPolicy(env, ownerId, row.folder);
     await db(env)
-      .prepare("DELETE FROM access_grants WHERE owner_id = ? AND target_kind = 'folder' AND target_key = ?")
+      .prepare(
+        "DELETE FROM access_grants WHERE owner_id = ? AND target_kind = 'folder' AND target_key = ?",
+      )
       .bind(ownerId, row.folder)
       .run();
     await db(env)
@@ -623,7 +697,10 @@ export async function listFolderGrantsForUser(
     .bind(user.id, user.email)
     .all<{ owner_id: string; target_key: string }>();
 
-  return (rows.results ?? []).map((row) => ({ ownerId: row.owner_id, folder: row.target_key }));
+  return (rows.results ?? []).map((row) => ({
+    ownerId: row.owner_id,
+    folder: row.target_key,
+  }));
 }
 
 export function noteMatchesFolderGrant(
@@ -633,6 +710,11 @@ export function noteMatchesFolderGrant(
   return folderContains(grantFolder, noteFolder);
 }
 
-export function derivedPermission(access: Pick<EffectiveAccess, "effectiveReadScope" | "effectiveWriteScope">) {
-  return presetFromScopes(access.effectiveReadScope, access.effectiveWriteScope);
+export function derivedPermission(
+  access: Pick<EffectiveAccess, "effectiveReadScope" | "effectiveWriteScope">,
+) {
+  return presetFromScopes(
+    access.effectiveReadScope,
+    access.effectiveWriteScope,
+  );
 }

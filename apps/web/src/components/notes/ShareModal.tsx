@@ -2,11 +2,11 @@ import {
   ACCESS_SCOPE_HINTS,
   ACCESS_SCOPE_LABELS,
   ACCESS_SCOPES,
-  clampWriteScope,
   type AccessGrant,
   type AccessScope,
+  clampWriteScope,
 } from "@miyulabmd/shared";
-import { useState, type FormEvent } from "react";
+import { type FormEvent, useState } from "react";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -33,7 +33,9 @@ type Props = {
 };
 
 function writeOptions(readScope: AccessScope): AccessScope[] {
-  return ACCESS_SCOPES.filter((scope) => clampWriteScope(readScope, scope) === scope);
+  return ACCESS_SCOPES.filter(
+    (scope) => clampWriteScope(readScope, scope) === scope,
+  );
 }
 
 export function ShareModal({
@@ -62,9 +64,13 @@ export function ShareModal({
   function handleAdd(event: FormEvent) {
     event.preventDefault();
     const nextEmail = email.trim().toLowerCase();
-    if (!nextEmail || value.grants.some((grant) => grant.email === nextEmail)) return;
+    if (!nextEmail || value.grants.some((grant) => grant.email === nextEmail))
+      return;
     update({
-      grants: [...value.grants, { email: nextEmail, userId: null, canWrite: false }],
+      grants: [
+        ...value.grants,
+        { email: nextEmail, userId: null, canWrite: false },
+      ],
     });
     setEmail("");
   }
@@ -110,7 +116,10 @@ export function ShareModal({
             disabled={disabled || value.inherit}
             aria-label="共有するユーザーのメールアドレス"
           />
-          <Button type="submit" disabled={disabled || value.inherit || !email.trim()}>
+          <Button
+            type="submit"
+            disabled={disabled || value.inherit || !email.trim()}
+          >
             送信
           </Button>
         </Row>
@@ -120,7 +129,11 @@ export function ShareModal({
         <SectionTitle>アクセスできるユーザー</SectionTitle>
         <ul className="mb-4 list-none p-0">
           <li className="grid grid-cols-[2rem_1fr_auto_auto] items-center gap-[0.65rem] py-[0.45rem]">
-            <Avatar name={ownerLabel} color={colorForEmail(ownerLabel)} variant="soft" />
+            <Avatar
+              name={ownerLabel}
+              color={colorForEmail(ownerLabel)}
+              variant="soft"
+            />
             <div>
               <strong>{ownerLabel}</strong>
               <MutedText className="text-[0.8rem]">オーナー</MutedText>
@@ -132,10 +145,16 @@ export function ShareModal({
               key={grant.email}
               className="grid grid-cols-[2rem_1fr_auto_auto] items-center gap-[0.65rem] py-[0.45rem]"
             >
-              <Avatar name={grant.email} color={colorForEmail(grant.email)} variant="soft" />
+              <Avatar
+                name={grant.email}
+                color={colorForEmail(grant.email)}
+                variant="soft"
+              />
               <div>
                 <strong>{grant.email}</strong>
-                <MutedText className="text-[0.8rem]">{grant.canWrite ? "編集者" : "閲覧者"}</MutedText>
+                <MutedText className="text-[0.8rem]">
+                  {grant.canWrite ? "編集者" : "閲覧者"}
+                </MutedText>
               </div>
               <Select
                 value={grant.canWrite ? "write" : "read"}
@@ -159,7 +178,11 @@ export function ShareModal({
                 className="cursor-pointer border-0 bg-transparent text-muted disabled:cursor-default disabled:opacity-65"
                 disabled={disabled || value.inherit}
                 onClick={() =>
-                  update({ grants: value.grants.filter((item) => item.email !== grant.email) })
+                  update({
+                    grants: value.grants.filter(
+                      (item) => item.email !== grant.email,
+                    ),
+                  })
                 }
               >
                 削除
@@ -181,7 +204,9 @@ export function ShareModal({
               <Select
                 value={value.readScope}
                 disabled={disabled || value.inherit}
-                onChange={(event) => update({ readScope: event.target.value as AccessScope })}
+                onChange={(event) =>
+                  update({ readScope: event.target.value as AccessScope })
+                }
               >
                 {ACCESS_SCOPES.map((scope) => (
                   <option key={scope} value={scope}>
@@ -195,7 +220,9 @@ export function ShareModal({
               <Select
                 value={value.writeScope}
                 disabled={disabled || value.inherit}
-                onChange={(event) => update({ writeScope: event.target.value as AccessScope })}
+                onChange={(event) =>
+                  update({ writeScope: event.target.value as AccessScope })
+                }
               >
                 {writeOptions(value.readScope).map((scope) => (
                   <option key={scope} value={scope}>
@@ -204,7 +231,9 @@ export function ShareModal({
                 ))}
               </Select>
             </label>
-            <MutedText className="mt-1 text-[0.8rem]">{ACCESS_SCOPE_HINTS[value.readScope]}</MutedText>
+            <MutedText className="mt-1 text-[0.8rem]">
+              {ACCESS_SCOPE_HINTS[value.readScope]}
+            </MutedText>
           </div>
         </div>
       </section>
@@ -223,6 +252,9 @@ export function ShareModal({
   );
 }
 
-export function accessSummary(readScope: AccessScope, writeScope: AccessScope): string {
+export function accessSummary(
+  readScope: AccessScope,
+  writeScope: AccessScope,
+): string {
   return `読み ${ACCESS_SCOPE_LABELS[readScope]} / 書き ${ACCESS_SCOPE_LABELS[writeScope]}`;
 }

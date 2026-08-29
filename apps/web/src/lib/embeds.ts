@@ -1,4 +1,8 @@
-import { collectStandaloneLinkUrls, mapLinesOutsideFences, standaloneLinkUrl } from "./standalone-link.ts";
+import {
+  collectStandaloneLinkUrls,
+  mapLinesOutsideFences,
+  standaloneLinkUrl,
+} from "./standalone-link.ts";
 
 export type OgPreview = {
   url: string;
@@ -24,8 +28,13 @@ export function youtubeId(url: string): string | null {
     if (parsed.hostname === "youtu.be") {
       return parsed.pathname.replace(/^\//, "") || null;
     }
-    if (parsed.hostname.endsWith("youtube.com") || parsed.hostname.endsWith("youtube-nocookie.com")) {
-      return parsed.searchParams.get("v") || parsed.pathname.split("/").pop() || null;
+    if (
+      parsed.hostname.endsWith("youtube.com") ||
+      parsed.hostname.endsWith("youtube-nocookie.com")
+    ) {
+      return (
+        parsed.searchParams.get("v") || parsed.pathname.split("/").pop() || null
+      );
     }
   } catch {
     return null;
@@ -76,12 +85,19 @@ export function renderOgCardHtml(href: string, card?: OgPreview): string {
   const description = card?.description
     ? `<span class="embed-og-desc">${escapeHtml(card.description)}</span>`
     : "";
-  const image = card?.image ? `<img src="${escapeHtml(card.image)}" alt="" />` : "";
-  const site = card?.siteName ? `<small>${escapeHtml(card.siteName)}</small>` : "";
+  const image = card?.image
+    ? `<img src="${escapeHtml(card.image)}" alt="" />`
+    : "";
+  const site = card?.siteName
+    ? `<small>${escapeHtml(card.siteName)}</small>`
+    : "";
   return `<div class="embed-og-wrap"><a class="embed-og" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${image}<span><strong>${escapeHtml(title)}</strong>${description}${site}</span></a></div>`;
 }
 
-export function expandEmbedsForPreview(markdown: string, cards: Map<string, OgPreview>): string {
+export function expandEmbedsForPreview(
+  markdown: string,
+  cards: Map<string, OgPreview>,
+): string {
   const normalized = normalizeEmbedMarkdown(markdown);
   const expanded = normalized
     .replace(YOUTUBE_BLOCK, (_all, attrs: string) => {

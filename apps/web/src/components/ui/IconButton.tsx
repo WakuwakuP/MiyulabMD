@@ -13,7 +13,8 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
 const variants: Record<Variant, string> = {
   ghost: "border-transparent bg-transparent hover:enabled:bg-row",
   surface: "border-transparent bg-surface",
-  outline: "border-border bg-canvas text-muted hover:enabled:bg-surface hover:enabled:text-ink",
+  outline:
+    "border-border bg-canvas text-muted hover:enabled:bg-surface hover:enabled:text-ink",
 };
 
 const sizes: Record<Size, string> = {

@@ -1,7 +1,13 @@
 import type { Editor } from "@tiptap/react";
 import { useEffect, useMemo, useState } from "react";
 import { CommandMenuList } from "./CommandMenuList.tsx";
-import { matchesSlashItem, readSlashQuery, SLASH_ITEMS, type SlashCommandHandlers, type SlashItem } from "./slash-items.ts";
+import {
+  matchesSlashItem,
+  readSlashQuery,
+  SLASH_ITEMS,
+  type SlashCommandHandlers,
+  type SlashItem,
+} from "./slash-items.ts";
 
 type SlashState = {
   query: string;
@@ -32,7 +38,10 @@ export function SlashCommandMenu({ editor, handlers }: Props) {
   const [index, setIndex] = useState(0);
 
   const items = useMemo(
-    () => (state ? SLASH_ITEMS.filter((item) => matchesSlashItem(item, state.query)) : []),
+    () =>
+      state
+        ? SLASH_ITEMS.filter((item) => matchesSlashItem(item, state.query))
+        : [],
     [state],
   );
 
@@ -55,7 +64,11 @@ export function SlashCommandMenu({ editor, handlers }: Props) {
 
     function apply(item: SlashItem) {
       if (!state) return;
-      editor.chain().focus().deleteRange({ from: state.from, to: state.to }).run();
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from: state.from, to: state.to })
+        .run();
       item.run(editor, handlers);
       setState(null);
     }
@@ -97,7 +110,11 @@ export function SlashCommandMenu({ editor, handlers }: Props) {
       label="ブロックを挿入"
       style={{ left: state.left, top: state.top }}
       onPick={(item) => {
-        editor.chain().focus().deleteRange({ from: state.from, to: state.to }).run();
+        editor
+          .chain()
+          .focus()
+          .deleteRange({ from: state.from, to: state.to })
+          .run();
         item.run(editor, handlers);
         setState(null);
       }}

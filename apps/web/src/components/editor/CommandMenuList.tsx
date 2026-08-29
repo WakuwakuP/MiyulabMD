@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 import { cn } from "../../lib/cn.ts";
 import type { SlashItem } from "./slash-items.ts";
 
@@ -10,11 +10,19 @@ type Props = {
   onPick: (item: SlashItem) => void;
 };
 
-export function CommandMenuList({ items, activeIndex, label, style, onPick }: Props) {
+export function CommandMenuList({
+  items,
+  activeIndex,
+  label,
+  style,
+  onPick,
+}: Props) {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const selected = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    const selected = listRef.current?.querySelector<HTMLElement>(
+      '[aria-selected="true"]',
+    );
     selected?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 

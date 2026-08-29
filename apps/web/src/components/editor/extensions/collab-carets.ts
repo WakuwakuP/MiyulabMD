@@ -1,8 +1,12 @@
 import { Extension } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { Node as PMNode } from "@tiptap/pm/model";
-import { clampPos, mdToPm, type OffsetMap } from "../../../lib/markdown-pm-map.ts";
+import {
+  clampPos,
+  mdToPm,
+  type OffsetMap,
+} from "../../../lib/markdown-pm-map.ts";
 import type { RemoteMarkdownCursor } from "../../../lib/rich-awareness.ts";
 
 export const collabCaretsKey = new PluginKey("collabCarets");

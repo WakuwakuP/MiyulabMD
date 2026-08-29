@@ -8,19 +8,29 @@ import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
 import type * as Y from "yjs";
 import { fetchOgPreview, uploadImage } from "../../lib/api.ts";
+import { cn } from "../../lib/cn.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
-import { canonicalizeEditorMarkdown, normalizeEmbedMarkdown } from "../../lib/embeds.ts";
+import {
+  canonicalizeEditorMarkdown,
+  normalizeEmbedMarkdown,
+} from "../../lib/embeds.ts";
 import {
   buildOffsetMap,
   clampPos,
   markdownEquivalent,
   mdToPm,
-  pmToMd,
   type OffsetMap,
+  pmToMd,
 } from "../../lib/markdown-pm-map.ts";
-import { readRemoteMarkdownCursors, writeMarkdownCursor } from "../../lib/rich-awareness.ts";
-import { applyTextDiff, inspectPlainTextDelta, type YTextDeltaItem } from "../../lib/y-text-diff.ts";
-import { cn } from "../../lib/cn.ts";
+import {
+  readRemoteMarkdownCursors,
+  writeMarkdownCursor,
+} from "../../lib/rich-awareness.ts";
+import {
+  applyTextDiff,
+  inspectPlainTextDelta,
+  type YTextDeltaItem,
+} from "../../lib/y-text-diff.ts";
 import { FileInput } from "../ui/FileInput.tsx";
 import { editorLoadingClass } from "../ui/prose.ts";
 import { BlockHandle } from "./BlockHandle.tsx";
@@ -39,7 +49,12 @@ type Props = {
   readOnly?: boolean;
 };
 
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
 
 function firstImageFile(data: DataTransfer | null): File | null {
   if (!data) return null;
@@ -65,21 +80,35 @@ function trySurgicalApply(
     const pos = clampPos(editor.state.doc, mdToPm(map, plain.index));
     const $pos = editor.state.doc.resolve(pos);
     if (!$pos.parent.isTextblock) return false;
-    editor.view.dispatch(editor.state.tr.insertText(plain.text, pos).setMeta("addToHistory", false));
+    editor.view.dispatch(
+      editor.state.tr
+        .insertText(plain.text, pos)
+        .setMeta("addToHistory", false),
+    );
     return true;
   }
 
   const from = clampPos(editor.state.doc, mdToPm(map, plain.index));
-  const to = clampPos(editor.state.doc, mdToPm(map, plain.index + plain.length));
+  const to = clampPos(
+    editor.state.doc,
+    mdToPm(map, plain.index + plain.length),
+  );
   if (from === to) return false;
   const $from = editor.state.doc.resolve(from);
   const $to = editor.state.doc.resolve(to);
   if ($from.parent !== $to.parent || !$from.parent.isTextblock) return false;
-  editor.view.dispatch(editor.state.tr.delete(from, to).setMeta("addToHistory", false));
+  editor.view.dispatch(
+    editor.state.tr.delete(from, to).setMeta("addToHistory", false),
+  );
   return true;
 }
 
-export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false }: Props) {
+export function RichMarkdownEditor({
+  noteId,
+  yText,
+  awareness,
+  readOnly = false,
+}: Props) {
   const applyingRemote = useRef(false);
   const composing = useRef(false);
   const pendingRemote = useRef(false);
@@ -141,7 +170,10 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
   const flushLocal = (editor: Editor) => {
     if (applyingRemote.current || composing.current || readOnly) return;
     const next = editorMarkdown(editor);
-    if (markdownEquivalent(lastYMarkdown.current, next) || markdownEquivalent(yText.toString(), next)) {
+    if (
+      markdownEquivalent(lastYMarkdown.current, next) ||
+      markdownEquivalent(yText.toString(), next)
+    ) {
       lastYMarkdown.current = yText.toString();
       refreshMap(editor);
       return;
@@ -156,11 +188,19 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
     immediatelyRender: false,
     editable: !readOnly,
     extensions: [
-      StarterKit.configure({ paragraph: false, link: { openOnClick: false, autolink: true } }),
+      StarterKit.configure({
+        paragraph: false,
+        link: { openOnClick: false, autolink: true },
+      }),
       SafeParagraph,
       Markdown,
       Image,
-      Youtube.configure({ controls: true, nocookie: true, width: 640, height: 360 }),
+      Youtube.configure({
+        controls: true,
+        nocookie: true,
+        width: 640,
+        height: 360,
+      }),
       OgCard,
       AutoLinkCard,
       Placeholder.configure({ placeholder: "「/」でブロックを挿入" }),
@@ -196,7 +236,8 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
         if (!file) return false;
         event.preventDefault();
         void uploadImage(noteId, file).then((result) => {
-          if (result.ok) editor?.chain().focus().setImage({ src: result.data.url }).run();
+          if (result.ok)
+            editor?.chain().focus().setImage({ src: result.data.url }).run();
         });
         return true;
       },
@@ -206,7 +247,8 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
         if (!file) return false;
         event.preventDefault();
         void uploadImage(noteId, file).then((result) => {
-          if (result.ok) editor?.chain().focus().setImage({ src: result.data.url }).run();
+          if (result.ok)
+            editor?.chain().focus().setImage({ src: result.data.url }).run();
         });
         return true;
       },
@@ -267,7 +309,8 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
 
   async function insertImageFile(file: File) {
     const result = await uploadImage(noteId, file);
-    if (result.ok) editor?.chain().focus().setImage({ src: result.data.url }).run();
+    if (result.ok)
+      editor?.chain().focus().setImage({ src: result.data.url }).run();
   }
 
   function insertYoutube() {
@@ -279,7 +322,11 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
   async function insertStandaloneLink(url: string) {
     if (!editor) return;
     await fetchOgPreview(url);
-    editor.chain().focus().insertContent({ type: "ogCard", attrs: { href: url } }).run();
+    editor
+      .chain()
+      .focus()
+      .insertContent({ type: "ogCard", attrs: { href: url } })
+      .run();
   }
 
   function applyInlineLink(url: string) {
@@ -324,13 +371,20 @@ export function RichMarkdownEditor({ noteId, yText, awareness, readOnly = false 
         <>
           <SlashCommandMenu editor={editor} handlers={commandHandlers} />
           <BlockHandle editor={editor} handlers={commandHandlers} />
-          <SelectionToolbar editor={editor} onLink={() => setLinkModal("inline")} />
+          <SelectionToolbar
+            editor={editor}
+            onLink={() => setLinkModal("inline")}
+          />
         </>
       )}
       {linkModal && (
         <LinkModal
           title={linkModal === "card" ? "リンクカード" : "リンク"}
-          initial={linkModal === "inline" ? String(editor.getAttributes("link").href ?? "") : ""}
+          initial={
+            linkModal === "inline"
+              ? String(editor.getAttributes("link").href ?? "")
+              : ""
+          }
           submitLabel="挿入"
           onSubmit={(url) => {
             if (linkModal === "card") void insertStandaloneLink(url);

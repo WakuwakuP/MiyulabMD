@@ -20,10 +20,26 @@ export function Field({
   );
 }
 
-export function CheckLabel({ children, className }: { children: ReactNode; className?: string }) {
-  return <label className={cn("flex items-center gap-[0.45rem]", className)}>{children}</label>;
+export function CheckLabel({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={cn("flex items-center gap-[0.45rem]", className)}>
+      {children}
+    </label>
+  );
 }
 
-export function Row({ children, className }: { children: ReactNode; className?: string }) {
+export function Row({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return <div className={cn("flex gap-2", className)}>{children}</div>;
 }
