@@ -34,6 +34,7 @@ import {
   peekNotes,
   seedFolderCache,
 } from "../lib/list-cache.ts";
+import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
 
 function draftFromFolder(access: FolderAccess): AccessDraft {
   return {
@@ -165,6 +166,7 @@ export function HomePage() {
       return;
     }
 
+    seedNoteCache(result.data);
     navigate(`/n/${result.data.id}`);
   }
 
@@ -378,6 +380,7 @@ export function HomePage() {
     }
     setConfirm(null);
     setConfirmBusy(false);
+    if (confirm.kind === "note") invalidateNoteCache(confirm.id);
     if (confirm.kind === "folder" && folderId === confirm.id) {
       navigate(folderUrl(visibleFolder?.parentId));
     }

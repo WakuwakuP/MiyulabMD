@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import { loadOgCards, renderMarkdownHtml } from "../../lib/markdown.ts";
 import { embedClass, markdownProseClass } from "../ui/prose.ts";
@@ -26,32 +26,35 @@ export function MarkdownPreview({
   const articleRef = useRef<HTMLElement>(null);
   const applyingScroll = useRef(false);
   const deferredMarkdown = useDeferredValue(markdown);
-  const [html, setHtml] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [enhanced, setEnhanced] = useState<{ md: string; html: string } | null>(
+    null,
+  );
+
+  const rendered = useMemo(() => {
+    try {
+      return { html: renderMarkdownHtml(deferredMarkdown), error: null };
+    } catch {
+      return { html: "", error: "プレビューの生成に失敗しました。" };
+    }
+  }, [deferredMarkdown]);
 
   useEffect(() => {
     let cancelled = false;
-
-    try {
-      const next = renderMarkdownHtml(deferredMarkdown);
-      setHtml((prev) => (prev === next ? prev : next));
-      setError(null);
-    } catch {
-      setHtml("");
-      setError("プレビューの生成に失敗しました。");
-      return;
-    }
-
     void loadOgCards(deferredMarkdown).then((cards) => {
       if (cancelled || cards.size === 0) return;
-      const next = renderMarkdownHtml(deferredMarkdown, cards);
-      setHtml((prev) => (prev === next ? prev : next));
+      setEnhanced({
+        md: deferredMarkdown,
+        html: renderMarkdownHtml(deferredMarkdown, cards),
+      });
     });
-
     return () => {
       cancelled = true;
     };
   }, [deferredMarkdown]);
+
+  const html =
+    enhanced?.md === deferredMarkdown ? enhanced.html : rendered.html;
+  const error = rendered.error;
 
   useEffect(() => {
     const el = articleRef.current;
