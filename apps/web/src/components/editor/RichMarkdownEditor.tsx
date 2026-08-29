@@ -1,4 +1,5 @@
 import Image from "@tiptap/extension-image";
+import { NodeRange } from "@tiptap/extension-node-range";
 import Placeholder from "@tiptap/extension-placeholder";
 import Youtube from "@tiptap/extension-youtube";
 import { Markdown } from "@tiptap/markdown";
@@ -32,7 +33,11 @@ import {
   type YTextDeltaItem,
 } from "../../lib/y-text-diff.ts";
 import { FileInput } from "../ui/FileInput.tsx";
-import { editorLoadingClass } from "../ui/prose.ts";
+import {
+  editorLoadingClass,
+  richEditorPlaceholderClass,
+  richEditorProseClass,
+} from "../ui/prose.ts";
 import { BlockHandle } from "./BlockHandle.tsx";
 import { AutoLinkCard } from "./extensions/auto-link-card.ts";
 import { CollabCarets, collabCaretsKey } from "./extensions/collab-carets.ts";
@@ -191,7 +196,12 @@ export function RichMarkdownEditor({
       StarterKit.configure({
         paragraph: false,
         link: { openOnClick: false, autolink: true },
+        dropcursor: {
+          color: "color-mix(in srgb, CanvasText 35%, transparent)",
+          width: 2,
+        },
       }),
+      NodeRange,
       SafeParagraph,
       Markdown,
       Image,
@@ -203,7 +213,15 @@ export function RichMarkdownEditor({
       }),
       OgCard,
       AutoLinkCard,
-      Placeholder.configure({ placeholder: "「/」でブロックを挿入" }),
+      Placeholder.configure({
+        includeChildren: true,
+        placeholder: ({ node }) => {
+          if (node.type.name === "heading") {
+            return `見出し ${node.attrs.level}`;
+          }
+          return "「/」でブロックを挿入";
+        },
+      }),
       CollabCarets.configure({
         getMap: () => mapRef.current,
         getPeers: () => readRemoteMarkdownCursors(awareness, yText),
@@ -359,12 +377,9 @@ export function RichMarkdownEditor({
         editor={editor}
         className={cn(
           "rich-editor-content flex flex-1 justify-center overflow-auto px-5 py-4",
-          "[&_.tiptap]:min-h-full [&_.tiptap]:outline-none",
-          "[&_.tiptap_h1]:leading-tight [&_.tiptap_h2]:leading-tight [&_.tiptap_h3]:leading-tight",
-          "[&_.tiptap_img]:h-auto [&_.tiptap_img]:max-w-full",
-          "[[data-layout=editor]_&_.tiptap]:w-[min(100%,46rem)] [[data-layout=editor]_&_.tiptap]:px-6 [[data-layout=editor]_&_.tiptap]:py-9 [[data-layout=editor]_&_.tiptap]:pl-11 [[data-layout=editor]_&_.tiptap]:pb-20",
-          "[&_.tiptap_p.is-editor-empty:first-child]:before:pointer-events-none [&_.tiptap_p.is-editor-empty:first-child]:before:float-left [&_.tiptap_p.is-editor-empty:first-child]:before:h-0 [&_.tiptap_p.is-editor-empty:first-child]:before:text-muted [&_.tiptap_p.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]",
-          "[&_.tiptap_.is-empty.has-focus]:before:pointer-events-none [&_.tiptap_.is-empty.has-focus]:before:float-left [&_.tiptap_.is-empty.has-focus]:before:h-0 [&_.tiptap_.is-empty.has-focus]:before:text-muted [&_.tiptap_.is-empty.has-focus]:before:content-[attr(data-placeholder)]",
+          "[[data-layout=editor]_&_.tiptap]:w-[min(100%,46rem)] [[data-layout=editor]_&_.tiptap]:px-6 [[data-layout=editor]_&_.tiptap]:py-10 [[data-layout=editor]_&_.tiptap]:pl-14 [[data-layout=editor]_&_.tiptap]:pb-24",
+          richEditorProseClass,
+          richEditorPlaceholderClass,
         )}
       />
       {!readOnly && (
