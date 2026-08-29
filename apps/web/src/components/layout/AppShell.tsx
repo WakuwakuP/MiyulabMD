@@ -47,13 +47,7 @@ export function AppShell() {
   };
 
   return (
-    <div
-      data-layout={layout}
-      className={cn(
-        "flex min-h-dvh flex-col",
-        editor && "h-dvh overflow-hidden",
-      )}
-    >
+    <div data-layout={layout} className="flex min-h-dvh flex-col">
       <AppHeader
         title={headerTitle}
         actions={headerActions}
@@ -64,8 +58,8 @@ export function AppShell() {
       />
       <main
         className={cn(
-          "mx-auto w-full max-w-[1400px] flex-1 p-5",
-          editor && "m-0 min-h-0 max-w-none overflow-hidden p-0",
+          "mx-auto w-full max-w-[1400px] flex-1 p-5 pt-[calc(var(--header-height)+1.25rem)]",
+          editor && "m-0 max-w-none p-0 pt-[var(--header-height)]",
         )}
       >
         <Outlet context={context} />
