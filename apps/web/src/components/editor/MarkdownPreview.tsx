@@ -4,7 +4,7 @@ import { loadOgCards, renderMarkdownHtml } from "../../lib/markdown.ts";
 import {
   documentPaneScrollClass,
   documentProseClass,
-  richEditorColumnClass,
+  documentViewColumnClass,
 } from "../ui/prose.ts";
 
 type Props = {
@@ -81,8 +81,7 @@ export function MarkdownPreview({
           className,
         )
       : cn(
-          "mx-auto",
-          richEditorColumnClass,
+          documentViewColumnClass,
           "[[data-layout=editor]_&]:min-h-0",
           className,
         ),
