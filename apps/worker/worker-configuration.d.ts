@@ -8,6 +8,7 @@ interface Env {
   IMAGES: R2Bucket;
   DOCUMENT_ROOM: DurableObjectNamespace<DocumentRoom>;
   ASSETS: Fetcher;
+  OG_FETCH: Fetcher;
   ALLOW_ANONYMOUS: string;
   ALLOW_ANONYMOUS_EDITS: string;
   ALLOW_ANONYMOUS_VIEWS: string;

@@ -19,6 +19,10 @@ migrations_dir = "src/db/migrations"
 binding = "IMAGES"
 bucket_name = "miyulabmd-images"
 
+[[services]]
+binding = "OG_FETCH"
+service = "miyulabmd-og-fetch"
+
 [durable_objects]
 bindings = [{ name = "DOCUMENT_ROOM", class_name = "DocumentRoom" }]
 
