@@ -1,3 +1,9 @@
+import {
+  isBlockedHost,
+  type OgOutbound,
+  ogRequestInit,
+} from "../og-fetch-shared.ts";
+
 export type OgPreview = {
   url: string;
   title: string | null;
@@ -6,7 +12,7 @@ export type OgPreview = {
   siteName: string | null;
 };
 
-const FETCH_TIMEOUT_MS = 5000;
+const FETCH_TIMEOUT_MS = 8000;
 const MAX_BYTES = 512_000;
 
 export const OG_CACHE_CONTROL = "public, max-age=300, s-maxage=3600";
@@ -15,26 +21,6 @@ const ogInflight = new Map<
   string,
   Promise<OgPreview | { error: string; status: number }>
 >();
-
-function isBlockedHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host === "127.0.0.1" ||
-    host === "::1"
-  ) {
-    return true;
-  }
-  if (
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-  ) {
-    return true;
-  }
-  return false;
-}
 
 function decodeEntities(value: string): string {
   return value
@@ -185,8 +171,26 @@ export async function peekOgCards(
   return cards;
 }
 
+async function fetchHtml(
+  url: string,
+  init: RequestInit,
+  outbound?: OgOutbound,
+): Promise<Response> {
+  if (outbound) {
+    try {
+      const viaOutbound = await outbound.fetch(url, init);
+      if (viaOutbound.ok) return viaOutbound;
+    } catch {
+      // Custom-domain Workers cannot fetch some same-zone CNAMEs.
+      // Fall through to the runtime fetch (works on workers.dev / local).
+    }
+  }
+  return fetch(url, init);
+}
+
 export async function fetchOgPreview(
   rawUrl: string,
+  outbound?: OgOutbound,
 ): Promise<OgPreview | { error: string; status: number }> {
   let target: URL;
   try {
@@ -204,12 +208,11 @@ export async function fetchOgPreview(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(target.toString(), {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { Accept: "text/html,application/xhtml+xml" },
-    });
+    const response = await fetchHtml(
+      target.toString(),
+      ogRequestInit(controller.signal),
+      outbound,
+    );
     if (!response.ok) {
       return { error: "fetch failed", status: 502 };
     }
@@ -225,6 +228,7 @@ export async function fetchOgPreview(
 export async function loadOgPreview(
   origin: string,
   rawUrl: string,
+  outbound?: OgOutbound,
 ): Promise<OgPreview | { error: string; status: number }> {
   const cached = await matchOgCache(origin, rawUrl);
   if (cached) return cached;
@@ -234,7 +238,7 @@ export async function loadOgPreview(
   const existing = ogInflight.get(inflightKey);
   if (existing) return existing;
 
-  const pending = fetchOgPreview(rawUrl)
+  const pending = fetchOgPreview(rawUrl, outbound)
     .then(async (result) => {
       if (!("error" in result)) await putOgCache(origin, result);
       return result;
@@ -249,6 +253,7 @@ export async function loadOgPreview(
 export async function warmOgCards(
   origin: string,
   urls: string[],
+  outbound?: OgOutbound,
 ): Promise<void> {
-  await Promise.all(urls.map((url) => loadOgPreview(origin, url)));
+  await Promise.all(urls.map((url) => loadOgPreview(origin, url, outbound)));
 }
