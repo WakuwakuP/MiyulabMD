@@ -22,3 +22,20 @@ test("renderMarkdownHtml is sync and does not need OGP cards", () => {
   const html = renderMarkdownHtml("https://example.com/preview-perf\n");
   assert.match(html, /example\.com\/preview-perf/);
 });
+
+test("renderMarkdownHtml highlights fenced code and shows filename", () => {
+  const html = renderMarkdownHtml(
+    "```typescript:hoge.ts\nconst answer = 42;\n```\n",
+  );
+  assert.match(html, /class="md-code-filename"/);
+  assert.match(html, />hoge\.ts</);
+  assert.match(html, /language-typescript/);
+  assert.match(html, /hljs-/);
+  assert.doesNotMatch(html, /language-typescript:hoge\.ts/);
+});
+
+test("renderMarkdownHtml infers highlight language from a filename fence", () => {
+  const html = renderMarkdownHtml("```hoge.ts\nconst answer = 42;\n```\n");
+  assert.match(html, />hoge\.ts</);
+  assert.match(html, /language-typescript/);
+});

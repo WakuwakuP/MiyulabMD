@@ -5,7 +5,7 @@ import { TableKit } from "@tiptap/extension-table";
 import Youtube from "@tiptap/extension-youtube";
 import { Markdown } from "@tiptap/markdown";
 import type { Editor } from "@tiptap/react";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
 import type * as Y from "yjs";
@@ -42,7 +42,9 @@ import {
   richEditorTiptapClass,
 } from "../ui/prose.ts";
 import { BlockHandle } from "./BlockHandle.tsx";
+import { CodeBlockView } from "./CodeBlockView.tsx";
 import { AutoLinkCard } from "./extensions/auto-link-card.ts";
+import { HighlightedCodeBlock } from "./extensions/code-block.ts";
 import { CollabCarets, collabCaretsKey } from "./extensions/collab-carets.ts";
 import { OgCard } from "./extensions/og-card.ts";
 import { SafeParagraph } from "./extensions/safe-paragraph.ts";
@@ -198,10 +200,16 @@ export function RichMarkdownEditor({
     extensions: [
       StarterKit.configure({
         paragraph: false,
+        codeBlock: false,
         link: { openOnClick: false, autolink: true },
         dropcursor: {
           color: "color-mix(in srgb, CanvasText 35%, transparent)",
           width: 2,
+        },
+      }),
+      HighlightedCodeBlock.extend({
+        addNodeView() {
+          return ReactNodeViewRenderer(CodeBlockView);
         },
       }),
       NodeRange,
