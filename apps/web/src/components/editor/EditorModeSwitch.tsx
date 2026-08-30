@@ -10,7 +10,7 @@ import {
 } from "../../lib/editor-mode.ts";
 import { ChevronDownIcon, EyeIcon, PencilIcon } from "../ui/icons.tsx";
 import { MenuItem, MenuPanel } from "../ui/Menu.tsx";
-import { SegmentedControl, SegmentedWrap } from "../ui/SegmentedControl.tsx";
+import { SegmentedWrap, Switch } from "../ui/Switch.tsx";
 
 type Props = {
   value: EditorMode;
@@ -34,8 +34,9 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
   return (
     <div ref={rootRef}>
       <SegmentedWrap>
-        <SegmentedControl
+        <Switch
           label="表示モード"
+          size="md"
           items={[
             {
               value: "preview",

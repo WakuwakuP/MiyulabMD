@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/components/editor/*.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/components/editor/*.test.ts",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
@@ -47,11 +49,15 @@
     "yjs": "^13.6.32"
   },
   "devDependencies": {
+    "@storybook/addon-a11y": "^9.1.20",
+    "@storybook/addon-docs": "^9.1.20",
+    "@storybook/react-vite": "^9.1.20",
     "@tailwindcss/vite": "^4.3.3",
     "@types/fast-diff": "^1.2.2",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.1",
+    "storybook": "^9.1.20",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.2",
     "vite": "^7.1.3"

@@ -1,28 +1,10 @@
-/* highlight.js / lowlight tokens — Canvas/CanvasText aware, matches cm-highlight. */
-.markdown-preview,
-.rich-editor-content,
-#ssr-preview {
-  --hl-keyword: light-dark(#6d28d9, #c4b5fd);
-  --hl-literal: light-dark(#1d4ed8, #93c5fd);
-  --hl-string: light-dark(#047857, #6ee7b7);
-  --hl-number: light-dark(#c2410c, #fdba74);
-  --hl-comment: light-dark(
-    color-mix(in srgb, CanvasText 52%, transparent),
-    color-mix(in srgb, CanvasText 48%, transparent)
-  );
-  --hl-type: light-dark(#0e7490, #67e8f9);
-  --hl-variable: light-dark(#b45309, #fcd34d);
-  --hl-operator: light-dark(#be123c, #fda4af);
-  --hl-meta: light-dark(#4338ca, #a5b4fc);
-  --hl-title: light-dark(#2563eb, #93c5fd);
-}
-
+/* highlight.js / lowlight tokens — uses shared syntax-tokens. */
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-doctag,
 .hljs-section,
 .hljs-name {
-  color: var(--hl-keyword);
+  color: var(--syn-keyword);
 }
 
 .hljs-built_in,
@@ -30,7 +12,7 @@
 .hljs-type,
 .hljs-selector-id,
 .hljs-selector-class {
-  color: var(--hl-literal);
+  color: var(--syn-literal);
 }
 
 .hljs-string,
@@ -38,17 +20,17 @@
 .hljs-template-tag,
 .hljs-template-variable,
 .hljs-addition {
-  color: var(--hl-string);
+  color: var(--syn-string);
 }
 
 .hljs-number,
 .hljs-symbol {
-  color: var(--hl-number);
+  color: var(--syn-number);
 }
 
 .hljs-comment,
 .hljs-quote {
-  color: var(--hl-comment);
+  color: var(--syn-comment);
   font-style: italic;
 }
 
@@ -56,7 +38,7 @@
 .hljs-title.class_,
 .hljs-title.function_,
 .hljs-class .hljs-title {
-  color: var(--hl-type);
+  color: var(--syn-type);
 }
 
 .hljs-variable,
@@ -65,19 +47,19 @@
 .hljs-attr,
 .hljs-attribute,
 .hljs-property {
-  color: var(--hl-variable);
+  color: var(--syn-variable);
 }
 
 .hljs-punctuation,
 .hljs-operator,
 .hljs-bullet {
-  color: var(--hl-operator);
+  color: var(--syn-operator);
 }
 
 .hljs-meta,
 .hljs-meta .hljs-keyword,
 .hljs-meta .hljs-string {
-  color: var(--hl-meta);
+  color: var(--syn-meta);
 }
 
 .hljs-subst {
@@ -93,13 +75,19 @@
 }
 
 .hljs-link {
-  color: var(--hl-title);
+  color: var(--syn-title);
   text-decoration: underline;
 }
 
 .hljs-deletion {
-  color: var(--hl-operator);
+  color: var(--syn-operator);
   text-decoration: line-through;
+}
+
+.markdown-preview pre,
+.rich-editor-content pre,
+#ssr-preview pre {
+  background: var(--syn-code-bg);
 }
 
 .md-code {
@@ -113,7 +101,7 @@
   gap: 0.5rem;
   padding: 0.4rem 0.75rem;
   border-radius: 0.5rem 0.5rem 0 0;
-  background: var(--color-code);
+  background: var(--syn-code-bg);
   color: var(--color-muted);
   font-family: var(--font-mono);
   font-size: 0.8em;

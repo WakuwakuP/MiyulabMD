@@ -23,7 +23,7 @@ export const documentProseClass = [
   "[&_ul]:list-disc [&_ul]:pl-7 [&_ol]:list-decimal [&_ol]:pl-7",
   "[&_li]:my-[0.12em] [&_li_p]:my-0",
   "[&_blockquote]:my-[0.65em] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted",
-  "[&_pre]:my-[0.8em] [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-code [&_pre]:px-4 [&_pre]:py-3",
+  "[&_pre]:my-[0.8em] [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-[var(--syn-code-bg)] [&_pre]:px-4 [&_pre]:py-3",
   "[&_code]:rounded [&_code]:bg-code [&_code]:px-[0.32em] [&_code]:py-[0.08em] [&_code]:font-mono [&_code]:text-[0.9em]",
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
   "[&_.md-code]:my-[0.8em] [&_.md-code_pre]:my-0",
