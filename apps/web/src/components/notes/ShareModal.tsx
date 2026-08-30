@@ -15,7 +15,7 @@ import { Input } from "../ui/Input.tsx";
 import { Modal, ModalFooter, ModalHeader } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
 import { ErrorText, MutedText, SectionTitle } from "../ui/Text.tsx";
-import type { AccessDraft } from "./AccessPanel.tsx";
+import { type AccessDraft, accessScopeSelectClass } from "./AccessPanel.tsx";
 
 type Props = {
   title: string;
@@ -202,6 +202,7 @@ export function ShareModal({
             <label className="flex items-center justify-between gap-3">
               閲覧
               <Select
+                className={accessScopeSelectClass}
                 value={value.readScope}
                 disabled={disabled || value.inherit}
                 onChange={(event) =>
@@ -218,6 +219,7 @@ export function ShareModal({
             <label className="flex items-center justify-between gap-3">
               編集
               <Select
+                className={accessScopeSelectClass}
                 value={value.writeScope}
                 disabled={disabled || value.inherit}
                 onChange={(event) =>
