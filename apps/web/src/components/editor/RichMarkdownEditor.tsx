@@ -19,6 +19,7 @@ import {
 import {
   buildOffsetMap,
   clampPos,
+  isPlainMappedOffset,
   markdownEquivalent,
   mdToPm,
   type OffsetMap,
@@ -87,6 +88,7 @@ function trySurgicalApply(
   if (!plain) return false;
 
   if (plain.kind === "insert") {
+    if (!isPlainMappedOffset(map, plain.index)) return false;
     const pos = clampPos(editor.state.doc, mdToPm(map, plain.index));
     const $pos = editor.state.doc.resolve(pos);
     if (!$pos.parent.isTextblock) return false;
@@ -98,6 +100,12 @@ function trySurgicalApply(
     return true;
   }
 
+  if (
+    !isPlainMappedOffset(map, plain.index) ||
+    !isPlainMappedOffset(map, plain.index + plain.length)
+  ) {
+    return false;
+  }
   const from = clampPos(editor.state.doc, mdToPm(map, plain.index));
   const to = clampPos(
     editor.state.doc,

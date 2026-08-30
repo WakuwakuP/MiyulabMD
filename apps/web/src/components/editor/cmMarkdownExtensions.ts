@@ -6,12 +6,19 @@ import {
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { classHighlighter, tags } from "@lezer/highlight";
-import { highlightLanguage, parseFenceInfo } from "@miyulabmd/markdown";
+import { inferLanguageFromFilename, parseFenceInfo } from "@miyulabmd/markdown";
 
 function languageForFence(info: string) {
-  const name = highlightLanguage(parseFenceInfo(info));
-  if (!name) return null;
-  return LanguageDescription.matchLanguageName(languages, name, true);
+  const parsed = parseFenceInfo(info);
+  for (const name of [
+    parsed.language,
+    inferLanguageFromFilename(parsed.filename),
+  ]) {
+    if (!name) continue;
+    const match = LanguageDescription.matchLanguageName(languages, name, true);
+    if (match) return match;
+  }
+  return null;
 }
 
 const markdownHighlightExtras = HighlightStyle.define([
