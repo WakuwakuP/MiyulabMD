@@ -434,6 +434,7 @@ async function listVisibleChildren(
       name: folderName(row.folder),
       parentId: currentId,
       readScope: effective.effectiveReadScope,
+      writeScope: effective.effectiveWriteScope,
       ...(isOwner ? { folder: row.folder } : {}),
     });
   }
@@ -454,6 +455,7 @@ function presentFolderAccess(
       name: child.name,
       parentId: child.parentId,
       readScope: child.readScope,
+      writeScope: child.writeScope,
     })),
   };
 }

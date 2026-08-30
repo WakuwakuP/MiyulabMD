@@ -152,8 +152,11 @@ export function NoteTree({
                 name={folder.name}
                 icon={<FolderIcon />}
                 meta={
-                  folder.readScope ? (
-                    <AccessScopeMeta scope={folder.readScope} />
+                  folder.readScope && folder.writeScope ? (
+                    <AccessScopeMeta
+                      readScope={folder.readScope}
+                      writeScope={folder.writeScope}
+                    />
                   ) : undefined
                 }
                 menuOpen={openMenuId === folder.id}
@@ -171,7 +174,10 @@ export function NoteTree({
                 name={note.title}
                 icon={<MarkdownIcon />}
                 meta={
-                  <AccessScopeMeta scope={note.access.effectiveReadScope} />
+                  <AccessScopeMeta
+                    readScope={note.access.effectiveReadScope}
+                    writeScope={note.access.effectiveWriteScope}
+                  />
                 }
                 menuOpen={openMenuId === note.id}
                 onMenu={(event) => handleRowMenu(event, target)}

@@ -16,30 +16,44 @@ const SCOPE_ICONS: Record<AccessScope, typeof Globe> = {
   self: Lock,
 };
 
+function scopeTone(scope: AccessScope): string {
+  if (scope === "public") return "text-accent";
+  if (scope === "self") return "text-muted/45";
+  return "text-muted";
+}
+
+function ScopeMark({ kind, scope }: { kind: string; scope: AccessScope }) {
+  const Icon = SCOPE_ICONS[scope];
+
+  return (
+    <span className={cn("inline-flex items-center gap-1", scopeTone(scope))}>
+      <Icon aria-hidden className="size-3.5 shrink-0" />
+      <span>{kind}</span>
+      <span>{SHORT_LABELS[scope]}</span>
+    </span>
+  );
+}
+
 type Props = {
-  scope: AccessScope;
+  readScope: AccessScope;
+  writeScope: AccessScope;
   className?: string;
 };
 
-export function AccessScopeMeta({ scope, className }: Props) {
-  const label = ACCESS_SCOPE_LABELS[scope];
-  const Icon = SCOPE_ICONS[scope];
+export function AccessScopeMeta({ readScope, writeScope, className }: Props) {
+  const label = `閲覧 ${ACCESS_SCOPE_LABELS[readScope]}、編集 ${ACCESS_SCOPE_LABELS[writeScope]}`;
 
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 text-[0.72rem] leading-none",
-        scope === "public" && "text-accent",
-        scope === "signed_in" && "text-muted",
-        scope === "users" && "text-muted",
-        scope === "self" && "text-muted/45",
+        "inline-flex shrink-0 items-center gap-2 text-[0.72rem] leading-none",
         className,
       )}
       title={label}
       aria-label={label}
     >
-      <Icon aria-hidden className="size-3.5 shrink-0" />
-      <span>{SHORT_LABELS[scope]}</span>
+      <ScopeMark kind="閲覧" scope={readScope} />
+      <ScopeMark kind="編集" scope={writeScope} />
     </span>
   );
 }
