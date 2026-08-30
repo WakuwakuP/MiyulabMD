@@ -4,13 +4,15 @@ export const documentColumnClass = `${documentColumnWidthClass} px-6 py-10 pb-24
 
 export const richEditorColumnClass = `${documentColumnClass} pl-14`;
 
-export const documentViewColumnClass = `${richEditorColumnClass} mx-auto`;
+export const documentViewColumnClass = `${documentColumnWidthClass} mx-auto px-4 py-10 pb-24 sm:px-6`;
 
 export const documentScrollPadClass = "px-5 py-4";
 
-export const documentShellClass = `flex justify-center ${documentScrollPadClass}`;
+export const documentViewScrollPadClass = "px-3 py-4 sm:px-5";
 
-export const documentPaneScrollClass = `${documentShellClass} h-full overflow-auto`;
+export const documentViewShellClass = `flex justify-center ${documentViewScrollPadClass}`;
+
+export const documentPaneScrollClass = `${documentViewShellClass} h-full overflow-auto`;
 
 export const documentProseClass = [
   "text-[1.05rem] leading-[1.7]",
