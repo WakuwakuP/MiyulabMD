@@ -116,6 +116,14 @@ export function MenuSeparator() {
   return <hr className="my-[0.35rem] h-px border-0 bg-border" />;
 }
 
+export function MenuRow({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-2">
+      {children}
+    </div>
+  );
+}
+
 export function MenuHeader({
   name,
   email,

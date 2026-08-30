@@ -3,7 +3,14 @@ import { useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
-import { MenuHeader, MenuItem, MenuPanel, MenuSeparator } from "../ui/Menu.tsx";
+import {
+  MenuHeader,
+  MenuItem,
+  MenuPanel,
+  MenuRow,
+  MenuSeparator,
+} from "../ui/Menu.tsx";
+import { ThemeSwitch } from "./ThemeSwitch.tsx";
 
 type Props = {
   user: SessionUser;
@@ -40,6 +47,11 @@ export function AccountMenu({ user }: Props) {
               size="lg"
             />
           </MenuHeader>
+          <MenuSeparator />
+          <MenuRow>
+            <span className="text-[0.85rem] text-muted">テーマ</span>
+            <ThemeSwitch />
+          </MenuRow>
           <MenuSeparator />
           <MenuItem to="/settings" onClick={() => setOpen(false)}>
             設定
