@@ -6,6 +6,7 @@ import {
   clampWriteScope,
 } from "@miyulabmd/shared";
 import { type FormEvent, useState } from "react";
+import { cn } from "../../lib/cn.ts";
 import { Button } from "../ui/Button.tsx";
 import { CheckLabel, Row } from "../ui/Field.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -18,6 +19,9 @@ export type AccessDraft = {
   writeScope: AccessScope;
   grants: AccessGrant[];
 };
+
+/** Longest scope label is 指定ユーザーのみ / ログイン済みのみ. */
+export const accessScopeSelectClass = "w-[11rem] shrink-0";
 
 type Props = {
   title: string;
@@ -93,7 +97,7 @@ export function AccessPanel({
         <label className="flex items-center gap-[0.4rem]">
           読み取り
           <Select
-            className="ml-[0.35rem]"
+            className={cn("ml-[0.35rem]", accessScopeSelectClass)}
             value={value.readScope}
             disabled={value.inherit}
             onChange={(event) =>
@@ -110,7 +114,7 @@ export function AccessPanel({
         <label className="flex items-center gap-[0.4rem]">
           書き込み
           <Select
-            className="ml-[0.35rem]"
+            className={cn("ml-[0.35rem]", accessScopeSelectClass)}
             value={value.writeScope}
             disabled={value.inherit}
             onChange={(event) =>
