@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { OG_USER_AGENT } from "../og-fetch-shared.ts";
+import {
+  OG_TARGET_HEADER,
+  OG_USER_AGENT,
+  parseOgTargetUrl,
+} from "../og-fetch-shared.ts";
 import { fetchOgPreview, ogCacheKey, parseOgHtml } from "./og.ts";
 
 test("parseOgHtml reads Open Graph tags from head", () => {
@@ -45,21 +49,43 @@ test("fetchOgPreview sends a User-Agent", async () => {
   }
 });
 
+test("parseOgTargetUrl reads x-og-target and rejects workers.dev", () => {
+  const ok = parseOgTargetUrl(
+    new Request("https://og-fetch.workers.dev/", {
+      headers: { [OG_TARGET_HEADER]: "https://stellasora-tools.miyulab.dev/" },
+    }),
+  );
+  assert.equal(ok?.toString(), "https://stellasora-tools.miyulab.dev/");
+  assert.equal(
+    parseOgTargetUrl(
+      new Request("https://og-fetch.workers.dev/", {
+        headers: { [OG_TARGET_HEADER]: "https://miyulabmd.workers.dev/" },
+      }),
+    ),
+    null,
+  );
+  assert.equal(parseOgTargetUrl(new Request("https://example.com/")), null);
+});
+
 test("fetchOgPreview prefers the outbound fetcher", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => {
     throw new Error("should not use global fetch");
   };
   try {
-    const result = await fetchOgPreview("https://example.com/", {
-      fetch: async () =>
-        new Response(
+    let targetHeader = "";
+    const result = await fetchOgPreview("https://example.com/page", {
+      fetch: async (_input, init) => {
+        targetHeader = new Headers(init?.headers).get(OG_TARGET_HEADER) ?? "";
+        return new Response(
           `<html><head><meta property="og:title" content="Via outbound"></head></html>`,
           { status: 200 },
-        ),
+        );
+      },
     });
     assert.ok(!("error" in result));
     assert.equal(result.title, "Via outbound");
+    assert.equal(targetHeader, "https://example.com/page");
   } finally {
     globalThis.fetch = original;
   }

@@ -3,6 +3,29 @@ export const OG_USER_AGENT =
 
 export const OG_ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
 
+/** Service bindings rewrite request.url to this Worker; pass the page URL here. */
+export const OG_TARGET_HEADER = "x-og-target";
+
+export function parseOgTargetUrl(request: Request): URL | null {
+  const raw = request.headers.get(OG_TARGET_HEADER);
+  if (!raw) return null;
+  try {
+    const target = new URL(raw);
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      return null;
+    }
+    if (
+      isBlockedHost(target.hostname) ||
+      target.hostname.endsWith(".workers.dev")
+    ) {
+      return null;
+    }
+    return target;
+  } catch {
+    return null;
+  }
+}
+
 export type OgOutbound = {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 };
