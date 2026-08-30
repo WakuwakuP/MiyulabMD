@@ -13,6 +13,19 @@ import type { OgPreview } from "./embeds.ts";
 
 const fetchOpts: RequestInit = { credentials: "include" };
 
+/** Custom-domain Worker cannot fetch same-zone CNAMEs; workers.dev can. */
+const OG_FALLBACK_ORIGIN = "https://miyulabmd.wakuwakup.workers.dev";
+
+function ogFallbackOrigin(): string | null {
+  if (
+    typeof window !== "undefined" &&
+    window.location.origin === OG_FALLBACK_ORIGIN
+  ) {
+    return null;
+  }
+  return OG_FALLBACK_ORIGIN;
+}
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -202,10 +215,14 @@ export async function fetchOgPreview(
   if (inflight) return inflight;
 
   const pending = (async () => {
-    const res = await fetch(
-      `/api/og?url=${encodeURIComponent(url)}`,
-      fetchOpts,
-    );
+    const path = `/api/og?url=${encodeURIComponent(url)}`;
+    let res = await fetch(path, fetchOpts);
+    const fallbackOrigin = ogFallbackOrigin();
+    if (!res.ok && fallbackOrigin) {
+      res = await fetch(`${fallbackOrigin}${path}`, {
+        credentials: "omit",
+      });
+    }
     if (!res.ok) {
       return {
         ok: false as const,
