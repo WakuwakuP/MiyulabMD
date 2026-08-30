@@ -22,6 +22,8 @@ function languageForFence(info: string) {
 }
 
 const markdownHighlightExtras = HighlightStyle.define([
+  { tag: tags.function(tags.variableName), class: "tok-function" },
+  { tag: tags.function(tags.propertyName), class: "tok-function" },
   { tag: tags.monospace, class: "tok-monospace" },
   { tag: tags.strikethrough, class: "tok-strikethrough" },
   { tag: tags.contentSeparator, class: "tok-contentSeparator" },

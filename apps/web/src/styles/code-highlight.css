@@ -1,31 +1,8 @@
-/* highlight.js / lowlight tokens — uses shared syntax-tokens. */
-.hljs-keyword,
-.hljs-selector-tag,
-.hljs-doctag,
-.hljs-section,
-.hljs-name {
-  color: var(--syn-keyword);
-}
-
-.hljs-built_in,
-.hljs-literal,
-.hljs-type,
-.hljs-selector-id,
-.hljs-selector-class {
-  color: var(--syn-literal);
-}
-
-.hljs-string,
-.hljs-regexp,
-.hljs-template-tag,
-.hljs-template-variable,
-.hljs-addition {
-  color: var(--syn-string);
-}
-
-.hljs-number,
-.hljs-symbol {
-  color: var(--syn-number);
+/* highlight.js / lowlight — Atom One Light / One Dark class map. */
+.markdown-preview .hljs,
+.rich-editor-content .hljs,
+#ssr-preview .hljs {
+  color: var(--syn-fg);
 }
 
 .hljs-comment,
@@ -34,36 +11,57 @@
   font-style: italic;
 }
 
-.hljs-title,
-.hljs-title.class_,
-.hljs-title.function_,
-.hljs-class .hljs-title {
-  color: var(--syn-type);
+.hljs-doctag,
+.hljs-keyword,
+.hljs-formula {
+  color: var(--syn-keyword);
 }
 
-.hljs-variable,
-.hljs-variable.language_,
-.hljs-variable.constant_,
-.hljs-attr,
-.hljs-attribute,
-.hljs-property {
-  color: var(--syn-variable);
-}
-
-.hljs-punctuation,
-.hljs-operator,
-.hljs-bullet {
-  color: var(--syn-operator);
-}
-
-.hljs-meta,
-.hljs-meta .hljs-keyword,
-.hljs-meta .hljs-string {
-  color: var(--syn-meta);
-}
-
+.hljs-section,
+.hljs-name,
+.hljs-selector-tag,
+.hljs-deletion,
 .hljs-subst {
-  color: inherit;
+  color: var(--syn-name);
+}
+
+.hljs-literal {
+  color: var(--syn-literal);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: var(--syn-string);
+}
+
+.hljs-attr,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-number {
+  color: var(--syn-attr);
+}
+
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-meta,
+.hljs-selector-id,
+.hljs-title,
+.hljs-property {
+  color: var(--syn-title);
+}
+
+.hljs-built_in,
+.hljs-title.class_,
+.hljs-class .hljs-title {
+  color: var(--syn-class);
 }
 
 .hljs-emphasis {
@@ -75,13 +73,7 @@
 }
 
 .hljs-link {
-  color: var(--syn-title);
   text-decoration: underline;
-}
-
-.hljs-deletion {
-  color: var(--syn-operator);
-  text-decoration: line-through;
 }
 
 .markdown-preview pre,
