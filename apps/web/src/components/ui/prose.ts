@@ -26,6 +26,8 @@ export const documentProseClass = [
   "[&_pre]:my-[0.8em] [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-code [&_pre]:px-4 [&_pre]:py-3",
   "[&_code]:rounded [&_code]:bg-code [&_code]:px-[0.32em] [&_code]:py-[0.08em] [&_code]:font-mono [&_code]:text-[0.9em]",
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
+  "[&_.md-code]:my-[0.8em] [&_.md-code_pre]:my-0",
+  "[&_.md-code:has(.md-code-filename)_pre]:rounded-t-none [&_.md-code:has(.md-code-toolbar)_pre]:rounded-t-none",
   "[&_hr]:my-7 [&_hr]:border-0 [&_hr]:border-t [&_hr]:border-border",
   "[&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-lg",
   "[&_a]:underline [&_a]:underline-offset-2",

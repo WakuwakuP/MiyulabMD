@@ -1,3 +1,4 @@
+import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
@@ -5,6 +6,11 @@ import rehypeStringify from "rehype-stringify";
 import { remark } from "remark";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
+import {
+  rehypeCodeFilename,
+  rehypeCodeFilenameWrap,
+  remarkFenceInfo,
+} from "./code-filename.ts";
 import {
   expandEmbedsForPreview,
   normalizeEmbedMarkdown,
@@ -45,6 +51,8 @@ const schema = {
     a: ["href", "target", "rel", "className"],
     img: ["src", "alt"],
     span: ["className"],
+    pre: ["className"],
+    code: ["className", "dataFilename"],
     h1: ["id"],
     h2: ["id"],
     h3: ["id"],
@@ -53,8 +61,12 @@ const schema = {
 
 const processor = remark()
   .use(remarkGfm)
+  .use(remarkFenceInfo)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeRaw)
+  .use(rehypeCodeFilename)
+  .use(rehypeHighlight)
+  .use(rehypeCodeFilenameWrap)
   .use(rehypeSlug)
   .use(rehypeSanitize, schema)
   .use(rehypeStringify);

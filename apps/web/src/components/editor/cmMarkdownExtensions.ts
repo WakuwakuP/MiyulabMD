@@ -1,7 +1,25 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import {
+  HighlightStyle,
+  LanguageDescription,
+  syntaxHighlighting,
+} from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { classHighlighter, tags } from "@lezer/highlight";
+import { inferLanguageFromFilename, parseFenceInfo } from "@miyulabmd/markdown";
+
+function languageForFence(info: string) {
+  const parsed = parseFenceInfo(info);
+  for (const name of [
+    parsed.language,
+    inferLanguageFromFilename(parsed.filename),
+  ]) {
+    if (!name) continue;
+    const match = LanguageDescription.matchLanguageName(languages, name, true);
+    if (match) return match;
+  }
+  return null;
+}
 
 const markdownHighlightExtras = HighlightStyle.define([
   { tag: tags.monospace, class: "tok-monospace" },
@@ -11,7 +29,7 @@ const markdownHighlightExtras = HighlightStyle.define([
 
 export const markdownEditorLanguage = markdown({
   base: markdownLanguage,
-  codeLanguages: languages,
+  codeLanguages: languageForFence,
 });
 
 export const markdownEditorHighlight = [
