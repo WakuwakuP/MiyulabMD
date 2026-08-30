@@ -4,11 +4,9 @@ import type { MouseEvent } from "react";
 import { useEffect, useState } from "react";
 import { fetchOgPreview } from "../../lib/api.ts";
 import type { OgPreview } from "../../lib/embeds.ts";
-import { MutedText } from "../ui/Text.tsx";
 import { expandOgCard } from "./extensions/auto-link-card.ts";
 
-const cardClass =
-  "flex w-full cursor-pointer gap-3 rounded-[10px] border border-border bg-surface p-3 text-left text-inherit no-underline";
+const cardClass = "embed-og cursor-pointer";
 
 function CardBody({
   href,
@@ -21,21 +19,13 @@ function CardBody({
 }) {
   return (
     <>
-      {card?.image && (
-        <img
-          src={card.image}
-          alt=""
-          className="h-20 w-[7.5rem] rounded-md object-cover"
-        />
-      )}
-      <span>
+      {card?.image && <img src={card.image} alt="" />}
+      <span className="embed-og-body">
         <strong>{loading ? "読み込み中…" : card?.title || href}</strong>
         {card?.description && (
-          <MutedText className="mt-1">{card.description}</MutedText>
+          <span className="embed-og-desc">{card.description}</span>
         )}
-        {card?.siteName && (
-          <small className="mt-1 block text-muted">{card.siteName}</small>
-        )}
+        {card?.siteName && <small>{card.siteName}</small>}
       </span>
     </>
   );
@@ -79,7 +69,7 @@ export function OgCardView({ node, editor, getPos }: NodeViewProps) {
   const body = <CardBody href={href} card={card} loading={loading} />;
 
   return (
-    <NodeViewWrapper className="my-4" data-og-card="">
+    <NodeViewWrapper className="embed-og-wrap" data-og-card="">
       {editable ? (
         <div className={cardClass} onClick={expand}>
           {body}

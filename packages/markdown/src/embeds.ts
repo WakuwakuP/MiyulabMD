@@ -91,7 +91,7 @@ export function renderOgCardHtml(href: string, card?: OgPreview): string {
   const site = card?.siteName
     ? `<small>${escapeHtml(card.siteName)}</small>`
     : "";
-  return `<div class="embed-og-wrap"><a class="embed-og" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${image}<span><strong>${escapeHtml(title)}</strong>${description}${site}</span></a></div>`;
+  return `<div class="embed-og-wrap"><a class="embed-og" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${image}<span class="embed-og-body"><strong>${escapeHtml(title)}</strong>${description}${site}</span></a></div>`;
 }
 
 export function expandEmbedsForPreview(
