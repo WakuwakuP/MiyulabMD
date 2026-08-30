@@ -1,0 +1,136 @@
+/* highlight.js / lowlight tokens — Canvas/CanvasText aware, matches cm-highlight. */
+.markdown-preview,
+.rich-editor-content,
+#ssr-preview {
+  --hl-keyword: light-dark(#6d28d9, #c4b5fd);
+  --hl-literal: light-dark(#1d4ed8, #93c5fd);
+  --hl-string: light-dark(#047857, #6ee7b7);
+  --hl-number: light-dark(#c2410c, #fdba74);
+  --hl-comment: light-dark(
+    color-mix(in srgb, CanvasText 52%, transparent),
+    color-mix(in srgb, CanvasText 48%, transparent)
+  );
+  --hl-type: light-dark(#0e7490, #67e8f9);
+  --hl-variable: light-dark(#b45309, #fcd34d);
+  --hl-operator: light-dark(#be123c, #fda4af);
+  --hl-meta: light-dark(#4338ca, #a5b4fc);
+  --hl-title: light-dark(#2563eb, #93c5fd);
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-section,
+.hljs-name {
+  color: var(--hl-keyword);
+}
+
+.hljs-built_in,
+.hljs-literal,
+.hljs-type,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--hl-literal);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-addition {
+  color: var(--hl-string);
+}
+
+.hljs-number,
+.hljs-symbol {
+  color: var(--hl-number);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-class .hljs-title {
+  color: var(--hl-type);
+}
+
+.hljs-variable,
+.hljs-variable.language_,
+.hljs-variable.constant_,
+.hljs-attr,
+.hljs-attribute,
+.hljs-property {
+  color: var(--hl-variable);
+}
+
+.hljs-punctuation,
+.hljs-operator,
+.hljs-bullet {
+  color: var(--hl-operator);
+}
+
+.hljs-meta,
+.hljs-meta .hljs-keyword,
+.hljs-meta .hljs-string {
+  color: var(--hl-meta);
+}
+
+.hljs-subst {
+  color: inherit;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}
+
+.hljs-link {
+  color: var(--hl-title);
+  text-decoration: underline;
+}
+
+.hljs-deletion {
+  color: var(--hl-operator);
+  text-decoration: line-through;
+}
+
+.md-code {
+  margin: 0.8em 0;
+}
+
+.md-code-filename,
+.md-code-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.5rem 0.5rem 0 0;
+  background: var(--color-code);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  line-height: 1.4;
+}
+
+.md-code-filename {
+  padding-bottom: 0.15rem;
+}
+
+.md-code:has(.md-code-filename) pre,
+.md-code:has(.md-code-toolbar) pre {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.md-code pre {
+  margin: 0;
+}
