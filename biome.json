@@ -27,6 +27,7 @@
       "!**/dist",
       "!**/.wrangler",
       "!**/coverage",
+      "!**/storybook-static",
       "!**/pnpm-lock.yaml"
     ]
   },
