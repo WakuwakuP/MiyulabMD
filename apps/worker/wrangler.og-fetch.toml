@@ -1,0 +1,4 @@
+name = "miyulabmd-og-fetch"
+main = "src/og-fetch-worker.ts"
+compatibility_date = "2026-08-01"
+workers_dev = true

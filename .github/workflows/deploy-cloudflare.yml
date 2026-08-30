@@ -62,10 +62,9 @@ jobs:
 
       - name: Bundle Worker without uploading
         working-directory: apps/worker
-        run: >-
-          pnpm exec wrangler deploy
-          --dry-run
-          --outdir /tmp/miyulabmd-worker-dry-run
+        run: |
+          pnpm exec wrangler deploy -c wrangler.og-fetch.toml --dry-run --outdir /tmp/miyulabmd-og-fetch-dry-run
+          pnpm exec wrangler deploy --dry-run --outdir /tmp/miyulabmd-worker-dry-run
 
   deploy:
     name: Deploy production Worker
@@ -114,4 +113,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy --message "${{ github.sha }}"
+        run: |
+          pnpm exec wrangler deploy -c wrangler.og-fetch.toml --message "${{ github.sha }}-og-fetch"
+          pnpm exec wrangler deploy --message "${{ github.sha }}"

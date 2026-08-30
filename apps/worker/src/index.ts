@@ -96,7 +96,7 @@ async function handleNotePage(
   const ogCards = await peekOgCards(url.origin, ogUrls);
   const missingOg = ogUrls.filter((href) => !ogCards.has(href));
   if (missingOg.length > 0) {
-    ctx.waitUntil(warmOgCards(url.origin, missingOg));
+    ctx.waitUntil(warmOgCards(url.origin, missingOg, env.OG_FETCH));
   }
   const previewHtml = renderMarkdownHtml(result.note.markdown, ogCards);
   const ogRecord = Object.fromEntries(ogCards);

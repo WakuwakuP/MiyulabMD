@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "predev": "mkdir -p ../web/dist",
-    "dev": "wrangler dev",
+    "dev": "wrangler dev -c wrangler.toml -c wrangler.og-fetch.toml",
     "db:migrate": "wrangler d1 migrations apply DB --local",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy -c wrangler.og-fetch.toml && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/ssr/*.test.ts src/services/*.test.ts",
     "cf-typegen": "wrangler types"
