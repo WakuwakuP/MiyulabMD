@@ -124,12 +124,12 @@ export function parseFenceInfo(info: string): FenceInfo {
   if (colon >= 0) {
     return {
       language: trimmed.slice(0, colon).trim(),
-      filename: trimmed.slice(colon + 1).trim(),
+      filename: normalizeFilename(trimmed.slice(colon + 1)),
     };
   }
 
   if (!isKnownLanguage(trimmed) && looksLikeFilename(trimmed)) {
-    return { language: "", filename: trimmed };
+    return { language: "", filename: normalizeFilename(trimmed) };
   }
 
   return { language: trimmed, filename: "" };
@@ -144,9 +144,13 @@ export function highlightLanguage(info: FenceInfo): string {
   return resolveLanguage(info.language);
 }
 
+export function normalizeFilename(filename: string): string {
+  return filename.trim().replace(/\s+/g, "");
+}
+
 export function serializeFenceInfo(info: FenceInfo): string {
   const language = info.language.trim();
-  const filename = info.filename.trim();
+  const filename = normalizeFilename(info.filename);
   if (language && filename) return `${language}:${filename}`;
   return filename || language;
 }

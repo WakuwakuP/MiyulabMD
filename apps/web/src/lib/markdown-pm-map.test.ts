@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { canonicalizeEditorMarkdown } from "./embeds.ts";
 import {
   buildOffsetMap,
+  isPlainMappedOffset,
   mapThrough,
   markdownEquivalent,
   mdToPm,
@@ -100,4 +101,15 @@ test("markdownEquivalent ignores youtube default attrs and shorthand", () => {
 
 test("markdownEquivalent keeps real text changes distinct", () => {
   assert.equal(markdownEquivalent("# 無題\n", "# 無題\n\n追記"), false);
+});
+
+test("fence info offsets are not 1:1 with code text", () => {
+  const markdown = "```typescript:hoge.ts\nconst x = 1\n```\n";
+  const editor = editorFor(markdown);
+  const map = buildOffsetMap(editor.state.doc, markdown);
+  const fenceInfo = markdown.indexOf("typescript:hoge.ts");
+  const code = markdown.indexOf("const");
+  assert.equal(isPlainMappedOffset(map, fenceInfo), false);
+  assert.equal(isPlainMappedOffset(map, code), true);
+  editor.destroy();
 });

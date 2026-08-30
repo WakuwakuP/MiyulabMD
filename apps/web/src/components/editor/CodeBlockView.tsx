@@ -1,6 +1,7 @@
 import {
   highlightLanguage,
   inferLanguageFromFilename,
+  normalizeFilename,
 } from "@miyulabmd/markdown";
 import type { NodeViewProps } from "@tiptap/react";
 import { NodeViewContent, NodeViewWrapper } from "@tiptap/react";
@@ -55,7 +56,7 @@ export function CodeBlockView({
             placeholder="ファイル名（hoge.ts）"
             value={filename}
             onChange={(event) => {
-              const next = event.target.value;
+              const next = normalizeFilename(event.target.value);
               const inferred = inferLanguageFromFilename(next);
               updateAttributes({
                 filename: next,

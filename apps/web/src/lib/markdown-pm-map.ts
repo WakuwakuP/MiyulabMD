@@ -70,6 +70,10 @@ export function mdToPm(map: OffsetMap, md: number): number {
   return mapThrough(map.points, md, "md", "pm");
 }
 
+export function isPlainMappedOffset(map: OffsetMap, md: number): boolean {
+  return pmToMd(map, mdToPm(map, md)) === md;
+}
+
 export function clampPos(doc: PMNode, pos: number): number {
   return Math.max(0, Math.min(pos, doc.content.size));
 }

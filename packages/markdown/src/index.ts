@@ -14,6 +14,7 @@ export {
   highlightLanguage,
   inferLanguageFromFilename,
   isKnownLanguage,
+  normalizeFilename,
   parseFenceInfo,
   resolveLanguage,
   serializeFenceInfo,

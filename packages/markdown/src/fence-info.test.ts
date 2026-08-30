@@ -54,4 +54,15 @@ test("serializeFenceInfo restores language:filename", () => {
     serializeFenceInfo({ language: "", filename: "hoge.ts" }),
     "hoge.ts",
   );
+  assert.equal(
+    serializeFenceInfo({ language: "tsx", filename: "My Component.tsx" }),
+    "tsx:MyComponent.tsx",
+  );
+});
+
+test("parseFenceInfo strips spaces from filenames", () => {
+  assert.deepEqual(parseFenceInfo("typescript:My Component.tsx"), {
+    language: "typescript",
+    filename: "MyComponent.tsx",
+  });
 });

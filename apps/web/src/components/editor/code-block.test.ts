@@ -39,9 +39,9 @@ test("rich code block parses language:filename fences", () => {
 test("rich code block parses filename-only fences", () => {
   const editor = editorFor("```hoge.ts\nconst x = 1\n```\n");
   const attrs = codeAttrs(editor);
-  assert.equal(attrs.language, null);
+  assert.equal(attrs.language, "typescript");
   assert.equal(attrs.filename, "hoge.ts");
-  assert.match(editor.getMarkdown(), /```hoge\.ts/);
+  assert.match(editor.getMarkdown(), /```typescript:hoge\.ts/);
   editor.destroy();
 });
 

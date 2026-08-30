@@ -16,7 +16,7 @@ const tildeFenceInputRegex = /^~~~(\S*)[\s\n]$/;
 function fenceAttrs(info: string) {
   const parsed = parseFenceInfo(info);
   return {
-    language: parsed.language || null,
+    language: highlightLanguage(parsed) || parsed.language || null,
     filename: parsed.filename,
   };
 }
