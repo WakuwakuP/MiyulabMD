@@ -1,15 +1,14 @@
-/* Atom One Light / One Dark — shared syntax tokens for CM + preview. */
+/* Atom One Light / One Dark hues — shared by CodeMirror and highlight.js. */
 :root {
-  --syn-keyword: light-dark(#a626a4, #c678dd);
-  --syn-literal: light-dark(#4078f2, #61afef);
-  --syn-string: light-dark(#50a14f, #98c379);
-  --syn-number: light-dark(#986801, #d19a66);
+  --syn-fg: light-dark(#383a42, #abb2bf);
   --syn-comment: light-dark(#a0a1a7, #5c6370);
-  --syn-type: light-dark(#0184bc, #56b6c2);
-  --syn-variable: light-dark(#e45649, #e06c75);
-  --syn-operator: light-dark(#383a42, #abb2bf);
-  --syn-meta: light-dark(#c18401, #e5c07b);
-  --syn-title: light-dark(#4078f2, #61afef);
-  --syn-invalid: light-dark(#ca1243, #be5046);
+  --syn-keyword: light-dark(#a626a4, #c678dd);
+  --syn-name: light-dark(#e45649, #e06c75);
+  --syn-literal: light-dark(#0184bb, #56b6c2);
+  --syn-string: light-dark(#50a14f, #98c379);
+  --syn-attr: light-dark(#986801, #d19a66);
+  --syn-title: light-dark(#4078f2, #61aeee);
+  --syn-class: light-dark(#c18401, #e6c07b);
+  --syn-invalid: light-dark(#c91243, #be5046);
   --syn-code-bg: light-dark(#fafafa, #282c34);
 }
