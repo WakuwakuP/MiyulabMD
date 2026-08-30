@@ -4,9 +4,12 @@ import {
   Eye,
   FileText,
   Folder,
+  Monitor,
+  Moon,
   Pencil,
   Plus,
   Share2,
+  Sun,
   X,
 } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
@@ -17,6 +20,18 @@ type IconProps = {
 
 export function EyeIcon({ className }: IconProps) {
   return <Eye aria-hidden className={cn("size-4", className)} />;
+}
+
+export function SunIcon({ className }: IconProps) {
+  return <Sun aria-hidden className={cn("size-4", className)} />;
+}
+
+export function MoonIcon({ className }: IconProps) {
+  return <Moon aria-hidden className={cn("size-4", className)} />;
+}
+
+export function MonitorIcon({ className }: IconProps) {
+  return <Monitor aria-hidden className={cn("size-4", className)} />;
 }
 
 export function PencilIcon({ className }: IconProps) {
