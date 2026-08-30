@@ -1,5 +1,6 @@
 import {
   isBlockedHost,
+  OG_TARGET_HEADER,
   type OgOutbound,
   ogRequestInit,
 } from "../og-fetch-shared.ts";
@@ -178,7 +179,12 @@ async function fetchHtml(
 ): Promise<Response> {
   if (outbound) {
     try {
-      const viaOutbound = await outbound.fetch(url, init);
+      const headers = new Headers(init.headers);
+      headers.set(OG_TARGET_HEADER, url);
+      const viaOutbound = await outbound.fetch("https://og-fetch.internal/", {
+        ...init,
+        headers,
+      });
       if (viaOutbound.ok) return viaOutbound;
     } catch {
       // Custom-domain Workers cannot fetch some same-zone CNAMEs.
