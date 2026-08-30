@@ -7,8 +7,8 @@ import {
 } from "../../lib/note-toc.ts";
 import {
   documentColumnWidthClass,
-  documentShellClass,
   documentViewColumnClass,
+  documentViewShellClass,
 } from "../ui/prose.ts";
 import { MarkdownPreview } from "./MarkdownPreview.tsx";
 
@@ -100,7 +100,7 @@ export function PreviewWithToc({
     >
       <div
         className={cn(
-          documentShellClass,
+          documentViewShellClass,
           "[[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))]",
         )}
       >
