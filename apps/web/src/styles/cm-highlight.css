@@ -1,4 +1,4 @@
-/* CodeMirror syntax tokens — uses shared syntax-tokens. */
+/* CodeMirror tokens — same One Light / One Dark roles as code-highlight. */
 .cm-editor {
   --cm-hl-inline-code: light-dark(
     color-mix(in srgb, CanvasText 88%, Canvas),
@@ -15,6 +15,22 @@
   color: var(--syn-keyword);
 }
 
+.cm-editor .tok-variableName,
+.cm-editor .tok-variableName2 {
+  color: var(--syn-attr);
+}
+
+.cm-editor .tok-variableName.tok-definition:not(.tok-function) {
+  color: inherit;
+  font-weight: inherit;
+}
+
+.cm-editor .tok-function,
+.cm-editor .tok-labelName,
+.cm-editor .tok-propertyName {
+  color: var(--syn-title);
+}
+
 .cm-editor .tok-literal,
 .cm-editor .tok-bool,
 .cm-editor .tok-atom {
@@ -28,7 +44,7 @@
 }
 
 .cm-editor .tok-number {
-  color: var(--syn-number);
+  color: var(--syn-attr);
 }
 
 .cm-editor .tok-comment,
@@ -41,28 +57,16 @@
 .cm-editor .tok-typeName,
 .cm-editor .tok-className,
 .cm-editor .tok-namespace {
-  color: var(--syn-type);
+  color: var(--syn-class);
 }
 
-.cm-editor .tok-variableName,
-.cm-editor .tok-variableName2,
-.cm-editor .tok-propertyName,
-.cm-editor .tok-labelName,
-.cm-editor .tok-macroName {
-  color: var(--syn-variable);
-}
-
-.cm-editor .tok-definition {
-  font-weight: 600;
-}
-
-.cm-editor .tok-operator,
-.cm-editor .tok-punctuation {
-  color: var(--syn-operator);
+.cm-editor .tok-macroName,
+.cm-editor .tok-deleted {
+  color: var(--syn-name);
 }
 
 .cm-editor .tok-meta {
-  color: var(--syn-meta);
+  color: var(--syn-title);
 }
 
 .cm-editor .tok-invalid {
@@ -104,9 +108,4 @@
 
 .cm-editor .tok-inserted {
   color: var(--syn-string);
-}
-
-.cm-editor .tok-deleted {
-  color: var(--syn-invalid);
-  text-decoration: line-through;
 }
