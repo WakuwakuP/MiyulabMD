@@ -182,7 +182,8 @@ async function fetchHtml(
       const headers = new Headers(init.headers);
       headers.set(OG_TARGET_HEADER, url);
       const viaOutbound = await outbound.fetch("https://og-fetch.internal/", {
-        ...init,
+        method: init.method,
+        redirect: init.redirect,
         headers,
       });
       if (viaOutbound.ok) return viaOutbound;
