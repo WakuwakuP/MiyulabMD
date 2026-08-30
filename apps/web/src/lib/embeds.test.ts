@@ -4,6 +4,7 @@ import {
   canonicalizeEditorMarkdown,
   collectOgUrls,
   expandEmbedsForPreview,
+  renderOgCardHtml,
 } from "./embeds.ts";
 
 test("canonicalizeEditorMarkdown writes og cards as a normal URL", () => {
@@ -33,6 +34,19 @@ test("collectOgUrls finds standalone links and leftover card syntax", () => {
     "https://block.example",
     "https://legacy.example",
   ]);
+});
+
+test("renderOgCardHtml puts text in a body that can be height-clamped", () => {
+  const html = renderOgCardHtml("https://example.com/a", {
+    url: "https://example.com/a",
+    title: "Hello",
+    description: "A long description",
+    image: "https://example.com/og.png",
+    siteName: "Example",
+  });
+  assert.match(html, /class="embed-og-body"/);
+  assert.match(html, /embed-og-desc/);
+  assert.match(html, /og\.png/);
 });
 
 test("expandEmbedsForPreview cards a standalone URL but not an inline one", () => {
