@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./code-highlight.css";
 
 @theme {
   --font-sans:
@@ -153,6 +154,19 @@
     border-radius: 0.5rem;
     background: var(--color-code);
     padding: 0.75rem 1rem;
+  }
+
+  #ssr-preview .markdown-preview .md-code {
+    margin: 0.8em 0;
+  }
+
+  #ssr-preview .markdown-preview .md-code pre {
+    margin: 0;
+  }
+
+  #ssr-preview .markdown-preview .md-code:has(.md-code-filename) pre {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
 
   #ssr-preview .markdown-preview :not(pre) > code {

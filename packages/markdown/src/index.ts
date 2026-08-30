@@ -9,6 +9,15 @@ export {
   youtubeEmbedUrl,
   youtubeId,
 } from "./embeds.ts";
+export type { FenceInfo } from "./fence-info.ts";
+export {
+  highlightLanguage,
+  inferLanguageFromFilename,
+  isKnownLanguage,
+  parseFenceInfo,
+  resolveLanguage,
+  serializeFenceInfo,
+} from "./fence-info.ts";
 export { renderMarkdownHtml } from "./render.ts";
 export {
   collectStandaloneLinkUrls,
