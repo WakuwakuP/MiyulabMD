@@ -31,7 +31,7 @@ function TocNav({ entries }: { entries: TocEntry[] }) {
   return (
     <nav
       aria-label="目次"
-      className="sticky top-[calc(var(--header-height)+1.5rem)] w-48 shrink-0 self-start pt-2 text-sm"
+      className="sticky top-[calc(var(--header-height)+1.5rem)] max-h-[calc(100dvh-var(--header-height)-2rem)] w-48 shrink-0 self-start overflow-y-auto pt-2 text-sm"
     >
       <p className="m-0 mb-3 font-semibold text-ink">目次</p>
       <ol className="m-0 list-none space-y-1.5 p-0">
@@ -113,9 +113,9 @@ export function PreviewWithToc({
         />
       </div>
       {showToc && entries.length > 0 && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center">
-          <div className={cn("relative", documentColumnWidthClass)}>
-            <div className="pointer-events-auto absolute top-6 left-full ml-8">
+        <div className="pointer-events-none absolute inset-0 flex justify-center">
+          <div className={cn("relative h-full", documentColumnWidthClass)}>
+            <div className="pointer-events-auto absolute inset-y-0 left-full ml-8">
               <TocNav entries={entries} />
             </div>
           </div>
