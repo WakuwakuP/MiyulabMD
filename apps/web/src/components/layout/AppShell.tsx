@@ -18,7 +18,6 @@ export function AppShell() {
     mock: true,
   });
   const [loading, setLoading] = useState(true);
-  const [headerTitle, setHeaderTitle] = useState<string | undefined>();
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [layout, setLayout] = useState<HeaderLayout>("page");
@@ -35,7 +34,6 @@ export function AppShell() {
 
   const setHeader = useCallback(
     (next: Parameters<AppShellContext["setHeader"]>[0]) => {
-      setHeaderTitle(next?.title);
       setHeaderActions(next?.actions ?? null);
       setHeaderEnd(next?.end ?? null);
       setLayout(next?.layout ?? "page");
@@ -56,7 +54,6 @@ export function AppShell() {
       className="flex min-h-dvh flex-col"
     >
       <AppHeader
-        title={headerTitle}
         actions={headerActions}
         end={headerEnd}
         user={user}
@@ -67,7 +64,7 @@ export function AppShell() {
         className={
           editor
             ? "w-full flex-1 pt-[var(--header-height)]"
-            : "mx-auto w-full max-w-[1400px] flex-1 p-5 pt-[calc(var(--header-height)+1.25rem)]"
+            : "mx-auto w-full max-w-[1400px] flex-1 p-5 pt-[calc(var(--header-height)+1.25rem)] max-[640px]:px-3"
         }
       >
         <Outlet context={context} />

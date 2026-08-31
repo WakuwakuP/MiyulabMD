@@ -1,8 +1,11 @@
 import type { SessionUser } from "@miyulabmd/shared";
-import { useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
+import type { AuthConfig } from "../../lib/api.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
+import { Button } from "../ui/Button.tsx";
+import { Input } from "../ui/Input.tsx";
 import {
   MenuHeader,
   MenuItem,
@@ -12,15 +15,27 @@ import {
 } from "../ui/Menu.tsx";
 import { ThemeSwitch } from "./ThemeSwitch.tsx";
 
+const GUEST_LABEL = "ゲスト";
+
 type Props = {
-  user: SessionUser;
+  user: SessionUser | null;
+  authConfig: AuthConfig;
 };
 
-export function AccountMenu({ user }: Props) {
+export function AccountMenu({ user, authConfig }: Props) {
   const [open, setOpen] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("dev@example.com");
   const rootRef = useRef<HTMLDivElement>(null);
-  const label = user.displayName?.trim() || user.email;
+  const label = user?.displayName?.trim() || user?.email || GUEST_LABEL;
+  const mockLogin = !user && !authConfig.access && authConfig.mock;
   useDismiss(open, () => setOpen(false), rootRef);
+
+  function handleLoginSubmit(event: FormEvent) {
+    event.preventDefault();
+    const email = loginEmail.trim();
+    if (!email) return;
+    window.location.href = `/auth/login?email=${encodeURIComponent(email)}`;
+  }
 
   return (
     <div className="relative" ref={rootRef}>
@@ -34,16 +49,16 @@ export function AccountMenu({ user }: Props) {
       >
         <Avatar
           name={label}
-          color={colorForEmail(user.email, user.id)}
+          color={colorForEmail(user?.email, user?.id)}
           size="md"
         />
       </button>
       {open && (
         <MenuPanel width="18rem">
-          <MenuHeader name={label} email={user.email}>
+          <MenuHeader name={label} email={user?.email}>
             <Avatar
               name={label}
-              color={colorForEmail(user.email, user.id)}
+              color={colorForEmail(user?.email, user?.id)}
               size="lg"
             />
           </MenuHeader>
@@ -53,10 +68,31 @@ export function AccountMenu({ user }: Props) {
             <ThemeSwitch />
           </MenuRow>
           <MenuSeparator />
-          <MenuItem to="/settings" onClick={() => setOpen(false)}>
-            設定
-          </MenuItem>
-          <MenuItem href="/auth/logout">ログアウト</MenuItem>
+          {user ? (
+            <>
+              <MenuItem to="/settings" onClick={() => setOpen(false)}>
+                設定
+              </MenuItem>
+              <MenuItem href="/auth/logout">ログアウト</MenuItem>
+            </>
+          ) : mockLogin ? (
+            <form className="grid gap-2 px-4 py-2" onSubmit={handleLoginSubmit}>
+              <Input
+                variant="pill"
+                className="w-full"
+                type="email"
+                value={loginEmail}
+                onChange={(event) => setLoginEmail(event.target.value)}
+                placeholder="email"
+                aria-label="ログイン用メールアドレス"
+              />
+              <Button variant="outline" type="submit">
+                ログイン
+              </Button>
+            </form>
+          ) : (
+            <MenuItem href="/auth/login">ログイン</MenuItem>
+          )}
         </MenuPanel>
       )}
     </div>

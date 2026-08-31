@@ -70,7 +70,10 @@ export function PresenceBar({ awareness }: Props) {
   const packed = peers.length >= 5;
 
   return (
-    <div className="flex items-center p-[0.15rem]" aria-label="共同編集者">
+    <div
+      className="flex items-center p-[0.15rem] max-[640px]:hidden"
+      aria-label="共同編集者"
+    >
       {peers.map((peer, index) => (
         <span
           key={peer.clientId}

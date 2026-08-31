@@ -130,14 +130,14 @@ export function MenuHeader({
   children,
 }: {
   name: string;
-  email: string;
+  email?: string;
   children: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center gap-[0.45rem] px-[1.15rem] pt-4 pb-[0.85rem] text-center">
       {children}
       <p className="m-0 font-semibold">{name}</p>
-      <p className="m-0 text-[0.85rem] text-muted">{email}</p>
+      {email && <p className="m-0 text-[0.85rem] text-muted">{email}</p>}
     </div>
   );
 }
