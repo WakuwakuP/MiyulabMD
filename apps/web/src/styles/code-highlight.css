@@ -1,7 +1,5 @@
 /* highlight.js / lowlight — Atom One Light / One Dark class map. */
-.markdown-preview .hljs,
-.rich-editor-content .hljs,
-#ssr-preview .hljs {
+.hljs {
   color: var(--syn-fg);
 }
 
@@ -74,12 +72,6 @@
 
 .hljs-link {
   text-decoration: underline;
-}
-
-.markdown-preview pre,
-.rich-editor-content pre,
-#ssr-preview pre {
-  background: var(--syn-code-bg);
 }
 
 .md-code {

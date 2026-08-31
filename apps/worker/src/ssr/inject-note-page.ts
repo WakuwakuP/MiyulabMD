@@ -23,7 +23,7 @@ export function injectNotePage(
   ogCards: Record<string, unknown> = {},
 ): string {
   const title = titleFromMarkdown(note.markdown) || note.title || "MiyulabMD";
-  const preview = `<div id="ssr-preview" data-note-id="${escapeHtml(note.id)}" data-short-id="${escapeHtml(note.shortId)}"><article class="markdown-preview">${previewHtml}</article></div>`;
+  const preview = `<div id="ssr-preview" class="document-view-shell" data-note-id="${escapeHtml(note.id)}" data-short-id="${escapeHtml(note.shortId)}"><article class="markdown-preview document-prose document-view-column">${previewHtml}</article></div>`;
   const bootstrap = `<script type="application/json" id="note-bootstrap">${jsonForScript(note)}</script>`;
   const ogBootstrap =
     Object.keys(ogCards).length > 0

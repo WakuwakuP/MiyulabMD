@@ -1,0 +1,44 @@
+.document-column-width {
+  width: min(100%, 46rem);
+}
+
+.document-view-shell {
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0.75rem;
+}
+
+@media (min-width: 640px) {
+  .document-view-shell {
+    padding-right: 1.25rem;
+    padding-left: 1.25rem;
+  }
+}
+
+.document-view-column {
+  box-sizing: border-box;
+  width: min(100%, 46rem);
+  min-height: 24rem;
+  margin: 0 auto;
+  padding: 2.5rem 1rem 6rem;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+@media (min-width: 640px) {
+  .document-view-column {
+    padding-right: 1.5rem;
+    padding-left: 1.5rem;
+  }
+}
+
+/* #ssr-preview sits outside #root / AppShell, so it needs the header offset. */
+#ssr-preview {
+  min-height: 100dvh;
+  background: var(--color-canvas);
+}
+
+#ssr-preview.document-view-shell {
+  padding-top: calc(var(--header-height) + 1rem);
+}

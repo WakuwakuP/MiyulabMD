@@ -59,6 +59,11 @@ test("injectNotePage writes bootstrap outside #root and escapes script", () => {
   );
   assert.match(html, /<title>Hello · MiyulabMD<\/title>/);
   assert.match(html, /id="ssr-preview"/);
+  assert.match(html, /class="document-view-shell"/);
+  assert.match(
+    html,
+    /class="markdown-preview document-prose document-view-column"/,
+  );
   assert.match(html, /id="note-bootstrap"/);
   assert.doesNotMatch(html, /id="og-bootstrap"/);
   assert.match(html, /user-content-hello/);
