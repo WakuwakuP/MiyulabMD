@@ -4,6 +4,7 @@ import { Elysia } from "elysia";
 import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { isAccessConfigured } from "./auth/access.ts";
 import { readSession } from "./auth/session.ts";
+import { envTruthy } from "./env.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
 import {
   handleAuthRequest,
@@ -35,7 +36,7 @@ const api = new Elysia({ adapter: CloudflareAdapter })
     const access = isAccessConfigured(env);
     return {
       access,
-      mock: env.DEV_AUTH === "true" && !access,
+      mock: envTruthy(env.DEV_AUTH) && !access,
     };
   })
   .use(noteRoutes)

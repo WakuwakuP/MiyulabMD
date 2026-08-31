@@ -21,7 +21,7 @@ export function isAccessConfigured(env: Env): boolean {
   return Boolean(
     env.ACCESS_AUD?.trim() &&
       env.ACCESS_TEAM_DOMAIN &&
-      env.ACCESS_TEAM_DOMAIN !== "example.cloudflareaccess.com",
+      String(env.ACCESS_TEAM_DOMAIN) !== "example.cloudflareaccess.com",
   );
 }
 
