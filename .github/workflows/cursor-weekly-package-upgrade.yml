@@ -315,13 +315,21 @@ jobs:
 
           printf '%s\n\n' "Cursor Agent が依存パッケージを更新しました。" > "$pr_body"
           table_started=false
+          lock_args=()
+          if extract_old pnpm-lock.yaml && [[ -f pnpm-lock.yaml ]]; then
+            lock_args+=(
+              --old-lock "$old_dir/pnpm-lock.yaml"
+              --new-lock pnpm-lock.yaml
+            )
+          fi
           while IFS= read -r rel; do
             [[ -f "$rel" ]] || continue
             if extract_old "$rel"; then
               table="$(
                 node .github/cursor/render-package-upgrade-table.mjs \
                   --old-package "$old_dir/$rel" \
-                  --new-package "$rel"
+                  --new-package "$rel" \
+                  "${lock_args[@]}"
               )"
               if [[ "$table" == *"直接依存のバージョンに変更はありません。"* ]]; then
                 continue
