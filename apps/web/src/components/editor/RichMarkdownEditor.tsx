@@ -38,8 +38,6 @@ import { FileInput } from "../ui/FileInput.tsx";
 import {
   documentScrollPadClass,
   editorLoadingClass,
-  richEditorPlaceholderClass,
-  richEditorProseClass,
   richEditorTiptapClass,
 } from "../ui/prose.ts";
 import { BlockHandle } from "./BlockHandle.tsx";
@@ -403,8 +401,6 @@ export function RichMarkdownEditor({
         className={cn(
           "rich-editor-content flex flex-1 justify-center overflow-auto",
           documentScrollPadClass,
-          richEditorProseClass,
-          richEditorPlaceholderClass,
         )}
       />
       {!readOnly && (
