@@ -71,7 +71,8 @@ export class DocumentRoom extends DurableObject<Env> {
     const displayName = request.headers.get("X-Display-Name") ?? undefined;
 
     const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
+    const client = pair[0];
+    const server = pair[1];
     this.ctx.acceptWebSocket(server);
 
     const attachment: WsAttachment = {
@@ -246,7 +247,7 @@ export class DocumentRoom extends DurableObject<Env> {
       void this.onDocUpdate(update, origin);
     });
 
-    awareness.on("update", (_changes, origin) => {
+    awareness.on("update", (_changes: unknown, origin: unknown) => {
       this.broadcastAwareness(origin);
     });
 

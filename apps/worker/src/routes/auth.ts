@@ -16,9 +16,10 @@ import {
   updateDisplayName,
   upsertUserByEmail,
 } from "../db/users.ts";
+import { envTruthy } from "../env.ts";
 
 function isDevAuthEnabled(env: Env): boolean {
-  return env.DEV_AUTH === "true";
+  return envTruthy(env.DEV_AUTH);
 }
 
 function shouldUseMockLogin(request: Request, env: Env): boolean {
