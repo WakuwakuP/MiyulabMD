@@ -9,7 +9,6 @@ export type AppShellContext = {
   setUser: (user: SessionUser | null) => void;
   setHeader: (
     header: {
-      title?: string;
       actions?: ReactNode;
       end?: ReactNode;
       layout?: HeaderLayout;
