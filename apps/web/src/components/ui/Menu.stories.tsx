@@ -37,6 +37,25 @@ export const Account: Story = {
   ),
 };
 
+export const Guest: Story = {
+  render: () => (
+    <div className="relative h-80">
+      <MenuPanel width="18rem">
+        <MenuHeader name="ゲスト">
+          <Avatar name="ゲスト" color="#0d9488" size="lg" />
+        </MenuHeader>
+        <MenuSeparator />
+        <MenuRow>
+          <span className="text-[0.85rem] text-muted">テーマ</span>
+          <ThemeSwitch />
+        </MenuRow>
+        <MenuSeparator />
+        <MenuItem href="#login">ログイン</MenuItem>
+      </MenuPanel>
+    </div>
+  ),
+};
+
 export const Items: Story = {
   render: () => (
     <div className="relative h-40">

@@ -94,7 +94,7 @@ export function Switch<T extends string>({
           aria-expanded={item.hasPopup ? item.expanded : undefined}
           className={cn(
             "relative z-10 inline-flex cursor-pointer items-center justify-center gap-[0.35rem] rounded-full border-0 bg-transparent leading-tight text-inherit",
-            size === "sm" ? "px-2 py-1" : "px-3 py-[0.28rem]",
+            size === "sm" ? "px-2 py-1" : "px-3 py-[0.28rem] max-[900px]:px-2",
           )}
           onClick={item.onClick}
         >
