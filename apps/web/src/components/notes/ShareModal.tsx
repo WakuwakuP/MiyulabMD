@@ -105,7 +105,7 @@ export function ShareModal({
       )}
 
       <form className="mb-[1.1rem]" onSubmit={handleAdd}>
-        <Row>
+        <Row className="max-[520px]:flex-col">
           <Input
             variant="pill"
             className="flex-1"
@@ -128,7 +128,7 @@ export function ShareModal({
       <section>
         <SectionTitle>アクセスできるユーザー</SectionTitle>
         <ul className="mb-4 list-none p-0">
-          <li className="grid grid-cols-[2rem_1fr_auto_auto] items-center gap-[0.65rem] py-[0.45rem]">
+          <li className="grid grid-cols-[2rem_minmax(0,1fr)_auto_auto] items-center gap-[0.65rem] py-[0.45rem] max-[520px]:grid-cols-[2rem_minmax(0,1fr)]">
             <Avatar
               name={ownerLabel}
               color={colorForEmail(ownerLabel)}
@@ -143,7 +143,7 @@ export function ShareModal({
           {value.grants.map((grant: AccessGrant) => (
             <li
               key={grant.email}
-              className="grid grid-cols-[2rem_1fr_auto_auto] items-center gap-[0.65rem] py-[0.45rem]"
+              className="grid grid-cols-[2rem_minmax(0,1fr)_auto_auto] items-center gap-[0.65rem] py-[0.45rem] max-[520px]:grid-cols-[2rem_minmax(0,1fr)]"
             >
               <Avatar
                 name={grant.email}

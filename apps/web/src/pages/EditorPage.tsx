@@ -269,13 +269,12 @@ export function EditorPage() {
 
   useEffect(() => {
     if (!note) {
-      setHeader({ layout: "editor", title: "ノート" });
+      setHeader({ layout: "editor" });
       return () => setHeader(null);
     }
 
     setHeader({
       layout: "editor",
-      title: headingTitle,
       actions: (
         <EditorModeSwitch
           value={viewMode}
@@ -304,16 +303,7 @@ export function EditorPage() {
     });
 
     return () => setHeader(null);
-  }, [
-    note,
-    headingTitle,
-    viewMode,
-    canEdit,
-    awareness,
-    folder,
-    isOwner,
-    setHeader,
-  ]);
+  }, [note, viewMode, canEdit, awareness, folder, isOwner, setHeader]);
 
   if (loading) {
     return (

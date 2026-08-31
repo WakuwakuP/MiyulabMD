@@ -395,7 +395,6 @@ export function HomePage() {
         : "";
 
   const canAdmin = Boolean(visibleFolder?.flags.canAdmin);
-  const title = folderId ? (visibleFolder?.name ?? "フォルダ") : "ノート";
   const needsFolder = Boolean(folderId || user);
   const showPlaceholder =
     (userLoading || (needsFolder && folderPending)) && !visibleFolder;
@@ -406,7 +405,6 @@ export function HomePage() {
 
   useEffect(() => {
     setHeader({
-      title,
       end:
         visibleFolder || !folderId ? (
           <>
@@ -432,7 +430,7 @@ export function HomePage() {
         ) : null,
     });
     return () => setHeader(null);
-  }, [title, visibleFolder, folderId, canAdmin, creating, setHeader]);
+  }, [visibleFolder, folderId, canAdmin, creating, setHeader]);
 
   return (
     <section>

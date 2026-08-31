@@ -43,9 +43,10 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
               label: (
                 <>
                   <EyeIcon />
-                  View
+                  <span className="max-[900px]:hidden">View</span>
                 </>
               ),
+              ariaLabel: "View",
               pressed: !editing,
               onClick: () => {
                 setMenuOpen(false);
@@ -57,10 +58,11 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
               label: (
                 <>
                   <PencilIcon />
-                  Edit
+                  <span className="max-[900px]:hidden">Edit</span>
                   <ChevronDownIcon className="opacity-70" />
                 </>
               ),
+              ariaLabel: "Edit",
               pressed: editing,
               hasPopup: true,
               expanded: menuOpen,

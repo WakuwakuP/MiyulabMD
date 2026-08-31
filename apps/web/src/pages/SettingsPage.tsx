@@ -25,7 +25,7 @@ function formatTimestamp(ms: number | null): string {
 }
 
 export function SettingsPage() {
-  const { user, setUser, setHeader } = useOutletContext<AppShellContext>();
+  const { user, setUser } = useOutletContext<AppShellContext>();
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,11 +65,6 @@ export function SettingsPage() {
   useEffect(() => {
     void loadTokens();
   }, []);
-
-  useEffect(() => {
-    setHeader({ title: "設定" });
-    return () => setHeader(null);
-  }, [setHeader]);
 
   useEffect(() => {
     setDisplayName(user?.displayName ?? "");
@@ -140,6 +135,7 @@ export function SettingsPage() {
 
   return (
     <section className="max-w-2xl">
+      <h1 className="m-0 text-[1.75em] font-bold">設定</h1>
       <section className="mt-6">
         <h2 className="text-[1.5em] font-bold">プロフィール</h2>
         <p>
@@ -148,7 +144,7 @@ export function SettingsPage() {
         {user ? (
           <form onSubmit={(event) => void handleProfileSave(event)}>
             <Field label="表示名" htmlFor="display-name">
-              <Row className="mt-[0.35rem]">
+              <Row className="mt-[0.35rem] max-[640px]:flex-col">
                 <Input
                   id="display-name"
                   className="flex-1"
@@ -194,7 +190,7 @@ export function SettingsPage() {
           <>
             <form onSubmit={handleCreate}>
               <Field label="トークン名" htmlFor="token-name">
-                <Row className="mt-[0.35rem]">
+                <Row className="mt-[0.35rem] max-[640px]:flex-col">
                   <Input
                     id="token-name"
                     className="flex-1"
@@ -231,7 +227,7 @@ export function SettingsPage() {
                 {tokens.map((token) => (
                   <li
                     key={token.id}
-                    className="flex justify-between gap-4 border-b border-border py-3"
+                    className="flex justify-between gap-4 border-b border-border py-3 max-[640px]:flex-col max-[640px]:items-start"
                   >
                     <div>
                       <strong>{token.name}</strong>
