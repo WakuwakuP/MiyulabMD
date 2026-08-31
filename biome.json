@@ -28,7 +28,8 @@
       "!**/.wrangler",
       "!**/coverage",
       "!**/storybook-static",
-      "!**/pnpm-lock.yaml"
+      "!**/pnpm-lock.yaml",
+      "!.github/cursor/render-package-upgrade-table.mjs"
     ]
   },
   "formatter": {
