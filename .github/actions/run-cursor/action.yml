@@ -293,15 +293,17 @@ runs:
         # lifecycle scripts and `pnpm exec` cannot read it from their environ.
         cursor_tmp_dir="$(mktemp -d "$CURSOR_AGENT_HOME/tmp.XXXXXX")"
         cursor_cli_wrap_dir="$(mktemp -d "$CURSOR_AGENT_HOME/cli-wrap.XXXXXX")"
-        real_pnpm="$(command -v pnpm || true)"
-        if [[ -n "$real_pnpm" && -x "$real_pnpm" ]]; then
-          {
-            printf '%s\n' '#!/bin/bash'
-            printf '%s\n' 'unset CURSOR_API_KEY GITHUB_TOKEN GH_TOKEN GH_AW_GITHUB_TOKEN'
-            printf '%s\n' "exec $(printf '%q' "$real_pnpm") \"\$@\""
-          } > "$cursor_cli_wrap_dir/pnpm"
-          chmod 755 "$cursor_cli_wrap_dir/pnpm"
-        fi
+        for cli_name in yarn npm npx pnpm cargo go moon uv poetry pip; do
+          real_cli="$(command -v "$cli_name" || true)"
+          if [[ -n "$real_cli" && -x "$real_cli" ]]; then
+            {
+              printf '%s\n' '#!/bin/bash'
+              printf '%s\n' 'unset CURSOR_API_KEY GITHUB_TOKEN GH_TOKEN GH_AW_GITHUB_TOKEN'
+              printf '%s\n' "exec $(printf '%q' "$real_cli") \"\$@\""
+            } > "$cursor_cli_wrap_dir/$cli_name"
+            chmod 755 "$cursor_cli_wrap_dir/$cli_name"
+          fi
+        done
         agent_path="$cursor_cli_wrap_dir:$PATH"
 
         env -i \
