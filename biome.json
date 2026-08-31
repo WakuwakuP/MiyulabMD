@@ -29,6 +29,7 @@
       "!**/coverage",
       "!**/storybook-static",
       "!**/pnpm-lock.yaml",
+      "!**/worker-configuration.d.ts",
       "!.github/cursor/render-package-upgrade-table.mjs"
     ]
   },
