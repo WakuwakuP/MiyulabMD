@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   APP_HEIGHT_VAR,
+  APP_OFFSET_TOP_VAR,
   bindVisualViewportHeight,
   EDITOR_SCROLL_PAD_VAR,
   editorScrollPadPx,
@@ -20,16 +21,22 @@ test("editorScrollPadPx caps at 8rem and 30% of the viewport", () => {
   assert.equal(editorScrollPadPx(200, 16), 60);
 });
 
-test("syncAppHeight writes viewport height and scroll pad", () => {
+test("syncAppHeight writes viewport height, offset, and scroll pad", () => {
   const props: Record<string, string> = {};
-  syncAppHeight(200, 16, {
-    style: {
-      setProperty(name, value) {
-        props[name] = value;
+  syncAppHeight(
+    200,
+    16,
+    {
+      style: {
+        setProperty(name, value) {
+          props[name] = value;
+        },
       },
     },
-  });
+    48,
+  );
   assert.equal(props[APP_HEIGHT_VAR], "200px");
+  assert.equal(props[APP_OFFSET_TOP_VAR], "48px");
   assert.equal(props[EDITOR_SCROLL_PAD_VAR], "60px");
 });
 
@@ -38,12 +45,24 @@ test("bindVisualViewportHeight updates on resize and scroll, then unbinds", () =
   const vvListeners = new Map<string, Set<EventListener>>();
   const props: Record<string, string> = {};
   let height = 800;
+  let offsetTop = 0;
+  const frames: FrameRequestCallback[] = [];
 
   const target = {
     innerHeight: 900,
+    requestAnimationFrame(callback: FrameRequestCallback) {
+      frames.push(callback);
+      return frames.length;
+    },
+    cancelAnimationFrame() {
+      frames.length = 0;
+    },
     visualViewport: {
       get height() {
         return height;
+      },
+      get offsetTop() {
+        return offsetTop;
       },
       addEventListener(type: string, listener: EventListener) {
         const set = vvListeners.get(type) ?? new Set();
@@ -77,23 +96,36 @@ test("bindVisualViewportHeight updates on resize and scroll, then unbinds", () =
   );
 
   assert.equal(props[APP_HEIGHT_VAR], "800px");
+  assert.equal(props[APP_OFFSET_TOP_VAR], "0px");
   assert.equal(props[EDITOR_SCROLL_PAD_VAR], "128px");
 
   height = 400;
+  offsetTop = 120;
   for (const listener of vvListeners.get("resize") ?? []) {
     listener.call(undefined, new Event("resize"));
   }
-  assert.equal(props[APP_HEIGHT_VAR], "400px");
-  assert.equal(props[EDITOR_SCROLL_PAD_VAR], "120px");
-
-  height = 300;
   for (const listener of vvListeners.get("scroll") ?? []) {
     listener.call(undefined, new Event("scroll"));
   }
+  assert.equal(frames.length, 1);
+  assert.equal(props[APP_HEIGHT_VAR], "800px");
+  frames.shift()?.(0);
+  assert.equal(props[APP_HEIGHT_VAR], "400px");
+  assert.equal(props[APP_OFFSET_TOP_VAR], "120px");
+  assert.equal(props[EDITOR_SCROLL_PAD_VAR], "120px");
+
+  height = 300;
+  offsetTop = 80;
+  for (const listener of vvListeners.get("scroll") ?? []) {
+    listener.call(undefined, new Event("scroll"));
+  }
+  frames.shift()?.(0);
   assert.equal(props[APP_HEIGHT_VAR], "300px");
+  assert.equal(props[APP_OFFSET_TOP_VAR], "80px");
 
   unbind();
   height = 100;
+  offsetTop = 0;
   for (const listener of vvListeners.get("resize") ?? []) {
     listener.call(undefined, new Event("resize"));
   }

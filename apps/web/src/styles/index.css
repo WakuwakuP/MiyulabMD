@@ -35,6 +35,7 @@
 
   --header-height: 3.25rem;
   --app-height: 100dvh;
+  --app-offset-top: 0px;
   --editor-scroll-pad: min(8rem, 30dvh);
 }
 
@@ -55,12 +56,18 @@
     min-height: var(--app-height, 100dvh);
   }
 
-  /* 内部スクロール時、header padding と枠高さの二重計上でページが伸びないようにする。 */
+  /* 内部スクロール時は visual viewport にピン留めする（transform は使わない）。 */
   html.editor-lock-viewport,
-  html.editor-lock-viewport body,
+  html.editor-lock-viewport body {
+    overflow: hidden;
+  }
+
   html.editor-lock-viewport #root {
+    position: fixed;
+    top: var(--app-offset-top, 0px);
+    left: 0;
+    width: 100%;
     height: var(--app-height, 100dvh);
-    max-height: var(--app-height, 100dvh);
     overflow: hidden;
   }
 

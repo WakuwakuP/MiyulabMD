@@ -30,7 +30,7 @@ export function Modal({
   }, [onClose]);
 
   const bodyClass = cn(
-    "max-h-[min(40rem,90vh)] w-[min(32rem,100%)] overflow-auto rounded-xl bg-canvas px-[1.35rem] pt-5 pb-4 shadow-modal",
+    "max-h-[min(40rem,calc(var(--app-height,100dvh)*0.9))] w-[min(32rem,100%)] overflow-auto rounded-xl bg-canvas px-[1.35rem] pt-5 pb-4 shadow-modal",
     className,
   );
 
