@@ -29,6 +29,7 @@ import {
   readRemoteMarkdownCursors,
   writeMarkdownCursor,
 } from "../../lib/rich-awareness.ts";
+import { readEditorScrollPadPx } from "../../lib/visual-viewport.ts";
 import {
   applyTextDiff,
   inspectPlainTextDelta,
@@ -253,6 +254,8 @@ export function RichMarkdownEditor({
       attributes: {
         class: richEditorTiptapClass,
       },
+      scrollMargin: readEditorScrollPadPx(),
+      scrollThreshold: readEditorScrollPadPx(),
       handleDOMEvents: {
         compositionstart: () => {
           composing.current = true;

@@ -34,6 +34,8 @@
   --shadow-preview: 0 8px 28px color-mix(in srgb, CanvasText 8%, transparent);
 
   --header-height: 3.25rem;
+  --app-height: 100dvh;
+  --editor-scroll-pad: min(8rem, 30dvh);
 }
 
 @layer base {
@@ -50,7 +52,7 @@
   }
 
   #root {
-    min-height: 100vh;
+    min-height: var(--app-height, 100dvh);
   }
 
   a {
