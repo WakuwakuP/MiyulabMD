@@ -8,10 +8,14 @@
   background: var(--color-preview);
 }
 
+.rich-editor-content {
+  scroll-padding-block: var(--editor-scroll-pad);
+}
+
 .rich-editor-column {
   box-sizing: border-box;
   width: min(100%, 46rem);
-  padding: 2.5rem 1.5rem 6rem 3.5rem;
+  padding: 2.5rem 1.5rem max(6rem, var(--editor-scroll-pad)) 3.5rem;
 }
 
 .rich-editor-content .tiptap {

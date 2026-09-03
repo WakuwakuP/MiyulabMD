@@ -31,7 +31,7 @@ function TocNav({ entries }: { entries: TocEntry[] }) {
   return (
     <nav
       aria-label="目次"
-      className="sticky top-[calc(var(--header-height)+1.5rem)] max-h-[calc(100dvh-var(--header-height)-2rem)] w-48 shrink-0 self-start overflow-y-auto pt-2 text-sm"
+      className="sticky top-[calc(var(--header-height)+1.5rem)] max-h-[calc(var(--app-height,100dvh)-var(--header-height)-2rem)] w-48 shrink-0 self-start overflow-y-auto pt-2 text-sm"
     >
       <p className="m-0 mb-3 font-semibold text-ink">目次</p>
       <ol className="m-0 list-none space-y-1.5 p-0">
@@ -96,12 +96,12 @@ export function PreviewWithToc({
   return (
     <div
       ref={layoutRef}
-      className="relative w-full [[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))]"
+      className="relative w-full [[data-layout=editor]_&]:min-h-[calc(var(--app-height,100dvh)-var(--header-height))]"
     >
       <div
         className={cn(
           documentViewShellClass,
-          "[[data-layout=editor]_&]:min-h-[calc(100dvh-var(--header-height))]",
+          "[[data-layout=editor]_&]:min-h-[calc(var(--app-height,100dvh)-var(--header-height))]",
         )}
       >
         <MarkdownPreview

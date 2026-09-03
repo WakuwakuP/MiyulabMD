@@ -51,7 +51,7 @@ export function AppShell() {
   return (
     <div
       data-layout={editor ? "editor" : "page"}
-      className="flex min-h-dvh flex-col"
+      className="flex min-h-[var(--app-height,100dvh)] flex-col"
     >
       <AppHeader
         actions={headerActions}
