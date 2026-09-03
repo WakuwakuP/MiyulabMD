@@ -55,6 +55,27 @@
     min-height: var(--app-height, 100dvh);
   }
 
+  /* 内部スクロール時、header padding と枠高さの二重計上でページが伸びないようにする。 */
+  html.editor-lock-viewport,
+  html.editor-lock-viewport body,
+  html.editor-lock-viewport #root {
+    height: var(--app-height, 100dvh);
+    max-height: var(--app-height, 100dvh);
+    overflow: hidden;
+  }
+
+  html.editor-lock-viewport [data-layout="editor"] {
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  html.editor-lock-viewport [data-layout="editor"] > main {
+    min-height: 0;
+    overflow: hidden;
+  }
+
   a {
     color: var(--color-accent);
   }
