@@ -4,6 +4,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { TableKit } from "@tiptap/extension-table";
 import Youtube from "@tiptap/extension-youtube";
 import { Markdown } from "@tiptap/markdown";
+import type { EditorView } from "@tiptap/pm/view";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -29,7 +30,10 @@ import {
   readRemoteMarkdownCursors,
   writeMarkdownCursor,
 } from "../../lib/rich-awareness.ts";
-import { readEditorScrollPadPx } from "../../lib/visual-viewport.ts";
+import {
+  readEditorScrollPadPx,
+  scrollDeltaForPaddedRect,
+} from "../../lib/visual-viewport.ts";
 import {
   applyTextDiff,
   inspectPlainTextDelta,
@@ -65,6 +69,29 @@ const IMAGE_TYPES = new Set([
   "image/gif",
   "image/webp",
 ]);
+
+function scrollRichSelectionIntoView(view: EditorView): boolean {
+  const scroller = view.dom.closest(".rich-editor-content");
+  if (!(scroller instanceof HTMLElement)) {
+    return false;
+  }
+  const coords = view.coordsAtPos(view.state.selection.head);
+  if (!coords) {
+    return false;
+  }
+  const box = scroller.getBoundingClientRect();
+  const delta = scrollDeltaForPaddedRect(
+    box.top,
+    box.bottom,
+    coords.top,
+    coords.bottom,
+    readEditorScrollPadPx(scroller),
+  );
+  if (delta !== 0) {
+    scroller.scrollTop += delta;
+  }
+  return true;
+}
 
 function firstImageFile(data: DataTransfer | null): File | null {
   if (!data) return null;
@@ -256,6 +283,7 @@ export function RichMarkdownEditor({
       },
       scrollMargin: readEditorScrollPadPx(),
       scrollThreshold: readEditorScrollPadPx(),
+      handleScrollToSelection: scrollRichSelectionIntoView,
       handleDOMEvents: {
         compositionstart: () => {
           composing.current = true;
@@ -402,7 +430,7 @@ export function RichMarkdownEditor({
       <EditorContent
         editor={editor}
         className={cn(
-          "rich-editor-content flex flex-1 justify-center overflow-auto",
+          "rich-editor-content flex min-h-0 flex-1 justify-center overflow-auto",
           documentScrollPadClass,
         )}
       />
