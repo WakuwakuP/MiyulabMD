@@ -19,6 +19,7 @@ import {
   type PermissionFlags,
   presetFromScopes,
   ROOT_SCOPES,
+  rewriteFolderPrefix,
   type SessionUser,
 } from "@miyulabmd/shared";
 
@@ -671,6 +672,61 @@ export async function deleteFolderPolicy(
     .prepare("DELETE FROM folder_policies WHERE owner_id = ? AND folder = ?")
     .bind(ownerId, folder)
     .run();
+}
+
+export async function renameFolderTree(
+  env: Env,
+  ownerId: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  if (!from || !to || from === to) return;
+
+  const folderRows = await db(env)
+    .prepare("SELECT folder FROM folders WHERE owner_id = ?")
+    .bind(ownerId)
+    .all<{ folder: string }>();
+  const policyRows = await db(env)
+    .prepare("SELECT folder FROM folder_policies WHERE owner_id = ?")
+    .bind(ownerId)
+    .all<{ folder: string }>();
+  const grantRows = await db(env)
+    .prepare(
+      "SELECT id, target_key FROM access_grants WHERE owner_id = ? AND target_kind = 'folder'",
+    )
+    .bind(ownerId)
+    .all<{ id: string; target_key: string }>();
+
+  for (const row of folderRows.results ?? []) {
+    const next = rewriteFolderPrefix(row.folder, from, to);
+    if (next === null) continue;
+    await db(env)
+      .prepare(
+        "UPDATE folders SET folder = ? WHERE owner_id = ? AND folder = ?",
+      )
+      .bind(next, ownerId, row.folder)
+      .run();
+  }
+
+  for (const row of policyRows.results ?? []) {
+    const next = rewriteFolderPrefix(row.folder, from, to);
+    if (next === null) continue;
+    await db(env)
+      .prepare(
+        "UPDATE folder_policies SET folder = ? WHERE owner_id = ? AND folder = ?",
+      )
+      .bind(next, ownerId, row.folder)
+      .run();
+  }
+
+  for (const row of grantRows.results ?? []) {
+    const next = rewriteFolderPrefix(row.target_key, from, to);
+    if (next === null) continue;
+    await db(env)
+      .prepare("UPDATE access_grants SET target_key = ? WHERE id = ?")
+      .bind(next, row.id)
+      .run();
+  }
 }
 
 export async function deleteFolderTree(

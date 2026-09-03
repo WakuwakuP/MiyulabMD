@@ -3,6 +3,7 @@ import {
   type CreateNoteInput,
   clampWriteScope,
   defaultNoteMarkdown,
+  type FolderAccess,
   folderContains,
   isAccessScope,
   isPermissionPreset,
@@ -11,6 +12,7 @@ import {
   normalizeFolder,
   type PermissionPreset,
   presetFromScopes,
+  rewriteFolderPrefix,
   type SessionUser,
   scopesFromPreset,
   titleFromMarkdown,
@@ -27,10 +29,14 @@ import {
   ensureFolderRow,
   folderViewFlags,
   getFolderById,
+  getFolderByPath,
   listFolderGrantsForUser,
   type NoteAccessFields,
   noteMatchesFolderGrant,
+  parentFolderPath,
+  renameFolderTree,
   replaceGrants,
+  resolveFolderAccess,
   resolveNoteAccess,
 } from "./access.ts";
 import { createImageService } from "./images.ts";
@@ -328,6 +334,12 @@ export type RemoveFolderResult =
   | { kind: "ok" }
   | { kind: "not_found" }
   | { kind: "denied"; status: 401 | 403 };
+
+export type RenameFolderResult =
+  | { kind: "ok"; access: FolderAccess }
+  | { kind: "not_found" }
+  | { kind: "denied"; status: 401 | 403 }
+  | { kind: "invalid"; error: string; status: number };
 
 /** HTTP と MCP が共有するノートドメイン。 */
 export function createNoteService(env: Env) {
@@ -674,6 +686,66 @@ export function createNoteService(env: Env) {
 
       await deleteFolderTree(env, rec.owner_id, rec.folder);
       return { kind: "ok" };
+    },
+
+    async renameFolder(
+      folderId: string,
+      name: string,
+      user: SessionUser | undefined,
+    ): Promise<RenameFolderResult> {
+      const rec = await getFolderById(env, folderId);
+      if (!rec) {
+        return { kind: "not_found" };
+      }
+      if (!user || user.id !== rec.owner_id) {
+        return { kind: "denied", status: user === undefined ? 401 : 403 };
+      }
+
+      const parent = parentFolderPath(rec.folder);
+      const nextPath = parent ? `${parent}/${name}` : name;
+      if (nextPath === rec.folder) {
+        return {
+          kind: "ok",
+          access: await resolveFolderAccess(
+            env,
+            rec.owner_id,
+            rec.folder,
+            user,
+          ),
+        };
+      }
+
+      const conflict = await getFolderByPath(env, rec.owner_id, nextPath);
+      if (conflict) {
+        return {
+          kind: "invalid",
+          error: "同じ名前のフォルダが既にあります",
+          status: 409,
+        };
+      }
+
+      const owned = await db(env)
+        .prepare("SELECT id, folder FROM notes WHERE owner_id = ?")
+        .bind(rec.owner_id)
+        .all<{ id: string; folder: string }>();
+      for (const row of owned.results ?? []) {
+        const next = rewriteFolderPrefix(
+          row.folder ?? "",
+          rec.folder,
+          nextPath,
+        );
+        if (next === null) continue;
+        await db(env)
+          .prepare("UPDATE notes SET folder = ? WHERE id = ?")
+          .bind(next, row.id)
+          .run();
+      }
+
+      await renameFolderTree(env, rec.owner_id, rec.folder, nextPath);
+      return {
+        kind: "ok",
+        access: await resolveFolderAccess(env, rec.owner_id, nextPath, user),
+      };
     },
   };
 }
