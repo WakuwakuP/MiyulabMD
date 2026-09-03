@@ -18,7 +18,7 @@ export function AppHeader({ actions, end, user, loading, authConfig }: Props) {
   return (
     <header
       className={cn(
-        "fixed inset-x-0 top-0 z-40 grid min-h-[3.25rem] items-center gap-2 border-b border-border bg-surface px-[0.9rem] py-[0.4rem] max-[900px]:px-3",
+        "fixed inset-x-0 top-[var(--app-offset-top,0px)] z-40 grid min-h-[3.25rem] items-center gap-2 border-b border-border bg-surface px-[0.9rem] py-[0.4rem] max-[900px]:px-3",
         actions
           ? "grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
           : "grid-cols-[minmax(0,1fr)_auto]",
