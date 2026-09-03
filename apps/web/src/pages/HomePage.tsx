@@ -22,6 +22,7 @@ import {
   deleteNote,
   fetchFolder,
   fetchNote,
+  renameFolder,
   updateFolderAccess,
   updateNote,
 } from "../lib/api.ts";
@@ -89,6 +90,14 @@ export function HomePage() {
   const [folderCreateOpen, setFolderCreateOpen] = useState(false);
   const [folderCreating, setFolderCreating] = useState(false);
   const [folderCreateError, setFolderCreateError] = useState<string | null>(
+    null,
+  );
+  const [folderRename, setFolderRename] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [folderRenaming, setFolderRenaming] = useState(false);
+  const [folderRenameError, setFolderRenameError] = useState<string | null>(
     null,
   );
 
@@ -309,6 +318,13 @@ export function HomePage() {
       ];
       if (visibleFolder?.flags.canAdmin) {
         items.push({
+          label: "名前を変更",
+          onSelect: () => {
+            setFolderRename({ id: target.id, name: target.name });
+            setFolderRenameError(null);
+          },
+        });
+        items.push({
           label: "削除",
           danger: true,
           onSelect: () => {
@@ -363,6 +379,30 @@ export function HomePage() {
       return;
     }
     setVisibleFolder(result.data);
+  }
+
+  async function persistRenameFolder(name: string) {
+    if (!folderRename) return;
+    if (name === folderRename.name) {
+      setFolderRename(null);
+      return;
+    }
+
+    setFolderRenaming(true);
+    setFolderRenameError(null);
+
+    const result = await renameFolder(folderRename.id, name);
+    if (!result.ok) {
+      setFolderRenameError(result.error);
+      setFolderRenaming(false);
+      return;
+    }
+
+    setFolderRename(null);
+    setFolderRenaming(false);
+    seedFolderCache(result.data);
+    if (visibleFolder?.id === result.data.id) setVisibleFolder(result.data);
+    await refreshList();
   }
 
   async function persistDelete() {
@@ -464,6 +504,20 @@ export function HomePage() {
           onSubmit={(name) => void persistNewFolder(name)}
           onClose={() => {
             if (!folderCreating) setFolderCreateOpen(false);
+          }}
+        />
+      )}
+      {folderRename && (
+        <FolderCreateModal
+          title="フォルダ名を変更"
+          submitLabel="変更"
+          busyLabel="変更中…"
+          initialName={folderRename.name}
+          busy={folderRenaming}
+          error={folderRenameError}
+          onSubmit={(name) => void persistRenameFolder(name)}
+          onClose={() => {
+            if (!folderRenaming) setFolderRename(null);
           }}
         />
       )}

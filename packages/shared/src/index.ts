@@ -42,6 +42,7 @@ export {
   PERMISSION_PRESETS,
   presetFromScopes,
   ROOT_SCOPES,
+  rewriteFolderPrefix,
   scopesFromPreset,
 } from "./permission.ts";
 export {
