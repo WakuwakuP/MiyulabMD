@@ -5,8 +5,15 @@ import {
   bindVisualViewportHeight,
   EDITOR_SCROLL_PAD_VAR,
   editorScrollPadPx,
+  scrollDeltaForPaddedRect,
   syncAppHeight,
 } from "./visual-viewport.ts";
+
+test("scrollDeltaForPaddedRect keeps the caret away from the scroller edge", () => {
+  assert.equal(scrollDeltaForPaddedRect(0, 400, 350, 370, 80), 50);
+  assert.equal(scrollDeltaForPaddedRect(0, 400, 10, 30, 80), -70);
+  assert.equal(scrollDeltaForPaddedRect(0, 400, 160, 180, 80), 0);
+});
 
 test("editorScrollPadPx caps at 8rem and 30% of the viewport", () => {
   assert.equal(editorScrollPadPx(1000, 16), 128);
