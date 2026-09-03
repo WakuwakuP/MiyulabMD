@@ -51,8 +51,9 @@ function hasEventHandler(target: object | undefined, name: string): boolean {
 }
 
 function matchMediaMatches(win: object, query: string): boolean {
-  const matchMedia = (win as { matchMedia?: (q: string) => { matches?: boolean } })
-    .matchMedia;
+  const matchMedia = (
+    win as { matchMedia?: (q: string) => { matches?: boolean } }
+  ).matchMedia;
   return Boolean(matchMedia?.(query)?.matches);
 }
 
@@ -63,8 +64,9 @@ function needsHiddenFallback(win: object): boolean {
   if (matchMediaMatches(win, "(hover: none) and (pointer: coarse)")) {
     return true;
   }
-  const css = (win as { CSS?: { supports?: (p: string, v: string) => boolean } })
-    .CSS;
+  const css = (
+    win as { CSS?: { supports?: (p: string, v: string) => boolean } }
+  ).CSS;
   if (css?.supports?.("-webkit-touch-callout", "none")) {
     return true;
   }
@@ -85,7 +87,9 @@ export function detectPageLifecycleSupport(
   };
 }
 
-function visibilityStateOf(doc: LifecycleDocument | undefined): string | undefined {
+function visibilityStateOf(
+  doc: LifecycleDocument | undefined,
+): string | undefined {
   if (!doc || typeof doc.visibilityState !== "string") {
     return undefined;
   }
