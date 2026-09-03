@@ -1,4 +1,4 @@
-export const THEME_PREFERENCES = ["light", "dark", "system"] as const;
+export const THEME_PREFERENCES = ["light", "dark", "black", "system"] as const;
 export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 
 const STORAGE_KEY = "miyulabmd:theme";
@@ -9,12 +9,18 @@ export function isThemePreference(value: string): value is ThemePreference {
 
 export function colorSchemeFor(theme: ThemePreference): string {
   if (theme === "light") return "light";
-  if (theme === "dark") return "dark";
+  if (theme === "dark" || theme === "black") return "dark";
   return "light dark";
 }
 
 export function applyTheme(theme: ThemePreference): void {
-  document.documentElement.style.colorScheme = colorSchemeFor(theme);
+  const root = document.documentElement;
+  root.style.colorScheme = colorSchemeFor(theme);
+  if (theme === "black") {
+    root.dataset.theme = "black";
+    return;
+  }
+  delete root.dataset.theme;
 }
 
 export function readTheme(): ThemePreference {

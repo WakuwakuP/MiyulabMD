@@ -1,5 +1,6 @@
 import {
   ChevronDown,
+  Circle,
   EllipsisVertical,
   Eye,
   FileText,
@@ -28,6 +29,12 @@ export function SunIcon({ className }: IconProps) {
 
 export function MoonIcon({ className }: IconProps) {
   return <Moon aria-hidden className={cn("size-4", className)} />;
+}
+
+export function BlackIcon({ className }: IconProps) {
+  return (
+    <Circle aria-hidden className={cn("size-4 fill-current", className)} />
+  );
 }
 
 export function MonitorIcon({ className }: IconProps) {

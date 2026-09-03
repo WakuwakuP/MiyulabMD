@@ -8,13 +8,19 @@
       (() => {
         try {
           const stored = localStorage.getItem("miyulabmd:theme") ?? "";
-          const scheme =
-            stored === "light"
-              ? "light"
-              : stored === "dark"
-                ? "dark"
-                : "light dark";
-          document.documentElement.style.colorScheme = scheme;
+          const root = document.documentElement;
+          if (stored === "black") {
+            root.dataset.theme = "black";
+            root.style.colorScheme = "dark";
+          } else {
+            delete root.dataset.theme;
+            root.style.colorScheme =
+              stored === "light"
+                ? "light"
+                : stored === "dark"
+                  ? "dark"
+                  : "light dark";
+          }
         } catch {
           /* ignore */
         }

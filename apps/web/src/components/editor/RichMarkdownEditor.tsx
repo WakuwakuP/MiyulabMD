@@ -209,7 +209,7 @@ export function RichMarkdownEditor({
         codeBlock: false,
         link: { openOnClick: false, autolink: true },
         dropcursor: {
-          color: "color-mix(in srgb, CanvasText 35%, transparent)",
+          color: "var(--color-overlay)",
           width: 2,
         },
       }),
