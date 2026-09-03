@@ -59,6 +59,8 @@
   /* 内部スクロール時は visual viewport にピン留めする（transform は使わない）。 */
   html.editor-lock-viewport,
   html.editor-lock-viewport body {
+    height: var(--app-height, 100dvh);
+    max-height: var(--app-height, 100dvh);
     overflow: hidden;
   }
 
