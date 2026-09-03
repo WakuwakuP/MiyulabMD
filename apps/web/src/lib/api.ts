@@ -168,6 +168,22 @@ export async function fetchFolder(
   return { ok: true, data: (await res.json()) as FolderAccess };
 }
 
+export async function renameFolder(
+  id: string,
+  name: string,
+): Promise<ApiResult<FolderAccess>> {
+  const res = await fetch(`/api/folders/${id}`, {
+    ...fetchOpts,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  return { ok: true, data: (await res.json()) as FolderAccess };
+}
+
 export async function updateFolderAccess(input: {
   folderId: string;
   inherit?: boolean;

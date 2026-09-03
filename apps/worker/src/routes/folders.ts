@@ -230,6 +230,36 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
 
     return resolveFolderAccess(env, user.id, folder, user);
   })
+  .patch("/:id", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    if (!user) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+
+    const body = await parseJsonBody<{ name?: string }>(request);
+    const name = normalizeFolderName(body?.name ?? "");
+    if (!name) {
+      set.status = 400;
+      return { error: "フォルダ名が不正です" };
+    }
+
+    const result = await notes.renameFolder(params.id, name, user);
+    if (result.kind === "not_found") {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    if (result.kind === "denied") {
+      set.status = result.status;
+      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+    }
+    if (result.kind === "invalid") {
+      set.status = result.status;
+      return { error: result.error };
+    }
+
+    return result.access;
+  })
   .delete("/:id", async ({ params, request, set }) => {
     const user = await readSession(request, env);
     if (!user) {

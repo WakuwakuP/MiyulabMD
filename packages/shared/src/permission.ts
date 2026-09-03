@@ -224,3 +224,14 @@ export function folderContains(parent: string, folder: string): boolean {
   if (parent === "") return true;
   return folder === parent || folder.startsWith(`${parent}/`);
 }
+
+/** `from` 配下のパスを `to` 配下へ付け替える。範囲外なら null。 */
+export function rewriteFolderPrefix(
+  folder: string,
+  from: string,
+  to: string,
+): string | null {
+  if (!from || !folderContains(from, folder)) return null;
+  if (folder === from) return to;
+  return `${to}${folder.slice(from.length)}`;
+}
