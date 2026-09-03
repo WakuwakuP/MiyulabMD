@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./syntax-tokens.css";
+@import "./theme-black.css";
 @import "./document-prose.css";
 @import "./document-view.css";
 @import "./code-highlight.css";
@@ -42,8 +43,8 @@
 
   body {
     margin: 0;
-    background: Canvas;
-    color: CanvasText;
+    background: var(--color-canvas);
+    color: var(--color-ink);
     font-family: var(--font-sans);
     line-height: 1.5;
   }

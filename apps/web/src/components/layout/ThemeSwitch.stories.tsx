@@ -12,3 +12,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const Black: Story = {
+  globals: { colorScheme: "black" },
+};
