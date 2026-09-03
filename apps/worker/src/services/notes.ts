@@ -319,6 +319,55 @@ async function mergeNoteRows(rows: NoteRow[]): Promise<NoteRow[]> {
   return [...map.values()].sort((a, b) => b.updated_at - a.updated_at);
 }
 
+async function listAccessibleRows(
+  env: Env,
+  user: SessionUser,
+): Promise<NoteRow[]> {
+  const owned = await db(env)
+    .prepare(
+      `SELECT DISTINCT ${NOTE_COLUMNS_N}
+           FROM notes n
+           LEFT JOIN access_grants ag
+             ON ag.target_kind = 'note' AND ag.target_key = n.id
+            AND (ag.user_id = ? OR ag.email = ?)
+           WHERE n.owner_id = ? OR ag.id IS NOT NULL
+           ORDER BY n.updated_at DESC`,
+    )
+    .bind(user.id, user.email, user.id)
+    .all<NoteRow>();
+
+  const folderGrants = await listFolderGrantsForUser(env, user);
+  const extra: NoteRow[] = [];
+  for (const grant of folderGrants) {
+    const rows = await db(env)
+      .prepare(
+        `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ? ORDER BY updated_at DESC`,
+      )
+      .bind(grant.ownerId)
+      .all<NoteRow>();
+    for (const row of rows.results ?? []) {
+      if (noteMatchesFolderGrant(row.folder ?? "", grant.folder)) {
+        extra.push(row);
+      }
+    }
+  }
+
+  return mergeNoteRows([...(owned.results ?? []), ...extra]);
+}
+
+export type NoteSearchHit = NoteSummary & {
+  snippet?: string;
+};
+
+function excerptSnapshot(text: string, start: number, length: number): string {
+  const radius = 80;
+  const from = Math.max(0, start - radius);
+  const to = Math.min(text.length, start + length + radius);
+  const prefix = from > 0 ? "…" : "";
+  const suffix = to < text.length ? "…" : "";
+  return `${prefix}${text.slice(from, to)}${suffix}`;
+}
+
 export type GetNoteResult =
   | { kind: "ok"; note: Note }
   | { kind: "not_found" }
@@ -345,37 +394,38 @@ export type RenameFolderResult =
 export function createNoteService(env: Env) {
   return {
     async listForUser(user: SessionUser): Promise<NoteSummary[]> {
-      const owned = await db(env)
-        .prepare(
-          `SELECT DISTINCT ${NOTE_COLUMNS_N}
-           FROM notes n
-           LEFT JOIN access_grants ag
-             ON ag.target_kind = 'note' AND ag.target_key = n.id
-            AND (ag.user_id = ? OR ag.email = ?)
-           WHERE n.owner_id = ? OR ag.id IS NOT NULL
-           ORDER BY n.updated_at DESC`,
-        )
-        .bind(user.id, user.email, user.id)
-        .all<NoteRow>();
+      const rows = await listAccessibleRows(env, user);
+      return Promise.all(rows.map((row) => toSummary(env, row, user)));
+    },
 
-      const folderGrants = await listFolderGrantsForUser(env, user);
-      const extra: NoteRow[] = [];
-      for (const grant of folderGrants) {
-        const rows = await db(env)
-          .prepare(
-            `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ? ORDER BY updated_at DESC`,
-          )
-          .bind(grant.ownerId)
-          .all<NoteRow>();
-        for (const row of rows.results ?? []) {
-          if (noteMatchesFolderGrant(row.folder ?? "", grant.folder)) {
-            extra.push(row);
-          }
-        }
+    async searchForUser(
+      user: SessionUser,
+      query: string,
+    ): Promise<NoteSearchHit[]> {
+      const needle = query.trim().toLowerCase();
+      if (!needle) {
+        return [];
       }
 
-      const merged = await mergeNoteRows([...(owned.results ?? []), ...extra]);
-      return Promise.all(merged.map((row) => toSummary(env, row, user)));
+      const rows = await listAccessibleRows(env, user);
+      const hits: NoteSearchHit[] = [];
+      for (const row of rows) {
+        const titleHit = row.title.toLowerCase().includes(needle);
+        const markdown = row.markdown_snapshot ?? "";
+        const markdownIndex = markdown.toLowerCase().indexOf(needle);
+        if (!titleHit && markdownIndex === -1) {
+          continue;
+        }
+        const summary = await toSummary(env, row, user);
+        hits.push({
+          ...summary,
+          snippet:
+            markdownIndex >= 0
+              ? excerptSnapshot(markdown, markdownIndex, needle.length)
+              : undefined,
+        });
+      }
+      return hits;
     },
 
     async get(idOrShortId: string, user?: SessionUser): Promise<GetNoteResult> {
