@@ -180,8 +180,23 @@ export function MarkdownEditor({
         highlightActiveLine(),
         EditorView.lineWrapping,
         EditorView.theme({
+          "&": {
+            backgroundColor: "Canvas",
+            color: "CanvasText",
+          },
           ".cm-content": { caretColor: "CanvasText" },
           ".cm-line": { caretColor: "CanvasText" },
+          ".cm-gutters": {
+            backgroundColor: "var(--cm-gutter-bg)",
+            color: "var(--color-muted)",
+            borderRight: "1px solid var(--color-border)",
+          },
+          ".cm-activeLineGutter": {
+            backgroundColor: "var(--cm-gutter-active-bg)",
+          },
+          ".cm-activeLine": {
+            backgroundColor: "var(--color-preview)",
+          },
         }),
         yCollab(yText, awareness, { undoManager }),
         EditorView.editable.of(!readOnly),
@@ -239,7 +254,6 @@ export function MarkdownEditor({
           "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0 [[data-layout=editor]_&]:rounded-none [[data-layout=editor]_&]:border-0",
           "[&_.cm-editor]:h-full [&_.cm-editor]:min-h-96 [[data-layout=editor]_&_.cm-editor]:min-h-0",
           "[&_.cm-scroller]:font-mono [&_.cm-scroller]:text-[0.95rem]",
-          "[&_.cm-gutters]:border-r [&_.cm-gutters]:border-border [&_.cm-gutters]:bg-surface [&_.cm-gutters]:text-muted",
           "[&_.cm-editor]:caret-ink [&_.cm-content]:caret-ink [&_.cm-line]:caret-ink",
           "[&_.cm-cursor]:!border-l-ink [&_.cm-cursor-primary]:!border-l-ink",
           "[&_.cm-ySelectionInfo]:!opacity-100 [&_.cm-ySelectionInfo]:![transition-delay:0s]",
