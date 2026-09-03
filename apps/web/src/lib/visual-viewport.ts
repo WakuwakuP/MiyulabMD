@@ -1,8 +1,10 @@
 export const APP_HEIGHT_VAR = "--app-height";
+export const APP_OFFSET_TOP_VAR = "--app-offset-top";
 export const EDITOR_SCROLL_PAD_VAR = "--editor-scroll-pad";
 
 type ViewportLike = {
   height: number;
+  offsetTop: number;
   addEventListener(type: string, listener: EventListener): void;
   removeEventListener(type: string, listener: EventListener): void;
 };
@@ -10,6 +12,8 @@ type ViewportLike = {
 type BindTarget = {
   visualViewport?: ViewportLike | null;
   innerHeight: number;
+  requestAnimationFrame?: (callback: FrameRequestCallback) => number;
+  cancelAnimationFrame?: (handle: number) => void;
   addEventListener(type: string, listener: EventListener): void;
   removeEventListener(type: string, listener: EventListener): void;
 };
@@ -63,15 +67,17 @@ export function syncAppHeight(
   height: number,
   remPx = 16,
   root: StyleRoot = document.documentElement,
+  offsetTop = 0,
 ): void {
   root.style.setProperty(APP_HEIGHT_VAR, `${height}px`);
+  root.style.setProperty(APP_OFFSET_TOP_VAR, `${offsetTop}px`);
   root.style.setProperty(
     EDITOR_SCROLL_PAD_VAR,
     `${editorScrollPadPx(height, remPx)}px`,
   );
 }
 
-/** IME で縮む visual viewport を `--app-height` に載せる。 */
+/** IME で縮む visual viewport を `--app-height` / `--app-offset-top` に載せる。 */
 export function bindVisualViewportHeight(
   target: BindTarget = window,
   root: StyleRoot = document.documentElement,
@@ -79,20 +85,44 @@ export function bindVisualViewportHeight(
     Number.parseFloat(getComputedStyle(document.documentElement).fontSize) ||
     16,
 ): () => void {
+  let raf = 0;
+  const requestFrame =
+    target.requestAnimationFrame?.bind(target) ??
+    globalThis.requestAnimationFrame?.bind(globalThis);
+  const cancelFrame =
+    target.cancelAnimationFrame?.bind(target) ??
+    globalThis.cancelAnimationFrame?.bind(globalThis);
+
   const sync = () => {
-    const height = target.visualViewport?.height ?? target.innerHeight;
-    syncAppHeight(height, remPx(), root);
+    const vv = target.visualViewport;
+    const height = vv?.height ?? target.innerHeight;
+    const offsetTop = vv?.offsetTop ?? 0;
+    syncAppHeight(height, remPx(), root, offsetTop);
+  };
+
+  const schedule = () => {
+    if (raf) return;
+    if (!requestFrame) {
+      sync();
+      return;
+    }
+    raf = requestFrame(() => {
+      raf = 0;
+      sync();
+    });
   };
 
   const vv = target.visualViewport;
-  vv?.addEventListener("resize", sync);
-  vv?.addEventListener("scroll", sync);
-  target.addEventListener("orientationchange", sync);
+  vv?.addEventListener("resize", schedule);
+  vv?.addEventListener("scroll", schedule);
+  target.addEventListener("orientationchange", schedule);
   sync();
 
   return () => {
-    vv?.removeEventListener("resize", sync);
-    vv?.removeEventListener("scroll", sync);
-    target.removeEventListener("orientationchange", sync);
+    if (raf && cancelFrame) cancelFrame(raf);
+    raf = 0;
+    vv?.removeEventListener("resize", schedule);
+    vv?.removeEventListener("scroll", schedule);
+    target.removeEventListener("orientationchange", schedule);
   };
 }
