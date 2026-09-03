@@ -148,6 +148,7 @@ export function EditorPage() {
   const canEdit = Boolean(note?.access.flags.canEdit);
   const viewMode: EditorMode = canEdit ? mode : "preview";
   const sessionRef = useRef<YjsSession | null>(null);
+  const unbindCollabRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);
@@ -156,6 +157,8 @@ export function EditorPage() {
 
   useEffect(() => {
     return () => {
+      unbindCollabRef.current?.();
+      unbindCollabRef.current = null;
       sessionRef.current?.destroy();
       sessionRef.current = null;
       setCollab(null);
@@ -190,10 +193,15 @@ export function EditorPage() {
       setMarkdown(session.yMarkdown.toString());
     };
     session.yMarkdown.observe(onMarkdownChange);
+    unbindCollabRef.current = () => {
+      session.provider.off("sync", onSynced);
+      session.yMarkdown.unobserve(onMarkdownChange);
+    };
   }, [noteId, userLoading, viewMode, user]);
 
   useEffect(() => {
     if (!collab) return;
+    collab.setUser(user);
     applyAwarenessUser(collab.awareness, user);
   }, [collab, user]);
 

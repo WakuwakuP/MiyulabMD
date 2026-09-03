@@ -1,6 +1,7 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
+import { createSessionLifecycle } from "./page-lifecycle.ts";
 import { colorForEmail } from "./user-style.ts";
 
 export type CollabAwareness = WebsocketProvider["awareness"];
@@ -16,7 +17,10 @@ export type YjsSession = {
   provider: WebsocketProvider;
   yMarkdown: Y.Text;
   awareness: CollabAwareness;
+  leave: () => void;
+  reconnect: () => void;
   destroy: () => void;
+  setUser: (user: SessionUser | null) => void;
 };
 
 const MARKDOWN_FIELD = "markdown";
@@ -99,17 +103,32 @@ export function createYjsSession(
 
   applyAwarenessUser(provider.awareness, user);
 
-  const destroy = () => {
-    provider.awareness.setLocalState(null);
-    provider.destroy();
-    doc.destroy();
-  };
+  let currentUser = user;
+  const lifecycle = createSessionLifecycle({
+    leave: () => {
+      provider.awareness.setLocalState(null);
+      provider.disconnect();
+    },
+    reconnect: () => {
+      applyAwarenessUser(provider.awareness, currentUser);
+      provider.connect();
+    },
+    dispose: () => {
+      provider.destroy();
+      doc.destroy();
+    },
+  });
 
   return {
     doc,
     provider,
     yMarkdown,
     awareness: provider.awareness,
-    destroy,
+    leave: lifecycle.leave,
+    reconnect: lifecycle.reconnect,
+    destroy: lifecycle.destroy,
+    setUser(next) {
+      currentUser = next;
+    },
   };
 }

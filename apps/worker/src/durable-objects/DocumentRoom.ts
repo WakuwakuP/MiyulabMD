@@ -7,6 +7,14 @@ import * as Y from "yjs";
 
 import { db } from "../db/client.ts";
 import { persistMarkdownSnapshot } from "../services/notes.ts";
+import {
+  type AwarenessChanges,
+  applyOwnedClientChanges,
+  clientsForAwarenessBroadcast,
+  clockForRemoval,
+  encodeAwarenessNullUpdate,
+  nextAwarenessClocks,
+} from "./awareness-sync.ts";
 
 /** y-websocket 互換のトップレベルメッセージ種別。 */
 const MESSAGE_SYNC = 0;
@@ -22,18 +30,16 @@ type WsAttachment = {
   userId?: string;
   displayName?: string;
   awarenessClientIds: number[];
+  awarenessClocks: Record<string, number>;
 };
 
-function extractAwarenessClientIds(update: Uint8Array): number[] {
-  const decoder = decoding.createDecoder(update);
-  const len = decoding.readVarUint(decoder);
-  const ids: number[] = [];
-  for (let i = 0; i < len; i += 1) {
-    ids.push(decoding.readVarUint(decoder));
-    decoding.readVarUint(decoder);
-    decoding.readVarString(decoder);
-  }
-  return ids;
+function isRoomSocket(origin: unknown): origin is WebSocket {
+  return (
+    typeof origin === "object" &&
+    origin !== null &&
+    "deserializeAttachment" in origin &&
+    "serializeAttachment" in origin
+  );
 }
 
 /**
@@ -80,6 +86,7 @@ export class DocumentRoom extends DurableObject<Env> {
       userId,
       displayName,
       awarenessClientIds: [],
+      awarenessClocks: {},
     };
     server.serializeAttachment(attachment);
 
@@ -127,13 +134,6 @@ export class DocumentRoom extends DurableObject<Env> {
       }
       case MESSAGE_AWARENESS: {
         const update = decoding.readVarUint8Array(decoder);
-        if (attachment) {
-          const clientIds = extractAwarenessClientIds(update);
-          attachment.awarenessClientIds = [
-            ...new Set([...attachment.awarenessClientIds, ...clientIds]),
-          ];
-          ws.serializeAttachment(attachment);
-        }
         awarenessProtocol.applyAwarenessUpdate(this.awareness!, update, ws);
         break;
       }
@@ -164,10 +164,27 @@ export class DocumentRoom extends DurableObject<Env> {
     await this.ensureInitialized();
 
     const attachment = ws.deserializeAttachment() as WsAttachment | null;
-    if (attachment?.awarenessClientIds.length) {
-      awarenessProtocol.removeAwarenessStates(
-        this.awareness!,
-        attachment.awarenessClientIds,
+    const owned = attachment?.awarenessClientIds ?? [];
+    if (owned.length === 0) {
+      return;
+    }
+
+    const awareness = this.awareness!;
+    const present = owned.filter((id) => awareness.getStates().has(id));
+    if (present.length > 0) {
+      awarenessProtocol.removeAwarenessStates(awareness, present, ws);
+    }
+
+    const stale = owned.filter((id) => !awareness.meta.has(id));
+    if (stale.length > 0) {
+      const clocks = attachment?.awarenessClocks ?? {};
+      this.sendAwarenessUpdate(
+        encodeAwarenessNullUpdate(
+          stale.map((clientId) => ({
+            clientId,
+            clock: clockForRemoval(clocks[String(clientId)]),
+          })),
+        ),
         ws,
       );
     }
@@ -247,8 +264,9 @@ export class DocumentRoom extends DurableObject<Env> {
       void this.onDocUpdate(update, origin);
     });
 
-    awareness.on("update", (_changes: unknown, origin: unknown) => {
-      this.broadcastAwareness(origin);
+    awareness.on("update", (changes: AwarenessChanges, origin: unknown) => {
+      this.trackOwnedAwareness(changes, origin);
+      this.broadcastAwarenessDiff(changes, origin);
     });
 
     this.doc = doc;
@@ -292,21 +310,73 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
-  private broadcastAwareness(origin: unknown): void {
+  private trackOwnedAwareness(
+    changes: AwarenessChanges,
+    origin: unknown,
+  ): void {
+    if (!isRoomSocket(origin)) {
+      return;
+    }
+
+    const attachment = origin.deserializeAttachment() as WsAttachment | null;
+    if (!attachment) {
+      return;
+    }
+
+    const owned = applyOwnedClientChanges(
+      attachment.awarenessClientIds ?? [],
+      changes,
+    );
+    attachment.awarenessClientIds = owned;
+    attachment.awarenessClocks = nextAwarenessClocks(
+      attachment.awarenessClocks ?? {},
+      owned,
+      changes,
+      (clientId) => this.awareness?.meta.get(clientId)?.clock,
+    );
+    origin.serializeAttachment(attachment);
+  }
+
+  private broadcastAwarenessDiff(
+    changes: AwarenessChanges,
+    origin: unknown,
+  ): void {
     const awareness = this.awareness;
     if (!awareness) {
       return;
     }
 
+    const clients = clientsForAwarenessBroadcast(changes);
+    if (clients.length === 0) {
+      return;
+    }
+
+    const withMeta = clients.filter((id) => awareness.meta.has(id));
+    const withoutMeta = clients.filter((id) => !awareness.meta.has(id));
+
+    if (withMeta.length > 0) {
+      this.sendAwarenessUpdate(
+        awarenessProtocol.encodeAwarenessUpdate(awareness, withMeta),
+        origin,
+      );
+    }
+    if (withoutMeta.length > 0) {
+      this.sendAwarenessUpdate(
+        encodeAwarenessNullUpdate(
+          withoutMeta.map((clientId) => ({
+            clientId,
+            clock: clockForRemoval(undefined),
+          })),
+        ),
+        origin,
+      );
+    }
+  }
+
+  private sendAwarenessUpdate(update: Uint8Array, origin: unknown): void {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, MESSAGE_AWARENESS);
-    encoding.writeVarUint8Array(
-      encoder,
-      awarenessProtocol.encodeAwarenessUpdate(
-        awareness,
-        Array.from(awareness.getStates().keys()),
-      ),
-    );
+    encoding.writeVarUint8Array(encoder, update);
     const payload = encoding.toUint8Array(encoder);
 
     for (const ws of this.ctx.getWebSockets()) {
