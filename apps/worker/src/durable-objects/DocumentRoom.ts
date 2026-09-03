@@ -8,6 +8,11 @@ import * as Y from "yjs";
 import { db } from "../db/client.ts";
 import { persistMarkdownSnapshot } from "../services/notes.ts";
 import {
+  AGENT_IDLE_MS,
+  type AgentPresenceInput,
+  agentAwarenessState,
+} from "./agent-presence.ts";
+import {
   type AwarenessChanges,
   applyOwnedClientChanges,
   clientsForAwarenessBroadcast,
@@ -15,6 +20,14 @@ import {
   encodeAwarenessNullUpdate,
   nextAwarenessClocks,
 } from "./awareness-sync.ts";
+import {
+  type AgentCursor,
+  applyTextDiff,
+  excerptAround,
+  type InsertPosition,
+  planInsert,
+  planReplace,
+} from "./markdown-edit.ts";
 
 /** y-websocket 互換のトップレベルメッセージ種別。 */
 const MESSAGE_SYNC = 0;
@@ -42,15 +55,44 @@ function isRoomSocket(origin: unknown): origin is WebSocket {
   );
 }
 
+export type ApplyEditInput = {
+  noteId: string;
+  agent: AgentPresenceInput;
+} & (
+  | {
+      op: "replace";
+      oldString: string;
+      newString: string;
+      replaceAll?: boolean;
+    }
+  | { op: "insert"; text: string; position: InsertPosition }
+  | { op: "set"; markdown: string }
+);
+
+export type ApplyEditResult =
+  | {
+      ok: true;
+      cursor: AgentCursor;
+      excerpt: string;
+      markdownLength: number;
+    }
+  | {
+      ok: false;
+      error: "not_found" | "ambiguous" | "invalid";
+      message: string;
+      matches?: number;
+    };
+
 /**
  * ノート 1 件につき 1 Durable Object。
- * Yjs 同期・awareness・SQLite 永続化・MCP からの applyMarkdown を担う。
+ * Yjs 同期・awareness・SQLite 永続化・MCP からの差分編集を担う。
  */
 export class DocumentRoom extends DurableObject<Env> {
   private doc: Y.Doc | null = null;
   private awareness: awarenessProtocol.Awareness | null = null;
   private loading: Promise<void> | null = null;
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -194,24 +236,79 @@ export class DocumentRoom extends DurableObject<Env> {
     // 接続エラーは webSocketClose で後処理する。
   }
 
-  async applyMarkdown(markdown: string): Promise<void> {
-    await this.ensureInitialized();
-    const doc = this.doc!;
-    const ytext = doc.getText("markdown");
-
-    doc.transact(() => {
-      ytext.delete(0, ytext.length);
-      if (markdown.length > 0) {
-        ytext.insert(0, markdown);
-      }
-    }, "applyMarkdown");
-
+  async applyMarkdown(markdown: string, noteId?: string): Promise<void> {
+    await this.ensureInitialized(noteId);
+    const ytext = this.doc!.getText("markdown");
+    applyTextDiff(ytext, markdown, "applyMarkdown");
     this.scheduleSnapshotPersist();
   }
 
-  async getMarkdown(): Promise<string> {
-    await this.ensureInitialized();
+  async getMarkdown(noteId?: string): Promise<string> {
+    await this.ensureInitialized(noteId);
     return this.doc!.getText("markdown").toString();
+  }
+
+  /** 最新本文を返し、エージェントのカーソルを出す。 */
+  async readForAgent(
+    noteId: string,
+    agent: AgentPresenceInput,
+  ): Promise<string> {
+    await this.ensureInitialized(noteId);
+    const markdown = this.doc!.getText("markdown").toString();
+    this.touchAgentPresence(agent, { anchor: 0, head: 0 });
+    return markdown;
+  }
+
+  async setAgentPresence(
+    noteId: string,
+    agent: AgentPresenceInput,
+    cursor?: AgentCursor,
+  ): Promise<void> {
+    await this.ensureInitialized(noteId);
+    this.touchAgentPresence(agent, cursor ?? { anchor: 0, head: 0 });
+  }
+
+  async clearAgentPresence(): Promise<void> {
+    await this.ensureInitialized();
+    this.stopAgentIdle();
+    this.awareness?.setLocalState(null);
+  }
+
+  async applyEdit(input: ApplyEditInput): Promise<ApplyEditResult> {
+    await this.ensureInitialized(input.noteId);
+    const ytext = this.doc!.getText("markdown");
+    const current = ytext.toString();
+
+    const plan =
+      input.op === "replace"
+        ? planReplace(
+            current,
+            input.oldString,
+            input.newString,
+            input.replaceAll,
+          )
+        : input.op === "insert"
+          ? planInsert(current, input.text, input.position)
+          : {
+              ok: true as const,
+              next: input.markdown,
+              cursor: cursorAfterSet(current, input.markdown),
+            };
+
+    if (!plan.ok) {
+      return plan;
+    }
+
+    applyTextDiff(ytext, plan.next, "applyEdit");
+    this.touchAgentPresence(input.agent, plan.cursor);
+    this.scheduleSnapshotPersist();
+
+    return {
+      ok: true,
+      cursor: plan.cursor,
+      excerpt: excerptAround(plan.next, plan.cursor.anchor, plan.cursor.head),
+      markdownLength: plan.next.length,
+    };
   }
 
   private async ensureInitialized(noteId?: string): Promise<void> {
@@ -391,6 +488,34 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
+  private touchAgentPresence(
+    agent: AgentPresenceInput,
+    cursor: AgentCursor,
+  ): void {
+    const awareness = this.awareness;
+    const ytext = this.doc?.getText("markdown");
+    if (!awareness || !ytext) {
+      return;
+    }
+    awareness.setLocalState(agentAwarenessState(agent, ytext, cursor));
+    this.scheduleAgentIdle();
+  }
+
+  private scheduleAgentIdle(): void {
+    this.stopAgentIdle();
+    this.agentIdleTimer = setTimeout(() => {
+      this.agentIdleTimer = null;
+      this.awareness?.setLocalState(null);
+    }, AGENT_IDLE_MS);
+  }
+
+  private stopAgentIdle(): void {
+    if (this.agentIdleTimer !== null) {
+      clearTimeout(this.agentIdleTimer);
+      this.agentIdleTimer = null;
+    }
+  }
+
   private scheduleSnapshotPersist(): void {
     if (this.snapshotTimer !== null) {
       clearTimeout(this.snapshotTimer);
@@ -411,4 +536,13 @@ export class DocumentRoom extends DurableObject<Env> {
     const markdown = this.doc.getText("markdown").toString();
     await persistMarkdownSnapshot(this.env, noteId, markdown);
   }
+}
+
+function cursorAfterSet(previous: string, next: string): AgentCursor {
+  const max = Math.min(previous.length, next.length);
+  let start = 0;
+  while (start < max && previous[start] === next[start]) {
+    start += 1;
+  }
+  return { anchor: start, head: next.length };
 }

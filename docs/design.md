@@ -290,7 +290,8 @@ sequenceDiagram
 - `y-protocols` の sync / awareness を中継する
 - Yjs 更新を DO SQLite に append + 定期コンパクション
 - 読み取り専用接続（`locked` のゲストなど）は update を拒否し、awareness は許可してよい
-- MCP / REST からの本文置換は `applyMarkdown(text)` RPC で `Y.Text("markdown")` を更新し、接続中クライアントへ配信する
+- MCP からの本文変更は `applyEdit` RPC で `Y.Text("markdown")` に差分を載せ、接続中クライアントへ配信する。全文置換は `applyTextDiff` 経由の最終手段
+- MCP エージェントは DO 内の合成 awareness（`kind: "agent"`）としてカーソルと presence を出す。ブラウザ側の既存リモートカーソル描画をそのまま使う
 
 クライアント:
 
@@ -325,15 +326,19 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 | ツール | 権限 | 内容 |
 | --- | --- | --- |
 | `list_notes` | ログインユーザー | 自分が owner / collaborator のノート。任意で query |
-| `get_note` | `canView` | メタ + Markdown スナップショット。必要なら DO から最新を取る |
+| `get_note` | `canView` | メタ + DO の最新 Markdown + heading outline。`AI(ユーザー名)` カーソルを出す |
 | `create_note` | ログインユーザー | title / content / permission |
-| `update_note` | `canEdit` | Markdown 全置換。DO の `applyMarkdown` 経由 |
+| `replace_in_note` | `canEdit` | 一意コンテキストの置換。複数ヒットは `replace_all` か失敗 |
+| `insert_in_note` | `canEdit` | `at` / `after` / `before` のいずれか 1 つで挿入 |
+| `update_note` | `canEdit` | Markdown 全置換（最終手段）。`applyTextDiff` 経由 |
 | `delete_note` | `canAdmin` | メタ・画像・DO 状態を削除 |
-| `set_note_permission` | `canAdmin` | 6 プリセットを変更 |
+| `set_note_access` | `canAdmin` | 公開範囲を変更 |
 | `invite_collaborator` | `canAdmin` | email + role |
 | `search_notes` | ログインユーザー | title / snapshot の部分一致 |
+| `agent_join` | `canView` | `AI(ユーザー名)` カーソルだけ出す |
+| `agent_leave` | `canView` | `AI(ユーザー名)` カーソルを消す |
 
-`update_note` をライブ編集中に呼んでも、接続中のエディタは Yjs 更新として見る。スナップショットだけを D1 に書いて DO を迂回しない。
+編集・`get_note` は DocumentRoom の合成 awareness に `AI(ユーザー名)` を載せる。名前は MCP トークン所有者の displayName（なければ email）。接続中のエディタは通常の共同編集者と同じ経路でカーソルを見る。スナップショットだけを D1 に書いて DO を迂回しない。オフセット直指定の API は出さない（同時編集ですぐ腐る）。
 
 Cursor 側の設定例:
 

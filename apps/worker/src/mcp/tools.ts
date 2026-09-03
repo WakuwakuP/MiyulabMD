@@ -4,6 +4,11 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 
+import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
+import {
+  markdownOutline,
+  numberMarkdownLines,
+} from "../durable-objects/markdown-edit.ts";
 import { createNoteService } from "../services/notes.ts";
 
 function textResult(data: unknown) {
@@ -40,6 +45,32 @@ function requireUser(): SessionUser | null {
           ? candidate.displayName
           : null,
   };
+}
+
+function documentRoom(noteId: string) {
+  return env.DOCUMENT_ROOM.get(env.DOCUMENT_ROOM.idFromName(noteId));
+}
+
+function agentOf(user: SessionUser) {
+  return {
+    userId: user.id,
+    displayName: user.displayName?.trim() || user.email,
+  };
+}
+
+function editToolResult(noteId: string, result: ApplyEditResult) {
+  if (!result.ok) {
+    const suffix =
+      result.matches !== undefined ? ` (matches: ${result.matches})` : "";
+    return textError(`${result.message}${suffix}`);
+  }
+  return textResult({
+    id: noteId,
+    applied: true,
+    cursor: result.cursor,
+    excerpt: result.excerpt,
+    markdownLength: result.markdownLength,
+  });
 }
 
 /** createMcpHandler に渡す MCP サーバーファクトリ。 */
@@ -81,12 +112,17 @@ export function createMcpServerFactory() {
   server.registerTool(
     "get_note",
     {
-      description: "Get note metadata and markdown snapshot.",
+      description:
+        "Get note metadata and the live collaborative markdown (not a stale D1 snapshot). Shows an AI(username) cursor to people editing in the browser. Includes a heading outline.",
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
+        numbered: z
+          .boolean()
+          .optional()
+          .describe("Prefix each markdown line with its 1-based line number"),
       },
     },
-    async ({ id }) => {
+    async ({ id, numbered }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -100,7 +136,20 @@ export function createMcpServerFactory() {
         return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
       }
 
-      return textResult({ note: result.note });
+      const note = result.note;
+      const markdown = await documentRoom(note.id).readForAgent(
+        note.id,
+        agentOf(user),
+      );
+      const live = { ...note, markdown };
+
+      return textResult({
+        note: live,
+        outline: markdownOutline(markdown),
+        ...(numbered
+          ? { numberedMarkdown: numberMarkdownLines(markdown) }
+          : {}),
+      });
     },
   );
 
@@ -147,9 +196,114 @@ export function createMcpServerFactory() {
   );
 
   server.registerTool(
+    "replace_in_note",
+    {
+      description:
+        "Replace a unique old_string with new_string in the live note. If old_string matches more than once and replace_all is not true, the call fails. Prefer this over update_note. Shows an AI(username) cursor at the edit.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+        old_string: z
+          .string()
+          .describe("Exact text to find. Include unique surrounding context."),
+        new_string: z.string().describe("Replacement text"),
+        replace_all: z
+          .boolean()
+          .optional()
+          .describe("Replace every non-overlapping match"),
+      },
+    },
+    async ({ id, old_string, new_string, replace_all }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+
+      const loaded = await notes.get(id, user);
+      if (loaded.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (loaded.kind === "denied") {
+        return textError(loaded.status === 401 ? "Unauthorized" : "Forbidden");
+      }
+      if (!loaded.note.access.flags.canEdit) {
+        return textError("Forbidden");
+      }
+
+      const result = await documentRoom(loaded.note.id).applyEdit({
+        noteId: loaded.note.id,
+        agent: agentOf(user),
+        op: "replace",
+        oldString: old_string,
+        newString: new_string,
+        replaceAll: replace_all,
+      });
+      return editToolResult(loaded.note.id, result);
+    },
+  );
+
+  server.registerTool(
+    "insert_in_note",
+    {
+      description:
+        "Insert text into the live note. Provide exactly one of: at (start|end), after (unique context), or before (unique context). Prefer unique surrounding text when editing the middle. Shows an AI(username) cursor at the insert.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+        text: z.string().describe("Text to insert, including any newlines"),
+        at: z.enum(["start", "end"]).optional(),
+        after: z
+          .string()
+          .optional()
+          .describe("Insert immediately after this unique text"),
+        before: z
+          .string()
+          .optional()
+          .describe("Insert immediately before this unique text"),
+      },
+    },
+    async ({ id, text, at, after, before }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+
+      const specified = [
+        at !== undefined,
+        Boolean(after),
+        Boolean(before),
+      ].filter(Boolean).length;
+      if (specified !== 1) {
+        return textError("Provide exactly one of: at, after, before");
+      }
+
+      const loaded = await notes.get(id, user);
+      if (loaded.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (loaded.kind === "denied") {
+        return textError(loaded.status === 401 ? "Unauthorized" : "Forbidden");
+      }
+      if (!loaded.note.access.flags.canEdit) {
+        return textError("Forbidden");
+      }
+
+      const position = at ? { at } : after ? { after } : { before: before! };
+
+      const result = await documentRoom(loaded.note.id).applyEdit({
+        noteId: loaded.note.id,
+        agent: agentOf(user),
+        op: "insert",
+        text,
+        position,
+      });
+      return editToolResult(loaded.note.id, result);
+    },
+  );
+
+  server.registerTool(
     "update_note",
     {
-      description: "Replace note markdown via DocumentRoom.applyMarkdown.",
+      description:
+        "Last-resort full replace of the live note markdown. Concurrent human edits may be disrupted. Prefer replace_in_note or insert_in_note. Shows an AI(username) cursor.",
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
         markdown: z.string().describe("Full markdown body"),
@@ -174,15 +328,24 @@ export function createMcpServerFactory() {
         return textError("Forbidden");
       }
 
-      const doId = env.DOCUMENT_ROOM.idFromName(note.id);
-      await env.DOCUMENT_ROOM.get(doId).applyMarkdown(markdown);
+      const applied = await documentRoom(note.id).applyEdit({
+        noteId: note.id,
+        agent: agentOf(user),
+        op: "set",
+        markdown,
+      });
+      if (!applied.ok) {
+        return textError(applied.message);
+      }
 
       return textResult({
         id: note.id,
         shortId: note.shortId,
         title: note.title,
-        markdown,
-        updated: true,
+        applied: true,
+        cursor: applied.cursor,
+        excerpt: applied.excerpt,
+        markdownLength: applied.markdownLength,
       });
     },
   );
@@ -326,13 +489,66 @@ export function createMcpServerFactory() {
         return textError("query is required");
       }
 
-      const list = await notes.listForUser(user);
-      const needle = trimmedQuery.toLowerCase();
-      const notesFound = list.filter((note) =>
-        note.title.toLowerCase().includes(needle),
-      );
-
+      const notesFound = await notes.searchForUser(user, trimmedQuery);
       return textResult({ notes: notesFound, query: trimmedQuery });
+    },
+  );
+
+  server.registerTool(
+    "agent_join",
+    {
+      description:
+        "Show an AI(username) cursor on an open note. The name is the token owner's display name. Edit and get_note tools join automatically.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+      },
+    },
+    async ({ id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+
+      const result = await notes.get(id, user);
+      if (result.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (result.kind === "denied") {
+        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+      }
+
+      await documentRoom(result.note.id).setAgentPresence(
+        result.note.id,
+        agentOf(user),
+      );
+      return textResult({ id: result.note.id, joined: true });
+    },
+  );
+
+  server.registerTool(
+    "agent_leave",
+    {
+      description: "Hide the AI(username) cursor on a note.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+      },
+    },
+    async ({ id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+
+      const result = await notes.get(id, user);
+      if (result.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (result.kind === "denied") {
+        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+      }
+
+      await documentRoom(result.note.id).clearAgentPresence();
+      return textResult({ id: result.note.id, left: true });
     },
   );
 
