@@ -6,6 +6,10 @@ import { Modal, ModalFooter, ModalHeader } from "../ui/Modal.tsx";
 import { ErrorText } from "../ui/Text.tsx";
 
 type Props = {
+  title?: string;
+  submitLabel?: string;
+  busyLabel?: string;
+  initialName?: string;
   busy?: boolean;
   error?: string | null;
   onSubmit: (name: string) => void;
@@ -13,18 +17,25 @@ type Props = {
 };
 
 export function FolderCreateModal({
+  title = "フォルダを作成",
+  submitLabel = "作成",
+  busyLabel = "作成中…",
+  initialName = "",
   busy = false,
   error,
   onSubmit,
   onClose,
 }: Props) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [localError, setLocalError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    if (initialName) input.select();
+  }, [initialName]);
 
   function close() {
     if (!busy) onClose();
@@ -33,7 +44,7 @@ export function FolderCreateModal({
   return (
     <Modal
       as="form"
-      labelledBy="folder-create-title"
+      labelledBy="folder-name-title"
       className="w-[min(26rem,100%)]"
       onClose={close}
       onSubmit={(event) => {
@@ -46,11 +57,7 @@ export function FolderCreateModal({
         onSubmit(next);
       }}
     >
-      <ModalHeader
-        id="folder-create-title"
-        title="フォルダを作成"
-        onClose={close}
-      />
+      <ModalHeader id="folder-name-title" title={title} onClose={close} />
       <Field label="フォルダ名">
         <Input
           ref={inputRef}
@@ -71,7 +78,7 @@ export function FolderCreateModal({
           キャンセル
         </Button>
         <Button variant="accent" type="submit" disabled={busy || !name.trim()}>
-          {busy ? "作成中…" : "作成"}
+          {busy ? busyLabel : submitLabel}
         </Button>
       </ModalFooter>
     </Modal>
