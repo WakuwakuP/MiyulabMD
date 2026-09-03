@@ -4,6 +4,7 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
   lineNumbers,
+  scrollPastEnd,
 } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import { yCollab } from "y-codemirror.next";
@@ -11,6 +12,7 @@ import * as Y from "yjs";
 import { uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
+import { readEditorScrollPadPx } from "../../lib/visual-viewport.ts";
 import "../../styles/cm-highlight.css";
 import { ContextMenu } from "../notes/ContextMenu.tsx";
 import { FileInput } from "../ui/FileInput.tsx";
@@ -178,6 +180,11 @@ export function MarkdownEditor({
           ? [lineNumbers(), highlightActiveLineGutter()]
           : []),
         highlightActiveLine(),
+        scrollPastEnd(),
+        EditorView.scrollMargins.of((view) => {
+          const pad = readEditorScrollPadPx(view.dom);
+          return { top: pad, bottom: pad };
+        }),
         EditorView.lineWrapping,
         EditorView.theme({
           "&": {

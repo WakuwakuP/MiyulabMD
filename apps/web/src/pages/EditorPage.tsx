@@ -346,7 +346,7 @@ export function EditorPage() {
   const showRich = viewMode === "rich";
 
   const paneHeightClass =
-    "min-h-[calc(100dvh-var(--header-height))] h-[calc(100dvh-var(--header-height))]";
+    "h-[calc(var(--app-height,100dvh)-var(--header-height))]";
   const usesInternalScroll = viewMode !== "preview";
 
   return (
