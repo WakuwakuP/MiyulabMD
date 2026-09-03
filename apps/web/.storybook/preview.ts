@@ -14,6 +14,7 @@ const preview: Preview = {
         items: [
           { value: "light", title: "Light", icon: "sun" },
           { value: "dark", title: "Dark", icon: "moon" },
+          { value: "black", title: "Black", icon: "circle" },
         ],
         dynamicTitle: true,
       },
@@ -24,8 +25,15 @@ const preview: Preview = {
   },
   decorators: [
     (Story, { globals }) => {
-      document.documentElement.style.colorScheme =
-        globals.colorScheme === "dark" ? "dark" : "light";
+      const scheme = globals.colorScheme;
+      if (scheme === "black") {
+        document.documentElement.dataset.theme = "black";
+        document.documentElement.style.colorScheme = "dark";
+      } else {
+        delete document.documentElement.dataset.theme;
+        document.documentElement.style.colorScheme =
+          scheme === "dark" ? "dark" : "light";
+      }
 
       return createElement(
         ThemeProvider,

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTheme } from "../../hooks/use-theme.ts";
 import type { ThemePreference } from "../../lib/theme.ts";
-import { MonitorIcon, MoonIcon, SunIcon } from "../ui/icons.tsx";
+import { BlackIcon, MonitorIcon, MoonIcon, SunIcon } from "../ui/icons.tsx";
 import { Switch } from "../ui/Switch.tsx";
 
 const THEME_ITEMS: {
@@ -11,6 +11,7 @@ const THEME_ITEMS: {
 }[] = [
   { value: "light", ariaLabel: "ライト", label: <SunIcon /> },
   { value: "dark", ariaLabel: "ダーク", label: <MoonIcon /> },
+  { value: "black", ariaLabel: "ブラック", label: <BlackIcon /> },
   { value: "system", ariaLabel: "システム", label: <MonitorIcon /> },
 ];
 

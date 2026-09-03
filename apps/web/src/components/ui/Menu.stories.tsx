@@ -20,7 +20,7 @@ type Story = StoryObj<typeof meta>;
 export const Account: Story = {
   render: () => (
     <div className="relative h-80">
-      <MenuPanel width="18rem">
+      <MenuPanel width="20rem">
         <MenuHeader name="Waku" email="waku@example.com">
           <Avatar name="Waku" color="#2563eb" size="lg" />
         </MenuHeader>
@@ -40,7 +40,7 @@ export const Account: Story = {
 export const Guest: Story = {
   render: () => (
     <div className="relative h-80">
-      <MenuPanel width="18rem">
+      <MenuPanel width="20rem">
         <MenuHeader name="ゲスト">
           <Avatar name="ゲスト" color="#0d9488" size="lg" />
         </MenuHeader>
