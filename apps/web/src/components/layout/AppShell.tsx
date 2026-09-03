@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig, fetchMe } from "../../lib/api.ts";
+import { cn } from "../../lib/cn.ts";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext, HeaderLayout } from "./AppShellContext.ts";
 
@@ -51,7 +52,10 @@ export function AppShell() {
   return (
     <div
       data-layout={editor ? "editor" : "page"}
-      className="flex min-h-[var(--app-height,100dvh)] flex-col"
+      className={cn(
+        "flex flex-col",
+        editor ? "h-full min-h-0" : "min-h-[var(--app-height,100dvh)]",
+      )}
     >
       <AppHeader
         actions={headerActions}
@@ -63,7 +67,7 @@ export function AppShell() {
       <main
         className={
           editor
-            ? "w-full flex-1 pt-[var(--header-height)]"
+            ? "flex min-h-0 w-full flex-1 flex-col pt-[var(--header-height)]"
             : "mx-auto w-full max-w-[1400px] flex-1 p-5 pt-[calc(var(--header-height)+1.25rem)] max-[640px]:px-3"
         }
       >
