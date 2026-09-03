@@ -4,7 +4,7 @@ import type { EditorMode } from "../../lib/editor-mode.ts";
 import { EditorModeSwitch } from "./EditorModeSwitch.tsx";
 
 const meta = {
-  title: "Composite/EditorModeSwitch",
+  title: "Editor/EditorModeSwitch",
   tags: ["autodocs"],
   parameters: { layout: "centered" },
 } satisfies Meta;
