@@ -147,6 +147,7 @@ export function EditorPage() {
   const isOwner = Boolean(user && note && user.id === note.ownerId);
   const canEdit = Boolean(note?.access.flags.canEdit);
   const viewMode: EditorMode = canEdit ? mode : "preview";
+  const usesInternalScroll = viewMode !== "preview";
   const sessionRef = useRef<YjsSession | null>(null);
   const unbindCollabRef = useRef<(() => void) | null>(null);
 
@@ -154,6 +155,18 @@ export function EditorPage() {
     dismissStaleSsrPreview(id);
     if (!loading && markdown) removeSsrPreview();
   }, [id, loading, markdown]);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (!usesInternalScroll) {
+      root.classList.remove("editor-lock-viewport");
+      return;
+    }
+    root.classList.add("editor-lock-viewport");
+    return () => {
+      root.classList.remove("editor-lock-viewport");
+    };
+  }, [usesInternalScroll]);
 
   useEffect(() => {
     return () => {
@@ -345,9 +358,7 @@ export function EditorPage() {
   const showPreview = viewMode === "split" || viewMode === "preview";
   const showRich = viewMode === "rich";
 
-  const paneHeightClass =
-    "h-[calc(var(--app-height,100dvh)-var(--header-height))]";
-  const usesInternalScroll = viewMode !== "preview";
+  const paneHeightClass = "h-full min-h-0";
 
   return (
     <section
