@@ -9,13 +9,21 @@
 }
 
 .rich-editor-content {
+  min-height: 0;
   scroll-padding-block: var(--editor-scroll-pad);
 }
 
 .rich-editor-column {
   box-sizing: border-box;
   width: min(100%, 46rem);
-  padding: 2.5rem 1.5rem max(6rem, var(--editor-scroll-pad)) 3.5rem;
+  /* ソースの scrollPastEnd と同じく、末尾行を上へ送れる余白。 */
+  padding: 2.5rem 1.5rem
+    max(
+      6rem,
+      var(--editor-scroll-pad),
+      calc(var(--app-height, 100dvh) - var(--header-height) - 8rem)
+    )
+    3.5rem;
 }
 
 .rich-editor-content .tiptap {
