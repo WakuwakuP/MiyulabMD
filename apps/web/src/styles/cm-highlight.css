@@ -5,6 +5,29 @@
     color-mix(in srgb, CanvasText 90%, Canvas)
   );
   --cm-hl-inline-code-bg: color-mix(in srgb, CanvasText 10%, Canvas);
+  /* Light: slight gutter tint. Dark: match Canvas so #f5f5f5 / surface never wash out. */
+  --cm-gutter-bg: light-dark(color-mix(in srgb, CanvasText 4%, Canvas), Canvas);
+  --cm-gutter-active-bg: var(--color-preview);
+}
+
+/* Beat CodeMirror's default light chrome (.ͼ .cm-gutters { #f5f5f5 }). */
+.cm-editor.cm-editor {
+  background-color: Canvas;
+  color: CanvasText;
+}
+
+.cm-editor.cm-editor .cm-gutters {
+  background-color: var(--cm-gutter-bg);
+  color: var(--color-muted);
+  border-right: 1px solid var(--color-border);
+}
+
+.cm-editor.cm-editor .cm-activeLineGutter {
+  background-color: var(--cm-gutter-active-bg);
+}
+
+.cm-editor.cm-editor .cm-activeLine {
+  background-color: var(--color-preview);
 }
 
 .cm-editor .tok-keyword,
