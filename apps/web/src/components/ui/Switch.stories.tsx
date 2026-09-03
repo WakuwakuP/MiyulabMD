@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import {
+  BlackIcon,
   EyeIcon,
   MonitorIcon,
   MoonIcon,
@@ -74,6 +75,13 @@ export const ThemeIcons: Story = {
             ariaLabel: "ダーク",
             pressed: theme === "dark",
             onClick: () => setTheme("dark"),
+          },
+          {
+            value: "black",
+            label: <BlackIcon />,
+            ariaLabel: "ブラック",
+            pressed: theme === "black",
+            onClick: () => setTheme("black"),
           },
           {
             value: "system",

@@ -1,19 +1,27 @@
 /* CodeMirror tokens — same One Light / One Dark roles as code-highlight. */
 .cm-editor {
-  --cm-hl-inline-code: light-dark(
-    color-mix(in srgb, CanvasText 88%, Canvas),
-    color-mix(in srgb, CanvasText 90%, Canvas)
+  --cm-hl-inline-code: color-mix(
+    in srgb,
+    var(--color-ink) 90%,
+    var(--color-canvas)
   );
-  --cm-hl-inline-code-bg: color-mix(in srgb, CanvasText 10%, Canvas);
-  /* Light: slight gutter tint. Dark: match Canvas so #f5f5f5 / surface never wash out. */
-  --cm-gutter-bg: light-dark(color-mix(in srgb, CanvasText 4%, Canvas), Canvas);
+  --cm-hl-inline-code-bg: color-mix(
+    in srgb,
+    var(--color-ink) 10%,
+    var(--color-canvas)
+  );
+  /* Light: slight gutter tint. Dark / Black: match canvas so chrome does not wash out. */
+  --cm-gutter-bg: light-dark(
+    color-mix(in srgb, var(--color-ink) 4%, var(--color-canvas)),
+    var(--color-canvas)
+  );
   --cm-gutter-active-bg: var(--color-preview);
 }
 
 /* Beat CodeMirror's default light chrome (.ͼ .cm-gutters { #f5f5f5 }). */
 .cm-editor.cm-editor {
-  background-color: Canvas;
-  color: CanvasText;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
 }
 
 .cm-editor.cm-editor .cm-gutters {

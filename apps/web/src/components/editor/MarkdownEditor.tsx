@@ -181,11 +181,11 @@ export function MarkdownEditor({
         EditorView.lineWrapping,
         EditorView.theme({
           "&": {
-            backgroundColor: "Canvas",
-            color: "CanvasText",
+            backgroundColor: "var(--color-canvas)",
+            color: "var(--color-ink)",
           },
-          ".cm-content": { caretColor: "CanvasText" },
-          ".cm-line": { caretColor: "CanvasText" },
+          ".cm-content": { caretColor: "var(--color-ink)" },
+          ".cm-line": { caretColor: "var(--color-ink)" },
           ".cm-gutters": {
             backgroundColor: "var(--cm-gutter-bg)",
             color: "var(--color-muted)",

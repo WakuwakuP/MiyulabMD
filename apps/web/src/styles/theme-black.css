@@ -1,0 +1,38 @@
+/* OLED Black — #000 turns pixels off. Dim static ink/borders to reduce burn-in. */
+html[data-theme="black"] {
+  color-scheme: dark;
+
+  --color-canvas: #000000;
+  --color-ink: #c2c2c2;
+  --color-border: #1a1a1a;
+  --color-surface: #000000;
+  --color-muted: #7a7a7a;
+  --color-accent: #6b8fc4;
+  --color-error: #c45c5c;
+  --color-folder: #9a8638;
+  --color-note: #6b8fc4;
+  --color-fill: #101010;
+  --color-fill-hover: #181818;
+  --color-soft: #262626;
+  --color-row: #0d0d0d;
+  --color-overlay: rgb(0 0 0 / 72%);
+  --color-preview: #0a0a0a;
+  --color-code: #000000;
+  --color-chip: #152033;
+
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 70%);
+  --shadow-modal: 0 16px 48px rgb(0 0 0 / 80%);
+  --shadow-preview: none;
+
+  --syn-fg: #8b9098;
+  --syn-comment: #555a62;
+  --syn-keyword: #8e629e;
+  --syn-name: #a86266;
+  --syn-literal: #4a8e96;
+  --syn-string: #6d8d56;
+  --syn-attr: #9a7a4a;
+  --syn-title: #5a82b0;
+  --syn-class: #a08c54;
+  --syn-invalid: #8e4e4c;
+  --syn-code-bg: #000000;
+}

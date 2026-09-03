@@ -54,7 +54,7 @@ export function AccountMenu({ user, authConfig }: Props) {
         />
       </button>
       {open && (
-        <MenuPanel width="18rem">
+        <MenuPanel width="20rem">
           <MenuHeader name={label} email={user?.email}>
             <Avatar
               name={label}
