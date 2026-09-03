@@ -22,6 +22,30 @@ export function editorScrollPadPx(viewportHeight: number, remPx = 16): number {
   return Math.min(8 * remPx, viewportHeight * 0.3);
 }
 
+/** キャレットが可視領域の端に張り付かないよう、必要な scrollTop 差分を返す。 */
+export function scrollDeltaForPaddedRect(
+  scrollerTop: number,
+  scrollerBottom: number,
+  rectTop: number,
+  rectBottom: number,
+  pad: number,
+): number {
+  const height = scrollerBottom - scrollerTop;
+  const inset = Math.min(
+    pad,
+    Math.max(0, (height - (rectBottom - rectTop)) / 2),
+  );
+  const topLimit = scrollerTop + inset;
+  const bottomLimit = scrollerBottom - inset;
+  if (rectTop < topLimit) {
+    return rectTop - topLimit;
+  }
+  if (rectBottom > bottomLimit) {
+    return rectBottom - bottomLimit;
+  }
+  return 0;
+}
+
 export function readEditorScrollPadPx(
   el: { ownerDocument?: Document | null } | Element = document.documentElement,
 ): number {
