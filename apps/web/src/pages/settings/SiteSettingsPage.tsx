@@ -7,6 +7,7 @@ import {
 import { type FormEvent, useEffect, useState } from "react";
 import { useOutletContext } from "react-router";
 import type { AppShellContext } from "../../components/layout/AppShellContext.ts";
+import { FolderHierarchySelect } from "../../components/settings/FolderHierarchySelect.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { CheckLabel, Field, Row } from "../../components/ui/Field.tsx";
 import { Input } from "../../components/ui/Input.tsx";
@@ -211,7 +212,8 @@ export function SiteSettingsPage() {
     <section>
       <h2 className="m-0 text-[1.5em] font-bold">サイト設定</h2>
       <p>
-        ディレクトリを記事コレクションとして公開します。Astro は PAT で{" "}
+        ディレクトリを記事コレクションとして公開します。メタデータはノート先頭の
+        YAML frontmatter です。Astro は PAT で{" "}
         <code className="font-mono">/api/articles</code> と{" "}
         <code className="font-mono">/openapi.json</code> を読めます。Webhook
         はヘッダーの「サイトを更新」から送ります。
@@ -260,12 +262,7 @@ export function SiteSettingsPage() {
           className="mt-4"
           variant="accent"
           disabled={folders.length === 0}
-          onClick={() =>
-            setDraft({
-              ...emptyDraft(),
-              folder: folders[0]?.folder ?? "",
-            })
-          }
+          onClick={() => setDraft(emptyDraft())}
         >
           ソースを追加
         </Button>
@@ -292,25 +289,20 @@ export function SiteSettingsPage() {
               placeholder="お知らせ"
             />
           </Field>
-          <Field label="ディレクトリ" htmlFor="source-folder">
-            <Select
+          <div className="grid gap-[0.35rem]">
+            <span className="text-[0.85rem] text-muted">ディレクトリ</span>
+            <FolderHierarchySelect
               id="source-folder"
-              className="w-full rounded-lg px-3 py-2.5"
+              folders={folders}
               value={draft.folder}
-              onChange={(event) =>
-                setDraft({ ...draft, folder: event.target.value })
-              }
-            >
-              {folders.map((folder) => (
-                <option key={folder.id} value={folder.folder}>
-                  {folder.folder}
-                </option>
-              ))}
-            </Select>
-          </Field>
+              onChange={(folder) => setDraft({ ...draft, folder })}
+            />
+          </div>
 
           <div>
-            <p className="m-0 mb-2 text-[0.85rem] text-muted">スキーマ</p>
+            <p className="m-0 mb-2 text-[0.85rem] text-muted">
+              スキーマ（新規ノートの frontmatter と形式チェック）
+            </p>
             <div className="grid gap-3">
               {draft.schema.map((field, index) => (
                 <div

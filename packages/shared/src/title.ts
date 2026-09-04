@@ -1,8 +1,11 @@
+import { markdownBody } from "./markdown-frontmatter.ts";
+
 const ATX_HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
 
 /** Markdown 本文の最初の見出しをノートタイトルにする。 */
 export function titleFromMarkdown(markdown: string): string {
-  const lines = markdown.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const body = markdownBody(markdown);
+  const lines = body.replace(/^\uFEFF/, "").split(/\r?\n/);
 
   for (let i = 0; i < lines.length; i += 1) {
     const atx = ATX_HEADING.exec(lines[i] ?? "");

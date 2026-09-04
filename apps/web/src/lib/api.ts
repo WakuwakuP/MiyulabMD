@@ -1,7 +1,6 @@
 import type {
   AccessGrantInput,
   AccessScope,
-  ArticleMeta,
   ArticleSource,
   ArticleSourceStatus,
   CreateNoteInput,
@@ -120,7 +119,6 @@ export async function updateNote(
     readScope?: AccessScope | null;
     writeScope?: AccessScope | null;
     grants?: AccessGrantInput[];
-    articleMeta?: ArticleMeta;
   },
 ): Promise<ApiResult<Note>> {
   const res = await fetch(`/api/notes/${id}`, {
