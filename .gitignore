@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .wrangler/
+apps/worker/wrangler.deploy.toml
+apps/worker/wrangler.og-fetch.deploy.toml
 .dev.vars
 .env
 .env.*

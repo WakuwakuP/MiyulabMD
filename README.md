@@ -30,9 +30,9 @@ pnpm dev:worker   # http://127.0.0.1:8787
 curl http://127.0.0.1:8787/api/health   # => {"ok":true}
 ```
 
-`wrangler.toml` の `database_id = "REPLACE_WITH_D1_DATABASE_ID"` はそのままでよい。`wrangler d1 ... --local` と `wrangler dev` はローカル SQLite を使う。
+`wrangler.toml` の `database_id` はプレースホルダのままでよい。`wrangler d1 ... --local` と `wrangler dev` はローカル SQLite を使う。アカウント固有の D1 ID や Access チームドメインは GitHub Actions の Variables に置く。
 
-ローカルでは `DEV_AUTH=true`（`wrangler.toml` [vars]）により `/auth/login?email=...` でモックログインできる。**本番では必ず `DEV_AUTH=false` に設定**し、`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` / `SESSION_SECRET` を本番値にする。
+ローカルでは `.dev.vars` の `DEV_AUTH=true` により `/auth/login?email=...` でモックログインできる。本番の `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` / `SESSION_SECRET` は Environment と Worker secret で渡す。
 
 ## ローカル開発の起動
 
@@ -49,4 +49,10 @@ Worker 単体で API だけ試す場合は `pnpm dev:worker` のみでよい。`
 
 ## CI / デプロイ
 
-GitHub Actions の設定手順は [docs/ci.md](docs/ci.md)。`main` への merge で Worker（本体 + og-fetch）をデプロイする。ローカルから出す場合は `pnpm --filter @miyulabmd/web build` のあと `pnpm --filter @miyulabmd/worker deploy`。
+フォークや別アカウントでは、手元から対話スクリプトで Cloudflare（Access / Worker / D1 / R2）と GitHub Actions の Secrets / Variables を揃えられる。`wrangler.toml` は共通のままなので、upstream への追従でコンフリクトしにくい。
+
+```bash
+pnpm setup:deploy
+```
+
+`wrangler login` でブラウザ認証し、セットアップ用の一時トークンを取得する。詳細は [docs/ci.md](docs/ci.md)。`main` への merge で Worker（本体 + og-fetch）をデプロイする。

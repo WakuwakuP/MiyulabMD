@@ -12,7 +12,8 @@ run_worker_first = ["/api/*", "/auth/*", "/ws/*", "/mcp", "/mcp/*", "/n/*", "/s/
 [[d1_databases]]
 binding = "DB"
 database_name = "miyulabmd"
-database_id = "f17b1a84-e201-47a4-a841-e874236f9a17"
+# Remote ID is D1_DATABASE_ID (GitHub Actions variable). Local / dry-run use this placeholder.
+database_id = "00000000-0000-4000-8000-000000000000"
 migrations_dir = "src/db/migrations"
 
 [[r2_buckets]]
@@ -35,7 +36,8 @@ ALLOW_ANONYMOUS = "false"
 ALLOW_ANONYMOUS_EDITS = "true"
 ALLOW_ANONYMOUS_VIEWS = "true"
 DEFAULT_PERMISSION = "editable"
-ACCESS_TEAM_DOMAIN = "miyulab.cloudflareaccess.com"
+# Production value is ACCESS_TEAM_DOMAIN (GitHub Actions variable).
+ACCESS_TEAM_DOMAIN = "example.cloudflareaccess.com"
 DEV_AUTH = "false"
 
 # wrangler secret put SESSION_SECRET
