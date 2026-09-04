@@ -12,6 +12,7 @@ import type {
   PermissionPreset,
   SessionUser,
 } from "@miyulabmd/shared";
+import { notifyArticleChanged } from "./article-changed.ts";
 import type { OgPreview } from "./embeds.ts";
 
 const fetchOpts: RequestInit = { credentials: "include" };
@@ -131,6 +132,7 @@ export async function updateNote(
   if (!res.ok) {
     return { ok: false, status: res.status, error: await parseError(res) };
   }
+  notifyArticleChanged();
   return { ok: true, data: (await res.json()) as Note };
 }
 
@@ -381,6 +383,7 @@ export async function createArticleSource(
   if (!res.ok) {
     return { ok: false, status: res.status, error: await parseError(res) };
   }
+  notifyArticleChanged();
   return { ok: true, data: (await res.json()) as ArticleSource };
 }
 
@@ -397,6 +400,7 @@ export async function updateArticleSource(
   if (!res.ok) {
     return { ok: false, status: res.status, error: await parseError(res) };
   }
+  notifyArticleChanged();
   return { ok: true, data: (await res.json()) as ArticleSource };
 }
 
@@ -410,6 +414,7 @@ export async function deleteArticleSource(
   if (!res.ok) {
     return { ok: false, status: res.status, error: await parseError(res) };
   }
+  notifyArticleChanged();
   return { ok: true, data: undefined };
 }
 

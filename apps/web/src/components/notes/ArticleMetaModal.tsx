@@ -30,6 +30,7 @@ function fieldValue(field: ArticleSchemaField, meta: ArticleMeta): string {
         ? field.default.join(", ")
         : String(field.default);
     }
+    if (field.enum && field.enum.length > 0) return field.enum[0] ?? "";
     return "";
   }
   if (Array.isArray(raw)) return raw.join(", ");
@@ -49,7 +50,9 @@ function parseField(
   }
   if (field.type === "boolean") return raw === "true";
   if (field.type === "number") {
-    const value = Number(raw);
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+    const value = Number(trimmed);
     return Number.isFinite(value) ? value : undefined;
   }
   return raw.trim() || undefined;
