@@ -1,5 +1,6 @@
 import {
   type AccessScope,
+  articleMetaFromNote,
   type CreateNoteInput,
   clampWriteScope,
   defaultNoteMarkdown,
@@ -14,7 +15,6 @@ import {
   normalizeFolder,
   type PermissionPreset,
   presetFromScopes,
-  readArticleFrontmatter,
   rewriteFolderPrefix,
   type SessionUser,
   scopesFromPreset,
@@ -115,7 +115,7 @@ async function toNote(
     permission: derivedPermission(access),
     access: isOwner ? access : { ...access, sourceFolder: null },
     markdown: row.markdown_snapshot,
-    articleMeta: readArticleFrontmatter(row.markdown_snapshot).data,
+    articleMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
