@@ -32,14 +32,14 @@ pnpm setup:deploy
 スクリプトは次を対話で進める。
 
 1. `wrangler login`（ブラウザ OAuth）で一時トークンを取得する。SSH のみのときはデバイス認可。
-2. D1 / R2 を作るか既存を使い、`wrangler.toml` の `database_id` と Worker 名を更新する
+2. D1 / R2 を作るか既存を使う。`wrangler.toml` は書き換えない
 3. Zero Trust のチームドメインと `/auth*` の Access アプリを作り、`ACCESS_AUD` を Worker secret にする
 4. 任意で Web ビルド、リモート D1 マイグレーション、初回デプロイ、`SESSION_SECRET`
-5. GitHub Environment `cloudflare-production` に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を入れる
+5. GitHub Environment `cloudflare-production` に Secrets と Variables を入れる
 
 Access と GitHub Actions は wrangler の OAuth スコープ外なので、権限を事前入力したトークン作成 URL を開き、発行した API トークンを貼る。OAuth トークンは期限切れになるため CI には入れない。
 
-前提は Node.js 20+、pnpm、[GitHub CLI](https://cli.github.com/)。変更した `wrangler.toml` はコミットする。
+前提は Node.js 20+、pnpm、[GitHub CLI](https://cli.github.com/)。アカウント固有値は Environment に置くので、フォークは `wrangler.toml` を変えずに upstream を取り込める。
 
 ---
 
@@ -58,12 +58,19 @@ og-fetch はカスタムドメインの same-zone `fetch` を避ける分離 Wor
 2. 名前は `cloudflare-production`（ワークフローの `environment:` と一致させる）
 3. 必要なら Required reviewers や Wait timer を付ける
 
-このリポジトリでは Environment シークレットに置いている。
+このリポジトリでは Environment の Secrets / Variables に置いている。`wrangler.toml` はプレースホルダのまま共有する。デプロイジョブが Variables から `wrangler.deploy.toml` を生成する。
 
-| 名前 | 用途 |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` | wrangler の認証 |
-| `CLOUDFLARE_ACCOUNT_ID` | 対象アカウント |
+| 種類 | 名前 | 用途 |
+|---|---|---|
+| Secret | `CLOUDFLARE_API_TOKEN` | wrangler の認証 |
+| Secret | `CLOUDFLARE_ACCOUNT_ID` | 対象アカウント |
+| Variable | `D1_DATABASE_ID` | リモート D1（必須） |
+| Variable | `ACCESS_TEAM_DOMAIN` | Zero Trust チームドメイン |
+| Variable | `D1_DATABASE_NAME` | 任意。未設定なら `wrangler.toml` の名前 |
+| Variable | `WORKER_NAME` | 任意。未設定なら `miyulabmd` |
+| Variable | `OG_FETCH_WORKER_NAME` | 任意。未設定なら `miyulabmd-og-fetch` |
+| Variable | `R2_BUCKET_NAME` | 任意。未設定なら `miyulabmd-images` |
+| Variable | `CUSTOM_HOSTNAME` | 任意。カスタムドメイン |
 
 ### 2.2 Cloudflare API トークン
 
@@ -81,18 +88,17 @@ Account Resources はこのアプリのアカウントに制限する。Zone Res
 
 Account ID はダッシュボード右側、または `wrangler whoami`。
 
-トークンと Account ID を Environment `cloudflare-production` の Secrets に入れる。リポジトリシークレットには置かない（本番デプロイジョブ以外から見えないようにするため）。
+トークンと Account ID を Environment `cloudflare-production` の Secrets に、D1 ID とチームドメインを同じ Environment の Variables に入れる。リポジトリシークレットには置かない（本番デプロイジョブ以外から見えないようにするため）。
 
 ### 2.3 先に揃えておく Cloudflare リソース
 
 ワークフローは既存リソースへデプロイする。初回は手元かダッシュボードで作る。
 
-- Worker `miyulabmd` と `miyulabmd-og-fetch`（初回 `wrangler deploy` で作成可）
-- D1 `miyulabmd`（`wrangler.toml` の `database_id`）
-- R2 `miyulabmd-images`
+- Worker `miyulabmd` と `miyulabmd-og-fetch`（初回 `wrangler deploy` で作成可。名前は Variables で変更可）
+- D1（Variables の `D1_DATABASE_ID`）
+- R2 `miyulabmd-images`（名前は Variables で変更可）
 - 本番シークレット: `wrangler secret put SESSION_SECRET` / `wrangler secret put ACCESS_AUD`
-- `wrangler.toml` の `[vars]`（`DEV_AUTH=false`、`ACCESS_TEAM_DOMAIN` など）
-- Zero Trust Access アプリ（チームドメインと AUD）
+- Zero Trust Access アプリ（チームドメインは Variables の `ACCESS_TEAM_DOMAIN`、AUD は Worker secret）
 
 カスタムドメインと Access はワークフローでは作らない。
 
@@ -136,7 +142,8 @@ Account ID はダッシュボード右側、または `wrangler whoami`。
 
 | 場所 | 名前 |
 |---|---|
-| Environment `cloudflare-production` | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
+| Environment `cloudflare-production` Secrets | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
+| Environment `cloudflare-production` Variables | `D1_DATABASE_ID`, `ACCESS_TEAM_DOMAIN`（ほか任意） |
 | Repository secrets | `CURSOR_API_KEY`, `GH_AW_GITHUB_TOKEN` |
 | Repository variables | `CURSOR_AGENT_MODEL` |
 | Labels | `dependencies`, `maintenance`, `automated` |

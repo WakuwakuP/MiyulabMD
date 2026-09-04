@@ -2,7 +2,7 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -26,6 +26,7 @@ import {
   ensureEnvironment,
   ensureGhAuth,
   setEnvironmentSecret,
+  setEnvironmentVariable,
 } from "./setup-deploy/github.mjs";
 import {
   ACCESS_APP_NAME,
@@ -41,13 +42,17 @@ import {
   normalizeTeamDomain,
   parseAccessIncludes,
   readTomlQuotedValue,
-  replaceTomlQuotedValue,
   slugifyTeamName,
-  upsertCustomDomainRoute,
   workersDevHostname,
 } from "./setup-deploy/helpers.mjs";
 import { commandExists, runCommand } from "./setup-deploy/process.mjs";
 import { createPrompt } from "./setup-deploy/prompt.mjs";
+import {
+  OG_FETCH_DEPLOY_TOML,
+  PLACEHOLDER_ACCESS_TEAM_DOMAIN,
+  WRANGLER_DEPLOY_TOML,
+  writeDeployConfigFiles,
+} from "./setup-deploy/wrangler-config.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(ROOT, "..");
@@ -64,11 +69,12 @@ function printHelp() {
 対話で次を揃えます。フォーク先のリポジトリでも、手元から実行できます。
 
   1. wrangler login で Cloudflare にログインし、一時 OAuth トークンを取得
-  2. D1 / R2 / Worker 名を wrangler.toml に反映
+  2. D1 / R2 を作るか既存を使う（wrangler.toml は共通のまま）
   3. Zero Trust Access（チームドメインと /auth* アプリ、ACCESS_AUD）
   4. Worker シークレットと任意の初回デプロイ
   5. GitHub Environment ${GITHUB_ENVIRONMENT} に
-     CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID を登録
+     Secrets（CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID）と
+     Variables（D1_DATABASE_ID / ACCESS_TEAM_DOMAIN など）を登録
 
 前提: Node.js 20+、pnpm、GitHub CLI (gh)
 `);
@@ -307,51 +313,19 @@ async function resolveApiTokens(
   return { setupToken, githubToken };
 }
 
-async function writeWorkerConfig({
-  wranglerToml,
-  ogToml,
-  names,
-  databaseId,
-  teamDomain,
-  customHostname,
-}) {
-  let nextWrangler = wranglerToml;
-  nextWrangler = replaceTomlQuotedValue(nextWrangler, "name", names.workerName);
-  nextWrangler = replaceTomlQuotedValue(
-    nextWrangler,
-    "database_name",
-    names.d1Name,
-  );
-  nextWrangler = replaceTomlQuotedValue(
-    nextWrangler,
-    "database_id",
-    databaseId,
-  );
-  nextWrangler = replaceTomlQuotedValue(
-    nextWrangler,
-    "bucket_name",
-    names.r2Name,
-  );
-  nextWrangler = replaceTomlQuotedValue(
-    nextWrangler,
-    "service",
-    names.ogFetchName,
-  );
-  if (teamDomain) {
-    nextWrangler = replaceTomlQuotedValue(
-      nextWrangler,
-      "ACCESS_TEAM_DOMAIN",
-      teamDomain,
-    );
-  }
-  if (customHostname) {
-    nextWrangler = upsertCustomDomainRoute(nextWrangler, customHostname);
-  }
-  await writeFile(WRANGLER_TOML, nextWrangler);
-
-  let nextOg = ogToml;
-  nextOg = replaceTomlQuotedValue(nextOg, "name", names.ogFetchName);
-  await writeFile(OG_TOML, nextOg);
+function toDeployOverrides({ names, databaseId, teamDomain, customHostname }) {
+  return {
+    workerName: names.workerName,
+    ogFetchName: names.ogFetchName,
+    d1Name: names.d1Name,
+    d1Id: databaseId,
+    r2Name: names.r2Name,
+    accessTeamDomain:
+      teamDomain && teamDomain !== PLACEHOLDER_ACCESS_TEAM_DOMAIN
+        ? teamDomain
+        : undefined,
+    customHostname: customHostname ?? undefined,
+  };
 }
 
 async function setupAccess(prompt, token, account, hostname, loginEmail) {
@@ -434,17 +408,31 @@ async function deployWorkers(prompt, cloudflare, env, { applyMigrations }) {
 
   if (applyMigrations) {
     logInfo("リモート D1 にマイグレーションを適用します。");
-    await cloudflare.wrangler(["d1", "migrations", "apply", "DB", "--remote"], {
-      env,
-      inherit: true,
-    });
+    await cloudflare.wrangler(
+      [
+        "d1",
+        "migrations",
+        "apply",
+        "DB",
+        "--remote",
+        "-c",
+        WRANGLER_DEPLOY_TOML,
+      ],
+      {
+        env,
+        inherit: true,
+      },
+    );
   }
 
-  await cloudflare.wrangler(["deploy", "-c", "wrangler.og-fetch.toml"], {
+  await cloudflare.wrangler(["deploy", "-c", OG_FETCH_DEPLOY_TOML], {
     env,
     inherit: true,
   });
-  await cloudflare.wrangler(["deploy"], { env, inherit: true });
+  await cloudflare.wrangler(["deploy", "-c", WRANGLER_DEPLOY_TOML], {
+    env,
+    inherit: true,
+  });
   return { deployed: true };
 }
 
@@ -467,8 +455,12 @@ async function putSecrets(cloudflare, env, { sessionSecret, accessAud }) {
   }
 }
 
-async function setupGitHub(prompt, ghBin, account, apiToken) {
-  logStep(6, "GitHub Actions の Secrets");
+async function setupGitHub(
+  prompt,
+  ghBin,
+  { account, apiToken, names, d1, teamDomain, customHostname },
+) {
+  logStep(6, "GitHub Actions の Secrets / Variables");
   if (!(await commandExists(ghBin))) {
     throw new Error(
       "GitHub CLI (gh) がありません。https://cli.github.com/ から入れてください",
@@ -480,7 +472,7 @@ async function setupGitHub(prompt, ghBin, account, apiToken) {
     `対象リポジトリ: ${repo.nameWithOwner}${repo.isFork ? "（フォーク）" : ""}`,
   );
   const confirmed = await prompt.confirm(
-    "このリポジトリに Environment Secrets を登録しますか？",
+    "このリポジトリに Environment の Secrets と Variables を登録しますか？",
     true,
   );
   if (!confirmed) {
@@ -503,8 +495,26 @@ async function setupGitHub(prompt, ghBin, account, apiToken) {
     "CLOUDFLARE_ACCOUNT_ID",
     account.id,
   );
+
+  const variables = {
+    WORKER_NAME: names.workerName,
+    OG_FETCH_WORKER_NAME: names.ogFetchName,
+    D1_DATABASE_NAME: names.d1Name,
+    D1_DATABASE_ID: d1.id,
+    R2_BUCKET_NAME: names.r2Name,
+  };
+  if (teamDomain && teamDomain !== PLACEHOLDER_ACCESS_TEAM_DOMAIN) {
+    variables.ACCESS_TEAM_DOMAIN = teamDomain;
+  }
+  if (customHostname) {
+    variables.CUSTOM_HOSTNAME = customHostname;
+  }
+  for (const [name, value] of Object.entries(variables)) {
+    await setEnvironmentVariable(ghBin, repo.nameWithOwner, name, value);
+  }
+
   logInfo(
-    `Environment ${GITHUB_ENVIRONMENT} に CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID を登録しました。`,
+    `Environment ${GITHUB_ENVIRONMENT} に Secrets と Variables を登録しました。wrangler.toml のコミットは不要です。`,
   );
   return repo;
 }
@@ -562,7 +572,7 @@ async function main(argv) {
       true,
     );
     const configureGitHub = await prompt.confirm(
-      "GitHub Actions の Environment Secrets を登録しますか？",
+      "GitHub Actions の Environment Secrets / Variables を登録しますか？",
       true,
     );
 
@@ -579,7 +589,7 @@ async function main(argv) {
     }
     const cfToken = setupToken;
 
-    logStep(3, "D1 / R2 / wrangler.toml");
+    logStep(3, "D1 / R2");
     const d1 = await ensureD1(cfToken, account.id, names.d1Name);
     logInfo(
       d1.created
@@ -650,16 +660,15 @@ async function main(argv) {
       accessAud = access.aud;
     }
 
-    await writeWorkerConfig({
-      wranglerToml,
-      ogToml,
+    const deployOverrides = toDeployOverrides({
       names,
       databaseId: d1.id,
       teamDomain,
       customHostname,
     });
+    await writeDeployConfigFiles(WORKER_DIR, deployOverrides);
     logInfo(
-      "apps/worker/wrangler.toml と wrangler.og-fetch.toml を更新しました。",
+      `${WRANGLER_DEPLOY_TOML} を生成しました（git 管理外。共通の wrangler.toml は変更しません）。`,
     );
 
     const deployResult = await deployWorkers(prompt, cloudflare, wranglerEnv, {
@@ -695,7 +704,14 @@ async function main(argv) {
 
     let repo = null;
     if (configureGitHub) {
-      repo = await setupGitHub(prompt, commandName("gh"), account, githubToken);
+      repo = await setupGitHub(prompt, commandName("gh"), {
+        account,
+        apiToken: githubToken,
+        names,
+        d1,
+        teamDomain,
+        customHostname,
+      });
     }
 
     console.log(`
@@ -711,7 +727,7 @@ async function main(argv) {
   Environment        : ${GITHUB_ENVIRONMENT}
 
 次の作業:
-  - 変更した wrangler.toml をコミットして main に載せる
+  - wrangler.toml は共通のまま。アカウント固有値は GitHub の Environment に入っています
   - フォークでは Settings → Actions を有効にする
   - 以降の本番デプロイは main への push、または Actions の workflow_dispatch
 `);
