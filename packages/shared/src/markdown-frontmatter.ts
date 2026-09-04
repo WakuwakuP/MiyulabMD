@@ -37,3 +37,11 @@ export function markdownBody(markdown: string): string {
   if (split.raw !== null && !split.unclosed) return split.body;
   return markdown;
 }
+
+/** 閉じた YAML ブロックを保ったまま、本文だけ差し替える。 */
+export function withClosedFrontmatter(source: string, body: string): string {
+  const split = splitMarkdownFrontmatter(source);
+  const next = body.replace(/^\uFEFF/, "");
+  if (split.raw === null || split.unclosed) return next;
+  return `---\n${split.raw}\n---\n\n${next.replace(/^\n+/, "")}`;
+}

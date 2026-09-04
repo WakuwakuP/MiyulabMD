@@ -33,7 +33,9 @@ export type {
 } from "./frontmatter.ts";
 export {
   articleFrontmatterObject,
+  articleMetaFromNote,
   articleTemplateMarkdown,
+  articleValuesEqual,
   ensureArticleMarkdown,
   markdownBody,
   parseFrontmatterYaml,
@@ -41,6 +43,7 @@ export {
   splitMarkdownFrontmatter,
   stringifyArticleFrontmatter,
   validateArticleDocument,
+  withClosedFrontmatter,
 } from "./frontmatter.ts";
 export type { McpToolName } from "./mcp.ts";
 export { MCP_TOOLS } from "./mcp.ts";

@@ -3,6 +3,7 @@ import {
   type ArticleMeta,
   type ArticleSchemaField,
   coerceArticleValue,
+  parseArticleMeta,
 } from "./article.ts";
 import { splitMarkdownFrontmatter } from "./markdown-frontmatter.ts";
 
@@ -21,6 +22,7 @@ export type { MarkdownFrontmatterSplit } from "./markdown-frontmatter.ts";
 export {
   markdownBody,
   splitMarkdownFrontmatter,
+  withClosedFrontmatter,
 } from "./markdown-frontmatter.ts";
 
 function normalizeYamlValue(value: unknown): unknown {
@@ -63,6 +65,29 @@ export function parseFrontmatterYaml(
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `YAML が不正です: ${message}` };
   }
+}
+
+export function articleValuesEqual(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return (
+      left.length === right.length &&
+      left.every((item, index) => item === right[index])
+    );
+  }
+  return left === right;
+}
+
+/** 閉じた YAML があればそれを使い、なければ DB の article_meta に戻す。 */
+export function articleMetaFromNote(
+  markdown: string,
+  stored: unknown,
+): ArticleMeta {
+  const split = splitMarkdownFrontmatter(markdown);
+  if (split.raw !== null && !split.unclosed) {
+    const parsed = parseFrontmatterYaml(split.raw);
+    if (parsed.ok) return parsed.data;
+  }
+  return parseArticleMeta(stored);
 }
 
 export function readArticleFrontmatter(
@@ -124,7 +149,7 @@ export function validateArticleDocument(
     if (
       field.fixed &&
       field.default !== undefined &&
-      coerced !== field.default
+      !articleValuesEqual(coerced, field.default)
     ) {
       issues.push({
         key: field.key,

@@ -6,6 +6,7 @@ import {
   type ArticleSource,
   type ArticleSourceStatus,
   articleEditUrl,
+  articleMetaFromNote,
   articleSlug,
   folderMatchesSource,
   isArticleSourceDirty,
@@ -40,6 +41,7 @@ type NoteArticleRow = {
   title: string;
   folder: string;
   markdown_snapshot: string;
+  article_meta: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -177,7 +179,7 @@ function toEntry(
   const frontmatter = readArticleFrontmatter(row.markdown_snapshot);
   const data = mergeArticleData({
     schema,
-    noteMeta: frontmatter.data,
+    noteMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
     title: row.title,
   });
   const slug = articleSlug(row.alias, row.short_id);
@@ -478,7 +480,7 @@ export function createArticleService(env: Env) {
       const notes = await db(env)
         .prepare(
           `SELECT id, short_id, alias, title, folder, markdown_snapshot,
-                  created_at, updated_at
+                  article_meta, created_at, updated_at
            FROM notes
            WHERE owner_id = ? AND ${filter.sql}
            ORDER BY updated_at DESC, id DESC
@@ -510,7 +512,7 @@ export function createArticleService(env: Env) {
       const note = await db(env)
         .prepare(
           `SELECT id, short_id, alias, title, folder, markdown_snapshot,
-                  created_at, updated_at
+                  article_meta, created_at, updated_at
            FROM notes
            WHERE owner_id = ? AND (alias = ? OR short_id = ?)`,
         )

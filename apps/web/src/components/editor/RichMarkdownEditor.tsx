@@ -1,3 +1,4 @@
+import { markdownBody, withClosedFrontmatter } from "@miyulabmd/shared";
 import Image from "@tiptap/extension-image";
 import { NodeRange } from "@tiptap/extension-node-range";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -160,18 +161,24 @@ export function RichMarkdownEditor({
   const mapRef = useRef<OffsetMap | null>(null);
   const editorRef = useRef<Editor | null>(null);
 
-  const refreshMap = (editor: Editor, markdown = yText.toString()) => {
+  const refreshMap = (
+    editor: Editor,
+    markdown = markdownBody(yText.toString()),
+  ) => {
     mapRef.current = buildOffsetMap(editor.state.doc, markdown);
     return mapRef.current;
   };
 
   const publishCursor = (editor: Editor) => {
-    const map = refreshMap(editor);
+    const full = yText.toString();
+    const body = markdownBody(full);
+    const offset = full.length - body.length;
+    const map = refreshMap(editor, body);
     writeMarkdownCursor(
       awareness,
       yText,
-      pmToMd(map, editor.state.selection.anchor),
-      pmToMd(map, editor.state.selection.head),
+      pmToMd(map, editor.state.selection.anchor) + offset,
+      pmToMd(map, editor.state.selection.head) + offset,
     );
   };
 
@@ -182,24 +189,27 @@ export function RichMarkdownEditor({
 
   const applyRemote = (editor: Editor, delta: YTextDeltaItem[]) => {
     const next = yText.toString();
-    if (markdownEquivalent(editorMarkdown(editor), next)) {
+    const nextBody = markdownBody(next);
+    if (markdownEquivalent(editorMarkdown(editor), nextBody)) {
       lastYMarkdown.current = next;
-      refreshMap(editor, next);
+      refreshMap(editor, nextBody);
       return;
     }
 
-    const map = buildOffsetMap(editor.state.doc, lastYMarkdown.current);
+    const prevBody = markdownBody(lastYMarkdown.current);
+    const map = buildOffsetMap(editor.state.doc, prevBody);
     const mdFrom = pmToMd(map, editor.state.selection.from);
     const mdTo = pmToMd(map, editor.state.selection.to);
 
     applyingRemote.current = true;
-    const surgical = trySurgicalApply(editor, map, delta);
+    const surgical =
+      nextBody === next ? trySurgicalApply(editor, map, delta) : false;
     if (!surgical) {
-      editor.commands.setContent(normalizeEmbedMarkdown(next), {
+      editor.commands.setContent(normalizeEmbedMarkdown(nextBody), {
         contentType: "markdown",
         emitUpdate: false,
       });
-      const restored = buildOffsetMap(editor.state.doc, next);
+      const restored = buildOffsetMap(editor.state.doc, nextBody);
       editor.commands.setTextSelection({
         from: clampPos(editor.state.doc, mdToPm(restored, mdFrom)),
         to: clampPos(editor.state.doc, mdToPm(restored, mdTo)),
@@ -213,7 +223,10 @@ export function RichMarkdownEditor({
 
   const flushLocal = (editor: Editor) => {
     if (applyingRemote.current || composing.current || readOnly) return;
-    const next = editorMarkdown(editor);
+    const next = withClosedFrontmatter(
+      lastYMarkdown.current || yText.toString(),
+      editorMarkdown(editor),
+    );
     if (
       markdownEquivalent(lastYMarkdown.current, next) ||
       markdownEquivalent(yText.toString(), next)
@@ -272,10 +285,18 @@ export function RichMarkdownEditor({
       }),
       CollabCarets.configure({
         getMap: () => mapRef.current,
-        getPeers: () => readRemoteMarkdownCursors(awareness, yText),
+        getPeers: () => {
+          const full = yText.toString();
+          const offset = full.length - markdownBody(full).length;
+          return readRemoteMarkdownCursors(awareness, yText).map((peer) => ({
+            ...peer,
+            anchor: Math.max(0, peer.anchor - offset),
+            head: Math.max(0, peer.head - offset),
+          }));
+        },
       }),
     ],
-    content: normalizeEmbedMarkdown(yText.toString()),
+    content: normalizeEmbedMarkdown(markdownBody(yText.toString())),
     contentType: "markdown",
     editorProps: {
       attributes: {

@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  articleMetaFromNote,
   articleTemplateMarkdown,
+  articleValuesEqual,
   ensureArticleMarkdown,
   markdownBody,
   readArticleFrontmatter,
   splitMarkdownFrontmatter,
   validateArticleDocument,
+  withClosedFrontmatter,
 } from "./frontmatter.ts";
 import { titleFromMarkdown } from "./title.ts";
 
@@ -80,6 +83,35 @@ test("articleTemplateMarkdown and ensureArticleMarkdown insert YAML", () => {
   const injected = ensureArticleMarkdown("# 無題\n", schema);
   assert.match(injected, /^---\n/);
   assert.match(injected, /# 無題\n$/);
+});
+
+test("articleMetaFromNote falls back to stored JSON without YAML", () => {
+  assert.deepEqual(
+    articleMetaFromNote("# Hello\n", '{"draft":false,"title":"旧"}'),
+    { draft: false, title: "旧" },
+  );
+  assert.equal(
+    articleMetaFromNote(SAMPLE, '{"title":"旧"}').title,
+    "公開タイトル",
+  );
+});
+
+test("articleValuesEqual compares string arrays by contents", () => {
+  assert.equal(articleValuesEqual(["a", "b"], ["a", "b"]), true);
+  assert.equal(articleValuesEqual(["a"], ["b"]), false);
+  const fixed = validateArticleDocument(
+    [{ key: "tags", type: "string[]", fixed: true, default: ["news"] }],
+    "---\ntags:\n  - news\n---\n\n# A\n",
+  );
+  assert.deepEqual(fixed.issues, []);
+});
+
+test("withClosedFrontmatter keeps YAML and replaces the body", () => {
+  const next = withClosedFrontmatter(SAMPLE, "# 新しい本文\n");
+  assert.match(next, /^---\n/);
+  assert.match(next, /title: 公開タイトル/);
+  assert.match(next, /# 新しい本文\n$/);
+  assert.equal(withClosedFrontmatter("# only\n", "# next\n"), "# next\n");
 });
 
 test("titleFromMarkdown skips frontmatter", () => {
