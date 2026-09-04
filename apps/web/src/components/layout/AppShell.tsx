@@ -21,6 +21,7 @@ export function AppShell() {
   const [loading, setLoading] = useState(true);
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
+  const [headerFolder, setHeaderFolder] = useState<string | null>(null);
   const [layout, setLayout] = useState<HeaderLayout>("page");
   const editor = isEditorPath(pathname) || layout === "editor";
 
@@ -37,6 +38,7 @@ export function AppShell() {
     (next: Parameters<AppShellContext["setHeader"]>[0]) => {
       setHeaderActions(next?.actions ?? null);
       setHeaderEnd(next?.end ?? null);
+      setHeaderFolder(next?.folder ?? null);
       setLayout(next?.layout ?? "page");
     },
     [],
@@ -60,6 +62,7 @@ export function AppShell() {
       <AppHeader
         actions={headerActions}
         end={headerEnd}
+        folder={headerFolder}
         user={user}
         loading={loading}
         authConfig={authConfig}
