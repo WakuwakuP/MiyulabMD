@@ -434,6 +434,12 @@ export function HomePage() {
         ? `${window.location.origin}/n/${share.id}`
         : "";
 
+  const headerFolder =
+    visibleFolder?.folder !== undefined
+      ? visibleFolder.folder
+      : folderId
+        ? null
+        : "";
   const canAdmin = Boolean(visibleFolder?.flags.canAdmin);
   const needsFolder = Boolean(folderId || user);
   const showPlaceholder =
@@ -445,6 +451,7 @@ export function HomePage() {
 
   useEffect(() => {
     setHeader({
+      folder: headerFolder,
       end:
         visibleFolder || !folderId ? (
           <>
@@ -470,7 +477,7 @@ export function HomePage() {
         ) : null,
     });
     return () => setHeader(null);
-  }, [visibleFolder, folderId, canAdmin, creating, setHeader]);
+  }, [headerFolder, visibleFolder, folderId, canAdmin, creating, setHeader]);
 
   return (
     <section>
