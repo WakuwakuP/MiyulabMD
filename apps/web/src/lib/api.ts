@@ -1,6 +1,9 @@
 import type {
   AccessGrantInput,
   AccessScope,
+  ArticleMeta,
+  ArticleSource,
+  ArticleSourceStatus,
   CreateNoteInput,
   FolderAccess,
   FolderRecord,
@@ -9,6 +12,7 @@ import type {
   PermissionPreset,
   SessionUser,
 } from "@miyulabmd/shared";
+import { notifyArticleChanged } from "./article-changed.ts";
 import type { OgPreview } from "./embeds.ts";
 
 const fetchOpts: RequestInit = { credentials: "include" };
@@ -116,6 +120,7 @@ export async function updateNote(
     readScope?: AccessScope | null;
     writeScope?: AccessScope | null;
     grants?: AccessGrantInput[];
+    articleMeta?: ArticleMeta;
   },
 ): Promise<ApiResult<Note>> {
   const res = await fetch(`/api/notes/${id}`, {
@@ -127,6 +132,7 @@ export async function updateNote(
   if (!res.ok) {
     return { ok: false, status: res.status, error: await parseError(res) };
   }
+  notifyArticleChanged();
   return { ok: true, data: (await res.json()) as Note };
 }
 
@@ -333,6 +339,96 @@ export async function createToken(
     return { ok: false, status: res.status, error: await parseError(res) };
   }
   return { ok: true, data: (await res.json()) as ApiTokenCreated };
+}
+
+export type ArticleSourceWrite = {
+  name?: string;
+  folder?: string;
+  folderId?: string | null;
+  schema?: ArticleSource["schema"];
+  webhookUrl?: string | null;
+  webhookAuthorization?: string | null;
+};
+
+export async function fetchArticleSources(): Promise<
+  ApiResult<ArticleSource[]>
+> {
+  const res = await fetch("/api/article-sources", fetchOpts);
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  const body = (await res.json()) as { sources: ArticleSource[] };
+  return { ok: true, data: body.sources };
+}
+
+export async function fetchArticleSourceStatus(): Promise<
+  ApiResult<ArticleSourceStatus>
+> {
+  const res = await fetch("/api/article-sources/status", fetchOpts);
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  return { ok: true, data: (await res.json()) as ArticleSourceStatus };
+}
+
+export async function createArticleSource(
+  input: ArticleSourceWrite,
+): Promise<ApiResult<ArticleSource>> {
+  const res = await fetch("/api/article-sources", {
+    ...fetchOpts,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  notifyArticleChanged();
+  return { ok: true, data: (await res.json()) as ArticleSource };
+}
+
+export async function updateArticleSource(
+  id: string,
+  input: ArticleSourceWrite,
+): Promise<ApiResult<ArticleSource>> {
+  const res = await fetch(`/api/article-sources/${id}`, {
+    ...fetchOpts,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  notifyArticleChanged();
+  return { ok: true, data: (await res.json()) as ArticleSource };
+}
+
+export async function deleteArticleSource(
+  id: string,
+): Promise<ApiResult<void>> {
+  const res = await fetch(`/api/article-sources/${id}`, {
+    ...fetchOpts,
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  notifyArticleChanged();
+  return { ok: true, data: undefined };
+}
+
+export async function dispatchArticleSource(
+  id: string,
+): Promise<ApiResult<void>> {
+  const res = await fetch(`/api/article-sources/${id}/dispatch`, {
+    ...fetchOpts,
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: await parseError(res) };
+  }
+  return { ok: true, data: undefined };
 }
 
 export async function revokeToken(id: string): Promise<ApiResult<void>> {
