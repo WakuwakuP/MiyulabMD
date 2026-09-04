@@ -10,9 +10,9 @@ export function ArticleFrontmatterAlert({
   return (
     <div
       role="alert"
-      className="pointer-events-none fixed inset-x-0 top-[calc(var(--app-offset-top,0px)+var(--header-height))] z-30 flex justify-center px-3 max-[640px]:px-2"
+      className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-3 max-[640px]:px-2 bottom-[calc(100dvh-var(--app-offset-top,0px)-var(--app-height,100dvh))] pb-[env(safe-area-inset-bottom,0px)]"
     >
-      <div className="pointer-events-auto max-h-[min(12rem,calc(var(--app-height,100dvh)*0.4))] w-full max-w-[36rem] overflow-y-auto rounded-b-xl border border-t-0 border-border bg-canvas px-3 py-2 shadow-menu">
+      <div className="pointer-events-auto max-h-[min(12rem,calc(var(--app-height,100dvh)*0.4))] w-full max-w-[36rem] overflow-y-auto rounded-t-xl border border-b-0 border-border bg-canvas px-3 py-2 shadow-menu">
         <ErrorText className="m-0 text-[0.85rem] font-medium">
           記事メタが不正です
         </ErrorText>
