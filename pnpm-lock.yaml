@@ -205,6 +205,9 @@ importers:
 
   packages/markdown:
     dependencies:
+      '@miyulabmd/shared':
+        specifier: workspace:*
+        version: link:../shared
       rehype-highlight:
         specifier: ^7.0.2
         version: 7.0.2
@@ -234,7 +237,11 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
-  packages/shared: {}
+  packages/shared:
+    dependencies:
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
 packages:
 

@@ -1,4 +1,5 @@
 import { folderContains } from "./permission.ts";
+import { normalizeFolder } from "./title.ts";
 
 export const ARTICLE_FIELD_TYPES = [
   "string",
@@ -65,6 +66,68 @@ export type ArticleEntry = {
   editUrl: string;
   markdown?: string;
 };
+
+export const ARTICLE_LIST_DEFAULT_PER_PAGE = 50;
+export const ARTICLE_LIST_MAX_PER_PAGE = 100;
+
+export type ArticleEntryPage = {
+  collection: ArticleCollection;
+  entries: ArticleEntry[];
+  page: number;
+  perPage: number;
+  total: number;
+  hasMore: boolean;
+};
+
+export function parseArticleListQuery(
+  searchParams: URLSearchParams,
+):
+  | { page: number; perPage: number; folder: string | null }
+  | { error: string } {
+  const pageRaw = searchParams.get("page");
+  const perPageRaw = searchParams.get("perPage");
+  const folderRaw = searchParams.get("folder");
+
+  let page = 1;
+  if (pageRaw != null && pageRaw !== "") {
+    const value = Number(pageRaw);
+    if (!Number.isInteger(value) || value < 1) {
+      return { error: "page が不正です" };
+    }
+    page = value;
+  }
+
+  let perPage = ARTICLE_LIST_DEFAULT_PER_PAGE;
+  if (perPageRaw != null && perPageRaw !== "") {
+    const value = Number(perPageRaw);
+    if (!Number.isInteger(value) || value < 1) {
+      return { error: "perPage が不正です" };
+    }
+    perPage = Math.min(value, ARTICLE_LIST_MAX_PER_PAGE);
+  }
+
+  const folder =
+    folderRaw == null || folderRaw === "" ? null : normalizeFolder(folderRaw);
+  if (folderRaw && !folder) {
+    return { error: "folder が不正です" };
+  }
+
+  return { page, perPage, folder };
+}
+
+/** 一覧の絞り込み先。未指定ならソース直下、指定ならその配下（ソースの子孫に限る）。 */
+export function resolveArticleListFolder(
+  sourceFolder: string,
+  requested: string | null | undefined,
+): string | { error: string } {
+  if (!requested) return sourceFolder;
+  const folder = normalizeFolder(requested);
+  if (!folder) return { error: "folder が不正です" };
+  if (!folderContains(sourceFolder, folder)) {
+    return { error: "folder はこのコレクション配下である必要があります" };
+  }
+  return folder;
+}
 
 const FIELD_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 

@@ -1,6 +1,7 @@
 import {
   type ArticleCollection,
   type ArticleEntry,
+  type ArticleEntryPage,
   type ArticleSchemaField,
   type ArticleSource,
   type ArticleSourceStatus,
@@ -9,8 +10,9 @@ import {
   folderMatchesSource,
   isArticleSourceDirty,
   mergeArticleData,
-  parseArticleMeta,
   parseArticleSchema,
+  readArticleFrontmatter,
+  resolveArticleListFolder,
   rewriteFolderPrefix,
 } from "@miyulabmd/shared";
 
@@ -38,7 +40,6 @@ type NoteArticleRow = {
   title: string;
   folder: string;
   markdown_snapshot: string;
-  article_meta: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -132,10 +133,20 @@ async function loadSource(
     .first<SourceRow>();
 }
 
-function sourceNoteFilter(folder: string): { sql: string; binds: string[] } {
+export function escapeLikePattern(value: string): string {
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_");
+}
+
+/** ソース（または指定パス）直下と、何階層下のノートも含める。 */
+export function sourceNoteFilter(
+  folder: string,
+): { sql: string; binds: string[] } {
   return {
-    sql: "(folder = ? OR folder LIKE ?)",
-    binds: [folder, `${folder}/%`],
+    sql: "(folder = ? OR folder LIKE ? ESCAPE '\\')",
+    binds: [folder, `${escapeLikePattern(folder)}/%`],
   };
 }
 
@@ -162,10 +173,10 @@ function toEntry(
   origin: string,
   includeMarkdown: boolean,
 ): ArticleEntry {
-  const meta = parseArticleMeta(row.article_meta);
+  const frontmatter = readArticleFrontmatter(row.markdown_snapshot);
   const data = mergeArticleData({
     schema,
-    noteMeta: meta,
+    noteMeta: frontmatter.data,
     title: row.title,
   });
   const slug = articleSlug(row.alias, row.short_id);
@@ -179,7 +190,7 @@ function toEntry(
     data,
     editUrl: articleEditUrl(origin, row.short_id),
   };
-  if (includeMarkdown) entry.markdown = row.markdown_snapshot;
+  if (includeMarkdown) entry.markdown = frontmatter.body;
   return entry;
 }
 
@@ -444,29 +455,45 @@ export function createArticleService(env: Env) {
       ownerId: string,
       id: string,
       origin: string,
-    ): Promise<{
-      collection: ArticleCollection;
-      entries: ArticleEntry[];
-    } | null> {
+      query: { page: number; perPage: number; folder: string | null },
+    ): Promise<ArticleEntryPage | { error: string; status: number } | null> {
       const row = await loadSource(env, ownerId, id);
       if (!row) return null;
+      const folder = resolveArticleListFolder(row.folder, query.folder);
+      if (typeof folder !== "string") {
+        return { error: folder.error, status: 400 };
+      }
       const schema = parseSchemaJson(row.schema_json);
-      const filter = sourceNoteFilter(row.folder);
+      const filter = sourceNoteFilter(folder);
+      const countRow = await db(env)
+        .prepare(
+          `SELECT COUNT(*) AS total FROM notes
+           WHERE owner_id = ? AND ${filter.sql}`,
+        )
+        .bind(ownerId, ...filter.binds)
+        .first<{ total: number }>();
+      const total = Number(countRow?.total ?? 0);
+      const offset = (query.page - 1) * query.perPage;
       const notes = await db(env)
         .prepare(
           `SELECT id, short_id, alias, title, folder, markdown_snapshot,
-                  article_meta, created_at, updated_at
+                  created_at, updated_at
            FROM notes
            WHERE owner_id = ? AND ${filter.sql}
-           ORDER BY updated_at DESC`,
+           ORDER BY updated_at DESC, id DESC
+           LIMIT ? OFFSET ?`,
         )
-        .bind(ownerId, ...filter.binds)
+        .bind(ownerId, ...filter.binds, query.perPage, offset)
         .all<NoteArticleRow>();
       return {
         collection: presentCollection(row),
         entries: (notes.results ?? []).map((note) =>
           toEntry(note, schema, origin, false),
         ),
+        page: query.page,
+        perPage: query.perPage,
+        total,
+        hasMore: offset + query.perPage < total,
       };
     },
 
@@ -482,7 +509,7 @@ export function createArticleService(env: Env) {
       const note = await db(env)
         .prepare(
           `SELECT id, short_id, alias, title, folder, markdown_snapshot,
-                  article_meta, created_at, updated_at
+                  created_at, updated_at
            FROM notes
            WHERE owner_id = ? AND (alias = ? OR short_id = ?)`,
         )

@@ -34,6 +34,14 @@ test("renderMarkdownHtml highlights fenced code and shows filename", () => {
   assert.doesNotMatch(html, /language-typescript:hoge\.ts/);
 });
 
+test("renderMarkdownHtml skips YAML frontmatter", () => {
+  const html = renderMarkdownHtml(
+    "---\ntitle: Hidden\n---\n\n# Visible heading\n",
+  );
+  assert.match(html, /Visible heading/);
+  assert.doesNotMatch(html, /Hidden/);
+});
+
 test("renderMarkdownHtml infers highlight language from a filename fence", () => {
   const html = renderMarkdownHtml("```hoge.ts\nconst answer = 42;\n```\n");
   assert.match(html, />hoge\.ts</);
