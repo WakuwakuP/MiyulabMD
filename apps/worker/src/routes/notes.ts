@@ -77,7 +77,8 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
       meta.inheritAccess !== undefined ||
       meta.readScope !== undefined ||
       meta.writeScope !== undefined ||
-      meta.grants !== undefined;
+      meta.grants !== undefined ||
+      meta.articleMeta !== undefined;
 
     if (hasMeta) {
       latest = await notes.updateMeta(params.id, user ?? undefined, meta);

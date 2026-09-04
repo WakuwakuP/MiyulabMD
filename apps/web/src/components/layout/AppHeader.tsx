@@ -5,6 +5,7 @@ import type { AuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import { MutedText } from "../ui/Text.tsx";
 import { AccountMenu } from "./AccountMenu.tsx";
+import { SitePublishButton } from "./SitePublishButton.tsx";
 
 type Props = {
   actions?: ReactNode;
@@ -36,6 +37,7 @@ export function AppHeader({ actions, end, user, loading, authConfig }: Props) {
       )}
       <nav className="flex min-w-0 items-center justify-end gap-2 max-[900px]:gap-1">
         {end}
+        <SitePublishButton user={user} />
         {loading ? (
           <MutedText className="m-0">…</MutedText>
         ) : (

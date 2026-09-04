@@ -6,6 +6,9 @@ import { isAccessConfigured } from "./auth/access.ts";
 import { readSession } from "./auth/session.ts";
 import { envTruthy } from "./env.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
+import { openApiDocument } from "./openapi.ts";
+import { articleSourceRoutes } from "./routes/article-sources.ts";
+import { articleRoutes } from "./routes/articles.ts";
 import {
   handleAuthRequest,
   handleEstablishSession,
@@ -39,7 +42,10 @@ const api = new Elysia({ adapter: CloudflareAdapter })
       mock: envTruthy(env.DEV_AUTH) && !access,
     };
   })
+  .get("/openapi.json", () => openApiDocument())
   .use(noteRoutes)
+  .use(articleRoutes)
+  .use(articleSourceRoutes)
   .use(folderRoutes)
   .use(ogRoutes)
   .use(tokenRoutes)
@@ -55,6 +61,7 @@ function noteIdFromWsPath(pathname: string): string | null {
 function isElysiaPath(pathname: string): boolean {
   return (
     pathname.startsWith("/api/") ||
+    pathname === "/openapi.json" ||
     pathname === "/mcp" ||
     pathname.startsWith("/mcp/")
   );

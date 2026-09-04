@@ -1,5 +1,9 @@
-import type { Note } from "@miyulabmd/shared";
-import { normalizeFolder, titleFromMarkdown } from "@miyulabmd/shared";
+import type { ArticleMeta, ArticleSource, Note } from "@miyulabmd/shared";
+import {
+  matchArticleSource,
+  normalizeFolder,
+  titleFromMarkdown,
+} from "@miyulabmd/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
@@ -11,12 +15,13 @@ import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
+import { ArticleMetaModal } from "../components/notes/ArticleMetaModal.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
-import { ShareIcon } from "../components/ui/icons.tsx";
+import { ArticleIcon, ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { updateNote } from "../lib/api.ts";
+import { fetchArticleSources, updateNote } from "../lib/api.ts";
 import { cn } from "../lib/cn.ts";
 import {
   applyAwarenessUser,
@@ -71,6 +76,10 @@ export function EditorPage() {
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [articleOpen, setArticleOpen] = useState(false);
+  const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
+  const [articleSaving, setArticleSaving] = useState(false);
+  const [articleError, setArticleError] = useState<string | null>(null);
   const [mode, setMode] = useState<EditorMode>("preview");
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
@@ -141,6 +150,21 @@ export function EditorPage() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!user) {
+      setArticleSources([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchArticleSources().then((result) => {
+      if (cancelled || !result.ok) return;
+      setArticleSources(result.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const noteId = note?.id;
   const userId = user?.id;
@@ -261,7 +285,25 @@ export function EditorPage() {
     seedNoteCache(result.data);
   }
 
+  async function persistArticleMeta(meta: ArticleMeta) {
+    const currentNote = note;
+    if (!currentNote) return;
+    setArticleSaving(true);
+    setArticleError(null);
+    const result = await updateNote(currentNote.id, { articleMeta: meta });
+    if (!result.ok) {
+      setArticleError(result.error);
+      setArticleSaving(false);
+      return;
+    }
+    setNote(result.data);
+    seedNoteCache(result.data);
+    setArticleSaving(false);
+    setArticleOpen(false);
+  }
+
   const headingTitle = titleFromMarkdown(markdown);
+  const articleSource = matchArticleSource(folder, articleSources);
 
   function handleModeChange(next: EditorMode) {
     if (!canEdit && next !== "preview") return;
@@ -313,6 +355,17 @@ export function EditorPage() {
             onFolderChange={setFolder}
             onFolderBlur={() => void handleFolderBlur()}
           />
+          {articleSource && (
+            <HeaderButton
+              variant="outline"
+              icon={<ArticleIcon />}
+              label="記事"
+              onClick={() => {
+                setArticleError(null);
+                setArticleOpen(true);
+              }}
+            />
+          )}
           <HeaderButton
             variant="accent"
             icon={<ShareIcon />}
@@ -324,7 +377,16 @@ export function EditorPage() {
     });
 
     return () => setHeader(null);
-  }, [note, viewMode, canEdit, awareness, folder, isOwner, setHeader]);
+  }, [
+    note,
+    viewMode,
+    canEdit,
+    awareness,
+    folder,
+    isOwner,
+    articleSource,
+    setHeader,
+  ]);
 
   if (loading) {
     return (
@@ -418,6 +480,17 @@ export function EditorPage() {
             </div>
           ))}
       </div>
+      {articleOpen && articleSource && (
+        <ArticleMetaModal
+          source={articleSource}
+          value={note.articleMeta ?? {}}
+          saving={articleSaving}
+          error={articleError}
+          disabled={!canEdit}
+          onSave={(meta) => void persistArticleMeta(meta)}
+          onClose={() => setArticleOpen(false)}
+        />
+      )}
       {shareOpen && (
         <ShareModal
           title={headingTitle}

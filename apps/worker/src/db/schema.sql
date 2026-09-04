@@ -22,7 +22,8 @@ CREATE TABLE notes (
   markdown_snapshot TEXT NOT NULL DEFAULT '',
   snapshot_updated_at INTEGER,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  article_meta TEXT
 );
 
 CREATE TABLE note_collaborators (
@@ -81,7 +82,23 @@ CREATE TABLE api_tokens (
   last_used_at INTEGER
 );
 
+CREATE TABLE article_sources (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  folder TEXT NOT NULL,
+  folder_id TEXT,
+  name TEXT NOT NULL,
+  schema_json TEXT NOT NULL,
+  webhook_url TEXT,
+  webhook_authorization TEXT,
+  last_dispatched_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (owner_id, folder)
+);
+
 CREATE INDEX notes_owner_id_idx ON notes (owner_id);
+CREATE INDEX article_sources_owner_id_idx ON article_sources (owner_id);
 CREATE INDEX notes_owner_folder_idx ON notes (owner_id, folder);
 CREATE UNIQUE INDEX access_grants_target_email_idx ON access_grants (target_kind, target_key, email);
 CREATE INDEX access_grants_user_id_idx ON access_grants (user_id);
