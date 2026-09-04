@@ -94,7 +94,9 @@ test("parseArticleListQuery defaults, clamps, and rejects bad values", () => {
   assert.ok(!("error" in clamped));
   assert.equal(clamped.perPage, ARTICLE_LIST_MAX_PER_PAGE);
   assert.ok("error" in parseArticleListQuery(new URLSearchParams("page=0")));
-  assert.ok("error" in parseArticleListQuery(new URLSearchParams("perPage=abc")));
+  assert.ok(
+    "error" in parseArticleListQuery(new URLSearchParams("perPage=abc")),
+  );
 });
 
 test("resolveArticleListFolder allows the source and its descendants", () => {

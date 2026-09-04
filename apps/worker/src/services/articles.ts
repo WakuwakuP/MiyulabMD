@@ -141,9 +141,10 @@ export function escapeLikePattern(value: string): string {
 }
 
 /** ソース（または指定パス）直下と、何階層下のノートも含める。 */
-export function sourceNoteFilter(
-  folder: string,
-): { sql: string; binds: string[] } {
+export function sourceNoteFilter(folder: string): {
+  sql: string;
+  binds: string[];
+} {
   return {
     sql: "(folder = ? OR folder LIKE ? ESCAPE '\\')",
     binds: [folder, `${escapeLikePattern(folder)}/%`],
