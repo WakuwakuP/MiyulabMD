@@ -4,6 +4,7 @@ import {
   dispatchArticleSource,
   fetchArticleSourceStatus,
 } from "../../lib/api.ts";
+import { ARTICLE_CHANGED_EVENT } from "../../lib/article-changed.ts";
 import { HeaderButton } from "../ui/HeaderButton.tsx";
 import { RefreshIcon } from "../ui/icons.tsx";
 
@@ -31,14 +32,22 @@ export function SitePublishButton({ user }: { user: SessionUser | null }) {
 
   useEffect(() => {
     void reload();
-  }, [reload]);
-
-  useEffect(() => {
+    function onChanged() {
+      void reload();
+    }
     function onVisible() {
       if (document.visibilityState === "visible") void reload();
     }
+    window.addEventListener(ARTICLE_CHANGED_EVENT, onChanged);
+    window.addEventListener("focus", onChanged);
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    const timer = window.setInterval(() => void reload(), 20_000);
+    return () => {
+      window.removeEventListener(ARTICLE_CHANGED_EVENT, onChanged);
+      window.removeEventListener("focus", onChanged);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(timer);
+    };
   }, [reload]);
 
   if (!user || dirtyIds.length === 0) return null;
