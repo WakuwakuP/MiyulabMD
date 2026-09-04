@@ -23,6 +23,26 @@ pnpm test
 
 ## 2. Cloudflare デプロイ
 
+フォークや別アカウントへ複製するときは、手元で対話スクリプトを使う。
+
+```bash
+pnpm setup:deploy
+```
+
+スクリプトは次を対話で進める。
+
+1. `wrangler login`（ブラウザ OAuth）で一時トークンを取得する。SSH のみのときはデバイス認可。
+2. D1 / R2 を作るか既存を使い、`wrangler.toml` の `database_id` と Worker 名を更新する
+3. Zero Trust のチームドメインと `/auth*` の Access アプリを作り、`ACCESS_AUD` を Worker secret にする
+4. 任意で Web ビルド、リモート D1 マイグレーション、初回デプロイ、`SESSION_SECRET`
+5. GitHub Environment `cloudflare-production` に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を入れる
+
+Access と GitHub Actions は wrangler の OAuth スコープ外なので、権限を事前入力したトークン作成 URL を開き、発行した API トークンを貼る。OAuth トークンは期限切れになるため CI には入れない。
+
+前提は Node.js 20+、pnpm、[GitHub CLI](https://cli.github.com/)。変更した `wrangler.toml` はコミットする。
+
+---
+
 PR ではバンドル検証（dry-run）だけ。本番デプロイは `main` への push か `workflow_dispatch` のあと、Environment `cloudflare-production` で走る。
 
 1. og-fetch と本体 Worker を dry-run
@@ -121,4 +141,4 @@ Account ID はダッシュボード右側、または `wrangler whoami`。
 | Repository variables | `CURSOR_AGENT_MODEL` |
 | Labels | `dependencies`, `maintenance`, `automated` |
 
-フォークや別アカウントへ複製するときは、1〜3 を同じ名前で入れ直す。ワークフロー YAML の変更は不要。
+フォークや別アカウントへ複製するときは `pnpm setup:deploy` で 1〜3 を同じ名前で入れ直す。ワークフロー YAML の変更は不要。

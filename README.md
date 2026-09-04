@@ -49,4 +49,10 @@ Worker 単体で API だけ試す場合は `pnpm dev:worker` のみでよい。`
 
 ## CI / デプロイ
 
-GitHub Actions の設定手順は [docs/ci.md](docs/ci.md)。`main` への merge で Worker（本体 + og-fetch）をデプロイする。ローカルから出す場合は `pnpm --filter @miyulabmd/web build` のあと `pnpm --filter @miyulabmd/worker deploy`。
+フォークや別アカウントでは、手元から対話スクリプトで Cloudflare（Access / Worker / D1 / R2）と GitHub Actions の Secrets を揃えられる。
+
+```bash
+pnpm setup:deploy
+```
+
+`wrangler login` でブラウザ認証し、セットアップ用の一時トークンを取得する。詳細は [docs/ci.md](docs/ci.md)。`main` への merge で Worker（本体 + og-fetch）をデプロイする。ローカルから出す場合は `pnpm --filter @miyulabmd/web build` のあと `pnpm --filter @miyulabmd/worker deploy`。
