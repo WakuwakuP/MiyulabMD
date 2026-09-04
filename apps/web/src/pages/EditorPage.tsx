@@ -316,12 +316,13 @@ export function EditorPage() {
 
   useEffect(() => {
     if (!note) {
-      setHeader({ layout: "editor" });
+      setHeader({ layout: "editor", folder: null });
       return () => setHeader(null);
     }
 
     setHeader({
       layout: "editor",
+      folder,
       actions: (
         <EditorModeSwitch
           value={viewMode}

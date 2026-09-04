@@ -1,33 +1,32 @@
-import type { SessionUser } from "@miyulabmd/shared";
-import { useCallback, useEffect, useState } from "react";
-import {
-  dispatchArticleSource,
-  fetchArticleSourceStatus,
-} from "../../lib/api.ts";
+import type { ArticleSource, SessionUser } from "@miyulabmd/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { dispatchArticleSource, fetchArticleSources } from "../../lib/api.ts";
 import { ARTICLE_CHANGED_EVENT } from "../../lib/article-changed.ts";
+import { matchingSiteSource } from "../../lib/site-publish.ts";
 import { HeaderButton } from "../ui/HeaderButton.tsx";
 import { RefreshIcon } from "../ui/icons.tsx";
 
-export function SitePublishButton({ user }: { user: SessionUser | null }) {
-  const [dirtyIds, setDirtyIds] = useState<string[]>([]);
+type Props = {
+  user: SessionUser | null;
+  folder?: string | null;
+};
+
+export function SitePublishButton({ user, folder }: Props) {
+  const [sources, setSources] = useState<ArticleSource[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!user) {
-      setDirtyIds([]);
+      setSources([]);
       return;
     }
-    const result = await fetchArticleSourceStatus();
+    const result = await fetchArticleSources();
     if (!result.ok) {
-      setDirtyIds([]);
+      setSources([]);
       return;
     }
-    setDirtyIds(
-      result.data.sources
-        .filter((source) => source.dirty)
-        .map((source) => source.id),
-    );
+    setSources(result.data);
   }, [user]);
 
   useEffect(() => {
@@ -41,29 +40,38 @@ export function SitePublishButton({ user }: { user: SessionUser | null }) {
     window.addEventListener(ARTICLE_CHANGED_EVENT, onChanged);
     window.addEventListener("focus", onChanged);
     document.addEventListener("visibilitychange", onVisible);
-    const timer = window.setInterval(() => void reload(), 20_000);
     return () => {
       window.removeEventListener(ARTICLE_CHANGED_EVENT, onChanged);
       window.removeEventListener("focus", onChanged);
       document.removeEventListener("visibilitychange", onVisible);
-      window.clearInterval(timer);
     };
   }, [reload]);
 
-  if (!user || dirtyIds.length === 0) return null;
+  const matched = user ? matchingSiteSource(folder, sources) : null;
+  const matchedId = matched?.id ?? null;
+  const matchedIdRef = useRef(matchedId);
+  matchedIdRef.current = matchedId;
+
+  useEffect(() => {
+    setBusy(false);
+    setError(null);
+  }, [matchedId]);
+
+  if (!matched) return null;
 
   async function handleClick() {
+    const id = matched.id;
     setBusy(true);
     setError(null);
-    for (const id of dirtyIds) {
-      const result = await dispatchArticleSource(id);
-      if (!result.ok) {
-        setError(result.error);
-        setBusy(false);
-        return;
-      }
+    const result = await dispatchArticleSource(id);
+    if (matchedIdRef.current !== id) return;
+    if (!result.ok) {
+      setError(result.error);
+      setBusy(false);
+      return;
     }
     await reload();
+    if (matchedIdRef.current !== id) return;
     setBusy(false);
   }
 
@@ -73,11 +81,12 @@ export function SitePublishButton({ user }: { user: SessionUser | null }) {
         variant="outline"
         icon={<RefreshIcon />}
         label={busy ? "更新中…" : "サイトを更新"}
+        title={`${matched.name} を更新`}
         disabled={busy}
         onClick={() => void handleClick()}
       />
       {error && (
-        <span className="absolute top-full right-0 z-50 mt-1 max-w-[16rem] rounded-md bg-canvas px-2 py-1 text-[0.75rem] text-error shadow-modal">
+        <span className="absolute top-full left-0 z-50 mt-1 max-w-[16rem] rounded-md bg-canvas px-2 py-1 text-[0.75rem] text-error shadow-modal">
           {error}
         </span>
       )}
