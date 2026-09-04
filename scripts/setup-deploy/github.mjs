@@ -85,3 +85,24 @@ export async function setEnvironmentSecret(ghBin, nameWithOwner, name, value) {
     { input: value },
   );
 }
+
+export async function setEnvironmentVariable(
+  ghBin,
+  nameWithOwner,
+  name,
+  value,
+) {
+  await runCommand(
+    ghBin,
+    [
+      "variable",
+      "set",
+      name,
+      "--env",
+      GITHUB_ENVIRONMENT,
+      "--repo",
+      nameWithOwner,
+    ],
+    { input: value },
+  );
+}

@@ -9,6 +9,8 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/deploy-cloudflare.yml"
+      - "scripts/apply-wrangler-env.mjs"
+      - "scripts/setup-deploy/**"
   push:
     branches:
       - main
@@ -19,6 +21,8 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/deploy-cloudflare.yml"
+      - "scripts/apply-wrangler-env.mjs"
+      - "scripts/setup-deploy/**"
   workflow_dispatch:
 
 concurrency:
@@ -101,12 +105,24 @@ jobs:
       - name: Build web assets
         run: pnpm --filter @miyulabmd/web build
 
+      - name: Apply account-specific wrangler config
+        working-directory: apps/worker
+        env:
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+          D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
+          ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+          OG_FETCH_WORKER_NAME: ${{ vars.OG_FETCH_WORKER_NAME }}
+          R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+          CUSTOM_HOSTNAME: ${{ vars.CUSTOM_HOSTNAME }}
+        run: node ../../scripts/apply-wrangler-env.mjs --require-remote
+
       - name: Apply D1 migrations
         working-directory: apps/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler d1 migrations apply DB --remote
+        run: pnpm exec wrangler d1 migrations apply DB --remote -c wrangler.deploy.toml
 
       - name: Deploy Worker
         working-directory: apps/worker
@@ -114,5 +130,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          pnpm exec wrangler deploy -c wrangler.og-fetch.toml --message "${{ github.sha }}-og-fetch"
-          pnpm exec wrangler deploy --message "${{ github.sha }}"
+          pnpm exec wrangler deploy -c wrangler.og-fetch.deploy.toml --message "${{ github.sha }}-og-fetch"
+          pnpm exec wrangler deploy -c wrangler.deploy.toml --message "${{ github.sha }}"

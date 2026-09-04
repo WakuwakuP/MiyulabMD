@@ -9,7 +9,7 @@ interface __BaseEnv_Env {
 	ALLOW_ANONYMOUS_EDITS: "true";
 	ALLOW_ANONYMOUS_VIEWS: "true";
 	DEFAULT_PERMISSION: "editable";
-	ACCESS_TEAM_DOMAIN: "miyulab.cloudflareaccess.com";
+	ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com";
 	DEV_AUTH: "false";
 	DOCUMENT_ROOM: DurableObjectNamespace<import("./src/index").DocumentRoom>;
 	OG_FETCH: Fetcher /* miyulabmd-og-fetch */;
