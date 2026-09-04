@@ -1,5 +1,5 @@
 import type { ArticleSource, SessionUser } from "@miyulabmd/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { dispatchArticleSource, fetchArticleSources } from "../../lib/api.ts";
 import { ARTICLE_CHANGED_EVENT } from "../../lib/article-changed.ts";
 import { matchingSiteSource } from "../../lib/site-publish.ts";
@@ -48,20 +48,30 @@ export function SitePublishButton({ user, folder }: Props) {
   }, [reload]);
 
   const matched = user ? matchingSiteSource(folder, sources) : null;
+  const matchedId = matched?.id ?? null;
+  const matchedIdRef = useRef(matchedId);
+  matchedIdRef.current = matchedId;
+
+  useEffect(() => {
+    setBusy(false);
+    setError(null);
+  }, [matchedId]);
 
   if (!matched) return null;
 
   async function handleClick() {
-    if (!matched) return;
+    const id = matched.id;
     setBusy(true);
     setError(null);
-    const result = await dispatchArticleSource(matched.id);
+    const result = await dispatchArticleSource(id);
+    if (matchedIdRef.current !== id) return;
     if (!result.ok) {
       setError(result.error);
       setBusy(false);
       return;
     }
     await reload();
+    if (matchedIdRef.current !== id) return;
     setBusy(false);
   }
 
