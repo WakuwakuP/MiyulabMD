@@ -129,6 +129,8 @@ async function loginCloudflare(prompt, cloudflare) {
       logInfo("環境変数の API トークンを使います。");
       return { type: "api_token", token: envToken };
     }
+    delete process.env.CLOUDFLARE_API_TOKEN;
+    logInfo("環境変数のトークンは使いません。wrangler login を使います。");
   }
 
   const whoami = await cloudflare.wrangler(["whoami", "--json"], {
@@ -442,6 +444,7 @@ async function putSecrets(cloudflare, env, { sessionSecret, accessAud }) {
       name: "SESSION_SECRET",
       value: sessionSecret,
       env,
+      config: WRANGLER_DEPLOY_TOML,
     });
     logInfo("SESSION_SECRET を Worker に設定しました。");
   }
@@ -450,6 +453,7 @@ async function putSecrets(cloudflare, env, { sessionSecret, accessAud }) {
       name: "ACCESS_AUD",
       value: accessAud,
       env,
+      config: WRANGLER_DEPLOY_TOML,
     });
     logInfo("ACCESS_AUD を Worker に設定しました。");
   }
@@ -609,6 +613,7 @@ async function main(argv) {
     ]);
 
     let customHostname = null;
+    let customZone = null;
     let hostname;
     if (hostMode === "custom") {
       const zones = await listZones(cfToken, account.id);
@@ -627,6 +632,7 @@ async function main(argv) {
       customHostname = normalizeHostname(
         await prompt.ask("ホスト名", `md.${zone.name}`),
       );
+      customZone = zone;
       hostname = customHostname;
     } else {
       const fallback = slugifyTeamName(account.name) || names.workerName;
@@ -677,16 +683,15 @@ async function main(argv) {
 
     if (deployResult.deployed) {
       if (customHostname) {
-        const zones = await listZones(cfToken, account.id);
-        const zone = zones.find((item) => customHostname.endsWith(item.name));
-        if (zone) {
-          await attachCustomDomain(cfToken, account.id, {
-            hostname: customHostname,
-            service: names.workerName,
-            zoneId: zone.id,
-          });
-          logInfo(`カスタムドメインを付けました: https://${customHostname}`);
+        if (!customZone) {
+          throw new Error("カスタムドメイン用の Zone が選ばれていません");
         }
+        await attachCustomDomain(cfToken, account.id, {
+          hostname: customHostname,
+          service: names.workerName,
+          zoneId: customZone.id,
+        });
+        logInfo(`カスタムドメインを付けました: https://${customHostname}`);
       }
 
       const rotateSecret = await prompt.confirm(

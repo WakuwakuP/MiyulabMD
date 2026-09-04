@@ -4,6 +4,7 @@ import { readTomlQuotedValue } from "./helpers.mjs";
 import {
   applyDeployOverrides,
   assertRemoteOverrides,
+  PLACEHOLDER_ACCESS_TEAM_DOMAIN,
   PLACEHOLDER_D1_DATABASE_ID,
   readDeployOverridesFromEnv,
 } from "./wrangler-config.mjs";
@@ -75,7 +76,18 @@ test("assertRemoteOverrides rejects the shared placeholder", () => {
     () => assertRemoteOverrides({ d1Id: PLACEHOLDER_D1_DATABASE_ID }),
     /D1_DATABASE_ID/,
   );
+  assert.throws(
+    () =>
+      assertRemoteOverrides({
+        d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        accessTeamDomain: PLACEHOLDER_ACCESS_TEAM_DOMAIN,
+      }),
+    /ACCESS_TEAM_DOMAIN/,
+  );
   assert.doesNotThrow(() =>
-    assertRemoteOverrides({ d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }),
+    assertRemoteOverrides({
+      d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      accessTeamDomain: "fork.cloudflareaccess.com",
+    }),
   );
 });

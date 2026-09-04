@@ -101,6 +101,14 @@ export function assertRemoteOverrides(overrides) {
       "D1_DATABASE_ID がありません。Environment cloudflare-production の Variables に設定してください",
     );
   }
+  if (
+    !overrides.accessTeamDomain ||
+    overrides.accessTeamDomain === PLACEHOLDER_ACCESS_TEAM_DOMAIN
+  ) {
+    throw new Error(
+      "ACCESS_TEAM_DOMAIN がありません。Environment cloudflare-production の Variables に設定してください",
+    );
+  }
 }
 
 export async function writeDeployConfigFiles(workerDir, overrides) {

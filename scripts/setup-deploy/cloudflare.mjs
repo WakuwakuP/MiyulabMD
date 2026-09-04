@@ -111,12 +111,27 @@ export async function ensureD1(token, accountId, name) {
   return { created: true, id: payload.result.uuid, name: payload.result.name };
 }
 
+export async function listR2Buckets(token, accountId) {
+  const buckets = [];
+  let cursor;
+  for (;;) {
+    const payload = await cfApi(token, `/accounts/${accountId}/r2/buckets`, {
+      query: { per_page: 50, ...(cursor ? { cursor } : {}) },
+    });
+    const page = payload.result?.buckets ?? [];
+    buckets.push(...page);
+    const next = payload.result_info?.cursor;
+    if (!payload.result_info?.is_truncated || !next) {
+      break;
+    }
+    cursor = next;
+  }
+  return buckets;
+}
+
 export async function ensureR2(token, accountId, name) {
-  const payload = await cfApi(token, `/accounts/${accountId}/r2/buckets`);
-  const buckets = payload.result?.buckets ?? payload.result ?? [];
-  const existing = (Array.isArray(buckets) ? buckets : []).find(
-    (item) => item.name === name,
-  );
+  const buckets = await listR2Buckets(token, accountId);
+  const existing = buckets.find((item) => item.name === name);
   if (existing) {
     return { created: false, name };
   }
@@ -334,8 +349,15 @@ export async function listIdentityProviders(token, accountId) {
   }
 }
 
-export async function putWorkerSecret(cloudflare, { name, value, env }) {
-  await cloudflare.wrangler(["secret", "put", name], {
+export async function putWorkerSecret(
+  cloudflare,
+  { name, value, env, config },
+) {
+  const args = ["secret", "put", name];
+  if (config) {
+    args.push("-c", config);
+  }
+  await cloudflare.wrangler(args, {
     env,
     input: `${value}\n`,
   });
