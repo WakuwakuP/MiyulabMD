@@ -1,3 +1,4 @@
+import { markdownBody } from "@miyulabmd/shared";
 import GithubSlugger from "github-slugger";
 
 /** Matches rehype-sanitize default `clobberPrefix`. */
@@ -27,7 +28,7 @@ export function extractNoteToc(markdown: string): TocEntry[] {
   const entries: TocEntry[] = [];
   let inFence = false;
 
-  for (const line of markdown.split("\n")) {
+  for (const line of markdownBody(markdown).split("\n")) {
     const trimmed = line.trim();
     if (trimmed.startsWith("```")) {
       inFence = !inFence;

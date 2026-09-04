@@ -77,7 +77,7 @@ export function openApiDocument() {
       title: "MiyulabMD Article API",
       version: "1.0.0",
       description:
-        "Astro など外部サイト向けの記事 API。Personal Access Token を Bearer で送る。Elysia の OpenAPI Type Gen は Workers では使えないため、この文書は手書き。",
+        "Astro など外部サイト向けの記事 API。メタデータはノート先頭の YAML frontmatter。Personal Access Token を Bearer で送る。Elysia の OpenAPI Type Gen は Workers では使えないため、この文書は手書き。",
     },
     servers: [{ url: "/" }],
     tags: [{ name: "Articles", description: "PAT で読む公開記事" }],
@@ -148,6 +148,8 @@ export function openApiDocument() {
         get: {
           tags: ["Articles"],
           summary: "コレクション配下の記事一覧",
+          description:
+            "ソースディレクトリ直下と、何階層下のノートも含む。folder で配下の特定パスに絞れる。",
           parameters: [
             {
               name: "id",
@@ -155,15 +157,49 @@ export function openApiDocument() {
               required: true,
               schema: { type: "string", format: "uuid" },
             },
+            {
+              name: "page",
+              in: "query",
+              required: false,
+              description: "1 始まり。省略時は 1",
+              schema: { type: "integer", minimum: 1, default: 1 },
+            },
+            {
+              name: "perPage",
+              in: "query",
+              required: false,
+              description: "1 ページ件数。省略時 50、上限 100",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 100,
+                default: 50,
+              },
+            },
+            {
+              name: "folder",
+              in: "query",
+              required: false,
+              description:
+                "コレクション配下のパス。指定するとそのディレクトリと子孫だけを返す",
+              schema: { type: "string", example: "work/infra/db" },
+            },
           ],
           responses: {
             "200": {
-              description: "本文なしのエントリ",
+              description: "本文なしのエントリ（ページネーション付き）",
               content: {
                 "application/json": {
                   schema: {
                     type: "object",
-                    required: ["collection", "entries"],
+                    required: [
+                      "collection",
+                      "entries",
+                      "page",
+                      "perPage",
+                      "total",
+                      "hasMore",
+                    ],
                     properties: {
                       collection: {
                         $ref: "#/components/schemas/ArticleCollection",
@@ -172,9 +208,19 @@ export function openApiDocument() {
                         type: "array",
                         items: { $ref: "#/components/schemas/ArticleEntry" },
                       },
+                      page: { type: "integer", minimum: 1 },
+                      perPage: { type: "integer", minimum: 1, maximum: 100 },
+                      total: { type: "integer", minimum: 0 },
+                      hasMore: { type: "boolean" },
                     },
                   },
                 },
+              },
+            },
+            "400": {
+              description: "page / perPage / folder が不正",
+              content: {
+                "application/json": { schema: errorSchema },
               },
             },
             "401": unauthorized,
@@ -208,7 +254,8 @@ export function openApiDocument() {
           ],
           responses: {
             "200": {
-              description: "markdown 付きエントリ",
+              description:
+                "data は YAML frontmatter。markdown は frontmatter を除いた本文",
               content: {
                 "application/json": {
                   schema: {

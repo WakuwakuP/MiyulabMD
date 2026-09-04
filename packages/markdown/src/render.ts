@@ -1,3 +1,4 @@
+import { markdownBody } from "@miyulabmd/shared";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -77,7 +78,7 @@ export function renderMarkdownHtml(
   cards: Map<string, OgPreview> = new Map(),
 ): string {
   const expanded = expandEmbedsForPreview(
-    normalizeEmbedMarkdown(markdown),
+    normalizeEmbedMarkdown(markdownBody(markdown)),
     cards,
   );
   return String(processor.processSync(expanded));

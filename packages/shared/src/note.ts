@@ -80,7 +80,6 @@ export type UpdateNoteMetaInput = {
   readScope?: AccessScope | null;
   writeScope?: AccessScope | null;
   grants?: AccessGrantInput[];
-  articleMeta?: ArticleMeta;
 };
 
 export type FolderAccess = EffectiveAccess & {
