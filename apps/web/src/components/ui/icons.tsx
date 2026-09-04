@@ -9,6 +9,7 @@ import {
   Moon,
   Pencil,
   Plus,
+  RefreshCw,
   Share2,
   Sun,
   X,
@@ -67,6 +68,14 @@ export function PlusIcon({ className }: IconProps) {
 
 export function ShareIcon({ className }: IconProps) {
   return <Share2 aria-hidden className={cn("size-4", className)} />;
+}
+
+export function RefreshIcon({ className }: IconProps) {
+  return <RefreshCw aria-hidden className={cn("size-4", className)} />;
+}
+
+export function ArticleIcon({ className }: IconProps) {
+  return <FileText aria-hidden className={cn("size-4", className)} />;
 }
 
 export function FolderIcon({ className }: IconProps) {

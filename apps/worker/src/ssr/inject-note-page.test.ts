@@ -34,6 +34,7 @@ function sampleNote(overrides: Partial<Note> = {}): Note {
       },
     },
     markdown: "# Hello\n\n<script>alert(1)</script>",
+    articleMeta: {},
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
