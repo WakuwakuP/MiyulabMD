@@ -1,3 +1,4 @@
+import type { ArticleMeta } from "./article.ts";
 import type {
   AccessGrant,
   AccessScope,
@@ -39,6 +40,7 @@ export type Note = {
   permission: PermissionPreset;
   access: NoteAccess;
   markdown: string;
+  articleMeta: ArticleMeta;
   createdAt: number;
   updatedAt: number;
 };
@@ -78,6 +80,7 @@ export type UpdateNoteMetaInput = {
   readScope?: AccessScope | null;
   writeScope?: AccessScope | null;
   grants?: AccessGrantInput[];
+  articleMeta?: ArticleMeta;
 };
 
 export type FolderAccess = EffectiveAccess & {

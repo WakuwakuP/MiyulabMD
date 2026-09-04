@@ -11,6 +11,7 @@ import {
   type NoteSummary,
   normalizeFolder,
   type PermissionPreset,
+  parseArticleMeta,
   presetFromScopes,
   rewriteFolderPrefix,
   type SessionUser,
@@ -39,6 +40,10 @@ import {
   resolveFolderAccess,
   resolveNoteAccess,
 } from "./access.ts";
+import {
+  deleteArticleSourcesInFolder,
+  rewriteArticleSourceFolders,
+} from "./articles.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
 
@@ -55,15 +60,16 @@ type NoteRow = {
   markdown_snapshot: string;
   created_at: number;
   updated_at: number;
+  article_meta: string | null;
 };
 
 const SHORT_ID_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const ANONYMOUS_OWNER_EMAIL = "anonymous@miyulabmd.local";
 const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
-                  markdown_snapshot, created_at, updated_at`;
+                  markdown_snapshot, created_at, updated_at, article_meta`;
 const NOTE_COLUMNS_N = `n.id, n.short_id, n.alias, n.owner_id, n.title, n.folder, n.permission, n.read_scope, n.write_scope,
-                  n.markdown_snapshot, n.created_at, n.updated_at`;
+                  n.markdown_snapshot, n.created_at, n.updated_at, n.article_meta`;
 
 function parseStoredScope(value: string | null): AccessScope | null {
   return value && isAccessScope(value) ? value : null;
@@ -106,6 +112,7 @@ async function toNote(
     permission: derivedPermission(access),
     access: isOwner ? access : { ...access, sourceFolder: null },
     markdown: row.markdown_snapshot,
+    articleMeta: parseArticleMeta(row.article_meta),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -525,7 +532,7 @@ export function createNoteService(env: Env) {
       const current = await toNote(env, row, user);
       const flags = current.access.flags;
 
-      if (input.title !== undefined) {
+      if (input.title !== undefined || input.articleMeta !== undefined) {
         if (!flags.canEdit) {
           return {
             kind: "denied",
@@ -583,12 +590,17 @@ export function createNoteService(env: Env) {
         await ensureFolderRow(env, row.owner_id, nextFolder);
       }
 
+      const nextArticleMeta =
+        input.articleMeta !== undefined
+          ? JSON.stringify(parseArticleMeta(input.articleMeta))
+          : row.article_meta;
+
       const now = Date.now();
       await db(env)
         .prepare(
           `UPDATE notes
            SET title = ?, folder = ?, permission = ?, alias = ?,
-               read_scope = ?, write_scope = ?, updated_at = ?
+               read_scope = ?, write_scope = ?, article_meta = ?, updated_at = ?
            WHERE id = ?`,
         )
         .bind(
@@ -598,6 +610,7 @@ export function createNoteService(env: Env) {
           nextAlias,
           scopes.readScope,
           scopes.writeScope,
+          nextArticleMeta,
           now,
           row.id,
         )
@@ -734,6 +747,7 @@ export function createNoteService(env: Env) {
           .run();
       }
 
+      await deleteArticleSourcesInFolder(env, rec.owner_id, rec.folder);
       await deleteFolderTree(env, rec.owner_id, rec.folder);
       return { kind: "ok" };
     },
@@ -792,6 +806,12 @@ export function createNoteService(env: Env) {
       }
 
       await renameFolderTree(env, rec.owner_id, rec.folder, nextPath);
+      await rewriteArticleSourceFolders(
+        env,
+        rec.owner_id,
+        rec.folder,
+        nextPath,
+      );
       return {
         kind: "ok",
         access: await resolveFolderAccess(env, rec.owner_id, nextPath, user),
