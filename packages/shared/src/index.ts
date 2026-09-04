@@ -1,6 +1,7 @@
 export type {
   ArticleCollection,
   ArticleEntry,
+  ArticleEntryPage,
   ArticleFieldType,
   ArticleMeta,
   ArticleSchemaField,
@@ -10,6 +11,8 @@ export type {
 } from "./article.ts";
 export {
   ARTICLE_FIELD_TYPES,
+  ARTICLE_LIST_DEFAULT_PER_PAGE,
+  ARTICLE_LIST_MAX_PER_PAGE,
   articleEditUrl,
   articleSlug,
   coerceArticleValue,
@@ -18,8 +21,10 @@ export {
   isArticleSourceDirty,
   matchArticleSource,
   mergeArticleData,
+  parseArticleListQuery,
   parseArticleMeta,
   parseArticleSchema,
+  resolveArticleListFolder,
 } from "./article.ts";
 export type { McpToolName } from "./mcp.ts";
 export { MCP_TOOLS } from "./mcp.ts";
@@ -68,6 +73,22 @@ export {
   rewriteFolderPrefix,
   scopesFromPreset,
 } from "./permission.ts";
+export type {
+  ArticleFrontmatterIssue,
+  ArticleFrontmatterRead,
+  MarkdownFrontmatterSplit,
+} from "./frontmatter.ts";
+export {
+  articleFrontmatterObject,
+  articleTemplateMarkdown,
+  ensureArticleMarkdown,
+  markdownBody,
+  parseFrontmatterYaml,
+  readArticleFrontmatter,
+  splitMarkdownFrontmatter,
+  stringifyArticleFrontmatter,
+  validateArticleDocument,
+} from "./frontmatter.ts";
 export {
   defaultNoteMarkdown,
   folderUrl,

@@ -23,6 +23,16 @@ test("extractNoteToc collects h1–h3 and ignores code fences", () => {
   ]);
 });
 
+test("extractNoteToc ignores YAML frontmatter", () => {
+  const markdown = ["---", "title: Not a heading", "---", "", "# Real"].join(
+    "\n",
+  );
+  assert.deepEqual(
+    extractNoteToc(markdown).map((entry) => entry.text),
+    ["Real"],
+  );
+});
+
 test("extractNoteToc deduplicates slugs like rehype-slug", () => {
   const markdown = ["# Same", "## Same", "### Same"].join("\n");
   assert.deepEqual(

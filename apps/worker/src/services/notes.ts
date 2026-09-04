@@ -3,16 +3,18 @@ import {
   type CreateNoteInput,
   clampWriteScope,
   defaultNoteMarkdown,
+  ensureArticleMarkdown,
   type FolderAccess,
   folderContains,
   isAccessScope,
   isPermissionPreset,
+  matchArticleSource,
   type Note,
   type NoteSummary,
   normalizeFolder,
   type PermissionPreset,
-  parseArticleMeta,
   presetFromScopes,
+  readArticleFrontmatter,
   rewriteFolderPrefix,
   type SessionUser,
   scopesFromPreset,
@@ -41,6 +43,7 @@ import {
   resolveNoteAccess,
 } from "./access.ts";
 import {
+  createArticleService,
   deleteArticleSourcesInFolder,
   rewriteArticleSourceFolders,
 } from "./articles.ts";
@@ -112,7 +115,7 @@ async function toNote(
     permission: derivedPermission(access),
     access: isOwner ? access : { ...access, sourceFolder: null },
     markdown: row.markdown_snapshot,
-    articleMeta: parseArticleMeta(row.article_meta),
+    articleMeta: readArticleFrontmatter(row.markdown_snapshot).data,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -484,8 +487,17 @@ export function createNoteService(env: Env) {
       if (folder) {
         await ensureFolderRow(env, owner.id, folder);
       }
-      const markdown =
+      let markdown =
         input.markdown ?? defaultNoteMarkdown(input.title?.trim() || "無題");
+      const sources = await createArticleService(env).listSources(owner.id);
+      const source = matchArticleSource(folder, sources);
+      if (source) {
+        markdown = ensureArticleMarkdown(
+          markdown,
+          source.schema,
+          input.title?.trim() || "無題",
+        );
+      }
       const title = titleFromMarkdown(markdown);
 
       await db(env)
@@ -532,7 +544,7 @@ export function createNoteService(env: Env) {
       const current = await toNote(env, row, user);
       const flags = current.access.flags;
 
-      if (input.title !== undefined || input.articleMeta !== undefined) {
+      if (input.title !== undefined) {
         if (!flags.canEdit) {
           return {
             kind: "denied",
@@ -590,17 +602,12 @@ export function createNoteService(env: Env) {
         await ensureFolderRow(env, row.owner_id, nextFolder);
       }
 
-      const nextArticleMeta =
-        input.articleMeta !== undefined
-          ? JSON.stringify(parseArticleMeta(input.articleMeta))
-          : row.article_meta;
-
       const now = Date.now();
       await db(env)
         .prepare(
           `UPDATE notes
            SET title = ?, folder = ?, permission = ?, alias = ?,
-               read_scope = ?, write_scope = ?, article_meta = ?, updated_at = ?
+               read_scope = ?, write_scope = ?, updated_at = ?
            WHERE id = ?`,
         )
         .bind(
@@ -610,7 +617,6 @@ export function createNoteService(env: Env) {
           nextAlias,
           scopes.readScope,
           scopes.writeScope,
-          nextArticleMeta,
           now,
           row.id,
         )

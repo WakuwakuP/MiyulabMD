@@ -9,5 +9,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/*.test.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }

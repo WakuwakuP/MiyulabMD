@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  ARTICLE_LIST_DEFAULT_PER_PAGE,
+  ARTICLE_LIST_MAX_PER_PAGE,
   articleEditUrl,
   articleSlug,
   isArticleSourceDirty,
   matchArticleSource,
   mergeArticleData,
+  parseArticleListQuery,
   parseArticleSchema,
+  resolveArticleListFolder,
 } from "./article.ts";
 
 test("parseArticleSchema rejects duplicate keys and bad types", () => {
@@ -70,6 +74,36 @@ test("isArticleSourceDirty compares max updated_at to last dispatch", () => {
   assert.equal(isArticleSourceDirty(null, 10), true);
   assert.equal(isArticleSourceDirty(20, 10), false);
   assert.equal(isArticleSourceDirty(10, 20), true);
+});
+
+test("parseArticleListQuery defaults, clamps, and rejects bad values", () => {
+  assert.deepEqual(parseArticleListQuery(new URLSearchParams()), {
+    page: 1,
+    perPage: ARTICLE_LIST_DEFAULT_PER_PAGE,
+    folder: null,
+  });
+  assert.deepEqual(
+    parseArticleListQuery(
+      new URLSearchParams("page=3&perPage=10&folder=work/infra/db"),
+    ),
+    { page: 3, perPage: 10, folder: "work/infra/db" },
+  );
+  const clamped = parseArticleListQuery(
+    new URLSearchParams(`perPage=${ARTICLE_LIST_MAX_PER_PAGE + 40}`),
+  );
+  assert.ok(!("error" in clamped));
+  assert.equal(clamped.perPage, ARTICLE_LIST_MAX_PER_PAGE);
+  assert.ok("error" in parseArticleListQuery(new URLSearchParams("page=0")));
+  assert.ok("error" in parseArticleListQuery(new URLSearchParams("perPage=abc")));
+});
+
+test("resolveArticleListFolder allows the source and its descendants", () => {
+  assert.equal(resolveArticleListFolder("work", null), "work");
+  assert.equal(
+    resolveArticleListFolder("work", "work/infra/db"),
+    "work/infra/db",
+  );
+  assert.ok("error" in resolveArticleListFolder("work", "play"));
 });
 
 test("articleSlug and articleEditUrl", () => {
