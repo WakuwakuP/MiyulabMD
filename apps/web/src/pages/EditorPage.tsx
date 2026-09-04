@@ -350,15 +350,7 @@ export function EditorPage() {
     });
 
     return () => setHeader(null);
-  }, [
-    note,
-    viewMode,
-    canEdit,
-    awareness,
-    folder,
-    isOwner,
-    setHeader,
-  ]);
+  }, [note, viewMode, canEdit, awareness, folder, isOwner, setHeader]);
 
   if (loading) {
     return (

@@ -17,11 +17,11 @@ export type ArticleFrontmatterRead = {
   issues: ArticleFrontmatterIssue[];
 };
 
+export type { MarkdownFrontmatterSplit } from "./markdown-frontmatter.ts";
 export {
   markdownBody,
   splitMarkdownFrontmatter,
 } from "./markdown-frontmatter.ts";
-export type { MarkdownFrontmatterSplit } from "./markdown-frontmatter.ts";
 
 function normalizeYamlValue(value: unknown): unknown {
   if (value instanceof Date) {
