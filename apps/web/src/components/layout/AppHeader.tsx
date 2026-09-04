@@ -10,12 +10,20 @@ import { SitePublishButton } from "./SitePublishButton.tsx";
 type Props = {
   actions?: ReactNode;
   end?: ReactNode;
+  folder?: string | null;
   user: SessionUser | null;
   loading: boolean;
   authConfig: AuthConfig;
 };
 
-export function AppHeader({ actions, end, user, loading, authConfig }: Props) {
+export function AppHeader({
+  actions,
+  end,
+  folder,
+  user,
+  loading,
+  authConfig,
+}: Props) {
   return (
     <header
       className={cn(
@@ -36,8 +44,8 @@ export function AppHeader({ actions, end, user, loading, authConfig }: Props) {
         </div>
       )}
       <nav className="flex min-w-0 items-center justify-end gap-2 max-[900px]:gap-1">
+        <SitePublishButton user={user} folder={folder} />
         {end}
-        <SitePublishButton user={user} />
         {loading ? (
           <MutedText className="m-0">…</MutedText>
         ) : (
