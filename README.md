@@ -47,6 +47,6 @@ Vite は `/api` `/auth` `/mcp` `/ws` を Worker (`8787`) にプロキシする�
 
 Worker 単体で API だけ試す場合は `pnpm dev:worker` のみでよい。`apps/web/dist` が無い場合も `predev` が空ディレクトリを作るため起動できる（本番相当の静的配信は `pnpm --filter @miyulabmd/web build` 後）。
 
-## デプロイ（後続フェーズ）
+## CI / デプロイ
 
-Cloudflare ログインとリモート D1 / R2 の作成が必要。`pnpm --filter @miyulabmd/web build` のあと `pnpm --filter @miyulabmd/worker deploy`。
+GitHub Actions の設定手順は [docs/ci.md](docs/ci.md)。`main` への merge で Worker（本体 + og-fetch）をデプロイする。ローカルから出す場合は `pnpm --filter @miyulabmd/web build` のあと `pnpm --filter @miyulabmd/worker deploy`。
