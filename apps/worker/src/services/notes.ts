@@ -1,6 +1,5 @@
 import {
   type AccessScope,
-  actorFromUser,
   articleMetaFromNote,
   type CreateNoteInput,
   clampWriteScope,
@@ -8,7 +7,6 @@ import {
   ensureArticleMarkdown,
   type FolderAccess,
   folderContains,
-  grantForActor,
   isAccessScope,
   isPermissionPreset,
   matchArticleSource,
@@ -28,11 +26,12 @@ import { db } from "../db/client.ts";
 import { upsertUserByEmail } from "../db/users.ts";
 import { instanceFlags } from "../env.ts";
 import {
+  canDiscoverAccess,
   defaultScopes,
   deleteFolderTree,
   derivedPermission,
   ensureFolderRow,
-  folderViewFlags,
+  folderDiscoveryAllowed,
   getFolderById,
   getFolderByPath,
   listPublicFolderCandidates,
@@ -103,8 +102,9 @@ async function toNote(
   const folderId = await ensureFolderRow(env, row.owner_id, folder);
   let visibleFolderId = isOwner ? folderId : null;
   if (!isOwner && folderId) {
-    const flags = await folderViewFlags(env, row.owner_id, folder, user);
-    if (flags.canView) visibleFolderId = folderId;
+    if (await folderDiscoveryAllowed(env, row.owner_id, folder, user)) {
+      visibleFolderId = folderId;
+    }
   }
   return {
     id: row.id,
@@ -404,7 +404,7 @@ async function listAccessibleRows(
            LEFT JOIN access_grants ag
              ON ag.target_kind = 'note' AND ag.target_key = n.id
             AND (ag.user_id = ? OR ag.email = ?)
-           WHERE n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope IN ('signed_in', 'public')
+           WHERE n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope = 'public'
            ORDER BY n.updated_at DESC`,
     )
     .bind(user.id, user.email, user.id)
@@ -431,12 +431,7 @@ async function listAccessibleRows(
   const visible = await Promise.all(
     candidates.map(async (row) => {
       const access = await resolveNoteAccess(env, accessFields(row), user);
-      const discoverable =
-        row.owner_id === user.id ||
-        access.effectiveReadScope !== "link" ||
-        grantForActor(access.grants, actorFromUser(user, row.owner_id)) !==
-          null;
-      return access.flags.canView && discoverable ? row : null;
+      return canDiscoverAccess(access, row.owner_id, user) ? row : null;
     }),
   );
   return visible.filter((row): row is NoteRow => row !== null);
@@ -465,9 +460,7 @@ async function listGuestRows(env: Env): Promise<NoteRow[]> {
   const visible = await Promise.all(
     candidates.map(async (row) => {
       const access = await resolveNoteAccess(env, accessFields(row), undefined);
-      return access.flags.canView && access.effectiveReadScope === "public"
-        ? row
-        : null;
+      return canDiscoverAccess(access, row.owner_id) ? row : null;
     }),
   );
 

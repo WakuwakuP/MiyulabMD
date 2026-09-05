@@ -356,16 +356,31 @@ async function loadFolderEffective(
   };
 }
 
-export async function folderViewFlags(
+/** 閲覧権限だけでは URL・ID の列挙に同意したことにはならない。 */
+export function canDiscoverAccess(
+  access: EffectiveAccess & { flags: PermissionFlags },
+  ownerId: string,
+  user?: SessionUser | null,
+): boolean {
+  const actor = actorFromUser(user, ownerId);
+  return (
+    access.flags.canView &&
+    (actor.kind === "owner" ||
+      access.effectiveReadScope === "public" ||
+      grantForActor(access.grants, actor) !== null)
+  );
+}
+
+async function loadFolderAccessState(
   env: Env,
   ownerId: string,
   folder: string,
   user?: SessionUser | null,
-): Promise<PermissionFlags> {
+): Promise<FolderPolicyResolved & { flags: PermissionFlags }> {
   const effective = await loadFolderEffective(env, ownerId, folder);
   const actor = actorFromUser(user, ownerId);
   const grant = grantForActor(effective.grants, actor);
-  return applyInstanceFlags(
+  const flags = applyInstanceFlags(
     evaluateAccess(
       effective.effectiveReadScope,
       effective.effectiveWriteScope,
@@ -374,6 +389,29 @@ export async function folderViewFlags(
     ),
     actor,
     env,
+  );
+  return { ...effective, flags };
+}
+
+export async function folderViewFlags(
+  env: Env,
+  ownerId: string,
+  folder: string,
+  user?: SessionUser | null,
+): Promise<PermissionFlags> {
+  return (await loadFolderAccessState(env, ownerId, folder, user)).flags;
+}
+
+export async function folderDiscoveryAllowed(
+  env: Env,
+  ownerId: string,
+  folder: string,
+  user?: SessionUser | null,
+): Promise<boolean> {
+  return canDiscoverAccess(
+    await loadFolderAccessState(env, ownerId, folder, user),
+    ownerId,
+    user,
   );
 }
 
@@ -389,8 +427,12 @@ async function visibleCrumbs(
     const path = parts.slice(0, i).join("/");
     const rec = await getFolderByPath(env, ownerId, path);
     if (!rec) continue;
-    const flags = await folderViewFlags(env, ownerId, path, user);
-    if (flags.canView) {
+    const access = await loadFolderAccessState(env, ownerId, path, user);
+    // 自分自身の URL は既知。祖先の URL は別途発見可能な場合だけ返す。
+    if (
+      access.flags.canView &&
+      (path === folder || canDiscoverAccess(access, ownerId, user))
+    ) {
       crumbs.push({ id: rec.id, name: parts[i - 1] ?? rec.id });
     } else {
       crumbs.length = 0;
@@ -431,6 +473,15 @@ async function listVisibleChildren(
       env,
     );
     if (!flags.canView) continue;
+    // 既知のフォルダから継承した子は辿れるが、別のリンク限定設定は列挙しない。
+    const inheritsKnownFolder =
+      effective.sourceFolder !== null &&
+      folderContains(effective.sourceFolder, folder);
+    if (
+      !inheritsKnownFolder &&
+      !canDiscoverAccess({ ...effective, flags }, ownerId, user)
+    )
+      continue;
     children.push({
       id: row.id,
       name: folderName(row.folder),
@@ -452,6 +503,7 @@ function presentFolderAccess(
     ...access,
     folder: undefined,
     sourceFolder: null,
+    grants: [],
     children: access.children.map((child) => ({
       id: child.id,
       name: child.name,
@@ -468,18 +520,11 @@ export async function resolveFolderAccess(
   folder: string,
   user?: SessionUser | null,
 ): Promise<FolderAccess> {
-  const effective = await loadFolderEffective(env, ownerId, folder);
-  const actor = actorFromUser(user, ownerId);
-  const grant = grantForActor(effective.grants, actor);
-  const flags = applyInstanceFlags(
-    evaluateAccess(
-      effective.effectiveReadScope,
-      effective.effectiveWriteScope,
-      actor,
-      grant,
-    ),
-    actor,
+  const { flags, ...effective } = await loadFolderAccessState(
     env,
+    ownerId,
+    folder,
+    user,
   );
   const id = await ensureFolderRow(env, ownerId, folder);
   const crumbs = folder ? await visibleCrumbs(env, ownerId, folder, user) : [];
@@ -573,7 +618,13 @@ export async function listSharedFolders(
       grant.folder,
       user,
     );
-    if (!access.flags.canView || !access.id || seen.has(access.id)) continue;
+    // resolveFolderAccess は非オーナーの grants を伏せるため、内部状態で判定する。
+    if (
+      !(await folderDiscoveryAllowed(env, grant.ownerId, grant.folder, user)) ||
+      !access.id ||
+      seen.has(access.id)
+    )
+      continue;
     seen.add(access.id);
     folders.push({
       id: access.id,
@@ -853,7 +904,7 @@ export async function listSharedFolderCandidates(
        UNION
        SELECT owner_id, folder AS target_key
        FROM folder_policies
-       WHERE read_scope IN ('signed_in', 'public')`,
+       WHERE read_scope = 'public'`,
     )
     .bind(user.id, user.email)
     .all<{ owner_id: string; target_key: string }>();
