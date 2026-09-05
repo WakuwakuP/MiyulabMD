@@ -16,7 +16,7 @@ export const ACCESS_SCOPE_HINTS: Record<AccessScope, string> = {
   self: "あなただけがアクセスできます",
 };
 
-/** ルートディレクトリの公開範囲。変更不可。 */
+/** マイドライブ（ユーザー root）の公開範囲。変更不可。 */
 export const ROOT_SCOPES = {
   readScope: "self",
   writeScope: "self",

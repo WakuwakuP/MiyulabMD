@@ -9,6 +9,7 @@ import {
   ContextMenu,
   type ContextMenuItem,
 } from "../components/notes/ContextMenu.tsx";
+import { DrivePlaceNav } from "../components/notes/DrivePlaceNav.tsx";
 import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
 import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
@@ -214,7 +215,7 @@ export function HomePage() {
       return;
     }
     if (result.data.locked || !result.data.id) {
-      setError("ルートディレクトリの範囲は自分のみで固定です。");
+      setError("マイドライブの範囲は自分のみで固定です。");
       return;
     }
     setShare({
@@ -479,8 +480,15 @@ export function HomePage() {
     return () => setHeader(null);
   }, [headerFolder, visibleFolder, folderId, canAdmin, creating, setHeader]);
 
+  const isDriveRoot = Boolean(visibleFolder?.locked);
+
   return (
     <section>
+      {user ? (
+        <DrivePlaceNav
+          current={canAdmin || isDriveRoot || !folderId ? "drive" : "shared"}
+        />
+      ) : null}
       {error && <ErrorText>{error}</ErrorText>}
       {showTree ? (
         <NoteTree
@@ -490,6 +498,7 @@ export function HomePage() {
           parentId={visibleFolder?.parentId ?? null}
           childrenFolders={visibleFolder?.children ?? []}
           showRootCrumb={canAdmin}
+          isDriveRoot={isDriveRoot}
           openMenuId={menu?.id}
           pending={listPending}
           placeholder={showPlaceholder}
