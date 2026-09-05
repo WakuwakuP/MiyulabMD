@@ -19,7 +19,8 @@ export const ACCESS_SCOPE_LABELS: Record<AccessScope, string> = {
 export const ACCESS_SCOPE_HINTS: Record<AccessScope, string> = {
   public: "誰でもアクセスでき、公開一覧にも表示されます",
   link: "リンクを知っている全員がアクセスできます（公開一覧には表示されません）",
-  signed_in: "ログインしているユーザーがアクセスできます",
+  signed_in:
+    "リンクを知っているログイン済みユーザーがアクセスできます（公開一覧には表示されません）",
   users: "追加したユーザーだけがアクセスできます",
   self: "あなただけがアクセスできます",
 };
