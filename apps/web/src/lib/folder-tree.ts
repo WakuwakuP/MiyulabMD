@@ -36,15 +36,20 @@ export type FolderHierarchyLevel = {
   selected: string;
 };
 
+function driveRootId(folders: FolderRecord[]): string | null {
+  return folders.find((folder) => folder.folder === "")?.id ?? null;
+}
+
 export function folderHierarchyLevels(
   folders: FolderRecord[],
   selectedPath: string,
 ): FolderHierarchyLevel[] {
   const chain = folderChain(folders, selectedPath);
-  const roots = childrenOf(folders, null);
+  const rootId = driveRootId(folders);
+  const roots = childrenOf(folders, rootId);
   const levels: FolderHierarchyLevel[] = [
     {
-      parentId: null,
+      parentId: rootId,
       parentPath: "",
       options: roots,
       selected: chain[0]?.folder ?? "",

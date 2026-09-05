@@ -13,8 +13,10 @@ import { instanceFlags } from "../env.ts";
 import {
   createOwnedFolder,
   deleteFolderPolicy,
+  ensureFolderRow,
   getFolderById,
   listOwnedFolders,
+  listSharedFolders,
   parentFolderPath,
   replaceGrants,
   resolveFolderAccess,
@@ -45,7 +47,7 @@ async function applyFolderAccessPatch(
 ): Promise<{ error: string; status: number } | null> {
   if (!folder) {
     return {
-      error: "ルートディレクトリの範囲は自分のみで固定です",
+      error: "マイドライブの範囲は自分のみで固定です",
       status: 400,
     };
   }
@@ -108,7 +110,17 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       set.status = 401;
       return { error: "Unauthorized" };
     }
+    await ensureFolderRow(env, user.id, "");
     const folders = await listOwnedFolders(env, user.id);
+    return { folders };
+  })
+  .get("/shared", async ({ request, set }) => {
+    const user = await readSession(request, env);
+    if (!user) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+    const folders = await listSharedFolders(env, user);
     return { folders };
   })
   .get("/:id", async ({ params, request, set }) => {
@@ -178,7 +190,7 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
 
     if (!folder) {
       set.status = 400;
-      return { error: "ルートにはフォルダを作成できません" };
+      return { error: "マイドライブ自体は作成できません" };
     }
 
     const parent = parentFolderPath(folder);

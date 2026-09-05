@@ -96,11 +96,9 @@ async function toNote(
   const access = await resolveNoteAccess(env, accessFields(row), user);
   const isOwner = user?.id === row.owner_id;
   const folder = row.folder ?? "";
-  const folderId = folder
-    ? await ensureFolderRow(env, row.owner_id, folder)
-    : null;
+  const folderId = await ensureFolderRow(env, row.owner_id, folder);
   let visibleFolderId = isOwner ? folderId : null;
-  if (!isOwner && folderId && folder) {
+  if (!isOwner && folderId) {
     const flags = await folderViewFlags(env, row.owner_id, folder, user);
     if (flags.canView) visibleFolderId = folderId;
   }
@@ -484,9 +482,7 @@ export function createNoteService(env: Env) {
         }
         folder = rec.owner_id === owner.id ? rec.folder : "";
       }
-      if (folder) {
-        await ensureFolderRow(env, owner.id, folder);
-      }
+      await ensureFolderRow(env, owner.id, folder);
       let markdown =
         input.markdown ?? defaultNoteMarkdown(input.title?.trim() || "無題");
       const sources = await createArticleService(env).listSources(owner.id);
@@ -598,9 +594,7 @@ export function createNoteService(env: Env) {
         input.folder !== undefined
           ? normalizeFolder(input.folder)
           : (row.folder ?? "");
-      if (nextFolder) {
-        await ensureFolderRow(env, row.owner_id, nextFolder);
-      }
+      await ensureFolderRow(env, row.owner_id, nextFolder);
 
       const now = Date.now();
       await db(env)
@@ -732,6 +726,9 @@ export function createNoteService(env: Env) {
       if (!user || user.id !== rec.owner_id) {
         return { kind: "denied", status: user === undefined ? 401 : 403 };
       }
+      if (!rec.folder) {
+        return { kind: "denied", status: 403 };
+      }
 
       const owned = await db(env)
         .prepare(`SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?`)
@@ -769,6 +766,13 @@ export function createNoteService(env: Env) {
       }
       if (!user || user.id !== rec.owner_id) {
         return { kind: "denied", status: user === undefined ? 401 : 403 };
+      }
+      if (!rec.folder) {
+        return {
+          kind: "invalid",
+          error: "マイドライブの名前は変更できません",
+          status: 400,
+        };
       }
 
       const parent = parentFolderPath(rec.folder);

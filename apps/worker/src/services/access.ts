@@ -15,6 +15,8 @@ import {
   folderContains,
   grantForActor,
   isAccessScope,
+  isDriveRootPath,
+  MY_DRIVE_NAME,
   type NoteAccess,
   type PermissionFlags,
   presetFromScopes,
@@ -289,7 +291,6 @@ export async function getFolderByPath(
   ownerId: string,
   folder: string,
 ): Promise<FolderRow | null> {
-  if (!folder) return null;
   return (
     (await db(env)
       .prepare(
@@ -480,18 +481,23 @@ export async function resolveFolderAccess(
     actor,
     env,
   );
-  const id = folder ? await ensureFolderRow(env, ownerId, folder) : null;
+  const id = await ensureFolderRow(env, ownerId, folder);
   const crumbs = folder ? await visibleCrumbs(env, ownerId, folder, user) : [];
-  const parentId =
-    crumbs.length >= 2 ? (crumbs[crumbs.length - 2]?.id ?? null) : null;
-  const children = await listVisibleChildren(env, ownerId, folder, id, user);
   const isOwner = user?.id === ownerId;
+  const parentId = folder
+    ? crumbs.length >= 2
+      ? (crumbs[crumbs.length - 2]?.id ?? null)
+      : isOwner
+        ? await ensureFolderRow(env, ownerId, "")
+        : null
+    : null;
+  const children = await listVisibleChildren(env, ownerId, folder, id, user);
 
   return presentFolderAccess(
     {
       ...effective,
       id,
-      name: folder ? folderName(folder) : "ルート",
+      name: folder ? folderName(folder) : MY_DRIVE_NAME,
       parentId,
       crumbs,
       children,
@@ -507,10 +513,8 @@ export async function ensureFolderRow(
   ownerId: string,
   folder: string,
 ): Promise<string | null> {
-  if (!folder) return null;
-
   const parent = parentFolderPath(folder);
-  if (parent) {
+  if (folder && parent !== folder) {
     await ensureFolderRow(env, ownerId, parent);
   }
 
@@ -543,14 +547,44 @@ export async function listOwnedFolders(
     .bind(ownerId)
     .all<FolderRow>();
   const byPath = new Map((rows.results ?? []).map((row) => [row.folder, row]));
-  return (rows.results ?? [])
-    .filter((row) => row.folder)
-    .map((row) => ({
-      id: row.id,
-      name: folderName(row.folder),
-      parentId: byPath.get(parentFolderPath(row.folder))?.id ?? null,
-      folder: row.folder,
-    }));
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    name: row.folder ? folderName(row.folder) : MY_DRIVE_NAME,
+    parentId: isDriveRootPath(row.folder)
+      ? null
+      : (byPath.get(parentFolderPath(row.folder))?.id ?? null),
+    folder: row.folder,
+  }));
+}
+
+export async function listSharedFolders(
+  env: Env,
+  user: SessionUser,
+): Promise<FolderRecord[]> {
+  const grants = await listFolderGrantsForUser(env, user);
+  const seen = new Set<string>();
+  const folders: FolderRecord[] = [];
+
+  for (const grant of grants) {
+    if (isDriveRootPath(grant.folder)) continue;
+    const access = await resolveFolderAccess(
+      env,
+      grant.ownerId,
+      grant.folder,
+      user,
+    );
+    if (!access.flags.canView || !access.id || seen.has(access.id)) continue;
+    seen.add(access.id);
+    folders.push({
+      id: access.id,
+      name: access.name,
+      parentId: access.parentId,
+      readScope: access.effectiveReadScope,
+      writeScope: access.effectiveWriteScope,
+    });
+  }
+
+  return folders.sort((a, b) => a.name.localeCompare(b.name, "ja"));
 }
 
 export async function createOwnedFolder(
