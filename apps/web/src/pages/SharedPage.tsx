@@ -34,9 +34,12 @@ export function SharedPage() {
   const [menu, setMenu] = useState<MenuState | null>(null);
 
   useEffect(() => {
-    setHeader({ folder: null });
+    setHeader({
+      folder: null,
+      actions: user ? <DrivePlaceNav current="shared" /> : null,
+    });
     return () => setHeader(null);
-  }, [setHeader]);
+  }, [setHeader, user]);
 
   useEffect(() => {
     if (userLoading) return;
@@ -108,7 +111,6 @@ export function SharedPage() {
 
   return (
     <section>
-      <DrivePlaceNav current="shared" />
       {error && <ErrorText>{error}</ErrorText>}
       {empty && !pending ? (
         <p>共有されているアイテムはありません。</p>

@@ -16,6 +16,7 @@ import {
   ensureFolderRow,
   getFolderById,
   listOwnedFolders,
+  listPublicSharedFolders,
   listSharedFolders,
   parentFolderPath,
   replaceGrants,
@@ -121,6 +122,10 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       return { error: "Unauthorized" };
     }
     const folders = await listSharedFolders(env, user);
+    return { folders };
+  })
+  .get("/public", async () => {
+    const folders = await listPublicSharedFolders(env);
     return { folders };
   })
   .get("/:id", async ({ params, request, set }) => {

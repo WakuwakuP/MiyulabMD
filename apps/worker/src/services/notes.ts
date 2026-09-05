@@ -33,7 +33,8 @@ import {
   folderViewFlags,
   getFolderById,
   getFolderByPath,
-  listFolderGrantsForUser,
+  listPublicFolderCandidates,
+  listSharedFolderCandidates,
   type NoteAccessFields,
   noteMatchesFolderGrant,
   parentFolderPath,
@@ -45,6 +46,7 @@ import {
 import {
   createArticleService,
   deleteArticleSourcesInFolder,
+  escapeLikePattern,
   rewriteArticleSourceFolders,
 } from "./articles.ts";
 import { createImageService } from "./images.ts";
@@ -327,6 +329,65 @@ async function mergeNoteRows(rows: NoteRow[]): Promise<NoteRow[]> {
   return [...map.values()].sort((a, b) => b.updated_at - a.updated_at);
 }
 
+function buildFolderPrefixCondition(folders: string[]): {
+  clause: string;
+  binds: string[];
+} {
+  const unique = [...new Set(folders.filter(Boolean))];
+  if (unique.length === 0) {
+    return { clause: "1=0", binds: [] };
+  }
+
+  const parts: string[] = [];
+  const binds: string[] = [];
+  for (const folder of unique) {
+    parts.push("folder = ?", "folder LIKE ? ESCAPE '\\'");
+    binds.push(folder, `${escapeLikePattern(folder)}/%`);
+  }
+
+  return { clause: `(${parts.join(" OR ")})`, binds };
+}
+
+async function listGuestInheritedRowsFromPublicFolders(
+  env: Env,
+): Promise<NoteRow[]> {
+  const publicFolders = await listPublicFolderCandidates(env);
+  if (publicFolders.length === 0) {
+    return [];
+  }
+
+  const foldersByOwner = new Map<string, string[]>();
+  for (const row of publicFolders) {
+    const list = foldersByOwner.get(row.ownerId) ?? [];
+    list.push(row.folder);
+    foldersByOwner.set(row.ownerId, list);
+  }
+
+  const candidates: NoteRow[] = [];
+  for (const [ownerId, folders] of foldersByOwner) {
+    const { clause, binds } = buildFolderPrefixCondition(folders);
+    if (binds.length === 0) {
+      continue;
+    }
+
+    const rows = await db(env)
+      .prepare(
+        `SELECT ${NOTE_COLUMNS}
+           FROM notes
+          WHERE owner_id = ?
+            AND read_scope IS NULL
+            AND write_scope IS NULL
+            AND ${clause}
+          ORDER BY updated_at DESC`,
+      )
+      .bind(ownerId, ...binds)
+      .all<NoteRow>();
+    candidates.push(...(rows.results ?? []));
+  }
+
+  return candidates;
+}
+
 async function listAccessibleRows(
   env: Env,
   user: SessionUser,
@@ -338,13 +399,13 @@ async function listAccessibleRows(
            LEFT JOIN access_grants ag
              ON ag.target_kind = 'note' AND ag.target_key = n.id
             AND (ag.user_id = ? OR ag.email = ?)
-           WHERE n.owner_id = ? OR ag.id IS NOT NULL
+           WHERE n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope IN ('signed_in', 'public')
            ORDER BY n.updated_at DESC`,
     )
     .bind(user.id, user.email, user.id)
     .all<NoteRow>();
 
-  const folderGrants = await listFolderGrantsForUser(env, user);
+  const folderGrants = await listSharedFolderCandidates(env, user);
   const extra: NoteRow[] = [];
   for (const grant of folderGrants) {
     const rows = await db(env)
@@ -360,7 +421,45 @@ async function listAccessibleRows(
     }
   }
 
-  return mergeNoteRows([...(owned.results ?? []), ...extra]);
+  const candidates = await mergeNoteRows([...(owned.results ?? []), ...extra]);
+  // 親の共有設定より狭い範囲を指定したノートは一覧・検索に漏らさない。
+  const visible = await Promise.all(
+    candidates.map(async (row) => {
+      const access = await resolveNoteAccess(env, accessFields(row), user);
+      return access.flags.canView ? row : null;
+    }),
+  );
+  return visible.filter((row): row is NoteRow => row !== null);
+}
+
+async function listGuestRows(env: Env): Promise<NoteRow[]> {
+  const allowAnonymousViews = instanceFlags(env).allowAnonymousViews;
+  if (!allowAnonymousViews) {
+    return [];
+  }
+
+  const [publicDirect, inheritedFromFolder] = await Promise.all([
+    db(env)
+      .prepare(
+        `SELECT ${NOTE_COLUMNS} FROM notes WHERE read_scope = 'public' ORDER BY updated_at DESC`,
+      )
+      .all<NoteRow>(),
+    listGuestInheritedRowsFromPublicFolders(env),
+  ]);
+
+  const candidates = await mergeNoteRows([
+    ...(publicDirect.results ?? []),
+    ...inheritedFromFolder,
+  ]);
+
+  const visible = await Promise.all(
+    candidates.map(async (row) => {
+      const access = await resolveNoteAccess(env, accessFields(row), undefined);
+      return access.flags.canView ? row : null;
+    }),
+  );
+
+  return visible.filter((row): row is NoteRow => row !== null);
 }
 
 export type NoteSearchHit = NoteSummary & {
@@ -404,6 +503,11 @@ export function createNoteService(env: Env) {
     async listForUser(user: SessionUser): Promise<NoteSummary[]> {
       const rows = await listAccessibleRows(env, user);
       return Promise.all(rows.map((row) => toSummary(env, row, user)));
+    },
+
+    async listForGuest(): Promise<NoteSummary[]> {
+      const rows = await listGuestRows(env);
+      return Promise.all(rows.map((row) => toSummary(env, row, undefined)));
     },
 
     async searchForUser(
