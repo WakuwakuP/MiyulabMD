@@ -79,9 +79,12 @@ async function applyFolderAccessPatch(
         ? body.writeScope!
         : fallback.writeScope,
     );
-    if (writeScope === "public" && !instanceFlags(env).allowAnonymousEdits) {
+    if (
+      (writeScope === "public" || writeScope === "link") &&
+      !instanceFlags(env).allowAnonymousEdits
+    ) {
       return {
-        error: "全体公開の書き込みは、匿名編集が無効なため使えません",
+        error: "匿名ユーザーによる書き込みは、匿名編集が無効なため使えません",
         status: 400,
       };
     }
