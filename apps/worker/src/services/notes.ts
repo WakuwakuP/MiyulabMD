@@ -113,7 +113,7 @@ async function toNote(
     folder: isOwner ? folder : "",
     folderId: visibleFolderId,
     permission: derivedPermission(access),
-    access: isOwner ? access : { ...access, sourceFolder: null },
+    access: isOwner ? access : { ...access, sourceFolder: null, grants: [] },
     markdown: row.markdown_snapshot,
     articleMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
     createdAt: row.created_at,
@@ -188,8 +188,11 @@ function rejectPublicWrite(
   env: Env,
   writeScope: AccessScope | null,
 ): string | null {
-  if (writeScope === "public" && !instanceFlags(env).allowAnonymousEdits) {
-    return "全体公開の書き込みは、匿名編集が無効なため使えません";
+  if (
+    (writeScope === "public" || writeScope === "link") &&
+    !instanceFlags(env).allowAnonymousEdits
+  ) {
+    return "匿名ユーザーによる書き込みは、匿名編集が無効なため使えません";
   }
   return null;
 }

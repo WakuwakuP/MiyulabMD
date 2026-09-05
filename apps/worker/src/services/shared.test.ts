@@ -19,6 +19,7 @@ const MIGRATIONS = [
   "0005_folder_ids.sql",
   "0006_article_sources.sql",
   "0007_user_root_folders.sql",
+  "0008_split_link_and_public_scopes.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -212,7 +213,8 @@ async function createEnvWithPublicDiscoverySeededData(
   const directPublic = await notes.create(owner, {
     title: "Direct public note",
     folder: "public-zone",
-    permission: "freely",
+    readScope: "public",
+    writeScope: "public",
     markdown: "# Direct public note\nThis note should be visible to guests.",
   });
   if ("error" in directPublic) {
@@ -275,7 +277,7 @@ async function createEnvWithPublicDiscoverySeededData(
   };
 }
 
-test("listForUser exposes signed_in, public notes and explicit grants", async (t) => {
+test("listForUser excludes link-only notes without an explicit grant", async (t) => {
   const { env, viewer, sqlite } = await createEnvWithSeededData();
   t.after(() => sqlite.close());
   const notes = createNoteService(env);
@@ -287,7 +289,6 @@ test("listForUser exposes signed_in, public notes and explicit grants", async (t
     "Direct signed-in note",
     "Explicit grant note",
     "Inherited signed-in note",
-    "Public-link-only note",
   ]);
 
   assert.equal(
