@@ -5,6 +5,7 @@ import {
   childrenOf,
   folderChain,
   folderHierarchyLevels,
+  hasSelectableSourceFolders,
 } from "./folder-tree.ts";
 
 function folder(
@@ -45,6 +46,21 @@ test("folderChain walks from the root to the selected path", () => {
   assert.deepEqual(
     folderChain(tree, "missing/path").map((item) => item.id),
     [],
+  );
+});
+
+test("hasSelectableSourceFolders ignores the drive root", () => {
+  assert.equal(hasSelectableSourceFolders([]), false);
+  assert.equal(
+    hasSelectableSourceFolders([folder("root", "マイドライブ", null, "")]),
+    false,
+  );
+  assert.equal(
+    hasSelectableSourceFolders([
+      folder("root", "マイドライブ", null, ""),
+      folder("work", "work", "root", "work"),
+    ]),
+    true,
   );
 });
 
