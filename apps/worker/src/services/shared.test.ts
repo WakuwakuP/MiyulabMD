@@ -409,3 +409,82 @@ test("guest discovery is disabled when anonymous views is false", async (t) => {
   assert.equal(rows.length, 0);
   assert.equal(folders.length, 0);
 });
+
+test("link overrides stay out of discovery even below public folders", async (t) => {
+  const { env, owner, sqlite } = await createEnvWithPublicDiscoverySeededData();
+  t.after(() => sqlite.close());
+  const viewer = await upsertUserByEmail(env, "viewer@example.com", "Viewer");
+  const notes = createNoteService(env);
+  await upsertFolderPolicy(env, owner.id, "shared-public/link", "link", "self");
+  for (const inheritAccess of [false, true]) {
+    const created = await notes.create(owner, {
+      folder: "shared-public/link",
+      inheritAccess,
+      ...(inheritAccess
+        ? {}
+        : ({ readScope: "link", writeScope: "self" } as const)),
+      markdown: "# link-discovery-regression",
+    });
+    if ("error" in created) throw new Error(created.error);
+    assert.equal((await notes.get(created.id)).kind, "ok");
+    assert.equal((await notes.get(created.id, viewer)).kind, "ok");
+    assert.equal(
+      (await notes.listForUser(owner)).some((n) => n.id === created.id),
+      true,
+    );
+    assert.equal(
+      (await notes.listForUser(viewer)).some((n) => n.id === created.id),
+      false,
+    );
+    assert.equal(
+      (await notes.listForGuest()).some((n) => n.id === created.id),
+      false,
+    );
+  }
+  assert.deepEqual(
+    await notes.searchForUser(viewer, "link-discovery-regression"),
+    [],
+  );
+  assert.equal(
+    (await listSharedFolders(env, viewer)).some((f) => f.name === "link"),
+    false,
+  );
+  assert.equal(
+    (await listPublicSharedFolders(env)).some((f) => f.name === "link"),
+    false,
+  );
+
+  await replaceGrants(env, owner.id, "folder", "shared-public/link", [
+    { email: viewer.email },
+  ]);
+  const hits = await notes.searchForUser(viewer, "link-discovery-regression");
+  assert.equal(hits.length, 2);
+  assert.equal(
+    hits.every((hit) => hit.access.grants.length === 0),
+    true,
+  );
+});
+
+test("a direct grant makes a link-only note discoverable to its recipient", async (t) => {
+  const { env, owner, viewer, sqlite } = await createEnvWithSeededData();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+  const link = (await notes.listForUser(owner)).find(
+    (n) => n.title === "Public-link-only note",
+  )!;
+  await replaceGrants(env, owner.id, "note", link.id, [
+    { email: viewer.email },
+  ]);
+  assert.equal(
+    (await notes.listForUser(viewer)).some((n) => n.id === link.id),
+    true,
+  );
+  assert.equal(
+    (await notes.searchForUser(viewer, "public-link-only")).length,
+    1,
+  );
+  assert.equal(
+    (await notes.listForGuest()).some((n) => n.id === link.id),
+    false,
+  );
+});

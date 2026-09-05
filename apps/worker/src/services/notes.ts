@@ -1,5 +1,6 @@
 import {
   type AccessScope,
+  actorFromUser,
   articleMetaFromNote,
   type CreateNoteInput,
   clampWriteScope,
@@ -7,6 +8,7 @@ import {
   ensureArticleMarkdown,
   type FolderAccess,
   folderContains,
+  grantForActor,
   isAccessScope,
   isPermissionPreset,
   matchArticleSource,
@@ -429,7 +431,12 @@ async function listAccessibleRows(
   const visible = await Promise.all(
     candidates.map(async (row) => {
       const access = await resolveNoteAccess(env, accessFields(row), user);
-      return access.flags.canView ? row : null;
+      const discoverable =
+        row.owner_id === user.id ||
+        access.effectiveReadScope !== "link" ||
+        grantForActor(access.grants, actorFromUser(user, row.owner_id)) !==
+          null;
+      return access.flags.canView && discoverable ? row : null;
     }),
   );
   return visible.filter((row): row is NoteRow => row !== null);
@@ -458,7 +465,9 @@ async function listGuestRows(env: Env): Promise<NoteRow[]> {
   const visible = await Promise.all(
     candidates.map(async (row) => {
       const access = await resolveNoteAccess(env, accessFields(row), undefined);
-      return access.flags.canView ? row : null;
+      return access.flags.canView && access.effectiveReadScope === "public"
+        ? row
+        : null;
     }),
   );
 
