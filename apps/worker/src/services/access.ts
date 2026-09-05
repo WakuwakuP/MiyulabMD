@@ -561,7 +561,36 @@ export async function listSharedFolders(
   env: Env,
   user: SessionUser,
 ): Promise<FolderRecord[]> {
-  const grants = await listFolderGrantsForUser(env, user);
+  const grants = await listSharedFolderCandidates(env, user);
+  const seen = new Set<string>();
+  const folders: FolderRecord[] = [];
+
+  for (const grant of grants) {
+    if (grant.ownerId === user.id || isDriveRootPath(grant.folder)) continue;
+    const access = await resolveFolderAccess(
+      env,
+      grant.ownerId,
+      grant.folder,
+      user,
+    );
+    if (!access.flags.canView || !access.id || seen.has(access.id)) continue;
+    seen.add(access.id);
+    folders.push({
+      id: access.id,
+      name: access.name,
+      parentId: access.parentId,
+      readScope: access.effectiveReadScope,
+      writeScope: access.effectiveWriteScope,
+    });
+  }
+
+  return folders.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+}
+
+export async function listPublicSharedFolders(
+  env: Env,
+): Promise<FolderRecord[]> {
+  const grants = await listPublicFolderCandidates(env);
   const seen = new Set<string>();
   const folders: FolderRecord[] = [];
 
@@ -571,9 +600,16 @@ export async function listSharedFolders(
       env,
       grant.ownerId,
       grant.folder,
-      user,
+      null,
     );
-    if (!access.flags.canView || !access.id || seen.has(access.id)) continue;
+    if (
+      !access.flags.canView ||
+      access.effectiveReadScope !== "public" ||
+      !access.id
+    ) {
+      continue;
+    }
+    if (seen.has(access.id)) continue;
     seen.add(access.id);
     folders.push({
       id: access.id,
@@ -615,6 +651,21 @@ export async function createOwnedFolder(
     folder,
     user ?? { id: ownerId, email: "", displayName: null },
   );
+}
+
+export async function listPublicFolderCandidates(
+  env: Env,
+): Promise<Array<{ ownerId: string; folder: string }>> {
+  const rows = await db(env)
+    .prepare(
+      "SELECT owner_id, folder FROM folder_policies WHERE read_scope = 'public'",
+    )
+    .all<{ owner_id: string; folder: string }>();
+
+  return (rows.results ?? []).map((row) => ({
+    ownerId: row.owner_id,
+    folder: row.folder,
+  }));
 }
 
 export async function replaceGrants(
@@ -790,7 +841,7 @@ export async function deleteFolderTree(
   }
 }
 
-export async function listFolderGrantsForUser(
+export async function listSharedFolderCandidates(
   env: Env,
   user: SessionUser,
 ): Promise<Array<{ ownerId: string; folder: string }>> {
@@ -798,7 +849,11 @@ export async function listFolderGrantsForUser(
     .prepare(
       `SELECT owner_id, target_key
        FROM access_grants
-       WHERE target_kind = 'folder' AND (user_id = ? OR email = ?)`,
+       WHERE target_kind = 'folder' AND (user_id = ? OR email = ?)
+       UNION
+       SELECT owner_id, folder AS target_key
+       FROM folder_policies
+       WHERE read_scope IN ('signed_in', 'public')`,
     )
     .bind(user.id, user.email)
     .all<{ owner_id: string; target_key: string }>();

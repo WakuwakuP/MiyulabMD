@@ -17,6 +17,8 @@ type Props = {
   childrenFolders: FolderRecord[];
   showRootCrumb?: boolean;
   isDriveRoot?: boolean;
+  showAllNotes?: boolean;
+  rootHref?: string;
   openMenuId?: string | null;
   pending?: boolean;
   placeholder?: boolean;
@@ -60,12 +62,16 @@ export function NoteTree({
   childrenFolders,
   showRootCrumb = false,
   isDriveRoot = false,
+  showAllNotes = false,
+  rootHref = SHARED_PATH,
   openMenuId = null,
   pending = false,
   placeholder = false,
   onItemMenu,
 }: Props) {
-  const items = notesInFolder(notes, currentFolderId);
+  const items = showAllNotes
+    ? [...notes].sort((a, b) => b.updatedAt - a.updatedAt)
+    : notesInFolder(notes, currentFolderId);
   const folders = [...childrenFolders].sort((a, b) =>
     a.name.localeCompare(b.name, "ja"),
   );
@@ -124,8 +130,10 @@ export function NoteTree({
       {currentFolderId && !isDriveRoot && (
         <Link
           className="mb-3 block border-0 bg-transparent p-0 font-inherit text-accent no-underline"
-          to={parentId ? folderUrl(parentId) : SHARED_PATH}
-          onPointerEnter={() => prefetchFolder(parentId)}
+          to={parentId ? folderUrl(parentId) : rootHref}
+          onPointerEnter={() => {
+            if (parentId) prefetchFolder(parentId);
+          }}
         >
           上のフォルダへ
         </Link>

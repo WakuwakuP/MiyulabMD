@@ -3,6 +3,7 @@ import { AppShell } from "./components/layout/AppShell.tsx";
 import { SettingsLayout } from "./components/settings/SettingsLayout.tsx";
 import { EditorPage } from "./pages/EditorPage.tsx";
 import { HomePage } from "./pages/HomePage.tsx";
+import { SharedByMePage } from "./pages/SharedByMePage.tsx";
 import { SharedPage } from "./pages/SharedPage.tsx";
 import { SharePage } from "./pages/SharePage.tsx";
 import { McpSettingsPage } from "./pages/settings/McpSettingsPage.tsx";
@@ -16,6 +17,7 @@ export function App() {
         <Route element={<AppShell />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/shared" element={<SharedPage />} />
+          <Route path="/shared-by-me" element={<SharedByMePage />} />
           <Route path="/f/:folderId" element={<HomePage />} />
           <Route path="/n/:id" element={<EditorPage />} />
           <Route path="/s/:id" element={<SharePage />} />

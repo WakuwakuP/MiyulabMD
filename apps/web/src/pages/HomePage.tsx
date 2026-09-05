@@ -1,4 +1,9 @@
-import type { FolderAccess, Note, NoteSummary } from "@miyulabmd/shared";
+import type {
+  FolderAccess,
+  FolderRecord,
+  Note,
+  NoteSummary,
+} from "@miyulabmd/shared";
 import { folderUrl } from "@miyulabmd/shared";
 import { type MouseEvent, useEffect, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
@@ -23,6 +28,7 @@ import {
   deleteNote,
   fetchFolder,
   fetchNote,
+  fetchPublicFolders,
   renameFolder,
   updateFolderAccess,
   updateNote,
@@ -80,6 +86,7 @@ export function HomePage() {
     () => peekFolder(folderId) ?? null,
   );
   const [folderPending, setFolderPending] = useState(false);
+  const [publicFolders, setPublicFolders] = useState<FolderRecord[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [share, setShare] = useState<ShareState | null>(null);
@@ -126,8 +133,17 @@ export function HomePage() {
 
     if (!folderId && !user) {
       setVisibleFolder(null);
-      setFolderPending(false);
-      return;
+      setPublicFolders([]);
+      setFolderPending(true);
+      void fetchPublicFolders().then((result) => {
+        if (cancelled) return;
+        setFolderPending(false);
+        if (result.ok) setPublicFolders(result.data);
+        else setError(result.error);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
 
     const cached = peekFolder(folderId);
@@ -453,6 +469,9 @@ export function HomePage() {
   useEffect(() => {
     setHeader({
       folder: headerFolder,
+      actions: user ? (
+        <DrivePlaceNav current={canAdmin || !folderId ? "drive" : "shared"} />
+      ) : null,
       end:
         visibleFolder || !folderId ? (
           <>
@@ -478,17 +497,23 @@ export function HomePage() {
         ) : null,
     });
     return () => setHeader(null);
-  }, [headerFolder, visibleFolder, folderId, canAdmin, creating, setHeader]);
+  }, [
+    headerFolder,
+    visibleFolder,
+    folderId,
+    canAdmin,
+    creating,
+    setHeader,
+    user,
+  ]);
 
   const isDriveRoot = Boolean(visibleFolder?.locked);
 
   return (
     <section>
-      {user ? (
-        <DrivePlaceNav
-          current={canAdmin || isDriveRoot || !folderId ? "drive" : "shared"}
-        />
-      ) : null}
+      {!user && !folderId && !userLoading && (
+        <h1 className="mb-3 text-lg font-semibold">全体公開</h1>
+      )}
       {error && <ErrorText>{error}</ErrorText>}
       {showTree ? (
         <NoteTree
@@ -496,7 +521,11 @@ export function HomePage() {
           currentFolderId={visibleFolder?.id ?? null}
           crumbs={visibleFolder?.crumbs ?? []}
           parentId={visibleFolder?.parentId ?? null}
-          childrenFolders={visibleFolder?.children ?? []}
+          childrenFolders={
+            !user && !folderId ? publicFolders : (visibleFolder?.children ?? [])
+          }
+          showAllNotes={!user && !folderId}
+          rootHref={user ? "/shared" : "/"}
           showRootCrumb={canAdmin}
           isDriveRoot={isDriveRoot}
           openMenuId={menu?.id}
