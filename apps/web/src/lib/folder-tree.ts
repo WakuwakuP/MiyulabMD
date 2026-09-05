@@ -40,6 +40,11 @@ function driveRootId(folders: FolderRecord[]): string | null {
   return folders.find((folder) => folder.folder === "")?.id ?? null;
 }
 
+/** 記事ソースに選べるフォルダがあるか。マイドライブ自体は対象外。 */
+export function hasSelectableSourceFolders(folders: FolderRecord[]): boolean {
+  return folders.some((folder) => Boolean(folder.folder));
+}
+
 export function folderHierarchyLevels(
   folders: FolderRecord[],
   selectedPath: string,
