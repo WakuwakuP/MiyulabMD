@@ -20,8 +20,8 @@ function teamIssuer(env: Env): string {
 export function isAccessConfigured(env: Env): boolean {
   return Boolean(
     env.ACCESS_AUD?.trim() &&
-    env.ACCESS_TEAM_DOMAIN &&
-    String(env.ACCESS_TEAM_DOMAIN) !== "example.cloudflareaccess.com",
+      env.ACCESS_TEAM_DOMAIN &&
+      String(env.ACCESS_TEAM_DOMAIN) !== "example.cloudflareaccess.com",
   );
 }
 
@@ -88,7 +88,7 @@ export async function verifyAccessJwt(
   request: Request,
   env: Env,
 ): Promise<AccessVerifyResult> {
-  if (!isAccessConfigured(env) || !env.ACCESS_AUD) {
+  if (!(isAccessConfigured(env) && env.ACCESS_AUD)) {
     return { ok: false, reason: "access_not_configured" };
   }
 
@@ -104,7 +104,7 @@ export async function verifyAccessJwt(
     const jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
     let payload: Record<string, unknown>;
     try {
-      const verified = await jwtVerify(token, jwks, { issuer, audience });
+      const verified = await jwtVerify(token, jwks, { audience, issuer });
       payload = verified.payload as Record<string, unknown>;
     } catch (firstError) {
       // iss の表記ゆれ（末尾スラッシュなど）でも署名と aud は必ず見る
@@ -124,8 +124,8 @@ export async function verifyAccessJwt(
     }
 
     return {
+      claims: { displayName: displayNameFromPayload(payload), email },
       ok: true,
-      claims: { email, displayName: displayNameFromPayload(payload) },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "verify_failed";

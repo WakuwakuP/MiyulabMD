@@ -36,19 +36,21 @@ export function MarkdownPreview({
 
   const rendered = useMemo(() => {
     try {
-      return { html: renderMarkdownHtml(deferredMarkdown), error: null };
+      return { error: null, html: renderMarkdownHtml(deferredMarkdown) };
     } catch {
-      return { html: "", error: "プレビューの生成に失敗しました。" };
+      return { error: "プレビューの生成に失敗しました。", html: "" };
     }
   }, [deferredMarkdown]);
 
   useEffect(() => {
     let cancelled = false;
     void loadOgCards(markdown).then((cards) => {
-      if (cancelled || cards.size === 0) return;
+      if (cancelled || cards.size === 0) {
+        return;
+      }
       setEnhanced({
-        md: markdown,
         html: renderMarkdownHtml(markdown, cards),
+        md: markdown,
       });
     });
     return () => {
@@ -60,13 +62,21 @@ export function MarkdownPreview({
   const error = rendered.error;
 
   useEffect(() => {
-    if (documentScroll) return;
+    if (documentScroll) {
+      return;
+    }
     const el = scrollRef.current;
-    if (!el || scrollRatio == null) return;
-    if (Math.abs(scrollRatioFrom(el) - scrollRatio) < 0.004) return;
+    if (!el || scrollRatio == null) {
+      return;
+    }
+    if (Math.abs(scrollRatioFrom(el) - scrollRatio) < 0.004) {
+      return;
+    }
     applyingScroll.current = true;
     const max = el.scrollHeight - el.clientHeight;
-    if (max > 0) el.scrollTop = max * scrollRatio;
+    if (max > 0) {
+      el.scrollTop = max * scrollRatio;
+    }
     const timer = window.requestAnimationFrame(() => {
       applyingScroll.current = false;
     });
@@ -96,11 +106,11 @@ export function MarkdownPreview({
     }
     return (
       <div
-        ref={scrollRef}
         className={cn(
           documentPaneScrollClass,
           "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0",
         )}
+        ref={scrollRef}
       >
         <article className={cn(columnClass, "text-error")}>{error}</article>
       </div>
@@ -121,15 +131,17 @@ export function MarkdownPreview({
 
   return (
     <div
-      ref={scrollRef}
       className={cn(
         documentPaneScrollClass,
         "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0",
       )}
       onScroll={(event) => {
-        if (applyingScroll.current) return;
+        if (applyingScroll.current) {
+          return;
+        }
         onScrollRatio?.(scrollRatioFrom(event.currentTarget));
       }}
+      ref={scrollRef}
     >
       {article}
     </div>

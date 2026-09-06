@@ -5,24 +5,6 @@ import { ThemeProvider } from "../src/hooks/use-theme.ts";
 import "../src/styles/index.css";
 
 const preview: Preview = {
-  globalTypes: {
-    colorScheme: {
-      description: "Document color scheme (Canvas / CanvasText tokens)",
-      toolbar: {
-        title: "Color scheme",
-        icon: "circlehollow",
-        items: [
-          { value: "light", title: "Light", icon: "sun" },
-          { value: "dark", title: "Dark", icon: "moon" },
-          { value: "black", title: "Black", icon: "circle" },
-        ],
-        dynamicTitle: true,
-      },
-    },
-  },
-  initialGlobals: {
-    colorScheme: "light",
-  },
   decorators: [
     (Story, { globals }) => {
       const scheme = globals.colorScheme;
@@ -42,6 +24,24 @@ const preview: Preview = {
       );
     },
   ],
+  globalTypes: {
+    colorScheme: {
+      description: "Document color scheme (Canvas / CanvasText tokens)",
+      toolbar: {
+        dynamicTitle: true,
+        icon: "circlehollow",
+        items: [
+          { icon: "sun", title: "Light", value: "light" },
+          { icon: "moon", title: "Dark", value: "dark" },
+          { icon: "circle", title: "Black", value: "black" },
+        ],
+        title: "Color scheme",
+      },
+    },
+  },
+  initialGlobals: {
+    colorScheme: "light",
+  },
   parameters: {
     controls: {
       matchers: {

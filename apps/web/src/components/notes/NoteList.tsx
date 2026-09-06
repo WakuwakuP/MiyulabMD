@@ -15,11 +15,11 @@ export function NoteList({ notes }: Props) {
     <DriveList>
       {notes.map((note) => (
         <DriveRow
-          key={note.id}
           href={`/n/${note.id}`}
-          name={note.title}
           icon={<MarkdownIcon />}
+          key={note.id}
           menuOpen={false}
+          name={note.title}
           onMenu={(event) => event.preventDefault()}
         />
       ))}

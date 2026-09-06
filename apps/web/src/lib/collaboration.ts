@@ -66,14 +66,14 @@ export function awarenessUser(user: SessionUser | null): AwarenessUserState & {
   const displayName = awarenessLabel(user);
   const color = colorForEmail(user?.email, userId);
   return {
-    userId,
-    displayName,
     color,
+    displayName,
     user: {
-      name: displayName,
       color,
       colorLight: colorLightFor(color),
+      name: displayName,
     },
+    userId,
   };
 }
 
@@ -105,6 +105,10 @@ export function createYjsSession(
 
   let currentUser = user;
   const lifecycle = createSessionLifecycle({
+    dispose: () => {
+      provider.destroy();
+      doc.destroy();
+    },
     leave: () => {
       provider.awareness.setLocalState(null);
       provider.disconnect();
@@ -113,22 +117,18 @@ export function createYjsSession(
       applyAwarenessUser(provider.awareness, currentUser);
       provider.connect();
     },
-    dispose: () => {
-      provider.destroy();
-      doc.destroy();
-    },
   });
 
   return {
-    doc,
-    provider,
-    yMarkdown,
     awareness: provider.awareness,
-    leave: lifecycle.leave,
-    reconnect: lifecycle.reconnect,
     destroy: lifecycle.destroy,
+    doc,
+    leave: lifecycle.leave,
+    provider,
+    reconnect: lifecycle.reconnect,
     setUser(next) {
       currentUser = next;
     },
+    yMarkdown,
   };
 }

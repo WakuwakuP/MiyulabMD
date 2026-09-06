@@ -50,10 +50,10 @@ test("splitTopLevel keeps nested parentheses", () => {
 
 test("flattenLicenseReport reads pnpm grouped objects", () => {
   const packages = flattenLicenseReport({
-    MIT: [{ name: "yjs", license: "MIT" }],
     "Apache-2.0": {
-      "fast-diff@1.3.0": { name: "fast-diff", license: "Apache-2.0" },
+      "fast-diff@1.3.0": { license: "Apache-2.0", name: "fast-diff" },
     },
+    MIT: [{ license: "MIT", name: "yjs" }],
   });
   assert.deepEqual(
     packages.map((pkg) => pkg.name),
@@ -63,9 +63,9 @@ test("flattenLicenseReport reads pnpm grouped objects", () => {
 
 test("findLicenseViolations reports name and license", () => {
   const violations = findLicenseViolations([
-    { name: "yjs", license: "MIT" },
-    { name: "@tiptap-pro/foo", license: "MIT" },
-    { name: "secret-lib", license: "BUSL-1.1" },
+    { license: "MIT", name: "yjs" },
+    { license: "MIT", name: "@tiptap-pro/foo" },
+    { license: "BUSL-1.1", name: "secret-lib" },
   ]);
   assert.deepEqual(
     violations.map((item) => item.name),

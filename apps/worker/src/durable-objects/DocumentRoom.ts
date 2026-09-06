@@ -94,16 +94,26 @@ export class DocumentRoom extends DurableObject<Env> {
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
   private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
+  private requireDoc(): Y.Doc {
+    if (!this.doc) {
+      throw new Error("Y.Doc is not initialized");
+    }
+    return this.doc;
+  }
+
+  private requireAwareness(): awarenessProtocol.Awareness {
+    if (!this.awareness) {
+      throw new Error("Awareness is not initialized");
+    }
+    return this.awareness;
   }
 
   async fetch(request: Request): Promise<Response> {
     const upgrade = request.headers.get("Upgrade");
-    if (!upgrade || upgrade.toLowerCase() !== "websocket") {
+    if (upgrade?.toLowerCase() !== "websocket") {
       return new Response("Expected WebSocket upgrade", {
-        status: 426,
         headers: { Upgrade: "websocket" },
+        status: 426,
       });
     }
 
@@ -124,11 +134,11 @@ export class DocumentRoom extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
 
     const attachment: WsAttachment = {
-      canEdit,
-      userId,
-      displayName,
       awarenessClientIds: [],
       awarenessClocks: {},
+      canEdit,
+      displayName,
+      userId,
     };
     server.serializeAttachment(attachment);
 
@@ -167,7 +177,7 @@ export class DocumentRoom extends DurableObject<Env> {
 
         const encoder = encoding.createEncoder();
         encoding.writeVarUint(encoder, MESSAGE_SYNC);
-        syncProtocol.readSyncMessage(decoder, encoder, this.doc!, ws);
+        syncProtocol.readSyncMessage(decoder, encoder, this.requireDoc(), ws);
 
         if (encoding.length(encoder) > 1) {
           ws.send(encoding.toUint8Array(encoder));
@@ -176,7 +186,11 @@ export class DocumentRoom extends DurableObject<Env> {
       }
       case MESSAGE_AWARENESS: {
         const update = decoding.readVarUint8Array(decoder);
-        awarenessProtocol.applyAwarenessUpdate(this.awareness!, update, ws);
+        awarenessProtocol.applyAwarenessUpdate(
+          this.requireAwareness(),
+          update,
+          ws,
+        );
         break;
       }
       case MESSAGE_QUERY_AWARENESS: {
@@ -185,8 +199,8 @@ export class DocumentRoom extends DurableObject<Env> {
         encoding.writeVarUint8Array(
           encoder,
           awarenessProtocol.encodeAwarenessUpdate(
-            this.awareness!,
-            Array.from(this.awareness!.getStates().keys()),
+            this.requireAwareness(),
+            Array.from(this.requireAwareness().getStates().keys()),
           ),
         );
         ws.send(encoding.toUint8Array(encoder));
@@ -211,7 +225,7 @@ export class DocumentRoom extends DurableObject<Env> {
       return;
     }
 
-    const awareness = this.awareness!;
+    const awareness = this.requireAwareness();
     const present = owned.filter((id) => awareness.getStates().has(id));
     if (present.length > 0) {
       awarenessProtocol.removeAwarenessStates(awareness, present, ws);
@@ -238,14 +252,14 @@ export class DocumentRoom extends DurableObject<Env> {
 
   async applyMarkdown(markdown: string, noteId?: string): Promise<void> {
     await this.ensureInitialized(noteId);
-    const ytext = this.doc!.getText("markdown");
+    const ytext = this.requireDoc().getText("markdown");
     applyTextDiff(ytext, markdown, "applyMarkdown");
     this.scheduleSnapshotPersist();
   }
 
   async getMarkdown(noteId?: string): Promise<string> {
     await this.ensureInitialized(noteId);
-    return this.doc!.getText("markdown").toString();
+    return this.requireDoc().getText("markdown").toString();
   }
 
   /** 最新本文を返し、エージェントのカーソルを出す。 */
@@ -254,7 +268,7 @@ export class DocumentRoom extends DurableObject<Env> {
     agent: AgentPresenceInput,
   ): Promise<string> {
     await this.ensureInitialized(noteId);
-    const markdown = this.doc!.getText("markdown").toString();
+    const markdown = this.requireDoc().getText("markdown").toString();
     this.touchAgentPresence(agent, { anchor: 0, head: 0 });
     return markdown;
   }
@@ -276,24 +290,26 @@ export class DocumentRoom extends DurableObject<Env> {
 
   async applyEdit(input: ApplyEditInput): Promise<ApplyEditResult> {
     await this.ensureInitialized(input.noteId);
-    const ytext = this.doc!.getText("markdown");
+    const ytext = this.requireDoc().getText("markdown");
     const current = ytext.toString();
 
-    const plan =
-      input.op === "replace"
-        ? planReplace(
-            current,
-            input.oldString,
-            input.newString,
-            input.replaceAll,
-          )
-        : input.op === "insert"
-          ? planInsert(current, input.text, input.position)
-          : {
-              ok: true as const,
-              next: input.markdown,
-              cursor: cursorAfterSet(current, input.markdown),
-            };
+    let plan: ApplyEditResult | ReturnType<typeof planInsert>;
+    if (input.op === "replace") {
+      plan = planReplace(
+        current,
+        input.oldString,
+        input.newString,
+        input.replaceAll,
+      );
+    } else if (input.op === "insert") {
+      plan = planInsert(current, input.text, input.position);
+    } else {
+      plan = {
+        cursor: cursorAfterSet(current, input.markdown),
+        next: input.markdown,
+        ok: true as const,
+      };
+    }
 
     if (!plan.ok) {
       return plan;
@@ -304,10 +320,10 @@ export class DocumentRoom extends DurableObject<Env> {
     this.scheduleSnapshotPersist();
 
     return {
-      ok: true,
       cursor: plan.cursor,
       excerpt: excerptAround(plan.next, plan.cursor.anchor, plan.cursor.head),
       markdownLength: plan.next.length,
+      ok: true,
     };
   }
 
@@ -494,7 +510,7 @@ export class DocumentRoom extends DurableObject<Env> {
   ): void {
     const awareness = this.awareness;
     const ytext = this.doc?.getText("markdown");
-    if (!awareness || !ytext) {
+    if (!(awareness && ytext)) {
       return;
     }
     awareness.setLocalState(agentAwarenessState(agent, ytext, cursor));
@@ -529,7 +545,7 @@ export class DocumentRoom extends DurableObject<Env> {
 
   private async flushSnapshotToD1(): Promise<void> {
     const noteId = await this.ctx.storage.get<string>(STORAGE_NOTE_ID_KEY);
-    if (!noteId || !this.doc) {
+    if (!(noteId && this.doc)) {
       return;
     }
 

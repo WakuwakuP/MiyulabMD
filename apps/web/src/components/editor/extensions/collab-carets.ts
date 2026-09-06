@@ -39,7 +39,9 @@ function caretDom(color: string, name: string): HTMLElement {
 
 function decorationsFor(doc: PMNode, options: Options): DecorationSet {
   const map = options.getMap();
-  if (!map) return DecorationSet.empty;
+  if (!map) {
+    return DecorationSet.empty;
+  }
 
   const widgets: Decoration[] = [];
   for (const peer of options.getPeers()) {
@@ -56,8 +58,8 @@ function decorationsFor(doc: PMNode, options: Options): DecorationSet {
     }
     widgets.push(
       Decoration.widget(head, () => caretDom(peer.color, peer.name), {
-        side: peer.head - peer.anchor > 0 ? -1 : 1,
         key: String(peer.clientId),
+        side: peer.head - peer.anchor > 0 ? -1 : 1,
       }),
     );
   }
@@ -65,8 +67,6 @@ function decorationsFor(doc: PMNode, options: Options): DecorationSet {
 }
 
 export const CollabCarets = Extension.create<Options>({
-  name: "collabCarets",
-
   addOptions() {
     return {
       getMap: () => null,
@@ -79,21 +79,22 @@ export const CollabCarets = Extension.create<Options>({
     return [
       new Plugin({
         key: collabCaretsKey,
+        props: {
+          decorations(state) {
+            return this.getState(state);
+          },
+        },
         state: {
-          init: (_config, state) => decorationsFor(state.doc, options),
           apply: (tr, value, _old, state) => {
             if (tr.docChanged || tr.getMeta(collabCaretsKey)) {
               return decorationsFor(state.doc, options);
             }
             return value.map(tr.mapping, tr.doc);
           },
-        },
-        props: {
-          decorations(state) {
-            return this.getState(state);
-          },
+          init: (_config, state) => decorationsFor(state.doc, options),
         },
       }),
     ];
   },
+  name: "collabCarets",
 });

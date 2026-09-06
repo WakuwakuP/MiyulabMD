@@ -13,7 +13,9 @@ export function peekNote(id: string): Note | undefined {
 export function noteFromCaches(id: string): Note | undefined {
   consumeOgBootstrap();
   const peeked = peekNote(id);
-  if (peeked) return peeked;
+  if (peeked) {
+    return peeked;
+  }
   const boot = readNoteBootstrap(id);
   if (boot) {
     seedNoteCache(boot);
@@ -24,7 +26,9 @@ export function noteFromCaches(id: string): Note | undefined {
 
 export function seedNoteCache(note: Note): void {
   noteCache.set(note.id, note);
-  if (note.shortId) noteCache.set(note.shortId, note);
+  if (note.shortId) {
+    noteCache.set(note.shortId, note);
+  }
 }
 
 export function invalidateNoteCache(id?: string): void {
@@ -38,7 +42,9 @@ export function invalidateNoteCache(id?: string): void {
   noteInflight.delete(id);
   if (cached) {
     noteCache.delete(cached.id);
-    if (cached.shortId) noteCache.delete(cached.shortId);
+    if (cached.shortId) {
+      noteCache.delete(cached.shortId);
+    }
   }
 }
 
@@ -48,22 +54,30 @@ export async function loadNote(
 ): Promise<ApiResult<Note>> {
   if (!force) {
     const cached = noteCache.get(id);
-    if (cached) return { ok: true, data: cached };
+    if (cached) {
+      return { data: cached, ok: true };
+    }
     const inflight = noteInflight.get(id);
-    if (inflight) return inflight;
+    if (inflight) {
+      return inflight;
+    }
   }
 
   const pending = fetchNote(id).then((result) => {
     noteInflight.delete(id);
-    if (result.ok) seedNoteCache(result.data);
+    if (result.ok) {
+      seedNoteCache(result.data);
+    }
     return result;
   });
   noteInflight.set(id, pending);
-  return pending;
+  return await pending;
 }
 
 export function prefetchNote(id: string): void {
   void loadNote(id).then((result) => {
-    if (result.ok) void loadOgCards(result.data.markdown);
+    if (result.ok) {
+      void loadOgCards(result.data.markdown);
+    }
   });
 }

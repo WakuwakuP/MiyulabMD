@@ -11,9 +11,9 @@ import {
 import { Switch } from "./Switch.tsx";
 
 const meta = {
-  title: "UI/Switch",
-  tags: ["autodocs"],
   parameters: { layout: "centered" },
+  tags: ["autodocs"],
+  title: "UI/Switch",
 } satisfies Meta;
 
 export default meta;
@@ -24,31 +24,31 @@ export const ViewEdit: Story = {
     const [mode, setMode] = useState<"preview" | "edit">("preview");
     return (
       <Switch
-        label="表示モード"
         items={[
           {
-            value: "preview",
             label: (
               <>
                 <EyeIcon />
                 View
               </>
             ),
-            pressed: mode === "preview",
             onClick: () => setMode("preview"),
+            pressed: mode === "preview",
+            value: "preview",
           },
           {
-            value: "edit",
             label: (
               <>
                 <PencilIcon />
                 Edit
               </>
             ),
-            pressed: mode === "edit",
             onClick: () => setMode("edit"),
+            pressed: mode === "edit",
+            value: "edit",
           },
         ]}
+        label="表示モード"
       />
     );
   },
@@ -59,38 +59,38 @@ export const ThemeIcons: Story = {
     const [theme, setTheme] = useState("system");
     return (
       <Switch
-        label="テーマ"
-        size="sm"
         items={[
           {
-            value: "light",
-            label: <SunIcon />,
             ariaLabel: "ライト",
-            pressed: theme === "light",
+            label: <SunIcon />,
             onClick: () => setTheme("light"),
+            pressed: theme === "light",
+            value: "light",
           },
           {
-            value: "dark",
-            label: <MoonIcon />,
             ariaLabel: "ダーク",
-            pressed: theme === "dark",
+            label: <MoonIcon />,
             onClick: () => setTheme("dark"),
+            pressed: theme === "dark",
+            value: "dark",
           },
           {
-            value: "black",
-            label: <BlackIcon />,
             ariaLabel: "ブラック",
-            pressed: theme === "black",
+            label: <BlackIcon />,
             onClick: () => setTheme("black"),
+            pressed: theme === "black",
+            value: "black",
           },
           {
-            value: "system",
-            label: <MonitorIcon />,
             ariaLabel: "システム",
-            pressed: theme === "system",
+            label: <MonitorIcon />,
             onClick: () => setTheme("system"),
+            pressed: theme === "system",
+            value: "system",
           },
         ]}
+        label="テーマ"
+        size="sm"
       />
     );
   },

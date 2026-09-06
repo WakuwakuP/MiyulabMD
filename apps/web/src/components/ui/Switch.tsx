@@ -34,7 +34,7 @@ export function Switch<T extends string>({
 
   useLayoutEffect(() => {
     const container = containerRef.current;
-    if (!container || !selectedValue) {
+    if (!(container && selectedValue)) {
       setThumbRect(null);
       return;
     }
@@ -65,38 +65,38 @@ export function Switch<T extends string>({
 
   return (
     <div
-      ref={containerRef}
+      aria-label={label}
       className={cn(
         "relative inline-flex w-fit items-center gap-[0.15rem] rounded-full border border-border bg-fill p-0.5",
         size === "sm" ? "min-h-8" : "min-h-9",
       )}
+      ref={containerRef}
       role="group"
-      aria-label={label}
     >
       {thumbRect && (
         <div
-          aria-hidden
+          aria-hidden={true}
           className="pointer-events-none absolute inset-y-0.5 left-0 rounded-full bg-canvas shadow-sm transition-[transform,width] duration-200 ease-out motion-reduce:transition-none"
           style={{
-            width: thumbRect.width,
             transform: `translateX(${thumbRect.left}px)`,
+            width: thumbRect.width,
           }}
         />
       )}
       {items.map((item) => (
         <button
-          key={item.value}
-          type="button"
-          data-switch-value={item.value}
+          aria-expanded={item.hasPopup ? item.expanded : undefined}
+          aria-haspopup={item.hasPopup ? "menu" : undefined}
           aria-label={item.ariaLabel}
           aria-pressed={item.pressed}
-          aria-haspopup={item.hasPopup ? "menu" : undefined}
-          aria-expanded={item.hasPopup ? item.expanded : undefined}
           className={cn(
             "relative z-10 inline-flex cursor-pointer items-center justify-center gap-[0.35rem] rounded-full border-0 bg-transparent leading-tight text-inherit",
             size === "sm" ? "px-2 py-1" : "px-3 py-[0.28rem] max-[900px]:px-2",
           )}
+          data-switch-value={item.value}
+          key={item.value}
           onClick={item.onClick}
+          type="button"
         >
           {item.label}
         </button>

@@ -14,19 +14,23 @@ function languageForFence(info: string) {
     parsed.language,
     inferLanguageFromFilename(parsed.filename),
   ]) {
-    if (!name) continue;
+    if (!name) {
+      continue;
+    }
     const match = LanguageDescription.matchLanguageName(languages, name, true);
-    if (match) return match;
+    if (match) {
+      return match;
+    }
   }
   return null;
 }
 
 const markdownHighlightExtras = HighlightStyle.define([
-  { tag: tags.function(tags.variableName), class: "tok-function" },
-  { tag: tags.function(tags.propertyName), class: "tok-function" },
-  { tag: tags.monospace, class: "tok-monospace" },
-  { tag: tags.strikethrough, class: "tok-strikethrough" },
-  { tag: tags.contentSeparator, class: "tok-contentSeparator" },
+  { class: "tok-function", tag: tags.function(tags.variableName) },
+  { class: "tok-function", tag: tags.function(tags.propertyName) },
+  { class: "tok-monospace", tag: tags.monospace },
+  { class: "tok-strikethrough", tag: tags.strikethrough },
+  { class: "tok-contentSeparator", tag: tags.contentSeparator },
 ]);
 
 export const markdownEditorLanguage = markdown({

@@ -95,9 +95,13 @@ function scrollRichSelectionIntoView(view: EditorView): boolean {
 }
 
 function firstImageFile(data: DataTransfer | null): File | null {
-  if (!data) return null;
+  if (!data) {
+    return null;
+  }
   for (const file of data.files) {
-    if (IMAGE_TYPES.has(file.type)) return file;
+    if (IMAGE_TYPES.has(file.type)) {
+      return file;
+    }
   }
   return null;
 }
@@ -112,13 +116,19 @@ function trySurgicalApply(
   delta: YTextDeltaItem[],
 ): boolean {
   const plain = inspectPlainTextDelta(delta);
-  if (!plain) return false;
+  if (!plain) {
+    return false;
+  }
 
   if (plain.kind === "insert") {
-    if (!isPlainMappedOffset(map, plain.index)) return false;
+    if (!isPlainMappedOffset(map, plain.index)) {
+      return false;
+    }
     const pos = clampPos(editor.state.doc, mdToPm(map, plain.index));
     const $pos = editor.state.doc.resolve(pos);
-    if (!$pos.parent.isTextblock) return false;
+    if (!$pos.parent.isTextblock) {
+      return false;
+    }
     editor.view.dispatch(
       editor.state.tr
         .insertText(plain.text, pos)
@@ -128,8 +138,10 @@ function trySurgicalApply(
   }
 
   if (
-    !isPlainMappedOffset(map, plain.index) ||
-    !isPlainMappedOffset(map, plain.index + plain.length)
+    !(
+      isPlainMappedOffset(map, plain.index) &&
+      isPlainMappedOffset(map, plain.index + plain.length)
+    )
   ) {
     return false;
   }
@@ -138,10 +150,14 @@ function trySurgicalApply(
     editor.state.doc,
     mdToPm(map, plain.index + plain.length),
   );
-  if (from === to) return false;
+  if (from === to) {
+    return false;
+  }
   const $from = editor.state.doc.resolve(from);
   const $to = editor.state.doc.resolve(to);
-  if ($from.parent !== $to.parent || !$from.parent.isTextblock) return false;
+  if ($from.parent !== $to.parent || !$from.parent.isTextblock) {
+    return false;
+  }
   editor.view.dispatch(
     editor.state.tr.delete(from, to).setMeta("addToHistory", false),
   );
@@ -222,7 +238,9 @@ export function RichMarkdownEditor({
   };
 
   const flushLocal = (editor: Editor) => {
-    if (applyingRemote.current || composing.current || readOnly) return;
+    if (applyingRemote.current || composing.current || readOnly) {
+      return;
+    }
     const next = withClosedFrontmatter(
       lastYMarkdown.current || yText.toString(),
       editorMarkdown(editor),
@@ -242,17 +260,76 @@ export function RichMarkdownEditor({
   };
 
   const editor = useEditor({
-    immediatelyRender: false,
+    content: normalizeEmbedMarkdown(markdownBody(yText.toString())),
+    contentType: "markdown",
     editable: !readOnly,
+    editorProps: {
+      attributes: {
+        class: richEditorTiptapClass,
+      },
+      handleDOMEvents: {
+        compositionend: () => {
+          composing.current = false;
+          const current = editorRef.current;
+          if (current) {
+            flushLocal(current);
+            if (pendingRemote.current) {
+              pendingRemote.current = false;
+              applyRemote(current, []);
+            }
+          }
+          return false;
+        },
+        compositionstart: () => {
+          composing.current = true;
+          return false;
+        },
+      },
+      handleDrop(_view, event) {
+        if (readOnly) {
+          return false;
+        }
+        const file = firstImageFile(event.dataTransfer);
+        if (!file) {
+          return false;
+        }
+        event.preventDefault();
+        void uploadImage(noteId, file).then((result) => {
+          if (result.ok) {
+            editor?.chain().focus().setImage({ src: result.data.url }).run();
+          }
+        });
+        return true;
+      },
+      handlePaste(_view, event) {
+        if (readOnly) {
+          return false;
+        }
+        const file = firstImageFile(event.clipboardData);
+        if (!file) {
+          return false;
+        }
+        event.preventDefault();
+        void uploadImage(noteId, file).then((result) => {
+          if (result.ok) {
+            editor?.chain().focus().setImage({ src: result.data.url }).run();
+          }
+        });
+        return true;
+      },
+      handleScrollToSelection: scrollRichSelectionIntoView,
+      scrollMargin: readEditorScrollPadPx(),
+      scrollThreshold: readEditorScrollPadPx(),
+    },
     extensions: [
       StarterKit.configure({
-        paragraph: false,
         codeBlock: false,
-        link: { openOnClick: false, autolink: true },
         dropcursor: {
           color: "var(--color-overlay)",
           width: 2,
         },
+        link: { autolink: true, openOnClick: false },
+        paragraph: false,
       }),
       HighlightedCodeBlock.extend({
         addNodeView() {
@@ -268,9 +345,9 @@ export function RichMarkdownEditor({
       Image,
       Youtube.configure({
         controls: true,
+        height: 360,
         nocookie: true,
         width: 640,
-        height: 360,
       }),
       OgCard,
       AutoLinkCard,
@@ -296,76 +373,33 @@ export function RichMarkdownEditor({
         },
       }),
     ],
-    content: normalizeEmbedMarkdown(markdownBody(yText.toString())),
-    contentType: "markdown",
-    editorProps: {
-      attributes: {
-        class: richEditorTiptapClass,
-      },
-      scrollMargin: readEditorScrollPadPx(),
-      scrollThreshold: readEditorScrollPadPx(),
-      handleScrollToSelection: scrollRichSelectionIntoView,
-      handleDOMEvents: {
-        compositionstart: () => {
-          composing.current = true;
-          return false;
-        },
-        compositionend: () => {
-          composing.current = false;
-          const current = editorRef.current;
-          if (current) {
-            flushLocal(current);
-            if (pendingRemote.current) {
-              pendingRemote.current = false;
-              applyRemote(current, []);
-            }
-          }
-          return false;
-        },
-      },
-      handlePaste(_view, event) {
-        if (readOnly) return false;
-        const file = firstImageFile(event.clipboardData);
-        if (!file) return false;
-        event.preventDefault();
-        void uploadImage(noteId, file).then((result) => {
-          if (result.ok)
-            editor?.chain().focus().setImage({ src: result.data.url }).run();
-        });
-        return true;
-      },
-      handleDrop(_view, event) {
-        if (readOnly) return false;
-        const file = firstImageFile(event.dataTransfer);
-        if (!file) return false;
-        event.preventDefault();
-        void uploadImage(noteId, file).then((result) => {
-          if (result.ok)
-            editor?.chain().focus().setImage({ src: result.data.url }).run();
-        });
-        return true;
-      },
-    },
+    immediatelyRender: false,
     onCreate: ({ editor: next }) => {
       editorRef.current = next;
       lastYMarkdown.current = yText.toString();
       refreshMap(next);
     },
+    onSelectionUpdate: ({ editor: next }) => {
+      if (!applyingRemote.current) {
+        publishCursor(next);
+      }
+    },
     onUpdate: ({ editor: next }) => {
       flushLocal(next);
-    },
-    onSelectionUpdate: ({ editor: next }) => {
-      if (!applyingRemote.current) publishCursor(next);
     },
   });
 
   useEffect(() => {
     editorRef.current = editor;
-    if (editor) refreshMap(editor);
+    if (editor) {
+      refreshMap(editor);
+    }
   }, [editor]);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor) {
+      return;
+    }
 
     const sync = (event: Y.YTextEvent, transaction: Y.Transaction) => {
       if (transaction.local) {
@@ -384,7 +418,9 @@ export function RichMarkdownEditor({
   }, [editor, yText]);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor) {
+      return;
+    }
     const onAwareness = () => refreshCarets(editor);
     awareness.on("change", onAwareness);
     refreshCarets(editor);
@@ -402,23 +438,28 @@ export function RichMarkdownEditor({
 
   async function insertImageFile(file: File) {
     const result = await uploadImage(noteId, file);
-    if (result.ok)
+    if (result.ok) {
       editor?.chain().focus().setImage({ src: result.data.url }).run();
+    }
   }
 
   function insertYoutube() {
     const url = window.prompt("YouTube の URL");
-    if (!url || !editor) return;
+    if (!(url && editor)) {
+      return;
+    }
     editor.chain().focus().setYoutubeVideo({ src: url }).run();
   }
 
   async function insertStandaloneLink(url: string) {
-    if (!editor) return;
+    if (!editor) {
+      return;
+    }
     await fetchOgPreview(url);
     editor
       .chain()
       .focus()
-      .insertContent({ type: "ogCard", attrs: { href: url } })
+      .insertContent({ attrs: { href: url }, type: "ogCard" })
       .run();
   }
 
@@ -432,28 +473,30 @@ export function RichMarkdownEditor({
 
   const commandHandlers = {
     onImage: () => imageInputRef.current?.click(),
-    onYoutube: insertYoutube,
     onOgCard: () => setLinkModal("card"),
+    onYoutube: insertYoutube,
   };
 
   return (
     <div className="flex min-h-96 flex-col overflow-hidden [[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0">
       <FileInput
-        ref={imageInputRef}
         accept={[...IMAGE_TYPES].join(",")}
         aria-label="画像をアップロード"
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
-          if (file) void insertImageFile(file);
+          if (file) {
+            void insertImageFile(file);
+          }
         }}
+        ref={imageInputRef}
       />
       <EditorContent
-        editor={editor}
         className={cn(
           "rich-editor-content flex min-h-0 flex-1 justify-center overflow-auto",
           documentScrollPadClass,
         )}
+        editor={editor}
       />
       {!readOnly && (
         <>
@@ -467,19 +510,22 @@ export function RichMarkdownEditor({
       )}
       {linkModal && (
         <LinkModal
-          title={linkModal === "card" ? "リンクカード" : "リンク"}
           initial={
             linkModal === "inline"
               ? String(editor.getAttributes("link").href ?? "")
               : ""
           }
-          submitLabel="挿入"
+          onClose={() => setLinkModal(null)}
           onSubmit={(url) => {
-            if (linkModal === "card") void insertStandaloneLink(url);
-            else applyInlineLink(url);
+            if (linkModal === "card") {
+              void insertStandaloneLink(url);
+            } else {
+              applyInlineLink(url);
+            }
             setLinkModal(null);
           }}
-          onClose={() => setLinkModal(null)}
+          submitLabel="挿入"
+          title={linkModal === "card" ? "リンクカード" : "リンク"}
         />
       )}
     </div>

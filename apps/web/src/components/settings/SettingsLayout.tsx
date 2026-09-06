@@ -14,16 +14,16 @@ type SettingsGroup = { label: string; items: SettingsItem[] };
 
 const GROUPS: SettingsGroup[] = [
   {
+    items: [{ label: "ユーザー設定", to: "/settings/profile" }],
     label: "アカウント",
-    items: [{ to: "/settings/profile", label: "ユーザー設定" }],
   },
   {
+    items: [{ label: "MCP設定", to: "/settings/mcp" }],
     label: "開発者",
-    items: [{ to: "/settings/mcp", label: "MCP設定" }],
   },
   {
+    items: [{ label: "サイト設定", to: "/settings/site" }],
     label: "サイト",
-    items: [{ to: "/settings/site", label: "サイト設定" }],
   },
 ];
 
@@ -43,7 +43,7 @@ export function SettingsLayout() {
         <h1 className="m-0 mb-4 text-xl font-bold">設定</h1>
         <nav aria-label="設定">
           {GROUPS.map((group) => (
-            <div key={group.label} className="mb-4">
+            <div className="mb-4" key={group.label}>
               <p className="m-0 mb-1 px-2 text-[0.72rem] font-semibold tracking-wide text-muted uppercase">
                 {group.label}
               </p>
@@ -51,7 +51,6 @@ export function SettingsLayout() {
                 {group.items.map((item) => (
                   <li key={item.to}>
                     <NavLink
-                      to={item.to}
                       className={({ isActive }) =>
                         cn(
                           "block rounded-md border-l-2 px-2 py-1.5 text-[0.95rem] no-underline",
@@ -60,6 +59,7 @@ export function SettingsLayout() {
                             : "border-transparent text-ink hover:bg-fill",
                         )
                       }
+                      to={item.to}
                     >
                       {item.label}
                     </NavLink>
@@ -76,8 +76,8 @@ export function SettingsLayout() {
         <Select
           aria-label="設定セクション"
           className="w-full rounded-lg px-3 py-2.5"
-          value={current}
           onChange={(event) => navigate(event.target.value)}
+          value={current}
         >
           {ALL_ITEMS.map((item) => (
             <option key={item.to} value={item.to}>

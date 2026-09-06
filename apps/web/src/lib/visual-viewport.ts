@@ -101,7 +101,9 @@ export function bindVisualViewportHeight(
   };
 
   const schedule = () => {
-    if (raf) return;
+    if (raf) {
+      return;
+    }
     if (!requestFrame) {
       sync();
       return;
@@ -119,7 +121,9 @@ export function bindVisualViewportHeight(
   sync();
 
   return () => {
-    if (raf && cancelFrame) cancelFrame(raf);
+    if (raf && cancelFrame) {
+      cancelFrame(raf);
+    }
     raf = 0;
     vv?.removeEventListener("resize", schedule);
     vv?.removeEventListener("scroll", schedule);

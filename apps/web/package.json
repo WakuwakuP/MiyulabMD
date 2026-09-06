@@ -5,12 +5,12 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/components/editor/*.test.ts",
+    "build-storybook": "storybook build",
+    "dev": "vite",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/components/editor/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",

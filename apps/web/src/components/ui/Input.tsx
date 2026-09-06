@@ -18,13 +18,13 @@ export const Input = forwardRef<HTMLInputElement, Props>(function Input(
 ) {
   return (
     <input
-      ref={ref}
       className={cn(
         "min-w-0 border border-border bg-canvas text-ink",
         "disabled:cursor-default disabled:opacity-65",
         variants[variant],
         className,
       )}
+      ref={ref}
       {...props}
     />
   );

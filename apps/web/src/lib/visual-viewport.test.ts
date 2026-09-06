@@ -49,37 +49,37 @@ test("bindVisualViewportHeight updates on resize and scroll, then unbinds", () =
   const frames: FrameRequestCallback[] = [];
 
   const target = {
-    innerHeight: 900,
-    requestAnimationFrame(callback: FrameRequestCallback) {
-      frames.push(callback);
-      return frames.length;
+    addEventListener(type: string, listener: EventListener) {
+      const set = listeners.get(type) ?? new Set();
+      set.add(listener);
+      listeners.set(type, set);
     },
     cancelAnimationFrame() {
       frames.length = 0;
     },
+    innerHeight: 900,
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
+    },
+    requestAnimationFrame(callback: FrameRequestCallback) {
+      frames.push(callback);
+      return frames.length;
+    },
     visualViewport: {
+      addEventListener(type: string, listener: EventListener) {
+        const set = vvListeners.get(type) ?? new Set();
+        set.add(listener);
+        vvListeners.set(type, set);
+      },
       get height() {
         return height;
       },
       get offsetTop() {
         return offsetTop;
       },
-      addEventListener(type: string, listener: EventListener) {
-        const set = vvListeners.get(type) ?? new Set();
-        set.add(listener);
-        vvListeners.set(type, set);
-      },
       removeEventListener(type: string, listener: EventListener) {
         vvListeners.get(type)?.delete(listener);
       },
-    },
-    addEventListener(type: string, listener: EventListener) {
-      const set = listeners.get(type) ?? new Set();
-      set.add(listener);
-      listeners.set(type, set);
-    },
-    removeEventListener(type: string, listener: EventListener) {
-      listeners.get(type)?.delete(listener);
     },
   };
 

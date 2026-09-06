@@ -23,8 +23,8 @@ function readPnpmLicenseReport() {
       shell ? [] : args,
       {
         cwd: ROOT,
-        stdio: ["ignore", "pipe", "pipe"],
         shell,
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
     let stdout = "";

@@ -5,10 +5,10 @@ export const EDIT_MODES = ["split", "source", "rich"] as const;
 export type EditMode = (typeof EDIT_MODES)[number];
 
 export const EDITOR_MODE_LABELS: Record<EditorMode, string> = {
-  split: "分割",
   preview: "プレビュー",
-  source: "テキスト",
   rich: "リッチ",
+  source: "テキスト",
+  split: "分割",
 };
 
 const STORAGE_KEY = "miyulabmd:editor-mode";
@@ -34,7 +34,9 @@ export function readEditorMode(): EditorMode {
 export function readLastEditMode(): EditMode {
   try {
     const stored = localStorage.getItem(LAST_EDIT_KEY) ?? "";
-    if (isEditMode(stored)) return stored;
+    if (isEditMode(stored)) {
+      return stored;
+    }
     const current = localStorage.getItem(STORAGE_KEY) ?? "";
     return isEditMode(current) ? current : "split";
   } catch {

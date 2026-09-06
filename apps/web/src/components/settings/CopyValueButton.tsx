@@ -6,7 +6,6 @@ export function CopyValueButton({ value }: { value: string }) {
 
   return (
     <Button
-      variant="ghost"
       onClick={() => {
         void navigator.clipboard.writeText(value).then(
           () => {
@@ -16,6 +15,7 @@ export function CopyValueButton({ value }: { value: string }) {
           () => setCopied(false),
         );
       }}
+      variant="ghost"
     >
       {copied ? "コピー済み" : "コピー"}
     </Button>

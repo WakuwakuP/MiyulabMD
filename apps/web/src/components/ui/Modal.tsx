@@ -23,7 +23,9 @@ export function Modal({
 }: ModalProps) {
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+      }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
@@ -37,27 +39,27 @@ export function Modal({
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-overlay p-4"
-      role="presentation"
       onClick={onClose}
+      role="presentation"
     >
       {as === "form" ? (
         <form
-          className={bodyClass}
-          role="dialog"
-          aria-modal="true"
           aria-labelledby={labelledBy}
+          aria-modal="true"
+          className={bodyClass}
           onClick={(event) => event.stopPropagation()}
           onSubmit={onSubmit}
+          role="dialog"
         >
           {children}
         </form>
       ) : (
         <div
-          className={bodyClass}
-          role="dialog"
-          aria-modal="true"
           aria-labelledby={labelledBy}
+          aria-modal="true"
+          className={bodyClass}
           onClick={(event) => event.stopPropagation()}
+          role="dialog"
         >
           {children}
         </div>
@@ -80,13 +82,13 @@ export function ModalHeader({
   return (
     <header className="mb-4 flex justify-between gap-4">
       <div>
-        <h2 id={id} className="m-0 text-xl">
+        <h2 className="m-0 text-xl" id={id}>
           {title}
         </h2>
         {children}
       </div>
       {onClose && (
-        <IconButton variant="surface" aria-label="閉じる" onClick={onClose}>
+        <IconButton aria-label="閉じる" onClick={onClose} variant="surface">
           <CloseIcon />
         </IconButton>
       )}

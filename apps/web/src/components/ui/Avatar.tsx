@@ -13,9 +13,9 @@ type Props = {
 };
 
 const sizes: Record<Size, string> = {
-  sm: "size-7 text-[0.7rem]",
-  md: "size-8 text-[0.8rem]",
   lg: "size-16 text-2xl",
+  md: "size-8 text-[0.8rem]",
+  sm: "size-7 text-[0.7rem]",
 };
 
 export function Avatar({

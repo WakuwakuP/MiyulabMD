@@ -11,7 +11,9 @@ export function titleFromMarkdown(markdown: string): string {
     const atx = ATX_HEADING.exec(lines[i] ?? "");
     if (atx?.[2]) {
       const title = atx[2].trim();
-      if (title) return title;
+      if (title) {
+        return title;
+      }
     }
 
     const current = (lines[i] ?? "").trim();
@@ -30,7 +32,9 @@ export function defaultNoteMarkdown(title = "無題"): string {
 
 /** `work/infra` 形式。先頭末尾の / と `..` を除去する。 */
 export function normalizeFolder(folder: string | null | undefined): string {
-  if (!folder) return "";
+  if (!folder) {
+    return "";
+  }
   return folder
     .split("/")
     .map((part) => part.trim())
@@ -39,7 +43,9 @@ export function normalizeFolder(folder: string | null | undefined): string {
 }
 
 export function folderUrl(folderId: string | null | undefined): string {
-  if (!folderId) return "/";
+  if (!folderId) {
+    return "/";
+  }
   return `/f/${folderId}`;
 }
 

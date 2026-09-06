@@ -35,7 +35,9 @@ export function SitePublishButton({ user, folder }: Props) {
       void reload();
     }
     function onVisible() {
-      if (document.visibilityState === "visible") void reload();
+      if (document.visibilityState === "visible") {
+        void reload();
+      }
     }
     window.addEventListener(ARTICLE_CHANGED_EVENT, onChanged);
     window.addEventListener("focus", onChanged);
@@ -57,34 +59,42 @@ export function SitePublishButton({ user, folder }: Props) {
     setError(null);
   }, [matchedId]);
 
-  if (!matched) return null;
+  if (!matched) {
+    return null;
+  }
 
   async function handleClick() {
     const id = matchedId;
-    if (!id) return;
+    if (!id) {
+      return;
+    }
     setBusy(true);
     setError(null);
     const result = await dispatchArticleSource(id);
-    if (matchedIdRef.current !== id) return;
+    if (matchedIdRef.current !== id) {
+      return;
+    }
     if (!result.ok) {
       setError(result.error);
       setBusy(false);
       return;
     }
     await reload();
-    if (matchedIdRef.current !== id) return;
+    if (matchedIdRef.current !== id) {
+      return;
+    }
     setBusy(false);
   }
 
   return (
     <span className="relative">
       <HeaderButton
-        variant="outline"
+        disabled={busy}
         icon={<RefreshIcon />}
         label={busy ? "更新中…" : "サイトを更新"}
-        title={`${matched.name} を更新`}
-        disabled={busy}
         onClick={() => void handleClick()}
+        title={`${matched.name} を更新`}
+        variant="outline"
       />
       {error && (
         <span className="absolute top-full left-0 z-50 mt-1 max-w-[16rem] rounded-md bg-canvas px-2 py-1 text-[0.75rem] text-error shadow-modal">

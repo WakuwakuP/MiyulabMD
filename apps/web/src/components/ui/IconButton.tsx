@@ -12,14 +12,14 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const variants: Record<Variant, string> = {
   ghost: "border-transparent bg-transparent hover:enabled:bg-row",
-  surface: "border-transparent bg-surface",
   outline:
     "border-border bg-canvas text-muted hover:enabled:bg-surface hover:enabled:text-ink",
+  surface: "border-transparent bg-surface",
 };
 
 const sizes: Record<Size, string> = {
-  sm: "size-6 rounded-md",
   md: "size-8 rounded-full",
+  sm: "size-6 rounded-md",
 };
 
 export function IconButton({
@@ -32,7 +32,6 @@ export function IconButton({
 }: Props) {
   return (
     <button
-      type={type}
       className={cn(
         "grid cursor-pointer place-items-center border leading-none",
         "disabled:cursor-default disabled:opacity-65",
@@ -41,6 +40,7 @@ export function IconButton({
         sizes[size],
         className,
       )}
+      type={type}
       {...props}
     >
       {children}

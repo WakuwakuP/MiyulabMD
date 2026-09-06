@@ -15,7 +15,9 @@ function matchesNoteId(
 
 export function consumeOgBootstrap(): void {
   const el = document.getElementById(OG_BOOTSTRAP_ID);
-  if (!el?.textContent) return;
+  if (!el?.textContent) {
+    return;
+  }
   try {
     const cards = JSON.parse(el.textContent) as Record<string, OgPreview>;
     seedOgPreviews(cards);
@@ -27,10 +29,14 @@ export function consumeOgBootstrap(): void {
 export function readNoteBootstrap(id: string): Note | null {
   consumeOgBootstrap();
   const el = document.getElementById(BOOTSTRAP_ID);
-  if (!el?.textContent) return null;
+  if (!el?.textContent) {
+    return null;
+  }
   try {
     const note = JSON.parse(el.textContent) as Note;
-    if (!note?.id || !matchesNoteId(note, id)) return null;
+    if (!(note?.id && matchesNoteId(note, id))) {
+      return null;
+    }
     return note;
   } catch {
     return null;
@@ -39,7 +45,9 @@ export function readNoteBootstrap(id: string): Note | null {
 
 export function dismissStaleSsrPreview(id: string): void {
   const el = document.getElementById(SSR_PREVIEW_ID);
-  if (!el) return;
+  if (!el) {
+    return;
+  }
   const noteId = el.getAttribute("data-note-id");
   const shortId = el.getAttribute("data-short-id");
   if (noteId !== id && shortId !== id) {
