@@ -38,10 +38,10 @@ export function mcpAuthorizationHeader(token: string): string {
 
 function remoteHttpServer(origin: string, token: string) {
   return {
-    url: mcpEndpointUrl(origin),
     headers: {
       Authorization: mcpAuthorizationHeader(token),
     },
+    url: mcpEndpointUrl(origin),
   };
 }
 
@@ -77,14 +77,16 @@ export function mcpClaudeDesktopConfig(origin: string, token: string): string {
   return prettyJson({
     mcpServers: {
       miyulabmd: {
-        command: "npx",
         args: [
           "-y",
           "mcp-remote",
           mcpEndpointUrl(origin),
           "--header",
-          `Authorization:\${AUTH_HEADER}`,
+          // mcp-remote が AUTH_HEADER を展開する
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: mcp-remote placeholder
+          "Authorization:${AUTH_HEADER}",
         ],
+        command: "npx",
         env: {
           AUTH_HEADER: mcpAuthorizationHeader(token),
         },
@@ -119,10 +121,10 @@ export function mcpWindsurfConfig(origin: string, token: string): string {
   return prettyJson({
     mcpServers: {
       miyulabmd: {
-        serverUrl: mcpEndpointUrl(origin),
         headers: {
           Authorization: mcpAuthorizationHeader(token),
         },
+        serverUrl: mcpEndpointUrl(origin),
       },
     },
   });
@@ -132,9 +134,6 @@ const builders: Record<
   McpAgentId,
   (origin: string, token: string) => McpAgentSnippet[]
 > = {
-  cursor: (origin, token) => [
-    { label: "mcp.json", value: mcpCursorConfig(origin, token) },
-  ],
   "claude-code": (origin, token) => [
     { label: "コマンド", value: mcpClaudeCodeCommand(origin, token) },
     { label: ".mcp.json", value: mcpClaudeCodeConfig(origin, token) },
@@ -145,11 +144,14 @@ const builders: Record<
       value: mcpClaudeDesktopConfig(origin, token),
     },
   ],
-  vscode: (origin, token) => [
-    { label: "mcp.json", value: mcpVsCodeConfig(origin, token) },
-  ],
   codex: (origin, token) => [
     { label: "config.toml", value: mcpCodexConfig(origin, token) },
+  ],
+  cursor: (origin, token) => [
+    { label: "mcp.json", value: mcpCursorConfig(origin, token) },
+  ],
+  vscode: (origin, token) => [
+    { label: "mcp.json", value: mcpVsCodeConfig(origin, token) },
   ],
   windsurf: (origin, token) => [
     { label: "mcp_config.json", value: mcpWindsurfConfig(origin, token) },
@@ -157,49 +159,49 @@ const builders: Record<
 };
 
 const catalog: Record<McpAgentId, Omit<McpAgentGuide, "snippets">> = {
-  cursor: {
-    id: "cursor",
-    label: "Cursor",
-    intro:
-      "設定 → MCP に追加するか、次のファイルに貼って MCP を再読み込みしてください。",
-    paths: ["~/.cursor/mcp.json", ".cursor/mcp.json"],
-  },
   "claude-code": {
     id: "claude-code",
-    label: "Claude Code",
     intro:
       "ターミナルでコマンドを実行するか、プロジェクトの .mcp.json / ユーザー設定に貼ってください。接続後は /mcp で確認できます。",
+    label: "Claude Code",
     paths: [".mcp.json", "~/.claude.json"],
   },
   "claude-desktop": {
     id: "claude-desktop",
-    label: "Claude Desktop",
     intro:
       "設定 → Developer → Edit Config で開き、次を追加して Claude を再起動してください。リモート HTTP は mcp-remote 経由です（npx が必要）。",
+    label: "Claude Desktop",
     paths: [
       "~/Library/Application Support/Claude/claude_desktop_config.json",
       "%APPDATA%\\Claude\\claude_desktop_config.json",
     ],
   },
-  vscode: {
-    id: "vscode",
-    label: "VS Code",
-    intro:
-      "コマンドパレットの「MCP: Add Server」を使うか、次のファイルに貼ってください。Copilot は Agent モードで使います。ルートキーは servers です。",
-    paths: [".vscode/mcp.json"],
-  },
   codex: {
     id: "codex",
-    label: "Codex",
     intro:
       "~/.codex/config.toml またはプロジェクトの .codex/config.toml に追記し、Codex を再起動してください。CLI / IDE / ChatGPT デスクトップで共有されます。",
+    label: "Codex",
     paths: ["~/.codex/config.toml", ".codex/config.toml"],
+  },
+  cursor: {
+    id: "cursor",
+    intro:
+      "設定 → MCP に追加するか、次のファイルに貼って MCP を再読み込みしてください。",
+    label: "Cursor",
+    paths: ["~/.cursor/mcp.json", ".cursor/mcp.json"],
+  },
+  vscode: {
+    id: "vscode",
+    intro:
+      "コマンドパレットの「MCP: Add Server」を使うか、次のファイルに貼ってください。Copilot は Agent モードで使います。ルートキーは servers です。",
+    label: "VS Code",
+    paths: [".vscode/mcp.json"],
   },
   windsurf: {
     id: "windsurf",
-    label: "Windsurf",
     intro:
       "Cascade → Manage MCPs から追加するか、次のファイルに貼って Refresh してください。リモートは serverUrl です（url ではありません）。",
+    label: "Windsurf",
     paths: ["~/.codeium/windsurf/mcp_config.json"],
   },
 };

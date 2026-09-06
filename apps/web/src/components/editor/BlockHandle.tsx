@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import { PlusIcon } from "../ui/icons.tsx";
 import { CommandMenuList } from "./CommandMenuList.tsx";
+import { handleCommandMenuKey } from "./command-menu-key.ts";
 import {
   readSlashQuery,
   SLASH_ITEMS,
@@ -38,7 +39,9 @@ export function BlockHandle({ editor, handlers }: Props) {
   }, [editor]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
 
     function onPointer(event: MouseEvent) {
       const target = event.target as Node;
@@ -52,30 +55,19 @@ export function BlockHandle({ editor, handlers }: Props) {
     }
 
     function onKey(event: KeyboardEvent) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setIndex((value) => (value + 1) % SLASH_ITEMS.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setIndex(
-          (value) => (value - 1 + SLASH_ITEMS.length) % SLASH_ITEMS.length,
-        );
-        return;
-      }
-      if (event.key === "Enter") {
-        const item = SLASH_ITEMS[index];
-        if (!item) return;
-        event.preventDefault();
-        item.run(editor, handlers);
-        setOpen(false);
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setOpen(false);
-      }
+      handleCommandMenuKey(event, {
+        hasItem: Boolean(SLASH_ITEMS[index]),
+        itemCount: SLASH_ITEMS.length,
+        onCycle: setIndex,
+        onEnter: () => {
+          const item = SLASH_ITEMS[index];
+          if (item) {
+            item.run(editor, handlers);
+            setOpen(false);
+          }
+        },
+        onEscape: () => setOpen(false),
+      });
     }
 
     window.addEventListener("mousedown", onPointer);
@@ -98,44 +90,44 @@ export function BlockHandle({ editor, handlers }: Props) {
   return (
     <>
       <DragHandle
+        className={cn("rich-block-handle", slashOpen && "hidden")}
+        computePositionConfig={{ placement: "left", strategy: "absolute" }}
         editor={editor}
         nested={{ edgeDetection: { threshold: -16 } }}
-        computePositionConfig={{ placement: "left", strategy: "absolute" }}
-        className={cn("rich-block-handle", slashOpen && "hidden")}
       >
-        <div ref={handleRef} className="flex items-center text-muted">
+        <div className="flex items-center text-muted" ref={handleRef}>
           <button
-            type="button"
-            className="grid size-6 cursor-pointer place-items-center rounded-md border-0 bg-transparent hover:bg-surface hover:text-ink"
-            aria-label="ブロックを挿入"
             aria-expanded={open}
+            aria-label="ブロックを挿入"
+            className="grid size-6 cursor-pointer place-items-center rounded-md border-0 bg-transparent hover:bg-surface hover:text-ink"
             onMouseDown={(event) => {
               event.preventDefault();
               event.stopPropagation();
               toggleMenu();
             }}
+            type="button"
           >
             <PlusIcon className="size-3.5" />
           </button>
           <span
-            className="grid size-6 cursor-grab place-items-center rounded-md hover:bg-surface hover:text-ink active:cursor-grabbing"
             aria-label="ブロックを移動"
+            className="grid size-6 cursor-grab place-items-center rounded-md hover:bg-surface hover:text-ink active:cursor-grabbing"
           >
-            <GripVertical aria-hidden className="size-4" />
+            <GripVertical aria-hidden={true} className="size-4" />
           </span>
         </div>
       </DragHandle>
       {open && menuPos && (
         <div ref={menuRef}>
           <CommandMenuList
-            items={SLASH_ITEMS}
             activeIndex={index}
+            items={SLASH_ITEMS}
             label="ブロックコマンド"
-            style={{ left: menuPos.left, top: menuPos.top }}
             onPick={(item) => {
               item.run(editor, handlers);
               setOpen(false);
             }}
+            style={{ left: menuPos.left, top: menuPos.top }}
           />
         </div>
       )}

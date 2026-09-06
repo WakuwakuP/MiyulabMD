@@ -15,19 +15,21 @@ import {
 
 function editorFor(markdown: string): Editor {
   return new Editor({
+    content: markdown,
+    contentType: "markdown",
     extensions: [
       StarterKit.configure({ link: { openOnClick: false } }),
       Markdown,
     ],
-    content: markdown,
-    contentType: "markdown",
   });
 }
 
 function textPos(editor: Editor, text: string, offset = 0): number {
   let found = -1;
   editor.state.doc.descendants((node, pos) => {
-    if (found !== -1 || !node.isText || node.text !== text) return;
+    if (found !== -1 || !node.isText || node.text !== text) {
+      return;
+    }
     found = pos + offset;
   });
   assert.notEqual(found, -1, `missing text ${text}`);
@@ -36,9 +38,9 @@ function textPos(editor: Editor, text: string, offset = 0): number {
 
 test("mapThrough uses 1:1 spans and snaps markdown syntax forward", () => {
   const points = [
-    { pm: 0, md: 0 },
-    { pm: 1, md: 2 },
-    { pm: 6, md: 7 },
+    { md: 0, pm: 0 },
+    { md: 2, pm: 1 },
+    { md: 7, pm: 6 },
   ];
   assert.equal(mapThrough(points, 3, "pm", "md"), 4);
   assert.equal(mapThrough(points, 0, "md", "pm"), 1);

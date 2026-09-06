@@ -1,6 +1,7 @@
 import type { Editor } from "@tiptap/react";
 import { useEffect, useMemo, useState } from "react";
 import { CommandMenuList } from "./CommandMenuList.tsx";
+import { handleCommandMenuKey } from "./command-menu-key.ts";
 import {
   matchesSlashItem,
   readSlashQuery,
@@ -19,7 +20,9 @@ type SlashState = {
 
 function readSlashState(editor: Editor): SlashState | null {
   const slash = readSlashQuery(editor);
-  if (!slash) return null;
+  if (!slash) {
+    return null;
+  }
   const coords = editor.view.coordsAtPos(slash.from);
   return {
     ...slash,
@@ -60,10 +63,14 @@ export function SlashCommandMenu({ editor, handlers }: Props) {
   }, [editor]);
 
   useEffect(() => {
-    if (!state || items.length === 0) return;
+    if (!state || items.length === 0) {
+      return;
+    }
 
     function apply(item: SlashItem) {
-      if (!state) return;
+      if (!state) {
+        return;
+      }
       editor
         .chain()
         .focus()
@@ -74,41 +81,33 @@ export function SlashCommandMenu({ editor, handlers }: Props) {
     }
 
     function onKey(event: KeyboardEvent) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setIndex((value) => (value + 1) % items.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setIndex((value) => (value - 1 + items.length) % items.length);
-        return;
-      }
-      if (event.key === "Enter") {
-        const item = items[index];
-        if (!item) return;
-        event.preventDefault();
-        apply(item);
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setState(null);
-      }
+      handleCommandMenuKey(event, {
+        hasItem: Boolean(items[index]),
+        itemCount: items.length,
+        onCycle: setIndex,
+        onEnter: () => {
+          const item = items[index];
+          if (item) {
+            apply(item);
+          }
+        },
+        onEscape: () => setState(null),
+      });
     }
 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [editor, handlers, index, items, state]);
 
-  if (!state || items.length === 0) return null;
+  if (!state || items.length === 0) {
+    return null;
+  }
 
   return (
     <CommandMenuList
-      items={items}
       activeIndex={index}
+      items={items}
       label="ブロックを挿入"
-      style={{ left: state.left, top: state.top }}
       onPick={(item) => {
         editor
           .chain()
@@ -118,6 +117,7 @@ export function SlashCommandMenu({ editor, handlers }: Props) {
         item.run(editor, handlers);
         setState(null);
       }}
+      style={{ left: state.left, top: state.top }}
     />
   );
 }

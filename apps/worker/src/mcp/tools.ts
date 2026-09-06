@@ -1,25 +1,30 @@
 import { env } from "cloudflare:workers";
-import { ACCESS_SCOPES, type SessionUser } from "@miyulabmd/shared";
+import { ACCESS_SCOPES, type Note, type SessionUser } from "@miyulabmd/shared";
 import { McpServer } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import {
+  type InsertPosition,
   markdownOutline,
   numberMarkdownLines,
 } from "../durable-objects/markdown-edit.ts";
-import { createNoteService } from "../services/notes.ts";
+import {
+  createNoteService,
+  type GetNoteResult,
+  type MutateNoteResult,
+} from "../services/notes.ts";
 
 function textResult(data: unknown) {
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+    content: [{ text: JSON.stringify(data, null, 2), type: "text" as const }],
   };
 }
 
 function textError(message: string) {
   return {
-    content: [{ type: "text" as const, text: message }],
+    content: [{ text: message, type: "text" as const }],
     isError: true as const,
   };
 }
@@ -36,14 +41,10 @@ function requireUser(): SessionUser | null {
   }
 
   return {
-    id: candidate.id,
-    email: candidate.email,
     displayName:
-      candidate.displayName === null
-        ? null
-        : typeof candidate.displayName === "string"
-          ? candidate.displayName
-          : null,
+      typeof candidate.displayName === "string" ? candidate.displayName : null,
+    email: candidate.email,
+    id: candidate.id,
   };
 }
 
@@ -53,24 +54,172 @@ function documentRoom(noteId: string) {
 
 function agentOf(user: SessionUser) {
   return {
-    userId: user.id,
     displayName: user.displayName?.trim() || user.email,
+    userId: user.id,
   };
 }
 
 function editToolResult(noteId: string, result: ApplyEditResult) {
   if (!result.ok) {
     const suffix =
-      result.matches !== undefined ? ` (matches: ${result.matches})` : "";
+      result.matches === undefined ? "" : ` (matches: ${result.matches})`;
     return textError(`${result.message}${suffix}`);
   }
   return textResult({
-    id: noteId,
     applied: true,
     cursor: result.cursor,
     excerpt: result.excerpt,
+    id: noteId,
     markdownLength: result.markdownLength,
   });
+}
+
+function getNoteToolError(result: GetNoteResult) {
+  if (result.kind === "not_found") {
+    return textError("Not found");
+  }
+  if (result.kind === "denied") {
+    return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+  }
+  return null;
+}
+
+function mutateNoteToolResponse(result: MutateNoteResult) {
+  if (result.kind === "not_found") {
+    return textError("Not found");
+  }
+  if (result.kind === "denied") {
+    return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+  }
+  if (result.kind === "bad_request") {
+    return textError(result.error);
+  }
+  return textResult({ note: result.note });
+}
+
+function resolveInsertPosition(
+  at: "start" | "end" | undefined,
+  after: string | undefined,
+  before: string | undefined,
+): InsertPosition | { error: string } {
+  const specified = [at !== undefined, Boolean(after), Boolean(before)].filter(
+    Boolean,
+  ).length;
+  if (specified !== 1) {
+    return { error: "Provide exactly one of: at, after, before" };
+  }
+  if (at !== undefined) {
+    return { at };
+  }
+  if (after) {
+    return { after };
+  }
+  if (before) {
+    return { before };
+  }
+  return { error: "Provide exactly one of: at, after, before" };
+}
+
+type ToolTextResult =
+  | ReturnType<typeof textResult>
+  | ReturnType<typeof textError>;
+
+async function requireEditableNote(
+  notes: ReturnType<typeof createNoteService>,
+  id: string,
+  user: SessionUser,
+): Promise<{ ok: true; note: Note } | { ok: false; error: ToolTextResult }> {
+  const loaded = await notes.get(id, user);
+  const error = getNoteToolError(loaded);
+  if (error) {
+    return { error, ok: false };
+  }
+  if (loaded.kind !== "ok" || !loaded.note.access.flags.canEdit) {
+    return { error: textError("Forbidden"), ok: false };
+  }
+  return { note: loaded.note, ok: true };
+}
+
+function grantsWithCollaborator(
+  grants: Note["access"]["grants"],
+  email: string,
+  canWrite: boolean | undefined,
+) {
+  const next = grants
+    .filter((grant) => grant.email !== email.trim().toLowerCase())
+    .map((grant) => ({ canWrite: grant.canWrite, email: grant.email }));
+  next.push({ canWrite: Boolean(canWrite), email });
+  return next;
+}
+
+async function insertInNoteTool(
+  notes: ReturnType<typeof createNoteService>,
+  input: {
+    id: string;
+    text: string;
+    at?: "start" | "end";
+    after?: string;
+    before?: string;
+  },
+): Promise<ToolTextResult> {
+  const user = requireUser();
+  if (!user) {
+    return textError("Unauthorized");
+  }
+
+  const position = resolveInsertPosition(input.at, input.after, input.before);
+  if ("error" in position) {
+    return textError(position.error);
+  }
+
+  const loaded = await requireEditableNote(notes, input.id, user);
+  if (!loaded.ok) {
+    return loaded.error;
+  }
+
+  const result = await documentRoom(loaded.note.id).applyEdit({
+    agent: agentOf(user),
+    noteId: loaded.note.id,
+    op: "insert",
+    position,
+    text: input.text,
+  });
+  return editToolResult(loaded.note.id, result);
+}
+
+async function inviteCollaboratorTool(
+  notes: ReturnType<typeof createNoteService>,
+  input: { id: string; email: string; canWrite?: boolean },
+): Promise<ToolTextResult> {
+  const user = requireUser();
+  if (!user) {
+    return textError("Unauthorized");
+  }
+
+  const current = await notes.get(input.id, user);
+  const currentError = getNoteToolError(current);
+  if (currentError) {
+    return currentError;
+  }
+  if (current.kind !== "ok") {
+    return textError("Not found");
+  }
+
+  const result = await notes.updateMeta(input.id, user, {
+    grants: grantsWithCollaborator(
+      current.note.access.grants,
+      input.email,
+      input.canWrite,
+    ),
+    inheritAccess: current.note.access.inherit,
+    readScope: current.note.access.inherit
+      ? undefined
+      : current.note.access.effectiveReadScope,
+    writeScope: current.note.access.inherit
+      ? undefined
+      : current.note.access.effectiveWriteScope,
+  });
+  return mutateNoteToolResponse(result);
 }
 
 /** createMcpHandler に渡す MCP サーバーファクトリ。 */
@@ -158,11 +307,11 @@ export function createMcpServerFactory() {
     {
       description: "Create a new note owned by the authenticated user.",
       inputSchema: {
-        title: z.string().optional(),
-        markdown: z.string().optional(),
         folder: z.string().optional(),
         inheritAccess: z.boolean().optional(),
+        markdown: z.string().optional(),
         readScope: z.enum(ACCESS_SCOPES).optional(),
+        title: z.string().optional(),
         writeScope: z.enum(ACCESS_SCOPES).optional(),
       },
     },
@@ -180,11 +329,11 @@ export function createMcpServerFactory() {
       }
 
       const created = await notes.create(user, {
-        title,
-        markdown,
         folder,
         inheritAccess,
+        markdown,
         readScope,
+        title,
         writeScope,
       });
       if ("error" in created) {
@@ -202,10 +351,10 @@ export function createMcpServerFactory() {
         "Replace a unique old_string with new_string in the live note. If old_string matches more than once and replace_all is not true, the call fails. Prefer this over update_note. Shows an AI(username) cursor at the edit.",
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
+        new_string: z.string().describe("Replacement text"),
         old_string: z
           .string()
           .describe("Exact text to find. Include unique surrounding context."),
-        new_string: z.string().describe("Replacement text"),
         replace_all: z
           .boolean()
           .optional()
@@ -230,11 +379,11 @@ export function createMcpServerFactory() {
       }
 
       const result = await documentRoom(loaded.note.id).applyEdit({
-        noteId: loaded.note.id,
         agent: agentOf(user),
-        op: "replace",
-        oldString: old_string,
         newString: new_string,
+        noteId: loaded.note.id,
+        oldString: old_string,
+        op: "replace",
         replaceAll: replace_all,
       });
       return editToolResult(loaded.note.id, result);
@@ -247,56 +396,21 @@ export function createMcpServerFactory() {
       description:
         "Insert text into the live note. Provide exactly one of: at (start|end), after (unique context), or before (unique context). Prefer unique surrounding text when editing the middle. Shows an AI(username) cursor at the insert.",
       inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        text: z.string().describe("Text to insert, including any newlines"),
-        at: z.enum(["start", "end"]).optional(),
         after: z
           .string()
           .optional()
           .describe("Insert immediately after this unique text"),
+        at: z.enum(["start", "end"]).optional(),
         before: z
           .string()
           .optional()
           .describe("Insert immediately before this unique text"),
+        id: z.string().describe("Note UUID or short ID"),
+        text: z.string().describe("Text to insert, including any newlines"),
       },
     },
-    async ({ id, text, at, after, before }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      const specified = [
-        at !== undefined,
-        Boolean(after),
-        Boolean(before),
-      ].filter(Boolean).length;
-      if (specified !== 1) {
-        return textError("Provide exactly one of: at, after, before");
-      }
-
-      const loaded = await notes.get(id, user);
-      if (loaded.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (loaded.kind === "denied") {
-        return textError(loaded.status === 401 ? "Unauthorized" : "Forbidden");
-      }
-      if (!loaded.note.access.flags.canEdit) {
-        return textError("Forbidden");
-      }
-
-      const position = at ? { at } : after ? { after } : { before: before! };
-
-      const result = await documentRoom(loaded.note.id).applyEdit({
-        noteId: loaded.note.id,
-        agent: agentOf(user),
-        op: "insert",
-        text,
-        position,
-      });
-      return editToolResult(loaded.note.id, result);
-    },
+    async ({ id, text, at, after, before }) =>
+      insertInNoteTool(notes, { after, at, before, id, text }),
   );
 
   server.registerTool(
@@ -329,23 +443,23 @@ export function createMcpServerFactory() {
       }
 
       const applied = await documentRoom(note.id).applyEdit({
-        noteId: note.id,
         agent: agentOf(user),
-        op: "set",
         markdown,
+        noteId: note.id,
+        op: "set",
       });
       if (!applied.ok) {
         return textError(applied.message);
       }
 
       return textResult({
-        id: note.id,
-        shortId: note.shortId,
-        title: note.title,
         applied: true,
         cursor: applied.cursor,
         excerpt: applied.excerpt,
+        id: note.id,
         markdownLength: applied.markdownLength,
+        shortId: note.shortId,
+        title: note.title,
       });
     },
   );
@@ -421,52 +535,13 @@ export function createMcpServerFactory() {
     {
       description: "Grant a user read or write access to a note by email.",
       inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        email: z.string().email(),
         canWrite: z.boolean().optional(),
+        email: z.string().email(),
+        id: z.string().describe("Note UUID or short ID"),
       },
     },
-    async ({ id, email, canWrite }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      const current = await notes.get(id, user);
-      if (current.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (current.kind === "denied") {
-        return textError(current.status === 401 ? "Unauthorized" : "Forbidden");
-      }
-
-      const grants = current.note.access.grants
-        .filter((grant) => grant.email !== email.trim().toLowerCase())
-        .map((grant) => ({ email: grant.email, canWrite: grant.canWrite }));
-      grants.push({ email, canWrite: Boolean(canWrite) });
-
-      const result = await notes.updateMeta(id, user, {
-        inheritAccess: current.note.access.inherit,
-        readScope: current.note.access.inherit
-          ? undefined
-          : current.note.access.effectiveReadScope,
-        writeScope: current.note.access.inherit
-          ? undefined
-          : current.note.access.effectiveWriteScope,
-        grants,
-      });
-      if (result.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (result.kind === "denied") {
-        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
-      }
-      if (result.kind === "bad_request") {
-        return textError(result.error);
-      }
-
-      return textResult({ note: result.note });
-    },
+    async ({ id, email, canWrite }) =>
+      inviteCollaboratorTool(notes, { canWrite, email, id }),
   );
 
   server.registerTool(

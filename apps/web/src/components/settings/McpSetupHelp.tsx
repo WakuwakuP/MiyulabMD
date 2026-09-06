@@ -20,13 +20,13 @@ export function McpSetupHelp({ origin, token, tokenName, onClose }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    rootRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
   return (
     <div
-      ref={rootRef}
       className="my-4 rounded-md border border-border bg-surface px-4 py-3"
+      ref={rootRef}
       role="status"
     >
       <p>
@@ -42,7 +42,7 @@ export function McpSetupHelp({ origin, token, tokenName, onClose }: Props) {
           <Row>
             <Input
               className="min-w-0 flex-1 font-mono"
-              readOnly
+              readOnly={true}
               value={token}
             />
             <CopyValueButton value={token} />
@@ -52,7 +52,7 @@ export function McpSetupHelp({ origin, token, tokenName, onClose }: Props) {
           <Row>
             <Input
               className="min-w-0 flex-1 font-mono"
-              readOnly
+              readOnly={true}
               value={endpoint}
             />
             <CopyValueButton value={endpoint} />
@@ -62,7 +62,7 @@ export function McpSetupHelp({ origin, token, tokenName, onClose }: Props) {
           <Row>
             <Input
               className="min-w-0 flex-1 font-mono"
-              readOnly
+              readOnly={true}
               value={authorization}
             />
             <CopyValueButton value={authorization} />
@@ -73,7 +73,7 @@ export function McpSetupHelp({ origin, token, tokenName, onClose }: Props) {
       <McpClientGuide origin={origin} token={token} />
 
       <Row className="mt-3">
-        <Button variant="outline" onClick={onClose}>
+        <Button onClick={onClose} variant="outline">
           閉じる
         </Button>
       </Row>

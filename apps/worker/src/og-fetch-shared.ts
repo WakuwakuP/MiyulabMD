@@ -8,7 +8,9 @@ export const OG_TARGET_HEADER = "x-og-target";
 
 export function parseOgTargetUrl(request: Request): URL | null {
   const raw = request.headers.get(OG_TARGET_HEADER);
-  if (!raw) return null;
+  if (!raw) {
+    return null;
+  }
   try {
     const target = new URL(raw);
     if (target.protocol !== "http:" && target.protocol !== "https:") {
@@ -53,13 +55,13 @@ export function isBlockedHost(hostname: string): boolean {
 
 export function ogRequestInit(signal?: AbortSignal): RequestInit {
   return {
+    headers: {
+      Accept: OG_ACCEPT,
+      "Accept-Language": "ja,en;q=0.8",
+      "User-Agent": OG_USER_AGENT,
+    },
     method: "GET",
     redirect: "follow",
     signal,
-    headers: {
-      Accept: OG_ACCEPT,
-      "User-Agent": OG_USER_AGENT,
-      "Accept-Language": "ja,en;q=0.8",
-    },
   };
 }

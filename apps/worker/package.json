@@ -5,13 +5,13 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "predev": "node -e \"require('node:fs').mkdirSync('../web/dist', { recursive: true })\"",
-    "dev": "wrangler dev -c wrangler.toml -c wrangler.og-fetch.toml",
+    "cf-typegen": "wrangler types",
     "db:migrate": "wrangler d1 migrations apply DB --local",
     "deploy": "wrangler deploy -c wrangler.og-fetch.toml && wrangler deploy",
-    "typecheck": "tsc --noEmit",
+    "predev": "node -e \"require('node:fs').mkdirSync('../web/dist', { recursive: true })\"",
+    "dev": "wrangler dev -c wrangler.toml -c wrangler.og-fetch.toml",
     "test": "node --experimental-strip-types --test src/ssr/*.test.ts src/services/*.test.ts src/durable-objects/*.test.ts",
-    "cf-typegen": "wrangler types"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@miyulabmd/markdown": "workspace:*",

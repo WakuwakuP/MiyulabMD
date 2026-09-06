@@ -15,27 +15,27 @@ function note(
   effectiveReadScope: NoteSummary["access"]["effectiveReadScope"],
 ): NoteSummary {
   return {
-    id,
-    shortId: id,
-    alias: null,
-    ownerId,
-    title: id,
-    folder: "",
-    folderId: null,
-    permission: "private",
     access: {
-      inherit: true,
-      readScope: null,
-      writeScope: null,
       effectiveReadScope,
       effectiveWriteScope: "self",
+      flags: { canAdmin: false, canEdit: false, canView: true },
+      grants: [],
+      inherit: true,
+      readScope: null,
       source: "default",
       sourceFolder: null,
-      grants: [],
-      flags: { canView: true, canEdit: false, canAdmin: false },
+      writeScope: null,
     },
+    alias: null,
     articleMeta: {},
     createdAt: 1,
+    folder: "",
+    folderId: null,
+    id,
+    ownerId,
+    permission: "private",
+    shortId: id,
+    title: id,
     updatedAt: 1,
   };
 }
@@ -47,21 +47,21 @@ function folder(
   locked = false,
 ): FolderAccess {
   return {
-    id,
-    name,
-    parentId: null,
-    folder: name,
-    crumbs: [],
     children: [],
-    flags: { canView: true, canEdit: false, canAdmin: true },
-    inherit: true,
-    readScope: null,
-    writeScope: null,
+    crumbs: [],
     effectiveReadScope,
     effectiveWriteScope: "self",
+    flags: { canAdmin: true, canEdit: false, canView: true },
+    folder: name,
+    grants: [],
+    id,
+    inherit: true,
+    name,
+    parentId: null,
+    readScope: null,
     source: "default",
     sourceFolder: null,
-    grants: [],
+    writeScope: null,
     ...(locked ? { locked: true } : {}),
   };
 }
@@ -180,29 +180,32 @@ test("sharing boundaries compare write scope and effective grants, independent o
   const parent = folder("parent", "parent", "users");
   parent.effectiveWriteScope = "users";
   parent.grants = [
-    { email: "a@example.com", userId: "a", canWrite: true },
-    { email: "b@example.com", userId: null, canWrite: false },
+    { canWrite: true, email: "a@example.com", userId: "a" },
+    { canWrite: false, email: "b@example.com", userId: null },
   ];
   const same = { ...note("same", "me", "users"), folderId: parent.id };
   same.access.effectiveWriteScope = "users";
   same.access.grants = [...parent.grants].reverse();
   const differentWriter = {
     ...same,
-    id: "writer",
     access: {
       ...same.access,
       grants: parent.grants.map((grant) => ({ ...grant, canWrite: false })),
     },
+    id: "writer",
   };
   const differentReader = {
     ...same,
+    access: {
+      ...same.access,
+      grants: parent.grants[0] ? [parent.grants[0]] : [],
+    },
     id: "reader",
-    access: { ...same.access, grants: [parent.grants[0]!] },
   };
   const differentScope = {
     ...same,
-    id: "scope",
     access: { ...same.access, effectiveWriteScope: "self" as const },
+    id: "scope",
   };
   assert.deepEqual(
     sharedByMeItems(

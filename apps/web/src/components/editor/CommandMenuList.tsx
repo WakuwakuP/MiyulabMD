@@ -39,10 +39,10 @@ export function CommandMenuList({
 
   return (
     <div
-      ref={listRef}
-      className="fixed z-40 max-h-80 min-w-72 overflow-auto rounded-[10px] border border-border bg-canvas p-[0.35rem] shadow-menu"
-      role="listbox"
       aria-label={label}
+      className="fixed z-40 max-h-80 min-w-72 overflow-auto rounded-[10px] border border-border bg-canvas p-[0.35rem] shadow-menu"
+      ref={listRef}
+      role="listbox"
       style={style}
     >
       {items.map((item, itemIndex) => {
@@ -56,8 +56,6 @@ export function CommandMenuList({
               </p>
             )}
             <button
-              type="button"
-              role="option"
               aria-selected={itemIndex === activeIndex}
               className={cn(
                 "flex w-full cursor-pointer items-center gap-3 rounded-lg border-0 bg-transparent px-[0.5rem] py-[0.4rem] text-left",
@@ -68,6 +66,8 @@ export function CommandMenuList({
                 event.preventDefault();
                 onPick(item);
               }}
+              role="option"
+              type="button"
             >
               <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-surface text-ink">
                 <SlashItemIcon id={item.id} />

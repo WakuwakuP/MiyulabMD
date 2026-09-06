@@ -15,8 +15,8 @@ import {
 
 test("parseArticleSchema rejects duplicate keys and bad types", () => {
   const ok = parseArticleSchema([
-    { key: "category", type: "string", fixed: true, default: "お知らせ" },
-    { key: "tags", type: "string[]", default: [] },
+    { default: "お知らせ", fixed: true, key: "category", type: "string" },
+    { default: [], key: "tags", type: "string[]" },
   ]);
   assert.ok(Array.isArray(ok));
   assert.equal(ok[0]?.key, "category");
@@ -33,15 +33,15 @@ test("parseArticleSchema rejects duplicate keys and bad types", () => {
 
 test("mergeArticleData prefers fixed values over note meta", () => {
   const data = mergeArticleData({
-    schema: [
-      { key: "category", type: "string", fixed: true, default: "お知らせ" },
-      { key: "description", type: "string" },
-      { key: "tags", type: "string[]", default: [] },
-    ],
     noteMeta: {
       category: "議事録",
       description: "概要",
     },
+    schema: [
+      { default: "お知らせ", fixed: true, key: "category", type: "string" },
+      { key: "description", type: "string" },
+      { default: [], key: "tags", type: "string[]" },
+    ],
     title: "見出し",
   });
   assert.equal(data.category, "お知らせ");
@@ -52,8 +52,8 @@ test("mergeArticleData prefers fixed values over note meta", () => {
 
 test("mergeArticleData keeps an explicit title from note meta", () => {
   const data = mergeArticleData({
-    schema: [{ key: "title", type: "string" }],
     noteMeta: { title: "公開タイトル" },
+    schema: [{ key: "title", type: "string" }],
     title: "見出し",
   });
   assert.equal(data.title, "公開タイトル");
@@ -61,8 +61,8 @@ test("mergeArticleData keeps an explicit title from note meta", () => {
 
 test("matchArticleSource uses the longest folder prefix", () => {
   const sources = [
-    { id: "blog", folder: "blog" },
-    { id: "tech", folder: "blog/tech" },
+    { folder: "blog", id: "blog" },
+    { folder: "blog/tech", id: "tech" },
   ];
   assert.equal(matchArticleSource("blog/tech/2026", sources)?.id, "tech");
   assert.equal(matchArticleSource("blog/daily", sources)?.id, "blog");
@@ -78,15 +78,15 @@ test("isArticleSourceDirty compares max updated_at to last dispatch", () => {
 
 test("parseArticleListQuery defaults, clamps, and rejects bad values", () => {
   assert.deepEqual(parseArticleListQuery(new URLSearchParams()), {
+    folder: null,
     page: 1,
     perPage: ARTICLE_LIST_DEFAULT_PER_PAGE,
-    folder: null,
   });
   assert.deepEqual(
     parseArticleListQuery(
       new URLSearchParams("page=3&perPage=10&folder=work/infra/db"),
     ),
-    { page: 3, perPage: 10, folder: "work/infra/db" },
+    { folder: "work/infra/db", page: 3, perPage: 10 },
   );
   const clamped = parseArticleListQuery(
     new URLSearchParams(`perPage=${ARTICLE_LIST_MAX_PER_PAGE + 40}`),

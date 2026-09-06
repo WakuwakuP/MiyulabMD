@@ -15,21 +15,21 @@ import {
 } from "lucide-react";
 
 const ICONS: Record<string, LucideIcon> = {
-  paragraph: Type,
+  bullet: List,
+  code: Code,
   h1: Heading1,
   h2: Heading2,
   h3: Heading3,
-  bullet: List,
-  ordered: ListOrdered,
-  quote: Quote,
-  code: Code,
   hr: Minus,
   image: Image,
-  youtube: Video,
   og: Link,
+  ordered: ListOrdered,
+  paragraph: Type,
+  quote: Quote,
+  youtube: Video,
 };
 
 export function SlashItemIcon({ id }: { id: string }) {
   const Icon = ICONS[id] ?? Type;
-  return <Icon aria-hidden className="size-4" strokeWidth={1.8} />;
+  return <Icon aria-hidden={true} className="size-4" strokeWidth={1.8} />;
 }

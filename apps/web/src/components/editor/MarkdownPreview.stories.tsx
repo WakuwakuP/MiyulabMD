@@ -3,9 +3,9 @@ import { MarkdownPreview } from "./MarkdownPreview.tsx";
 import { EDITOR_STORY_SAMPLE } from "./storySample.ts";
 
 const meta = {
-  title: "Editor/MarkdownPreview",
-  tags: ["autodocs"],
   parameters: { layout: "padded" },
+  tags: ["autodocs"],
+  title: "Editor/MarkdownPreview",
 } satisfies Meta;
 
 export default meta;
@@ -14,7 +14,7 @@ type Story = StoryObj<typeof meta>;
 function Preview() {
   return (
     <div className="max-w-3xl bg-canvas text-ink">
-      <MarkdownPreview markdown={EDITOR_STORY_SAMPLE} documentScroll />
+      <MarkdownPreview documentScroll={true} markdown={EDITOR_STORY_SAMPLE} />
     </div>
   );
 }

@@ -30,27 +30,27 @@ export function FolderPopover({
   return (
     <div className="relative" ref={rootRef}>
       <HeaderButton
-        variant="outline"
-        icon={<FolderOutlineIcon />}
-        label="フォルダ"
         aria-expanded={open}
         aria-haspopup="dialog"
+        icon={<FolderOutlineIcon />}
+        label="フォルダ"
         onClick={() => setOpen((value) => !value)}
+        variant="outline"
       />
       {open && (
         <MenuPanel role="dialog" width="16rem">
           <div className="grid gap-2 px-3 py-2">
-            {isOwner ? (
+            {isOwner && (
               <>
                 <Input
-                  variant="pill"
+                  aria-label="ノートのフォルダ"
                   className="w-full"
+                  onBlur={onFolderBlur}
+                  onChange={(event) => onFolderChange(event.target.value)}
+                  placeholder="例: work/infra"
                   type="text"
                   value={folder}
-                  onChange={(event) => onFolderChange(event.target.value)}
-                  onBlur={onFolderBlur}
-                  placeholder="例: work/infra"
-                  aria-label="ノートのフォルダ"
+                  variant="pill"
                 />
                 {folderId && (
                   <Link
@@ -61,16 +61,16 @@ export function FolderPopover({
                   </Link>
                 )}
               </>
-            ) : folderId ? (
+            )}
+            {!isOwner && folderId && (
               <Link
                 className="text-accent no-underline"
                 to={folderUrl(folderId)}
               >
                 フォルダを開く
               </Link>
-            ) : (
-              <MutedText>なし</MutedText>
             )}
+            {!(isOwner || folderId) && <MutedText>なし</MutedText>}
           </div>
         </MenuPanel>
       )}

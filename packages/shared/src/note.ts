@@ -1,6 +1,5 @@
 import type { ArticleMeta } from "./article.ts";
 import type {
-  AccessGrant,
   AccessScope,
   CollaboratorRole,
   EffectiveAccess,
@@ -102,4 +101,4 @@ export type UpdateFolderAccessInput = {
   grants?: AccessGrantInput[];
 };
 
-export type { AccessGrant };
+export type { AccessGrant } from "./permission.ts";

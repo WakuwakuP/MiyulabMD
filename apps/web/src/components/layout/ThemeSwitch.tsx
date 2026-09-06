@@ -9,10 +9,10 @@ const THEME_ITEMS: {
   ariaLabel: string;
   label: ReactNode;
 }[] = [
-  { value: "light", ariaLabel: "ライト", label: <SunIcon /> },
-  { value: "dark", ariaLabel: "ダーク", label: <MoonIcon /> },
-  { value: "black", ariaLabel: "ブラック", label: <BlackIcon /> },
-  { value: "system", ariaLabel: "システム", label: <MonitorIcon /> },
+  { ariaLabel: "ライト", label: <SunIcon />, value: "light" },
+  { ariaLabel: "ダーク", label: <MoonIcon />, value: "dark" },
+  { ariaLabel: "ブラック", label: <BlackIcon />, value: "black" },
+  { ariaLabel: "システム", label: <MonitorIcon />, value: "system" },
 ];
 
 export function ThemeSwitch() {
@@ -20,15 +20,15 @@ export function ThemeSwitch() {
 
   return (
     <Switch
+      items={THEME_ITEMS.map((item) => ({
+        ariaLabel: item.ariaLabel,
+        label: item.label,
+        onClick: () => setTheme(item.value),
+        pressed: theme === item.value,
+        value: item.value,
+      }))}
       label="テーマ"
       size="sm"
-      items={THEME_ITEMS.map((item) => ({
-        value: item.value,
-        label: item.label,
-        ariaLabel: item.ariaLabel,
-        pressed: theme === item.value,
-        onClick: () => setTheme(item.value),
-      }))}
     />
   );
 }

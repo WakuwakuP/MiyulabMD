@@ -44,20 +44,20 @@ export function agentAwarenessState(
   const anchor = clampIndex(cursor.anchor, length);
   const head = clampIndex(cursor.head, length);
   return {
-    userId: agentUserId(agent.userId),
-    displayName: name,
     color: AGENT_COLOR,
-    email: null,
-    kind: "agent",
-    user: {
-      name,
-      color: AGENT_COLOR,
-      colorLight: `${AGENT_COLOR}40`,
-    },
     cursor: {
       anchor: Y.createRelativePositionFromTypeIndex(yText, anchor),
       head: Y.createRelativePositionFromTypeIndex(yText, head),
     },
+    displayName: name,
+    email: null,
+    kind: "agent",
+    user: {
+      color: AGENT_COLOR,
+      colorLight: `${AGENT_COLOR}40`,
+      name,
+    },
+    userId: agentUserId(agent.userId),
   };
 }
 

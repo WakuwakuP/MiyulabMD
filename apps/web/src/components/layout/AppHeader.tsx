@@ -30,7 +30,9 @@ export function AppHeader({
 
   useLayoutEffect(() => {
     const header = headerRef.current;
-    if (!header) return;
+    if (!header) {
+      return;
+    }
     const update = () => {
       document.documentElement.style.setProperty(
         "--header-height",
@@ -48,19 +50,19 @@ export function AppHeader({
 
   return (
     <header
-      ref={headerRef}
       className={cn(
         "fixed inset-x-0 top-[var(--app-offset-top,0px)] z-40 grid min-h-[3.25rem] items-center gap-2 border-b border-border bg-surface px-[0.9rem] py-[0.4rem] max-[900px]:px-3 max-[640px]:gap-1 max-[640px]:px-2",
         actions
           ? "grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
           : "grid-cols-[minmax(0,1fr)_auto]",
       )}
+      ref={headerRef}
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">
         <Link
-          to="/"
           aria-label="MiyulabMD ホーム"
           className="shrink-0 font-bold text-inherit no-underline"
+          to="/"
         >
           MiyulabMD
         </Link>
@@ -76,12 +78,12 @@ export function AppHeader({
           actions ? "col-start-3" : "col-start-2",
         )}
       >
-        <SitePublishButton user={user} folder={folder} />
+        <SitePublishButton folder={folder} user={user} />
         {end}
         {loading ? (
           <MutedText className="m-0">…</MutedText>
         ) : (
-          <AccountMenu user={user} authConfig={authConfig} />
+          <AccountMenu authConfig={authConfig} user={user} />
         )}
       </nav>
     </header>

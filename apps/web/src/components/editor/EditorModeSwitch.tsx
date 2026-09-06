@@ -24,7 +24,9 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
   const editing = isEditMode(value);
   useDismiss(menuOpen, () => setMenuOpen(false), rootRef);
 
-  if (!canEdit) return null;
+  if (!canEdit) {
+    return null;
+  }
 
   function chooseEdit(mode: EditMode) {
     onChange(mode);
@@ -35,26 +37,26 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
     <div ref={rootRef}>
       <SegmentedWrap>
         <Switch
-          label="表示モード"
-          size="md"
           items={[
             {
-              value: "preview",
+              ariaLabel: "View",
               label: (
                 <>
                   <EyeIcon />
                   <span className="max-[900px]:hidden">View</span>
                 </>
               ),
-              ariaLabel: "View",
-              pressed: !editing,
               onClick: () => {
                 setMenuOpen(false);
                 onChange("preview");
               },
+              pressed: !editing,
+              value: "preview",
             },
             {
-              value: "edit",
+              ariaLabel: "Edit",
+              expanded: menuOpen,
+              hasPopup: true,
               label: (
                 <>
                   <PencilIcon />
@@ -62,10 +64,6 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
                   <ChevronDownIcon className="opacity-70" />
                 </>
               ),
-              ariaLabel: "Edit",
-              pressed: editing,
-              hasPopup: true,
-              expanded: menuOpen,
               onClick: () => {
                 if (!editing) {
                   onChange(readLastEditMode());
@@ -73,15 +71,19 @@ export function EditorModeSwitch({ value, canEdit, onChange }: Props) {
                 }
                 setMenuOpen((open) => !open);
               },
+              pressed: editing,
+              value: "edit",
             },
           ]}
+          label="表示モード"
+          size="md"
         />
         {menuOpen && editing && (
           <MenuPanel align="end">
             {EDIT_MODES.map((mode) => (
               <MenuItem
-                key={mode}
                 active={value === mode}
+                key={mode}
                 onClick={() => chooseEdit(mode)}
               >
                 {EDITOR_MODE_LABELS[mode]}

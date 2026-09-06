@@ -9,12 +9,12 @@ export const FileInput = forwardRef<HTMLInputElement, Props>(function FileInput(
 ) {
   return (
     <input
-      ref={ref}
-      type="file"
       className={cn(
         "pointer-events-none absolute size-px opacity-0",
         className,
       )}
+      ref={ref}
+      type="file"
       {...props}
     />
   );

@@ -18,25 +18,25 @@ const places: {
   icon: LucideIcon;
 }[] = [
   {
-    value: "drive",
-    label: "個人",
     ariaLabel: "個人（マイドライブ）",
-    path: "/",
     icon: UserRound,
+    label: "個人",
+    path: "/",
+    value: "drive",
   },
   {
-    value: "shared",
-    label: "共有",
     ariaLabel: "共有（共有されているアイテム）",
-    path: SHARED_PATH,
     icon: UsersRound,
+    label: "共有",
+    path: SHARED_PATH,
+    value: "shared",
   },
   {
-    value: "shared-by-me",
-    label: "管理",
     ariaLabel: "管理（自分が共有済みのアイテム）",
-    path: "/shared-by-me",
     icon: Settings2,
+    label: "管理",
+    path: "/shared-by-me",
+    value: "shared-by-me",
   },
 ];
 
@@ -44,22 +44,22 @@ export function DrivePlaceNav({ current }: { current: Place }) {
   const navigate = useNavigate();
   return (
     <Switch
-      label="場所"
-      size="md"
       items={places.map(({ icon: Icon, ...place }) => ({
-        value: place.value,
         ariaLabel: place.ariaLabel,
         label: (
           <>
-            <Icon aria-hidden className="size-4" />
+            <Icon aria-hidden={true} className="size-4" />
             <span className="whitespace-nowrap max-[900px]:hidden">
               {place.label}
             </span>
           </>
         ),
-        pressed: current === place.value,
         onClick: () => navigate(place.path),
+        pressed: current === place.value,
+        value: place.value,
       }))}
+      label="場所"
+      size="md"
     />
   );
 }

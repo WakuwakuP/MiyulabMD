@@ -179,9 +179,23 @@ export function createSessionLifecycle(options: {
 }): SessionLifecycle {
   let destroyed = false;
   let left = false;
-  let unbind = () => {};
+  let unbind: () => void = () => {
+    /* bind later */
+  };
 
   const api: SessionLifecycle = {
+    destroy() {
+      if (destroyed) {
+        return;
+      }
+      destroyed = true;
+      unbind();
+      if (!left) {
+        options.leave();
+      }
+      left = true;
+      options.dispose();
+    },
     leave() {
       if (destroyed || left) {
         return;
@@ -195,18 +209,6 @@ export function createSessionLifecycle(options: {
       }
       left = false;
       options.reconnect();
-    },
-    destroy() {
-      if (destroyed) {
-        return;
-      }
-      destroyed = true;
-      unbind();
-      if (!left) {
-        options.leave();
-      }
-      left = true;
-      options.dispose();
     },
   };
 

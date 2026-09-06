@@ -43,8 +43,8 @@ function ListSkeleton() {
     <DriveList>
       {[0, 1, 2].map((index) => (
         <li
-          key={index}
           className="flex min-h-12 items-center gap-[0.7rem] border-b border-border px-[0.9rem] py-[0.55rem] last:border-b-0"
+          key={index}
         >
           <div className="size-[22px] shrink-0 animate-pulse rounded bg-surface" />
           <div className="h-4 max-w-[12rem] flex-1 animate-pulse rounded bg-surface" />
@@ -85,17 +85,17 @@ export function NoteTree({
   return (
     <div>
       <nav
-        className="mb-3 flex flex-wrap items-center gap-[0.15rem] text-[0.9rem]"
         aria-label="フォルダ"
+        className="mb-3 flex flex-wrap items-center gap-[0.15rem] text-[0.9rem]"
       >
         {showRootCrumb && (
           <Link
-            to="/"
             className={cn(
               "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
               isDriveRoot ? "cursor-default text-muted" : "cursor-pointer",
             )}
             onPointerEnter={() => prefetchFolder()}
+            to="/"
           >
             {MY_DRIVE_NAME}
           </Link>
@@ -104,21 +104,23 @@ export function NoteTree({
           const current = index === crumbs.length - 1;
           return (
             <span key={crumb.id}>
-              {(showRootCrumb || index > 0) && <span aria-hidden> / </span>}
+              {(showRootCrumb || index > 0) && (
+                <span aria-hidden={true}> / </span>
+              )}
               <Link
-                to={folderUrl(crumb.id)}
                 className={cn(
                   "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
                   current ? "cursor-default text-muted" : "cursor-pointer",
                 )}
-                onPointerEnter={() => prefetchFolder(crumb.id)}
                 onContextMenu={(event) =>
                   handleRowMenu(event, {
-                    kind: "folder",
                     id: crumb.id,
+                    kind: "folder",
                     name: crumb.name,
                   })
                 }
+                onPointerEnter={() => prefetchFolder(crumb.id)}
+                to={folderUrl(crumb.id)}
               >
                 {crumb.name}
               </Link>
@@ -130,20 +132,22 @@ export function NoteTree({
       {currentFolderId && !isDriveRoot && (
         <Link
           className="mb-3 block border-0 bg-transparent p-0 font-inherit text-accent no-underline"
-          to={parentId ? folderUrl(parentId) : rootHref}
           onPointerEnter={() => {
-            if (parentId) prefetchFolder(parentId);
+            if (parentId) {
+              prefetchFolder(parentId);
+            }
           }}
+          to={parentId ? folderUrl(parentId) : rootHref}
         >
           上のフォルダへ
         </Link>
       )}
 
-      {placeholder ? (
-        <ListSkeleton />
-      ) : folders.length === 0 && items.length === 0 ? (
+      {placeholder && <ListSkeleton />}
+      {!placeholder && folders.length === 0 && items.length === 0 && (
         <p>このフォルダは空です。</p>
-      ) : (
+      )}
+      {!placeholder && (folders.length > 0 || items.length > 0) && (
         <DriveList
           className={cn(
             pending && "opacity-60 transition-opacity duration-150",
@@ -151,16 +155,16 @@ export function NoteTree({
         >
           {folders.map((folder) => {
             const target = {
-              kind: "folder" as const,
               id: folder.id,
+              kind: "folder" as const,
               name: folder.name,
             };
             return (
               <DriveRow
-                key={folder.id}
                 href={folderUrl(folder.id)}
-                name={folder.name}
                 icon={<FolderIcon />}
+                key={folder.id}
+                menuOpen={openMenuId === folder.id}
                 meta={
                   folder.readScope && folder.writeScope ? (
                     <AccessScopeMeta
@@ -169,7 +173,7 @@ export function NoteTree({
                     />
                   ) : undefined
                 }
-                menuOpen={openMenuId === folder.id}
+                name={folder.name}
                 onMenu={(event) => handleRowMenu(event, target)}
                 onPointerEnter={() => prefetchFolder(folder.id)}
               />
@@ -179,17 +183,17 @@ export function NoteTree({
             const target = { kind: "note" as const, note };
             return (
               <DriveRow
-                key={note.id}
                 href={`/n/${note.id}`}
-                name={note.title}
                 icon={<MarkdownIcon />}
+                key={note.id}
+                menuOpen={openMenuId === note.id}
                 meta={
                   <AccessScopeMeta
                     readScope={note.access.effectiveReadScope}
                     writeScope={note.access.effectiveWriteScope}
                   />
                 }
-                menuOpen={openMenuId === note.id}
+                name={note.title}
                 onMenu={(event) => handleRowMenu(event, target)}
                 onPointerEnter={() => prefetchNote(note.id)}
               />

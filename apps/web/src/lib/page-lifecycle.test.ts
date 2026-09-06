@@ -25,19 +25,19 @@ type FakeTarget = {
 function fakeTarget(extra: Record<string, unknown> = {}): FakeTarget {
   const listeners = new Map<string, Set<EventListener>>();
   return {
-    listeners,
     addEventListener(type, listener) {
       const set = listeners.get(type) ?? new Set();
       set.add(listener);
       listeners.set(type, set);
     },
-    removeEventListener(type, listener) {
-      listeners.get(type)?.delete(listener);
-    },
     dispatch(type, event = new Event(type)) {
       for (const listener of listeners.get(type) ?? []) {
         listener.call(undefined, event);
       }
+    },
+    listeners,
+    removeEventListener(type, listener) {
+      listeners.get(type)?.delete(listener);
     },
     ...extra,
   };
@@ -91,8 +91,8 @@ test("detectPageLifecycleSupport: iOS WebKit without freeze uses hidden fallback
 test("detectPageLifecycleSupport: iPadOS desktop UA without freeze uses hidden fallback", () => {
   const support = detectPageLifecycleSupport(
     {
-      navigator: { platform: "MacIntel", maxTouchPoints: 5 },
       matchMedia: () => ({ matches: false }),
+      navigator: { maxTouchPoints: 5, platform: "MacIntel" },
     },
     {},
   );
@@ -115,9 +115,9 @@ test("Chromium: pagehide and freeze call leave, visibilitychange does not", () =
       },
     },
     {
-      window: win,
       document: doc,
       support: { freeze: true, hiddenFallback: false },
+      window: win,
     },
   );
 
@@ -146,15 +146,15 @@ test("Chromium: pageshow persisted and resume call reconnect", () => {
 
   bindPageLifecycle(
     {
-      leave: () => {},
+      leave: () => undefined,
       reconnect: () => {
         reconnects += 1;
       },
     },
     {
-      window: win,
       document: doc,
       support: { freeze: true, hiddenFallback: false },
+      window: win,
     },
   );
 
@@ -184,9 +184,9 @@ test("Firefox desktop: pagehide leaves, visibilitychange and freeze do not", () 
       },
     },
     {
-      window: win,
       document: doc,
       support: { freeze: false, hiddenFallback: false },
+      window: win,
     },
   );
 
@@ -221,9 +221,9 @@ test("iOS / mobile: hidden leaves and visible reconnects, freeze does not", () =
       },
     },
     {
-      window: win,
       document: doc,
       support: { freeze: false, hiddenFallback: true },
+      window: win,
     },
   );
 
@@ -251,16 +251,16 @@ test("leave and destroy are idempotent", () => {
   let disposes = 0;
 
   const lifecycle = createSessionLifecycle({
+    bind: () => () => undefined,
+    dispose: () => {
+      disposes += 1;
+    },
     leave: () => {
       leaves += 1;
     },
     reconnect: () => {
       reconnects += 1;
     },
-    dispose: () => {
-      disposes += 1;
-    },
-    bind: () => () => {},
   });
 
   lifecycle.leave();
@@ -285,14 +285,14 @@ test("destroy leaves once when still connected", () => {
   let disposes = 0;
 
   const lifecycle = createSessionLifecycle({
-    leave: () => {
-      leaves += 1;
-    },
-    reconnect: () => {},
+    bind: () => () => undefined,
     dispose: () => {
       disposes += 1;
     },
-    bind: () => () => {},
+    leave: () => {
+      leaves += 1;
+    },
+    reconnect: () => undefined,
   });
 
   lifecycle.destroy();

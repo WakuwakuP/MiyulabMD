@@ -46,10 +46,10 @@
 
   body {
     margin: 0;
-    background: var(--color-canvas);
-    color: var(--color-ink);
     font-family: var(--font-sans);
     line-height: 1.5;
+    color: var(--color-ink);
+    background: var(--color-canvas);
   }
 
   #root {
@@ -75,8 +75,8 @@
 
   html.editor-lock-viewport [data-layout="editor"] {
     height: 100%;
-    max-height: 100%;
     min-height: 0;
+    max-height: 100%;
     overflow: hidden;
   }
 

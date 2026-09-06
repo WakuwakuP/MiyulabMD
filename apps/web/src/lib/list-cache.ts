@@ -40,8 +40,12 @@ export function seedFolderCache(data: FolderAccess): void {
 }
 
 export async function loadNotes(force = false): Promise<NoteSummary[]> {
-  if (!force && notesCache) return notesCache;
-  if (!force && notesInflight) return notesInflight;
+  if (!force && notesCache) {
+    return notesCache;
+  }
+  if (!force && notesInflight) {
+    return notesInflight;
+  }
 
   const promise = fetchNotes().then((notes) => {
     notesCache = notes;
@@ -49,7 +53,7 @@ export async function loadNotes(force = false): Promise<NoteSummary[]> {
     return notes;
   });
   notesInflight = promise;
-  return promise;
+  return await promise;
 }
 
 export async function loadFolder(
@@ -59,18 +63,24 @@ export async function loadFolder(
   const key = folderCacheKey(id);
   if (!force) {
     const cached = folderCache.get(key);
-    if (cached) return { ok: true, data: cached };
+    if (cached) {
+      return { data: cached, ok: true };
+    }
     const inflight = folderInflight.get(key);
-    if (inflight) return inflight;
+    if (inflight) {
+      return inflight;
+    }
   }
 
   const promise = fetchFolder(id).then((result) => {
     folderInflight.delete(key);
-    if (result.ok) folderCache.set(key, result.data);
+    if (result.ok) {
+      folderCache.set(key, result.data);
+    }
     return result;
   });
   folderInflight.set(key, promise);
-  return promise;
+  return await promise;
 }
 
 export function prefetchFolder(id?: string | null): void {

@@ -38,11 +38,11 @@ test("collectOgUrls finds standalone links and leftover card syntax", () => {
 
 test("renderOgCardHtml puts text in a body that can be height-clamped", () => {
   const html = renderOgCardHtml("https://example.com/a", {
-    url: "https://example.com/a",
-    title: "Hello",
     description: "A long description",
     image: "https://example.com/og.png",
     siteName: "Example",
+    title: "Hello",
+    url: "https://example.com/a",
   });
   assert.match(html, /class="embed-og-body"/);
   assert.match(html, /embed-og-desc/);

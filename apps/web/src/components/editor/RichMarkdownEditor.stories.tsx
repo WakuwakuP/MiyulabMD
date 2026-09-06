@@ -16,7 +16,7 @@ function StoryRichEditor() {
       doc,
       { connect: false },
     );
-    return { doc, yText, provider };
+    return { doc, provider, yText };
   });
 
   useEffect(() => {
@@ -29,18 +29,18 @@ function StoryRichEditor() {
   return (
     <div className="min-h-[28rem] max-w-3xl bg-canvas text-ink">
       <RichMarkdownEditor
+        awareness={session.provider.awareness}
         noteId="storybook"
         yText={session.yText}
-        awareness={session.provider.awareness}
       />
     </div>
   );
 }
 
 const meta = {
-  title: "Editor/RichMarkdownEditor",
-  tags: ["autodocs"],
   parameters: { layout: "padded" },
+  tags: ["autodocs"],
+  title: "Editor/RichMarkdownEditor",
 } satisfies Meta;
 
 export default meta;

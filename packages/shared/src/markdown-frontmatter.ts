@@ -12,21 +12,23 @@ export function splitMarkdownFrontmatter(
   const text = markdown.replace(/^\uFEFF/, "");
   const lines = text.split(/\r?\n/);
   if ((lines[0] ?? "").trim() !== "---") {
-    return { raw: null, body: markdown, unclosed: false };
+    return { body: markdown, raw: null, unclosed: false };
   }
 
   for (let index = 1; index < lines.length; index += 1) {
-    if (!FENCE.test(lines[index] ?? "")) continue;
+    if (!FENCE.test(lines[index] ?? "")) {
+      continue;
+    }
     return {
-      raw: lines.slice(1, index).join("\n"),
       body: lines.slice(index + 1).join("\n"),
+      raw: lines.slice(1, index).join("\n"),
       unclosed: false,
     };
   }
 
   return {
-    raw: lines.slice(1).join("\n"),
     body: "",
+    raw: lines.slice(1).join("\n"),
     unclosed: true,
   };
 }
@@ -34,7 +36,9 @@ export function splitMarkdownFrontmatter(
 /** 閉じた frontmatter があるときだけ本文。なければ元の markdown。 */
 export function markdownBody(markdown: string): string {
   const split = splitMarkdownFrontmatter(markdown);
-  if (split.raw !== null && !split.unclosed) return split.body;
+  if (split.raw !== null && !split.unclosed) {
+    return split.body;
+  }
   return markdown;
 }
 
@@ -42,6 +46,8 @@ export function markdownBody(markdown: string): string {
 export function withClosedFrontmatter(source: string, body: string): string {
   const split = splitMarkdownFrontmatter(source);
   const next = body.replace(/^\uFEFF/, "");
-  if (split.raw === null || split.unclosed) return next;
+  if (split.raw === null || split.unclosed) {
+    return next;
+  }
   return `---\n${split.raw}\n---\n\n${next.replace(/^\n+/, "")}`;
 }

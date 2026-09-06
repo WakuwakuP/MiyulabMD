@@ -17,9 +17,9 @@ test("extractNoteToc collects h1–h3 and ignores code fences", () => {
   ].join("\n");
 
   assert.deepEqual(extractNoteToc(markdown), [
-    { level: 1, text: "Alpha", id: "user-content-alpha" },
-    { level: 2, text: "Beta link", id: "user-content-beta-link" },
-    { level: 3, text: "Gamma bold", id: "user-content-gamma-bold" },
+    { id: "user-content-alpha", level: 1, text: "Alpha" },
+    { id: "user-content-beta-link", level: 2, text: "Beta link" },
+    { id: "user-content-gamma-bold", level: 3, text: "Gamma bold" },
   ]);
 });
 
