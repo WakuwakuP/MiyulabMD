@@ -20,8 +20,8 @@ export async function handleMcp(request: Request): Promise<Response> {
   const user = await authenticateBearer(request, env);
   if (!user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
       headers: { "Content-Type": "application/json" },
+      status: 401,
     });
   }
 

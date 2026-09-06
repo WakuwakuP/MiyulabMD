@@ -27,38 +27,40 @@ export function AccountMenu({ user, authConfig }: Props) {
   const [loginEmail, setLoginEmail] = useState("dev@example.com");
   const rootRef = useRef<HTMLDivElement>(null);
   const label = user?.displayName?.trim() || user?.email || GUEST_LABEL;
-  const mockLogin = !user && !authConfig.access && authConfig.mock;
+  const mockLogin = !(user || authConfig.access) && authConfig.mock;
   useDismiss(open, () => setOpen(false), rootRef);
 
   function handleLoginSubmit(event: FormEvent) {
     event.preventDefault();
     const email = loginEmail.trim();
-    if (!email) return;
+    if (!email) {
+      return;
+    }
     window.location.href = `/auth/login?email=${encodeURIComponent(email)}`;
   }
 
   return (
     <div className="relative" ref={rootRef}>
       <button
-        type="button"
-        className="grid cursor-pointer place-items-center rounded-full border-2 border-transparent bg-transparent p-0 hover:border-soft aria-expanded:border-soft"
-        aria-label={label}
-        aria-haspopup="menu"
         aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={label}
+        className="grid cursor-pointer place-items-center rounded-full border-2 border-transparent bg-transparent p-0 hover:border-soft aria-expanded:border-soft"
         onClick={() => setOpen((value) => !value)}
+        type="button"
       >
         <Avatar
-          name={label}
           color={colorForEmail(user?.email, user?.id)}
+          name={label}
           size="md"
         />
       </button>
       {open && (
         <MenuPanel width="20rem">
-          <MenuHeader name={label} email={user?.email}>
+          <MenuHeader email={user?.email} name={label}>
             <Avatar
-              name={label}
               color={colorForEmail(user?.email, user?.id)}
+              name={label}
               size="lg"
             />
           </MenuHeader>
@@ -68,29 +70,31 @@ export function AccountMenu({ user, authConfig }: Props) {
             <ThemeSwitch />
           </MenuRow>
           <MenuSeparator />
-          {user ? (
+          {user && (
             <>
-              <MenuItem to="/settings" onClick={() => setOpen(false)}>
+              <MenuItem onClick={() => setOpen(false)} to="/settings">
                 設定
               </MenuItem>
               <MenuItem href="/auth/logout">ログアウト</MenuItem>
             </>
-          ) : mockLogin ? (
+          )}
+          {!user && mockLogin && (
             <form className="grid gap-2 px-4 py-2" onSubmit={handleLoginSubmit}>
               <Input
-                variant="pill"
+                aria-label="ログイン用メールアドレス"
                 className="w-full"
-                type="email"
-                value={loginEmail}
                 onChange={(event) => setLoginEmail(event.target.value)}
                 placeholder="email"
-                aria-label="ログイン用メールアドレス"
+                type="email"
+                value={loginEmail}
+                variant="pill"
               />
-              <Button variant="outline" type="submit">
+              <Button type="submit" variant="outline">
                 ログイン
               </Button>
             </form>
-          ) : (
+          )}
+          {!(user || mockLogin) && (
             <MenuItem href="/auth/login">ログイン</MenuItem>
           )}
         </MenuPanel>

@@ -40,31 +40,37 @@ function newRowId(): string {
 
 function emptyDraft(): Draft {
   return {
-    name: "",
     folder: "",
+    name: "",
     schema: [],
-    webhookUrl: "",
     webhookAuthorization: "",
     webhookAuthorizationSet: false,
+    webhookUrl: "",
   };
 }
 
 function draftFromSource(source: ArticleSource): Draft {
   return {
+    folder: source.folder,
     id: source.id,
     name: source.name,
-    folder: source.folder,
     schema: source.schema.map((field) => ({ ...field, rowId: newRowId() })),
-    webhookUrl: source.webhookUrl ?? "",
     webhookAuthorization: "",
     webhookAuthorizationSet: source.webhookAuthorizationSet,
+    webhookUrl: source.webhookUrl ?? "",
   };
 }
 
 function defaultForType(type: ArticleSchemaField["type"]): string {
-  if (type === "boolean") return "false";
-  if (type === "number") return "";
-  if (type === "string[]") return "";
+  if (type === "boolean") {
+    return "false";
+  }
+  if (type === "number") {
+    return "";
+  }
+  if (type === "string[]") {
+    return "";
+  }
   return "";
 }
 
@@ -73,8 +79,12 @@ function parseDefault(
   raw: string,
 ): unknown | undefined {
   const trimmed = raw.trim();
-  if (!trimmed) return undefined;
-  if (type === "boolean") return trimmed === "true";
+  if (!trimmed) {
+    return undefined;
+  }
+  if (type === "boolean") {
+    return trimmed === "true";
+  }
   if (type === "number") {
     const value = Number(trimmed);
     return Number.isFinite(value) ? value : undefined;
@@ -92,8 +102,12 @@ function defaultToInput(
   type: ArticleSchemaField["type"],
   value: unknown,
 ): string {
-  if (value === undefined || value === null) return "";
-  if (type === "string[]" && Array.isArray(value)) return value.join(", ");
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (type === "string[]" && Array.isArray(value)) {
+    return value.join(", ");
+  }
   return String(value);
 }
 
@@ -111,13 +125,15 @@ export function SiteSettingsPage() {
       fetchArticleSources(),
       fetchFolderTree(),
     ]);
-    if (!sourceResult.ok) {
+    if (sourceResult.ok) {
+      setSources(sourceResult.data);
+    } else {
       setError(sourceResult.error);
       setSources([]);
-    } else {
-      setSources(sourceResult.data);
     }
-    if (folderResult.ok) setFolders(folderResult.data);
+    if (folderResult.ok) {
+      setFolders(folderResult.data);
+    }
     setLoading(false);
   }
 
@@ -131,8 +147,10 @@ export function SiteSettingsPage() {
 
   async function handleSave(event: FormEvent) {
     event.preventDefault();
-    if (!draft) return;
-    if (!draft.name.trim() || !draft.folder) {
+    if (!draft) {
+      return;
+    }
+    if (!(draft.name.trim() && draft.folder)) {
       setError("名前とディレクトリを入力してください。");
       return;
     }
@@ -146,20 +164,28 @@ export function SiteSettingsPage() {
           key: field.key.trim(),
           type: field.type,
         };
-        if (field.required) next.required = true;
-        if (field.fixed) next.fixed = true;
-        if (field.enum?.length) next.enum = field.enum;
+        if (field.required) {
+          next.required = true;
+        }
+        if (field.fixed) {
+          next.fixed = true;
+        }
+        if (field.enum?.length) {
+          next.enum = field.enum;
+        }
         const fallback = parseDefault(
           field.type,
           defaultToInput(field.type, field.default),
         );
-        if (fallback !== undefined) next.default = fallback;
+        if (fallback !== undefined) {
+          next.default = fallback;
+        }
         return next;
       });
 
     const input = {
-      name: draft.name.trim(),
       folder: draft.folder,
+      name: draft.name.trim(),
       schema,
       webhookUrl: draft.webhookUrl.trim() || null,
       ...(draft.webhookAuthorization.trim()
@@ -188,12 +214,16 @@ export function SiteSettingsPage() {
       setError(result.error);
       return;
     }
-    if (draft?.id === id) setDraft(null);
+    if (draft?.id === id) {
+      setDraft(null);
+    }
     await reload();
   }
 
   function updateField(index: number, patch: Partial<DraftField>) {
-    if (!draft) return;
+    if (!draft) {
+      return;
+    }
     const schema = draft.schema.map((field, i) =>
       i === index ? { ...field, ...patch } : field,
     );
@@ -234,8 +264,8 @@ export function SiteSettingsPage() {
           )}
           {sources.map((source) => (
             <li
-              key={source.id}
               className="flex justify-between gap-4 border-b border-border py-3 max-[640px]:flex-col max-[640px]:items-start"
+              key={source.id}
             >
               <div>
                 <strong>{source.name}</strong>
@@ -243,14 +273,14 @@ export function SiteSettingsPage() {
               </div>
               <Row>
                 <Button
-                  variant="outline"
                   onClick={() => setDraft(draftFromSource(source))}
+                  variant="outline"
                 >
                   編集
                 </Button>
                 <Button
-                  variant="ghost"
                   onClick={() => void handleDelete(source.id)}
+                  variant="ghost"
                 >
                   削除
                 </Button>
@@ -263,14 +293,14 @@ export function SiteSettingsPage() {
       {!draft && (
         <Button
           className="mt-4"
-          variant="accent"
           disabled={!canPickSourceFolder}
           onClick={() => setDraft(emptyDraft())}
+          variant="accent"
         >
           ソースを追加
         </Button>
       )}
-      {!draft && !canPickSourceFolder && (
+      {!(draft || canPickSourceFolder) && (
         <MutedText className="mt-2">先にフォルダを作成してください。</MutedText>
       )}
 
@@ -282,23 +312,23 @@ export function SiteSettingsPage() {
           <h3 className="m-0 text-[1.15rem] font-semibold">
             {draft.id ? "ソースを編集" : "ソースを追加"}
           </h3>
-          <Field label="名前" htmlFor="source-name">
+          <Field htmlFor="source-name" label="名前">
             <Input
               id="source-name"
-              value={draft.name}
               onChange={(event) =>
                 setDraft({ ...draft, name: event.target.value })
               }
               placeholder="お知らせ"
+              value={draft.name}
             />
           </Field>
           <div className="grid gap-[0.35rem]">
             <span className="text-[0.85rem] text-muted">ディレクトリ</span>
             <FolderHierarchySelect
-              id="source-folder"
               folders={folders}
-              value={draft.folder}
+              id="source-folder"
               onChange={(folder) => setDraft({ ...draft, folder })}
+              value={draft.folder}
             />
           </div>
 
@@ -309,28 +339,28 @@ export function SiteSettingsPage() {
             <div className="grid gap-3">
               {draft.schema.map((field, index) => (
                 <div
-                  key={field.rowId}
                   className="grid gap-2 rounded-xl border border-border p-3"
+                  key={field.rowId}
                 >
                   <Row className="max-[640px]:flex-col">
                     <Input
                       className="flex-1"
-                      placeholder="key"
-                      value={field.key}
                       onChange={(event) =>
                         updateField(index, { key: event.target.value })
                       }
+                      placeholder="key"
+                      value={field.key}
                     />
                     <Select
                       className="rounded-lg px-3 py-2.5"
-                      value={field.type}
                       onChange={(event) =>
                         updateField(index, {
+                          default: undefined,
                           type: event.target
                             .value as ArticleSchemaField["type"],
-                          default: undefined,
                         })
                       }
+                      value={field.type}
                     >
                       {ARTICLE_FIELD_TYPES.map((type) => (
                         <option key={type} value={type}>
@@ -339,34 +369,32 @@ export function SiteSettingsPage() {
                       ))}
                     </Select>
                     <Button
-                      variant="ghost"
                       onClick={() =>
                         setDraft({
                           ...draft,
                           schema: draft.schema.filter((_, i) => i !== index),
                         })
                       }
+                      variant="ghost"
                     >
                       削除
                     </Button>
                   </Row>
                   <Input
+                    onChange={(event) =>
+                      updateField(index, {
+                        default: parseDefault(field.type, event.target.value),
+                      })
+                    }
                     placeholder={
                       field.type === "string[]"
                         ? "default（カンマ区切り）"
                         : "default"
                     }
                     value={defaultToInput(field.type, field.default)}
-                    onChange={(event) =>
-                      updateField(index, {
-                        default: parseDefault(field.type, event.target.value),
-                      })
-                    }
                   />
                   {field.type === "string" && (
                     <Input
-                      placeholder="enum（カンマ区切り、任意）"
-                      value={(field.enum ?? []).join(", ")}
                       onChange={(event) =>
                         updateField(index, {
                           enum: event.target.value
@@ -375,26 +403,28 @@ export function SiteSettingsPage() {
                             .filter(Boolean),
                         })
                       }
+                      placeholder="enum（カンマ区切り、任意）"
+                      value={(field.enum ?? []).join(", ")}
                     />
                   )}
                   <Row>
                     <CheckLabel>
                       <input
-                        type="checkbox"
                         checked={Boolean(field.required)}
                         onChange={(event) =>
                           updateField(index, { required: event.target.checked })
                         }
+                        type="checkbox"
                       />
                       必須
                     </CheckLabel>
                     <CheckLabel>
                       <input
-                        type="checkbox"
                         checked={Boolean(field.fixed)}
                         onChange={(event) =>
                           updateField(index, { fixed: event.target.checked })
                         }
+                        type="checkbox"
                       />
                       固定
                     </CheckLabel>
@@ -404,42 +434,41 @@ export function SiteSettingsPage() {
             </div>
             <Button
               className="mt-2"
-              variant="outline"
               onClick={() =>
                 setDraft({
                   ...draft,
                   schema: [
                     ...draft.schema,
                     {
-                      rowId: newRowId(),
-                      key: "",
-                      type: "string",
                       default: defaultForType("string"),
+                      key: "",
+                      rowId: newRowId(),
+                      type: "string",
                     },
                   ],
                 })
               }
+              variant="outline"
             >
               フィールドを追加
             </Button>
           </div>
 
-          <Field label="Webhook URL" htmlFor="webhook-url">
+          <Field htmlFor="webhook-url" label="Webhook URL">
             <Input
               id="webhook-url"
-              type="url"
-              value={draft.webhookUrl}
               onChange={(event) =>
                 setDraft({ ...draft, webhookUrl: event.target.value })
               }
               placeholder="https://api.github.com/repos/org/repo/dispatches"
+              type="url"
+              value={draft.webhookUrl}
             />
           </Field>
-          <Field label="Webhook Authorization" htmlFor="webhook-auth">
+          <Field htmlFor="webhook-auth" label="Webhook Authorization">
             <Input
+              autoComplete="off"
               id="webhook-auth"
-              type="password"
-              value={draft.webhookAuthorization}
               onChange={(event) =>
                 setDraft({
                   ...draft,
@@ -451,15 +480,16 @@ export function SiteSettingsPage() {
                   ? "設定済み（変更するときだけ入力）"
                   : "Bearer ghp_..."
               }
-              autoComplete="off"
+              type="password"
+              value={draft.webhookAuthorization}
             />
           </Field>
 
           <Row>
-            <Button variant="accent" type="submit" disabled={saving}>
+            <Button disabled={saving} type="submit" variant="accent">
               {saving ? "保存中…" : "保存"}
             </Button>
-            <Button variant="ghost" onClick={() => setDraft(null)}>
+            <Button onClick={() => setDraft(null)} variant="ghost">
               キャンセル
             </Button>
           </Row>

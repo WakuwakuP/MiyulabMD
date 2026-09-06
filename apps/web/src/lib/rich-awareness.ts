@@ -47,15 +47,21 @@ export function readRemoteMarkdownCursors(
   yText: Y.Text,
 ): RemoteMarkdownCursor[] {
   const doc = yText.doc;
-  if (!doc) return [];
+  if (!doc) {
+    return [];
+  }
 
   const peers: RemoteMarkdownCursor[] = [];
   awareness.getStates().forEach((state, clientId) => {
-    if (clientId === awareness.doc.clientID) return;
+    if (clientId === awareness.doc.clientID) {
+      return;
+    }
     const cursor = state.cursor as
       | { anchor?: unknown; head?: unknown }
       | undefined;
-    if (!cursor?.anchor || !cursor.head) return;
+    if (!(cursor?.anchor && cursor.head)) {
+      return;
+    }
     const anchor = Y.createAbsolutePositionFromRelativePosition(
       Y.createRelativePositionFromJSON(cursor.anchor),
       doc,
@@ -64,8 +70,9 @@ export function readRemoteMarkdownCursors(
       Y.createRelativePositionFromJSON(cursor.head),
       doc,
     );
-    if (!anchor || !head || anchor.type !== yText || head.type !== yText)
+    if (!(anchor && head) || anchor.type !== yText || head.type !== yText) {
       return;
+    }
 
     const user = (state.user ?? {}) as {
       name?: string;
@@ -74,12 +81,12 @@ export function readRemoteMarkdownCursors(
     };
     const color = user.color ?? "#30bced";
     peers.push({
+      anchor: anchor.index,
       clientId,
-      name: user.name ?? "Anonymous",
       color,
       colorLight: user.colorLight ?? `${color}33`,
-      anchor: anchor.index,
       head: head.index,
+      name: user.name ?? "Anonymous",
     });
   });
   return peers;

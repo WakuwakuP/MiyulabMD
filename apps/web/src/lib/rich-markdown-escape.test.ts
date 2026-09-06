@@ -15,17 +15,17 @@ test("escapeMarkdownBlockPrefix escapes heading and list markers", () => {
 
 test("paragraph markdown like ## stays a paragraph after reload", () => {
   const editor = new Editor({
+    content: {
+      content: [
+        { content: [{ text: "## aaaaa", type: "text" }], type: "paragraph" },
+      ],
+      type: "doc",
+    },
     extensions: [
-      StarterKit.configure({ paragraph: false, link: { openOnClick: false } }),
+      StarterKit.configure({ link: { openOnClick: false }, paragraph: false }),
       SafeParagraph,
       Markdown,
     ],
-    content: {
-      type: "doc",
-      content: [
-        { type: "paragraph", content: [{ type: "text", text: "## aaaaa" }] },
-      ],
-    },
   });
 
   const markdown = editor.getMarkdown();

@@ -72,7 +72,9 @@ export function collectOgUrls(markdown: string): string[] {
   const urls = new Set<string>(collectStandaloneLinkUrls(markdown));
   for (const match of markdown.matchAll(OGP_BLOCK)) {
     const href = attr(match[1] ?? "", "href");
-    if (href) urls.add(href);
+    if (href) {
+      urls.add(href);
+    }
   }
   for (const match of markdown.matchAll(OGP_LINK)) {
     urls.add(match[1] ?? "");
@@ -103,7 +105,9 @@ export function expandEmbedsForPreview(
     .replace(YOUTUBE_BLOCK, (_all, attrs: string) => {
       const src = attr(attrs, "src") ?? "";
       const embed = youtubeEmbedUrl(src);
-      if (!embed) return "";
+      if (!embed) {
+        return "";
+      }
       return `<div class="embed-youtube"><iframe src="${embed}" title="YouTube" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
     })
     .replace(OGP_BLOCK, (_all, attrs: string) => {

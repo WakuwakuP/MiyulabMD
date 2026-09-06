@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 test("license CLI runs from Node, including Windows pnpm.cmd", async () => {
   const script = fileURLToPath(
@@ -23,7 +23,7 @@ test("license CLI runs from Node, including Windows pnpm.cmd", async () => {
       stderr += chunk;
     });
     child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.on("close", (code) => resolve({ code, stderr, stdout }));
   });
 
   assert.equal(result.code, 0, result.stderr);

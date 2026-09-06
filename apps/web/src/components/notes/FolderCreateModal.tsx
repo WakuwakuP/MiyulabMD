@@ -32,20 +32,26 @@ export function FolderCreateModal({
 
   useEffect(() => {
     const input = inputRef.current;
-    if (!input) return;
+    if (!input) {
+      return;
+    }
     input.focus();
-    if (initialName) input.select();
+    if (initialName) {
+      input.select();
+    }
   }, [initialName]);
 
   function close() {
-    if (!busy) onClose();
+    if (!busy) {
+      onClose();
+    }
   }
 
   return (
     <Modal
       as="form"
-      labelledBy="folder-name-title"
       className="w-[min(26rem,100%)]"
+      labelledBy="folder-name-title"
       onClose={close}
       onSubmit={(event) => {
         event.preventDefault();
@@ -57,27 +63,27 @@ export function FolderCreateModal({
         onSubmit(next);
       }}
     >
-      <ModalHeader id="folder-name-title" title={title} onClose={close} />
+      <ModalHeader id="folder-name-title" onClose={close} title={title} />
       <Field label="フォルダ名">
         <Input
-          ref={inputRef}
           className="w-full"
-          type="text"
-          value={name}
-          placeholder="例: work"
           disabled={busy}
           onChange={(event) => {
             setName(event.target.value);
             setLocalError(null);
           }}
+          placeholder="例: work"
+          ref={inputRef}
+          type="text"
+          value={name}
         />
       </Field>
       {(localError || error) && <ErrorText>{localError ?? error}</ErrorText>}
       <ModalFooter>
-        <Button variant="ghost" disabled={busy} onClick={close}>
+        <Button disabled={busy} onClick={close} variant="ghost">
           キャンセル
         </Button>
-        <Button variant="accent" type="submit" disabled={busy || !name.trim()}>
+        <Button disabled={busy || !name.trim()} type="submit" variant="accent">
           {busy ? busyLabel : submitLabel}
         </Button>
       </ModalFooter>

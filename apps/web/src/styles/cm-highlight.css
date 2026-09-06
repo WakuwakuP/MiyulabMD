@@ -20,13 +20,13 @@
 
 /* Beat CodeMirror's default light chrome (.ͼ .cm-gutters { #f5f5f5 }). */
 .cm-editor.cm-editor {
-  background-color: var(--color-canvas);
   color: var(--color-ink);
+  background-color: var(--color-canvas);
 }
 
 .cm-editor.cm-editor .cm-gutters {
-  background-color: var(--cm-gutter-bg);
   color: var(--color-muted);
+  background-color: var(--cm-gutter-bg);
   border-right: 1px solid var(--color-border);
 }
 
@@ -52,8 +52,8 @@
 }
 
 .cm-editor .tok-variableName.tok-definition:not(.tok-function) {
-  color: inherit;
   font-weight: inherit;
+  color: inherit;
 }
 
 .cm-editor .tok-function,
@@ -81,8 +81,8 @@
 .cm-editor .tok-comment,
 .cm-editor .tok-lineComment,
 .cm-editor .tok-blockComment {
-  color: var(--syn-comment);
   font-style: italic;
+  color: var(--syn-comment);
 }
 
 .cm-editor .tok-typeName,
@@ -106,8 +106,8 @@
 }
 
 .cm-editor .tok-heading {
-  color: var(--syn-title);
   font-weight: 700;
+  color: var(--syn-title);
 }
 
 .cm-editor .tok-emphasis {
@@ -131,10 +131,10 @@
 }
 
 .cm-editor .tok-monospace {
+  padding-inline: 0.15em;
   color: var(--cm-hl-inline-code);
   background: var(--cm-hl-inline-code-bg);
   border-radius: 0.2rem;
-  padding-inline: 0.15em;
 }
 
 .cm-editor .tok-inserted {

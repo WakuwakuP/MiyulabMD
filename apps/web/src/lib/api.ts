@@ -57,14 +57,18 @@ export async function fetchAuthConfig(): Promise<AuthConfig> {
 
 export async function fetchMe(): Promise<SessionUser | null> {
   const res = await fetch("/api/me", fetchOpts);
-  if (!res.ok) return null;
+  if (!res.ok) {
+    return null;
+  }
   const body = (await res.json()) as { user: SessionUser | null };
   return body.user;
 }
 
 export async function fetchNotes(): Promise<NoteSummary[]> {
   const res = await fetch("/api/notes", fetchOpts);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    return [];
+  }
   const body = (await res.json()) as { notes: NoteSummary[] };
   return body.notes;
 }
@@ -72,9 +76,9 @@ export async function fetchNotes(): Promise<NoteSummary[]> {
 export async function fetchNote(id: string): Promise<ApiResult<Note>> {
   const res = await fetch(`/api/notes/${id}`, fetchOpts);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as Note };
+  return { data: (await res.json()) as Note, ok: true };
 }
 
 export async function createNote(
@@ -82,14 +86,14 @@ export async function createNote(
 ): Promise<ApiResult<Note>> {
   const res = await fetch("/api/notes", {
     ...fetchOpts,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as Note };
+  return { data: (await res.json()) as Note, ok: true };
 }
 
 export async function updateProfile(
@@ -97,15 +101,15 @@ export async function updateProfile(
 ): Promise<ApiResult<SessionUser>> {
   const res = await fetch("/api/me", {
     ...fetchOpts,
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ displayName }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   const body = (await res.json()) as { user: SessionUser };
-  return { ok: true, data: body.user };
+  return { data: body.user, ok: true };
 }
 
 export async function updateNote(
@@ -123,42 +127,42 @@ export async function updateNote(
 ): Promise<ApiResult<Note>> {
   const res = await fetch(`/api/notes/${id}`, {
     ...fetchOpts,
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   notifyArticleChanged();
-  return { ok: true, data: (await res.json()) as Note };
+  return { data: (await res.json()) as Note, ok: true };
 }
 
 export async function fetchFolderTree(): Promise<ApiResult<FolderRecord[]>> {
   const res = await fetch("/api/folders/tree", fetchOpts);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   const body = (await res.json()) as { folders: FolderRecord[] };
-  return { ok: true, data: body.folders };
+  return { data: body.folders, ok: true };
 }
 
 export async function fetchPublicFolders(): Promise<ApiResult<FolderRecord[]>> {
   const res = await fetch("/api/folders/public", fetchOpts);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   const body = (await res.json()) as { folders: FolderRecord[] };
-  return { ok: true, data: body.folders };
+  return { data: body.folders, ok: true };
 }
 
 export async function fetchSharedFolders(): Promise<ApiResult<FolderRecord[]>> {
   const res = await fetch("/api/folders/shared", fetchOpts);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   const body = (await res.json()) as { folders: FolderRecord[] };
-  return { ok: true, data: body.folders };
+  return { data: body.folders, ok: true };
 }
 
 export async function createFolder(input: {
@@ -167,14 +171,14 @@ export async function createFolder(input: {
 }): Promise<ApiResult<FolderAccess>> {
   const res = await fetch("/api/folders", {
     ...fetchOpts,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as FolderAccess };
+  return { data: (await res.json()) as FolderAccess, ok: true };
 }
 
 export async function fetchFolder(
@@ -185,9 +189,9 @@ export async function fetchFolder(
     fetchOpts,
   );
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as FolderAccess };
+  return { data: (await res.json()) as FolderAccess, ok: true };
 }
 
 export async function renameFolder(
@@ -196,14 +200,14 @@ export async function renameFolder(
 ): Promise<ApiResult<FolderAccess>> {
   const res = await fetch(`/api/folders/${id}`, {
     ...fetchOpts,
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as FolderAccess };
+  return { data: (await res.json()) as FolderAccess, ok: true };
 }
 
 export async function updateFolderAccess(input: {
@@ -215,14 +219,14 @@ export async function updateFolderAccess(input: {
 }): Promise<ApiResult<FolderAccess>> {
   const res = await fetch("/api/folders", {
     ...fetchOpts,
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as FolderAccess };
+  return { data: (await res.json()) as FolderAccess, ok: true };
 }
 
 const ogPreviewCache = new Map<string, OgPreview>();
@@ -238,9 +242,13 @@ export function seedOgPreviews(
   const entries =
     cards instanceof Map ? cards.entries() : Object.entries(cards);
   for (const [url, card] of entries) {
-    if (!card) continue;
+    if (!card) {
+      continue;
+    }
     ogPreviewCache.set(url, card);
-    if (card.url) ogPreviewCache.set(card.url, card);
+    if (card.url) {
+      ogPreviewCache.set(card.url, card);
+    }
   }
 }
 
@@ -248,9 +256,13 @@ export async function fetchOgPreview(
   url: string,
 ): Promise<ApiResult<OgPreview>> {
   const cached = ogPreviewCache.get(url);
-  if (cached) return { ok: true, data: cached };
+  if (cached) {
+    return { data: cached, ok: true };
+  }
   const inflight = ogPreviewInflight.get(url);
-  if (inflight) return inflight;
+  if (inflight) {
+    return inflight;
+  }
 
   const pending = (async () => {
     const path = `/api/og?url=${encodeURIComponent(url)}`;
@@ -263,20 +275,20 @@ export async function fetchOgPreview(
     }
     if (!res.ok) {
       return {
+        error: await parseError(res),
         ok: false as const,
         status: res.status,
-        error: await parseError(res),
       };
     }
     const data = (await res.json()) as OgPreview;
     ogPreviewCache.set(url, data);
-    return { ok: true, data } as const;
+    return { data, ok: true } as const;
   })().finally(() => {
     ogPreviewInflight.delete(url);
   });
 
   ogPreviewInflight.set(url, pending);
-  return pending;
+  return await pending;
 }
 
 export async function uploadImage(
@@ -287,13 +299,13 @@ export async function uploadImage(
   form.append("file", file);
   const res = await fetch(`/api/notes/${noteId}/images`, {
     ...fetchOpts,
-    method: "POST",
     body: form,
+    method: "POST",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as { id: string; url: string } };
+  return { data: (await res.json()) as { id: string; url: string }, ok: true };
 }
 
 export async function deleteFolder(id: string): Promise<ApiResult<void>> {
@@ -302,9 +314,9 @@ export async function deleteFolder(id: string): Promise<ApiResult<void>> {
     method: "DELETE",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: undefined };
+  return { data: undefined, ok: true };
 }
 
 export async function deleteNote(id: string): Promise<ApiResult<void>> {
@@ -313,9 +325,9 @@ export async function deleteNote(id: string): Promise<ApiResult<void>> {
     method: "DELETE",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: undefined };
+  return { data: undefined, ok: true };
 }
 
 export async function logout(): Promise<void> {
@@ -336,10 +348,10 @@ export type ApiTokenCreated = ApiTokenSummary & {
 export async function fetchTokens(): Promise<ApiResult<ApiTokenSummary[]>> {
   const res = await fetch("/api/tokens", fetchOpts);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   const body = (await res.json()) as { tokens: ApiTokenSummary[] };
-  return { ok: true, data: body.tokens };
+  return { data: body.tokens, ok: true };
 }
 
 export async function createToken(
@@ -347,14 +359,14 @@ export async function createToken(
 ): Promise<ApiResult<ApiTokenCreated>> {
   const res = await fetch("/api/tokens", {
     ...fetchOpts,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as ApiTokenCreated };
+  return { data: (await res.json()) as ApiTokenCreated, ok: true };
 }
 
 export type ArticleSourceWrite = {
@@ -371,10 +383,10 @@ export async function fetchArticleSources(): Promise<
 > {
   const res = await fetch("/api/article-sources", fetchOpts);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   const body = (await res.json()) as { sources: ArticleSource[] };
-  return { ok: true, data: body.sources };
+  return { data: body.sources, ok: true };
 }
 
 export async function fetchArticleSourceStatus(): Promise<
@@ -382,9 +394,9 @@ export async function fetchArticleSourceStatus(): Promise<
 > {
   const res = await fetch("/api/article-sources/status", fetchOpts);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: (await res.json()) as ArticleSourceStatus };
+  return { data: (await res.json()) as ArticleSourceStatus, ok: true };
 }
 
 export async function createArticleSource(
@@ -392,15 +404,15 @@ export async function createArticleSource(
 ): Promise<ApiResult<ArticleSource>> {
   const res = await fetch("/api/article-sources", {
     ...fetchOpts,
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   notifyArticleChanged();
-  return { ok: true, data: (await res.json()) as ArticleSource };
+  return { data: (await res.json()) as ArticleSource, ok: true };
 }
 
 export async function updateArticleSource(
@@ -409,15 +421,15 @@ export async function updateArticleSource(
 ): Promise<ApiResult<ArticleSource>> {
   const res = await fetch(`/api/article-sources/${id}`, {
     ...fetchOpts,
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   notifyArticleChanged();
-  return { ok: true, data: (await res.json()) as ArticleSource };
+  return { data: (await res.json()) as ArticleSource, ok: true };
 }
 
 export async function deleteArticleSource(
@@ -428,10 +440,10 @@ export async function deleteArticleSource(
     method: "DELETE",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
   notifyArticleChanged();
-  return { ok: true, data: undefined };
+  return { data: undefined, ok: true };
 }
 
 export async function dispatchArticleSource(
@@ -442,9 +454,9 @@ export async function dispatchArticleSource(
     method: "POST",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: undefined };
+  return { data: undefined, ok: true };
 }
 
 export async function revokeToken(id: string): Promise<ApiResult<void>> {
@@ -453,7 +465,7 @@ export async function revokeToken(id: string): Promise<ApiResult<void>> {
     method: "DELETE",
   });
   if (!res.ok) {
-    return { ok: false, status: res.status, error: await parseError(res) };
+    return { error: await parseError(res), ok: false, status: res.status };
   }
-  return { ok: true, data: undefined };
+  return { data: undefined, ok: true };
 }

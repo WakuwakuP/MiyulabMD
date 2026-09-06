@@ -174,8 +174,8 @@ export function flattenLicenseReport(grouped) {
         continue;
       }
       packages.push({
-        name,
         license: entry.license || license,
+        name,
       });
     }
   }
@@ -192,16 +192,16 @@ export function findLicenseViolations(packages) {
   for (const pkg of packages) {
     if (isForbiddenPackage(pkg.name)) {
       violations.push({
-        name: pkg.name,
         license: pkg.license,
+        name: pkg.name,
         reason: "forbidden package prefix",
       });
       continue;
     }
     if (!isAllowedLicenseExpression(pkg.license)) {
       violations.push({
-        name: pkg.name,
         license: pkg.license,
+        name: pkg.name,
         reason: "license not on the production allowlist",
       });
     }

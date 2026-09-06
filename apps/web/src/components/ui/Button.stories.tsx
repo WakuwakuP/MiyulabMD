@@ -2,9 +2,9 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Button } from "./Button.tsx";
 
 const meta = {
-  title: "UI/Button",
   component: Button,
   tags: ["autodocs"],
+  title: "UI/Button",
 } satisfies Meta<typeof Button>;
 
 export default meta;
@@ -12,37 +12,37 @@ type Story = StoryObj<typeof meta>;
 
 export const Outline: Story = {
   args: {
-    variant: "outline",
     children: "Outline",
+    variant: "outline",
   },
 };
 
 export const Accent: Story = {
   args: {
-    variant: "accent",
     children: "Accent",
+    variant: "accent",
   },
 };
 
 export const Ghost: Story = {
   args: {
-    variant: "ghost",
     children: "Ghost",
+    variant: "ghost",
   },
 };
 
 export const Danger: Story = {
   args: {
-    variant: "danger",
     children: "Danger",
+    variant: "danger",
   },
 };
 
 export const Disabled: Story = {
   args: {
-    variant: "outline",
     children: "Disabled",
     disabled: true,
+    variant: "outline",
   },
 };
 
@@ -53,7 +53,7 @@ export const AllVariants: StoryObj = {
       <Button variant="accent">Accent</Button>
       <Button variant="ghost">Ghost</Button>
       <Button variant="danger">Danger</Button>
-      <Button variant="outline" disabled>
+      <Button disabled={true} variant="outline">
         Disabled
       </Button>
     </div>

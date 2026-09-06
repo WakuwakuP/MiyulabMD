@@ -27,7 +27,9 @@ test("applyTextDiff deletes without replacing the whole document", () => {
 
   const ops: Array<{ insert?: string; delete?: number; retain?: number }> = [];
   text.observe((event) => {
-    for (const item of event.delta) ops.push(item);
+    for (const item of event.delta) {
+      ops.push(item);
+    }
   });
 
   applyTextDiff(text, "abde");
@@ -37,8 +39,8 @@ test("applyTextDiff deletes without replacing the whole document", () => {
 
 test("inspectPlainTextDelta accepts a single insert of letters", () => {
   assert.deepEqual(inspectPlainTextDelta([{ retain: 4 }, { insert: "x" }]), {
-    kind: "insert",
     index: 4,
+    kind: "insert",
     text: "x",
   });
 });

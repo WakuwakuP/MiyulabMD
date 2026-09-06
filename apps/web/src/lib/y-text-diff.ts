@@ -19,7 +19,9 @@ export function applyTextDiff(
   origin?: unknown,
 ): boolean {
   const current = yText.toString();
-  if (current === next) return false;
+  if (current === next) {
+    return false;
+  }
 
   const changes = diff(current, next);
   yText.doc?.transact(() => {
@@ -57,14 +59,18 @@ export function inspectPlainTextDelta(
       continue;
     }
     if (typeof item.insert === "string") {
-      if (found || STRUCTURAL.test(item.insert)) return null;
-      found = { kind: "insert", index, text: item.insert };
+      if (found || STRUCTURAL.test(item.insert)) {
+        return null;
+      }
+      found = { index, kind: "insert", text: item.insert };
       index += item.insert.length;
       continue;
     }
     if (item.delete) {
-      if (found) return null;
-      found = { kind: "delete", index, length: item.delete };
+      if (found) {
+        return null;
+      }
+      found = { index, kind: "delete", length: item.delete };
     }
   }
 

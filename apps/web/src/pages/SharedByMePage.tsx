@@ -1,5 +1,4 @@
 import type { FolderAccess, NoteSummary } from "@miyulabmd/shared";
-import { folderUrl } from "@miyulabmd/shared";
 import { type MouseEvent, useCallback, useEffect, useState } from "react";
 import {
   Link,
@@ -10,6 +9,7 @@ import {
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { AccessScopeMeta } from "../components/notes/AccessScopeMeta.tsx";
+import { causeMessage } from "../components/notes/access-draft.ts";
 import {
   ContextMenu,
   type ContextMenuItem,
@@ -19,42 +19,17 @@ import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { DriveList, DriveRow } from "../components/ui/DriveList.tsx";
 import { FolderIcon, MarkdownIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
-import {
-  fetchFolder,
-  fetchFolderTree,
-  fetchNote,
-  updateFolderAccess,
-  updateNote,
-} from "../lib/api.ts";
-import {
-  invalidateFolderCache,
-  invalidateNotesCache,
-  loadNotes,
-} from "../lib/list-cache.ts";
-import { invalidateNoteCache, prefetchNote } from "../lib/note-cache.ts";
+import { prefetchNote } from "../lib/note-cache.ts";
 import { sharedByMeItems } from "../lib/shared-by-me.ts";
-
-function draftFromFolder(folder: FolderAccess): AccessDraft {
-  return {
-    inherit: folder.inherit,
-    readScope: folder.effectiveReadScope,
-    writeScope: folder.effectiveWriteScope,
-    grants: folder.grants,
-  };
-}
-
-function draftFromNote(note: NoteSummary): AccessDraft {
-  return {
-    inherit: note.access.inherit,
-    readScope: note.access.effectiveReadScope,
-    writeScope: note.access.effectiveWriteScope,
-    grants: note.access.grants,
-  };
-}
-
-type ShareState =
-  | { kind: "folder"; folderId: string; name: string; draft: AccessDraft }
-  | { kind: "note"; id: string; name: string; draft: AccessDraft };
+import {
+  loadSharedByMe,
+  openSharedFolderShare,
+  openSharedNoteShare,
+  persistSharedShare,
+  type ShareState,
+  sharedInheritLabel,
+  sharedShareLink,
+} from "./shared-by-me-page.ts";
 
 type MenuState = {
   id: string;
@@ -80,52 +55,28 @@ export function SharedByMePage() {
 
   useEffect(() => {
     setHeader({
-      folder: null,
       actions: user ? <DrivePlaceNav current="shared-by-me" /> : null,
+      folder: null,
     });
     return () => setHeader(null);
   }, [setHeader, user]);
 
   const loadData = useCallback(
     async (signal?: AbortSignal) => {
-      if (!user) return;
-      setPending(true);
-      setError(null);
-      try {
-        const [noteList, folderTree] = await Promise.all([
-          loadNotes(true),
-          fetchFolderTree(),
-        ]);
-        if (signal?.aborted) return;
-        setNotes(noteList);
-        if (!folderTree.ok) throw new Error(folderTree.error);
-        const results = await Promise.all(
-          folderTree.data.map((entry) => fetchFolder(entry.id)),
-        );
-        if (signal?.aborted) return;
-        const nextFolders: FolderAccess[] = [];
-        for (const result of results) {
-          if (result.ok) nextFolders.push(result.data);
-          else setError(result.error);
-        }
-        setFolders(nextFolders);
-      } catch (cause) {
-        if (!signal?.aborted) {
-          setError(
-            cause instanceof Error
-              ? cause.message
-              : "共有済みの取得に失敗しました。",
-          );
-        }
-      } finally {
-        if (!signal?.aborted) setPending(false);
-      }
+      await loadSharedByMe(user, signal, {
+        setError,
+        setFolders,
+        setNotes,
+        setPending,
+      });
     },
     [user],
   );
 
   useEffect(() => {
-    if (userLoading) return;
+    if (userLoading) {
+      return;
+    }
     if (!user) {
       navigate("/", { replace: true });
       return;
@@ -153,7 +104,9 @@ export function SharedByMePage() {
 
   function openFolderMenu(event: MouseEvent, folder: FolderAccess) {
     const folderId = folder.id;
-    if (!folderId) return;
+    if (!folderId) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const position = menuPosition(event);
@@ -176,119 +129,35 @@ export function SharedByMePage() {
   }
 
   async function openFolderShare(folderId: string) {
-    if (!user) return;
-
-    const result = await fetchFolder(folderId);
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    if (result.data.locked) {
-      setError("マイドライブの範囲は自分のみで固定です。");
-      return;
-    }
-    if (!result.data.id) {
-      setError("共有対象のフォルダ情報が取得できませんでした。");
-      return;
-    }
-    setShare({
-      kind: "folder",
-      folderId: result.data.id,
-      name: result.data.name,
-      draft: draftFromFolder(result.data),
-    });
-    setShareError(null);
+    await openSharedFolderShare(
+      folderId,
+      user,
+      setError,
+      setShare,
+      setShareError,
+    );
   }
 
   async function openNoteShare(noteId: string) {
-    if (!user) return;
-
-    const result = await fetchNote(noteId);
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    setShare({
-      kind: "note",
-      id: result.data.id,
-      name: result.data.title,
-      draft: draftFromNote(result.data),
-    });
-    setShareError(null);
+    await openSharedNoteShare(noteId, user, setError, setShare, setShareError);
   }
 
   async function persistShare(next: AccessDraft) {
-    if (!share) return;
-
-    setShare({ ...share, draft: next });
-    setShareError(null);
-
-    if (share.kind === "folder") {
-      const result = await updateFolderAccess({
-        folderId: share.folderId,
-        inherit: next.inherit,
-        readScope: next.inherit ? undefined : next.readScope,
-        writeScope: next.inherit ? undefined : next.writeScope,
-        grants: next.grants.map((grant) => ({
-          email: grant.email,
-          canWrite: grant.canWrite,
-        })),
-      });
-
-      if (!result.ok) {
-        setShareError(result.error);
-        return;
-      }
-      setShare({
-        ...share,
-        name: result.data.name,
-        draft: draftFromFolder(result.data),
-      });
-
-      invalidateNoteCache();
-      invalidateNotesCache();
-      invalidateFolderCache();
-      await loadData();
-      return;
-    }
-
-    const result = await updateNote(share.id, {
-      inheritAccess: next.inherit,
-      readScope: next.inherit ? null : next.readScope,
-      writeScope: next.inherit ? null : next.writeScope,
-      grants: next.grants.map((grant) => ({
-        email: grant.email,
-        canWrite: grant.canWrite,
-      })),
+    await persistSharedShare(share, next, {
+      reload: () => loadData(),
+      setShare,
+      setShareError,
     });
-
-    if (!result.ok) {
-      setShareError(result.error);
-      return;
-    }
-
-    setShare({
-      ...share,
-      name: result.data.title,
-      draft: draftFromNote(result.data),
-    });
-    invalidateNoteCache(share.id);
-    invalidateNotesCache();
-    invalidateFolderCache();
-    await loadData();
   }
 
-  const shareLink =
-    share?.kind === "folder"
-      ? `${window.location.origin}${folderUrl(share.folderId)}`
-      : share
-        ? `${window.location.origin}/n/${share.id}`
-        : "";
+  const shareLink = sharedShareLink(share);
 
   const visible = sharedByMeItems(folders, notes, user?.id ?? "", folderId);
   const currentFolder = folders.find((folder) => folder.id === folderId);
   const empty = visible.folders.length === 0 && visible.notes.length === 0;
-  if (!user) return null;
+  if (!user) {
+    return null;
+  }
 
   return (
     <section>
@@ -329,17 +198,17 @@ export function SharedByMePage() {
             .sort((a, b) => a.name.localeCompare(b.name, "ja"))
             .map((folder) => (
               <DriveRow
-                key={folder.id}
                 href={sharedFolderUrl(folder.id)}
-                name={folder.name}
                 icon={<FolderIcon />}
+                key={folder.id}
+                menuOpen={menu?.id === folder.id}
                 meta={
                   <AccessScopeMeta
                     readScope={folder.effectiveReadScope}
                     writeScope={folder.effectiveWriteScope}
                   />
                 }
-                menuOpen={menu?.id === folder.id}
+                name={folder.name}
                 onMenu={(event) => openFolderMenu(event, folder)}
               />
             ))}
@@ -348,17 +217,17 @@ export function SharedByMePage() {
             .sort((a, b) => b.updatedAt - a.updatedAt)
             .map((note) => (
               <DriveRow
-                key={note.id}
                 href={`/n/${note.id}`}
-                name={note.title}
                 icon={<MarkdownIcon />}
+                key={note.id}
+                menuOpen={menu?.id === note.id}
                 meta={
                   <AccessScopeMeta
                     readScope={note.access.effectiveReadScope}
                     writeScope={note.access.effectiveWriteScope}
                   />
                 }
-                menuOpen={menu?.id === note.id}
+                name={note.title}
                 onMenu={(event) => openNoteMenu(event, note)}
                 onPointerEnter={() => prefetchNote(note.id)}
               />
@@ -368,36 +237,30 @@ export function SharedByMePage() {
 
       {menu && (
         <ContextMenu
-          x={menu.x}
-          y={menu.y}
           items={menu.items}
           onClose={() => setMenu(null)}
+          x={menu.x}
+          y={menu.y}
         />
       )}
 
       {share && (
         <ShareModal
-          title={share.name}
-          linkUrl={shareLink}
-          ownerLabel={user.displayName?.trim() || user.email}
-          value={share.draft}
-          showInherit
-          inheritLabel={
-            share.kind === "folder"
-              ? "親フォルダの設定に従う"
-              : "ディレクトリの設定に従う"
-          }
           error={shareError}
+          inheritLabel={sharedInheritLabel(share.kind)}
+          linkUrl={shareLink}
           onChange={(next) => {
             void persistShare(next).catch((cause) => {
               setShareError(
-                cause instanceof Error
-                  ? cause.message
-                  : "共有設定の更新に失敗しました。",
+                causeMessage(cause, "共有設定の更新に失敗しました。"),
               );
             });
           }}
           onClose={() => setShare(null)}
+          ownerLabel={user.displayName?.trim() || user.email}
+          showInherit={true}
+          title={share.name}
+          value={share.draft}
         />
       )}
     </section>

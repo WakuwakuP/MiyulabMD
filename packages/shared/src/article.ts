@@ -112,7 +112,7 @@ export function parseArticleListQuery(
     return { error: "folder が不正です" };
   }
 
-  return { page, perPage, folder };
+  return { folder, page, perPage };
 }
 
 /** 一覧の絞り込み先。未指定ならソース直下、指定ならその配下（ソースの子孫に限る）。 */
@@ -120,9 +120,13 @@ export function resolveArticleListFolder(
   sourceFolder: string,
   requested: string | null | undefined,
 ): string | { error: string } {
-  if (!requested) return sourceFolder;
+  if (!requested) {
+    return sourceFolder;
+  }
   const folder = normalizeFolder(requested);
-  if (!folder) return { error: "folder が不正です" };
+  if (!folder) {
+    return { error: "folder が不正です" };
+  }
   if (!folderContains(sourceFolder, folder)) {
     return { error: "folder はこのコレクション配下である必要があります" };
   }
@@ -133,6 +137,67 @@ const FIELD_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function isArticleFieldType(value: string): value is ArticleFieldType {
   return (ARTICLE_FIELD_TYPES as readonly string[]).includes(value);
+}
+
+function parseSchemaField(
+  item: unknown,
+  index: number,
+  seen: Set<string>,
+): ArticleSchemaField | { error: string } {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return { error: `schema[${index}] が不正です` };
+  }
+  const raw = item as Record<string, unknown>;
+  const key = typeof raw.key === "string" ? raw.key.trim() : "";
+  if (!FIELD_KEY.test(key)) {
+    return { error: `schema[${index}].key が不正です` };
+  }
+  if (seen.has(key)) {
+    return { error: `schema の key が重複しています: ${key}` };
+  }
+  if (typeof raw.type !== "string" || !isArticleFieldType(raw.type)) {
+    return { error: `schema[${index}].type が不正です` };
+  }
+
+  const field: ArticleSchemaField = { key, type: raw.type };
+  if (raw.required === true) {
+    field.required = true;
+  }
+  if (raw.fixed === true) {
+    field.fixed = true;
+  }
+  const enums = parseSchemaEnum(raw, index);
+  if (enums && "error" in enums) {
+    return enums;
+  }
+  if (enums) {
+    field.enum = enums;
+  }
+  if (raw.default !== undefined) {
+    const coerced = coerceArticleValue(raw.type, raw.default, field.enum);
+    if (coerced === undefined) {
+      return { error: `schema[${index}].default が型と一致しません` };
+    }
+    field.default = coerced;
+  }
+  seen.add(key);
+  return field;
+}
+
+function parseSchemaEnum(
+  raw: Record<string, unknown>,
+  index: number,
+): string[] | { error: string } | undefined {
+  if (!Array.isArray(raw.enum)) {
+    return undefined;
+  }
+  if (raw.type !== "string") {
+    return { error: `schema[${index}].enum は string のみ使えます` };
+  }
+  if (!raw.enum.every((entry) => typeof entry === "string")) {
+    return { error: `schema[${index}].enum が不正です` };
+  }
+  return raw.enum;
 }
 
 export function parseArticleSchema(
@@ -146,41 +211,10 @@ export function parseArticleSchema(
   const seen = new Set<string>();
 
   for (const [index, item] of value.entries()) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return { error: `schema[${index}] が不正です` };
+    const field = parseSchemaField(item, index, seen);
+    if ("error" in field) {
+      return field;
     }
-    const raw = item as Record<string, unknown>;
-    const key = typeof raw.key === "string" ? raw.key.trim() : "";
-    if (!FIELD_KEY.test(key)) {
-      return { error: `schema[${index}].key が不正です` };
-    }
-    if (seen.has(key)) {
-      return { error: `schema の key が重複しています: ${key}` };
-    }
-    if (typeof raw.type !== "string" || !isArticleFieldType(raw.type)) {
-      return { error: `schema[${index}].type が不正です` };
-    }
-
-    const field: ArticleSchemaField = { key, type: raw.type };
-    if (raw.required === true) field.required = true;
-    if (raw.fixed === true) field.fixed = true;
-    if (Array.isArray(raw.enum)) {
-      if (raw.type !== "string") {
-        return { error: `schema[${index}].enum は string のみ使えます` };
-      }
-      if (!raw.enum.every((entry) => typeof entry === "string")) {
-        return { error: `schema[${index}].enum が不正です` };
-      }
-      field.enum = raw.enum;
-    }
-    if (raw.default !== undefined) {
-      const coerced = coerceArticleValue(raw.type, raw.default, field.enum);
-      if (coerced === undefined) {
-        return { error: `schema[${index}].default が型と一致しません` };
-      }
-      field.default = coerced;
-    }
-    seen.add(key);
     fields.push(field);
   }
 
@@ -188,7 +222,9 @@ export function parseArticleSchema(
 }
 
 export function parseArticleMeta(value: unknown): ArticleMeta {
-  if (!value) return {};
+  if (!value) {
+    return {};
+  }
   if (typeof value === "string") {
     try {
       const parsed: unknown = JSON.parse(value);
@@ -203,19 +239,35 @@ export function parseArticleMeta(value: unknown): ArticleMeta {
   return {};
 }
 
+function coerceString(value: unknown, enums?: string[]): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  if (enums && !enums.includes(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+function coerceDate(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
+}
+
 export function coerceArticleValue(
   type: ArticleFieldType,
   value: unknown,
   enums?: string[],
 ): unknown {
-  if (value === undefined || value === null) return undefined;
+  if (value === undefined || value === null) {
+    return undefined;
+  }
 
   switch (type) {
-    case "string": {
-      if (typeof value !== "string") return undefined;
-      if (enums && !enums.includes(value)) return undefined;
-      return value;
-    }
+    case "string":
+      return coerceString(value, enums);
     case "number":
       return typeof value === "number" && Number.isFinite(value)
         ? value
@@ -223,8 +275,7 @@ export function coerceArticleValue(
     case "boolean":
       return typeof value === "boolean" ? value : undefined;
     case "date":
-      if (typeof value !== "string" || !value.trim()) return undefined;
-      return Number.isNaN(Date.parse(value)) ? undefined : value;
+      return coerceDate(value);
     case "string[]":
       return Array.isArray(value) &&
         value.every((item) => typeof item === "string")
@@ -246,7 +297,9 @@ export function mergeArticleData(input: {
 
   for (const field of input.schema) {
     if (field.fixed) {
-      if (field.default !== undefined) data[field.key] = field.default;
+      if (field.default !== undefined) {
+        data[field.key] = field.default;
+      }
       continue;
     }
     const fromNote = coerceArticleValue(
@@ -258,7 +311,9 @@ export function mergeArticleData(input: {
       data[field.key] = fromNote;
       continue;
     }
-    if (field.default !== undefined) data[field.key] = field.default;
+    if (field.default !== undefined) {
+      data[field.key] = field.default;
+    }
   }
 
   if (typeof data.title !== "string" || !data.title.trim()) {
@@ -274,7 +329,9 @@ export function matchArticleSource<T extends { folder: string }>(
 ): T | null {
   let best: T | null = null;
   for (const source of sources) {
-    if (!folderContains(source.folder, folder)) continue;
+    if (!folderContains(source.folder, folder)) {
+      continue;
+    }
     if (!best || source.folder.length > best.folder.length) {
       best = source;
     }
@@ -286,8 +343,12 @@ export function isArticleSourceDirty(
   lastDispatchedAt: number | null,
   maxNoteUpdatedAt: number | null,
 ): boolean {
-  if (maxNoteUpdatedAt === null) return false;
-  if (lastDispatchedAt === null) return true;
+  if (maxNoteUpdatedAt === null) {
+    return false;
+  }
+  if (lastDispatchedAt === null) {
+    return true;
+  }
   return maxNoteUpdatedAt > lastDispatchedAt;
 }
 

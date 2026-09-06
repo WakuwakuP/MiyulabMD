@@ -43,7 +43,9 @@ function metaContent(html: string, keys: string[]): string | null {
       "i",
     );
     const match = property.exec(html) ?? contentFirst.exec(html);
-    if (match?.[1]) return decodeEntities(match[1].trim());
+    if (match?.[1]) {
+      return decodeEntities(match[1].trim());
+    }
   }
   return null;
 }
@@ -54,7 +56,9 @@ function titleTag(html: string): string | null {
 }
 
 function resolveUrl(base: string, value: string | null): string | null {
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
   try {
     return new URL(value, base).toString();
   } catch {
@@ -76,11 +80,11 @@ export function parseOgHtml(html: string, baseUrl: string): OgPreview {
   );
   const siteName = metaContent(html, ["og:site_name"]);
   return {
-    url: baseUrl,
-    title,
     description,
     image,
     siteName,
+    title,
+    url: baseUrl,
   };
 }
 
@@ -89,7 +93,9 @@ async function readHtmlPrefix(
   maxBytes: number,
 ): Promise<string> {
   const body = response.body;
-  if (!body) return (await response.text()).slice(0, maxBytes);
+  if (!body) {
+    return (await response.text()).slice(0, maxBytes);
+  }
 
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -97,9 +103,13 @@ async function readHtmlPrefix(
   try {
     while (html.length < maxBytes) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
       html += decoder.decode(value, { stream: true });
-      if (/<\/head>/i.test(html)) break;
+      if (/<\/head>/i.test(html)) {
+        break;
+      }
     }
   } finally {
     try {
@@ -131,9 +141,13 @@ export async function matchOgCache(
   rawUrl: string,
 ): Promise<OgPreview | null> {
   const key = ogCacheKey(origin, rawUrl);
-  if (!key) return null;
+  if (!key) {
+    return null;
+  }
   const hit = await caches.default.match(key);
-  if (!hit?.ok) return null;
+  if (!hit?.ok) {
+    return null;
+  }
   try {
     return (await hit.json()) as OgPreview;
   } catch {
@@ -146,13 +160,15 @@ export async function putOgCache(
   preview: OgPreview,
 ): Promise<void> {
   const key = ogCacheKey(origin, preview.url);
-  if (!key) return;
+  if (!key) {
+    return;
+  }
   await caches.default.put(
     key,
     new Response(JSON.stringify(preview), {
       headers: {
-        "Content-Type": "application/json",
         "Cache-Control": OG_CACHE_CONTROL,
+        "Content-Type": "application/json",
       },
     }),
   );
@@ -166,7 +182,9 @@ export async function peekOgCards(
   await Promise.all(
     urls.map(async (url) => {
       const card = await matchOgCache(origin, url);
-      if (card) cards.set(url, card);
+      if (card) {
+        cards.set(url, card);
+      }
     }),
   );
   return cards;
@@ -182,11 +200,13 @@ async function fetchHtml(
       const headers = new Headers(init.headers);
       headers.set(OG_TARGET_HEADER, url);
       const viaOutbound = await outbound.fetch("https://og-fetch.internal/", {
+        headers,
         method: init.method,
         redirect: init.redirect,
-        headers,
       });
-      if (viaOutbound.ok) return viaOutbound;
+      if (viaOutbound.ok) {
+        return viaOutbound;
+      }
     } catch {
       // Custom-domain Workers cannot fetch some same-zone CNAMEs.
       // Fall through to the runtime fetch (works on workers.dev / local).
@@ -238,16 +258,22 @@ export async function loadOgPreview(
   outbound?: OgOutbound,
 ): Promise<OgPreview | { error: string; status: number }> {
   const cached = await matchOgCache(origin, rawUrl);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   const key = ogCacheKey(origin, rawUrl);
   const inflightKey = key?.url ?? rawUrl;
   const existing = ogInflight.get(inflightKey);
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
 
   const pending = fetchOgPreview(rawUrl, outbound)
     .then(async (result) => {
-      if (!("error" in result)) await putOgCache(origin, result);
+      if (!("error" in result)) {
+        await putOgCache(origin, result);
+      }
       return result;
     })
     .finally(() => {

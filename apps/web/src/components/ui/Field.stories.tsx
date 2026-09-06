@@ -4,9 +4,9 @@ import { CheckLabel, Field, Row } from "./Field.tsx";
 import { Input } from "./Input.tsx";
 
 const meta = {
-  title: "UI/Field",
   component: Field,
   tags: ["autodocs"],
+  title: "UI/Field",
 } satisfies Meta<typeof Field>;
 
 export default meta;
@@ -14,16 +14,16 @@ type Story = StoryObj<typeof meta>;
 
 export const LabeledInput: Story = {
   args: {
-    label: "表示名",
+    children: <Input defaultValue="Waku" id="display-name" />,
     htmlFor: "display-name",
-    children: <Input id="display-name" defaultValue="Waku" />,
+    label: "表示名",
   },
 };
 
 export const CheckboxRow: StoryObj = {
   render: () => (
     <CheckLabel>
-      <input type="checkbox" defaultChecked />
+      <input defaultChecked={true} type="checkbox" />
       フォルダの権限を継承する
     </CheckLabel>
   ),

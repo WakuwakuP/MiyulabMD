@@ -21,7 +21,9 @@ type Props = {
 };
 
 function TocNav({ entries }: { entries: TocEntry[] }) {
-  if (entries.length === 0) return null;
+  if (entries.length === 0) {
+    return null;
+  }
 
   function handleClick(id: string) {
     const target = document.getElementById(id);
@@ -37,16 +39,16 @@ function TocNav({ entries }: { entries: TocEntry[] }) {
       <ol className="m-0 list-none space-y-1.5 p-0">
         {entries.map((entry) => (
           <li
-            key={entry.id}
             className={cn(
               entry.level === 2 && "pl-3",
               entry.level === 3 && "pl-6",
             )}
+            key={entry.id}
           >
             <button
-              type="button"
               className="w-full cursor-pointer truncate border-0 bg-transparent p-0 text-left text-muted no-underline hover:text-accent"
               onClick={() => handleClick(entry.id)}
+              type="button"
             >
               {entry.text}
             </button>
@@ -95,8 +97,8 @@ export function PreviewWithToc({
 
   return (
     <div
-      ref={layoutRef}
       className="relative w-full [[data-layout=editor]_&]:min-h-[calc(var(--app-height,100dvh)-var(--header-height))]"
+      ref={layoutRef}
     >
       <div
         className={cn(
@@ -105,11 +107,11 @@ export function PreviewWithToc({
         )}
       >
         <MarkdownPreview
-          markdown={markdown}
-          scrollRatio={scrollRatio}
-          onScrollRatio={onScrollRatio}
-          documentScroll={documentScroll}
           className={columnClass}
+          documentScroll={documentScroll}
+          markdown={markdown}
+          onScrollRatio={onScrollRatio}
+          scrollRatio={scrollRatio}
         />
       </div>
       {showToc && entries.length > 0 && (

@@ -75,13 +75,27 @@ export function applyBlockType(editor: Editor, type: BlockType): void {
 }
 
 export function currentBlockType(editor: Editor): BlockType {
-  if (editor.isActive("heading", { level: 1 })) return "h1";
-  if (editor.isActive("heading", { level: 2 })) return "h2";
-  if (editor.isActive("heading", { level: 3 })) return "h3";
-  if (editor.isActive("bulletList")) return "bullet";
-  if (editor.isActive("orderedList")) return "ordered";
-  if (editor.isActive("blockquote")) return "quote";
-  if (editor.isActive("codeBlock")) return "code";
+  if (editor.isActive("heading", { level: 1 })) {
+    return "h1";
+  }
+  if (editor.isActive("heading", { level: 2 })) {
+    return "h2";
+  }
+  if (editor.isActive("heading", { level: 3 })) {
+    return "h3";
+  }
+  if (editor.isActive("bulletList")) {
+    return "bullet";
+  }
+  if (editor.isActive("orderedList")) {
+    return "ordered";
+  }
+  if (editor.isActive("blockquote")) {
+    return "quote";
+  }
+  if (editor.isActive("codeBlock")) {
+    return "code";
+  }
   return "paragraph";
 }
 
@@ -91,119 +105,121 @@ export function blockTypeLabel(type: BlockType): string {
 
 export const SLASH_ITEMS: SlashItem[] = [
   {
+    aliases: ["text", "p", "paragraph"],
+    group: "basic",
+    hint: "本文",
     id: "paragraph",
     label: "テキスト",
-    hint: "本文",
-    group: "basic",
-    aliases: ["text", "p", "paragraph"],
     run: (editor) => applyBlockType(editor, "paragraph"),
   },
   {
+    aliases: ["h1", "heading"],
+    group: "basic",
+    hint: "大きなタイトル",
     id: "h1",
     label: "見出し 1",
-    hint: "大きなタイトル",
-    group: "basic",
-    aliases: ["h1", "heading"],
     run: (editor) => applyBlockType(editor, "h1"),
   },
   {
+    aliases: ["h2", "heading"],
+    group: "basic",
+    hint: "セクション",
     id: "h2",
     label: "見出し 2",
-    hint: "セクション",
-    group: "basic",
-    aliases: ["h2", "heading"],
     run: (editor) => applyBlockType(editor, "h2"),
   },
   {
+    aliases: ["h3", "heading"],
+    group: "basic",
+    hint: "小見出し",
     id: "h3",
     label: "見出し 3",
-    hint: "小見出し",
-    group: "basic",
-    aliases: ["h3", "heading"],
     run: (editor) => applyBlockType(editor, "h3"),
   },
   {
+    aliases: ["ul", "list", "bullet"],
+    group: "block",
+    hint: "リスト",
     id: "bullet",
     label: "箇条書き",
-    hint: "リスト",
-    group: "block",
-    aliases: ["ul", "list", "bullet"],
     run: (editor) => applyBlockType(editor, "bullet"),
   },
   {
+    aliases: ["ol", "numbered"],
+    group: "block",
+    hint: "手順",
     id: "ordered",
     label: "番号付きリスト",
-    hint: "手順",
-    group: "block",
-    aliases: ["ol", "numbered"],
     run: (editor) => applyBlockType(editor, "ordered"),
   },
   {
+    aliases: ["quote", "blockquote"],
+    group: "block",
+    hint: "引用ブロック",
     id: "quote",
     label: "引用",
-    hint: "引用ブロック",
-    group: "block",
-    aliases: ["quote", "blockquote"],
     run: (editor) => applyBlockType(editor, "quote"),
   },
   {
+    aliases: ["code", "pre"],
+    group: "block",
+    hint: "コードブロック",
     id: "code",
     label: "コード",
-    hint: "コードブロック",
-    group: "block",
-    aliases: ["code", "pre"],
     run: (editor) => applyBlockType(editor, "code"),
   },
   {
+    aliases: ["hr", "divider"],
+    group: "block",
+    hint: "水平線",
     id: "hr",
     label: "区切り線",
-    hint: "水平線",
-    group: "block",
-    aliases: ["hr", "divider"],
     run: (editor) => editor.chain().focus().setHorizontalRule().run(),
   },
   {
+    aliases: ["table", "表"],
+    group: "block",
+    hint: "テーブル",
     id: "table",
     label: "表",
-    hint: "テーブル",
-    group: "block",
-    aliases: ["table", "表"],
     run: (editor) =>
       editor
         .chain()
         .focus()
-        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .insertTable({ cols: 3, rows: 3, withHeaderRow: true })
         .run(),
   },
   {
+    aliases: ["image", "img", "photo"],
+    group: "media",
+    hint: "アップロード",
     id: "image",
     label: "画像",
-    hint: "アップロード",
-    group: "media",
-    aliases: ["image", "img", "photo"],
     run: (_editor, handlers) => handlers.onImage(),
   },
   {
+    aliases: ["youtube", "video"],
+    group: "media",
+    hint: "動画を埋め込む",
     id: "youtube",
     label: "YouTube",
-    hint: "動画を埋め込む",
-    group: "media",
-    aliases: ["youtube", "video"],
     run: (_editor, handlers) => handlers.onYoutube(),
   },
   {
+    aliases: ["ogp", "card", "link"],
+    group: "media",
+    hint: "OGP",
     id: "og",
     label: "リンクカード",
-    hint: "OGP",
-    group: "media",
-    aliases: ["ogp", "card", "link"],
     run: (_editor, handlers) => handlers.onOgCard(),
   },
 ];
 
 export function matchesSlashItem(item: SlashItem, query: string): boolean {
   const needle = query.toLowerCase();
-  if (!needle) return true;
+  if (!needle) {
+    return true;
+  }
   return (
     item.label.includes(query) ||
     item.aliases.some((alias) => alias.includes(needle))
@@ -214,7 +230,9 @@ export function readSlashQuery(
   editor: Editor,
 ): { query: string; from: number; to: number } | null {
   const { empty, $from } = editor.state.selection;
-  if (!empty || !$from.parent.isTextblock) return null;
+  if (!(empty && $from.parent.isTextblock)) {
+    return null;
+  }
   const text = $from.parent.textBetween(
     0,
     $from.parentOffset,
@@ -222,7 +240,9 @@ export function readSlashQuery(
     "\uFFFC",
   );
   const match = /(^| )\/([^\s/]*)$/.exec(text);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   const query = match[2] ?? "";
-  return { query, from: $from.pos - query.length - 1, to: $from.pos };
+  return { from: $from.pos - query.length - 1, query, to: $from.pos };
 }

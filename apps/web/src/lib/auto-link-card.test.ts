@@ -10,12 +10,12 @@ import {
 } from "../components/editor/extensions/auto-link-card.ts";
 
 const TestOgCard = Node.create({
-  name: "ogCard",
-  group: "block",
-  atom: true,
   addAttributes() {
     return { href: { default: "" } };
   },
+  atom: true,
+  group: "block",
+  name: "ogCard",
   parseHTML() {
     return [{ tag: "div[data-og-card]" }];
   },
@@ -26,24 +26,24 @@ const TestOgCard = Node.create({
 
 function editorFor(markdown: string): Editor {
   return new Editor({
-    extensions: [
-      StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
-      Markdown,
-    ],
     content: markdown,
     contentType: "markdown",
+    extensions: [
+      StarterKit.configure({ link: { autolink: true, openOnClick: false } }),
+      Markdown,
+    ],
   });
 }
 
 function cardEditor(markdown: string): Editor {
   return new Editor({
+    content: markdown,
+    contentType: "markdown",
     extensions: [
-      StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
+      StarterKit.configure({ link: { autolink: true, openOnClick: false } }),
       Markdown,
       TestOgCard,
     ],
-    content: markdown,
-    contentType: "markdown",
   });
 }
 
@@ -70,16 +70,16 @@ test("paragraphStandaloneHref cards a lone URL or link paragraph", () => {
 test("paragraphStandaloneHref ignores Firefox trailing hardBreaks", () => {
   const editor = editorFor("hello");
   editor.commands.setContent({
-    type: "doc",
     content: [
       {
-        type: "paragraph",
         content: [
-          { type: "text", text: "https://example.com/a" },
+          { text: "https://example.com/a", type: "text" },
           { type: "hardBreak" },
         ],
+        type: "paragraph",
       },
     ],
+    type: "doc",
   });
   assert.equal(
     paragraphStandaloneHref(editor.state.doc.child(0)),
@@ -87,20 +87,20 @@ test("paragraphStandaloneHref ignores Firefox trailing hardBreaks", () => {
   );
 
   editor.commands.setContent({
-    type: "doc",
     content: [
       {
-        type: "paragraph",
         content: [
           {
-            type: "text",
-            marks: [{ type: "link", attrs: { href: "https://example.com/a" } }],
+            marks: [{ attrs: { href: "https://example.com/a" }, type: "link" }],
             text: "Example\u200B",
+            type: "text",
           },
           { type: "hardBreak" },
         ],
+        type: "paragraph",
       },
     ],
+    type: "doc",
   });
   assert.equal(
     paragraphStandaloneHref(editor.state.doc.child(0)),
@@ -137,11 +137,13 @@ test("autoLinkCardTransaction cards a pasted standalone URL in place", () => {
 test("expandOgCard turns a card into selected link text", () => {
   const editor = cardEditor("next");
   const href = "https://example.com/a";
-  editor.commands.insertContentAt(0, { type: "ogCard", attrs: { href } });
+  editor.commands.insertContentAt(0, { attrs: { href }, type: "ogCard" });
 
   let cardPos = -1;
   editor.state.doc.forEach((node, pos) => {
-    if (node.type.name === "ogCard") cardPos = pos;
+    if (node.type.name === "ogCard") {
+      cardPos = pos;
+    }
   });
   assert.notEqual(cardPos, -1);
 

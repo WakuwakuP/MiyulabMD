@@ -1,12 +1,18 @@
 {
-  "editor.formatOnSave": true,
-  "[javascript][javascriptreact][typescript][typescriptreact]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode",
+  "[javascript][javascriptreact][typescript][typescriptreact][css][json][jsonc][html]": {
     "editor.codeActionsOnSave": {
-      "source.fixAll.oxc": "explicit"
-    }
+      "source.action.useSortedAttributes.biome": "explicit",
+      "source.action.useSortedEnumMembers.biome": "explicit",
+      "source.action.useSortedInterfaceMembers.biome": "explicit",
+      "source.action.useSortedKeys.biome": "explicit",
+      "source.action.useSortedPackageJson.biome": "explicit",
+      "source.action.useSortedProperties.biome": "explicit",
+      "source.action.useSortedSelectionSet.biome": "explicit",
+      "source.action.useSortedTypeFields.biome": "explicit",
+      "source.fixAll.biome": "explicit",
+      "source.organizeImports.biome": "explicit"
+    },
+    "editor.defaultFormatter": "biomejs.biome"
   },
-  "[css][json][jsonc][yaml][markdown]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  }
+  "editor.formatOnSave": true
 }

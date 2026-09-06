@@ -1,5 +1,4 @@
 import type { Actor, PermissionFlags, SessionUser } from "@miyulabmd/shared";
-import { actorFromUser } from "@miyulabmd/shared";
 
 import { instanceFlags } from "../env.ts";
 import { type NoteAccessFields, resolveNoteAccess } from "./access.ts";
@@ -20,10 +19,10 @@ export function applyInstanceFlags(
 
   const { allowAnonymousViews, allowAnonymousEdits } = instanceFlags(env);
   if (!allowAnonymousViews) {
-    return { canView: false, canEdit: false, canAdmin: false };
+    return { canAdmin: false, canEdit: false, canView: false };
   }
   if (!allowAnonymousEdits) {
-    return { ...flags, canEdit: false, canAdmin: false };
+    return { ...flags, canAdmin: false, canEdit: false };
   }
   return flags;
 }
@@ -50,7 +49,7 @@ export async function permissionContextForNote(
   user?: SessionUser | null,
 ): Promise<PermissionContext> {
   const access = await resolveNoteAccess(env, note, user);
-  return { ownerId: note.ownerId, flags: access.flags };
+  return { flags: access.flags, ownerId: note.ownerId };
 }
 
-export { actorFromUser };
+export { actorFromUser } from "@miyulabmd/shared";

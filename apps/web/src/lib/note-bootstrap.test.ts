@@ -23,12 +23,15 @@ function installDocument(elements: Record<string, FakeEl | null>) {
     },
   };
   Object.defineProperty(globalThis, "document", {
-    value: document,
     configurable: true,
+    value: document,
   });
   return () => {
-    if (previous) Object.defineProperty(globalThis, "document", previous);
-    else Reflect.deleteProperty(globalThis, "document");
+    if (previous) {
+      Object.defineProperty(globalThis, "document", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "document");
+    }
   };
 }
 
@@ -37,23 +40,25 @@ function el(
   textContent: string | null = null,
 ): FakeEl {
   return {
-    textContent,
     attrs,
     getAttribute(name: string) {
       return this.attrs[name] ?? null;
     },
     remove() {
       for (const key of Object.keys(elementsRef)) {
-        if (elementsRef[key] === this) elementsRef[key] = null;
+        if (elementsRef[key] === this) {
+          elementsRef[key] = null;
+        }
       }
     },
+    textContent,
   };
 }
 
 let elementsRef: Record<string, FakeEl | null> = {};
 
 test("readNoteBootstrap accepts matching id or shortId", () => {
-  const note = { id: "note-1", shortId: "abc123", markdown: "# Hi" };
+  const note = { id: "note-1", markdown: "# Hi", shortId: "abc123" };
   elementsRef = {
     "note-bootstrap": el({}, JSON.stringify(note)),
   };
@@ -73,11 +78,11 @@ test("consumeOgBootstrap seeds the client OG cache", () => {
       {},
       JSON.stringify({
         "https://x.com/norotororo": {
-          url: "https://x.com/norotororo",
-          title: "noro",
           description: null,
           image: null,
           siteName: "X",
+          title: "noro",
+          url: "https://x.com/norotororo",
         },
       }),
     ),

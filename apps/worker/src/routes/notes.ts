@@ -1,13 +1,22 @@
 import { env } from "cloudflare:workers";
-import type { CreateNoteInput, UpdateNoteMetaInput } from "@miyulabmd/shared";
+import type {
+  CreateNoteInput,
+  Note,
+  SessionUser,
+  UpdateNoteMetaInput,
+} from "@miyulabmd/shared";
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
-import { createNoteService } from "../services/notes.ts";
+import { createNoteService, type MutateNoteResult } from "../services/notes.ts";
+
+const notes = createNoteService(env);
 
 type PatchNoteBody = UpdateNoteMetaInput & {
   markdown?: string;
 };
+
+type RouteSet = { status?: number | string };
 
 async function parseJsonBody<T>(request: Request): Promise<T | null> {
   try {
@@ -17,7 +26,66 @@ async function parseJsonBody<T>(request: Request): Promise<T | null> {
   }
 }
 
-const notes = createNoteService(env);
+function patchHasMetaFields(meta: UpdateNoteMetaInput): boolean {
+  return (
+    meta.title !== undefined ||
+    meta.permission !== undefined ||
+    meta.alias !== undefined ||
+    meta.folder !== undefined ||
+    meta.inheritAccess !== undefined ||
+    meta.readScope !== undefined ||
+    meta.writeScope !== undefined ||
+    meta.grants !== undefined
+  );
+}
+
+function mutateResultError(
+  set: RouteSet,
+  result: Exclude<MutateNoteResult, { kind: "ok" }>,
+): { error: string } {
+  if (result.kind === "not_found") {
+    set.status = 404;
+    return { error: "Not found" };
+  }
+  if (result.kind === "bad_request") {
+    set.status = 400;
+    return { error: result.error };
+  }
+  set.status = result.status;
+  return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+}
+
+async function applyNotePatch(
+  id: string,
+  user: SessionUser | undefined,
+  body: PatchNoteBody,
+  set: RouteSet,
+): Promise<{ error: string } | Note> {
+  const { markdown, ...meta } = body;
+  let latest = null as MutateNoteResult | null;
+
+  if (patchHasMetaFields(meta)) {
+    latest = await notes.updateMeta(id, user, meta);
+    if (latest.kind !== "ok") {
+      return mutateResultError(set, latest);
+    }
+  }
+
+  if (markdown !== undefined) {
+    const markdownResult = await notes.updateMarkdown(id, user, markdown);
+    if (markdownResult.kind !== "ok") {
+      return mutateResultError(set, markdownResult);
+    }
+    latest = markdownResult;
+  }
+
+  if (latest?.kind !== "ok") {
+    set.status = 400;
+    return { error: "No fields to update" };
+  }
+
+  return latest.note;
+}
 
 export const noteRoutes = new Elysia({ prefix: "/api/notes" })
   .get("/", async ({ request }) => {
@@ -63,64 +131,7 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
       return { error: "Invalid JSON body" };
     }
 
-    const { markdown, ...meta } = body;
-    let latest = null as Awaited<ReturnType<typeof notes.updateMeta>> | null;
-
-    const hasMeta =
-      meta.title !== undefined ||
-      meta.permission !== undefined ||
-      meta.alias !== undefined ||
-      meta.folder !== undefined ||
-      meta.inheritAccess !== undefined ||
-      meta.readScope !== undefined ||
-      meta.writeScope !== undefined ||
-      meta.grants !== undefined;
-
-    if (hasMeta) {
-      latest = await notes.updateMeta(params.id, user ?? undefined, meta);
-      if (latest.kind !== "ok") {
-        if (latest.kind === "not_found") {
-          set.status = 404;
-          return { error: "Not found" };
-        }
-        if (latest.kind === "bad_request") {
-          set.status = 400;
-          return { error: latest.error };
-        }
-        set.status = latest.status;
-        return { error: latest.status === 401 ? "Unauthorized" : "Forbidden" };
-      }
-    }
-
-    if (markdown !== undefined) {
-      const markdownResult = await notes.updateMarkdown(
-        params.id,
-        user ?? undefined,
-        markdown,
-      );
-      if (markdownResult.kind !== "ok") {
-        if (markdownResult.kind === "not_found") {
-          set.status = 404;
-          return { error: "Not found" };
-        }
-        if (markdownResult.kind === "bad_request") {
-          set.status = 400;
-          return { error: markdownResult.error };
-        }
-        set.status = markdownResult.status;
-        return {
-          error: markdownResult.status === 401 ? "Unauthorized" : "Forbidden",
-        };
-      }
-      latest = markdownResult;
-    }
-
-    if (!latest || latest.kind !== "ok") {
-      set.status = 400;
-      return { error: "No fields to update" };
-    }
-
-    return latest.note;
+    return applyNotePatch(params.id, user ?? undefined, body, set);
   })
   .delete("/:id", async ({ request, params, set }) => {
     const user = await readSession(request, env);

@@ -2,9 +2,9 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Select } from "./Select.tsx";
 
 const meta = {
-  title: "UI/Select",
   component: Select,
   tags: ["autodocs"],
+  title: "UI/Select",
 } satisfies Meta<typeof Select>;
 
 export default meta;
@@ -12,8 +12,6 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {
-    className: "rounded-lg px-3 py-2",
-    defaultValue: "signed_in",
     children: (
       <>
         <option value="public">公開</option>
@@ -22,5 +20,7 @@ export const Default: Story = {
         <option value="self">自分のみ</option>
       </>
     ),
+    className: "rounded-lg px-3 py-2",
+    defaultValue: "signed_in",
   },
 };

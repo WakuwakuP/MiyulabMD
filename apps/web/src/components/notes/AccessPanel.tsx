@@ -68,9 +68,9 @@ export function AccessPanel({
       grants: [
         ...value.grants,
         {
+          canWrite: value.writeScope !== "self",
           email: nextEmail,
           userId: null,
-          canWrite: value.writeScope !== "self",
         },
       ],
     });
@@ -83,9 +83,9 @@ export function AccessPanel({
       {showInherit && (
         <CheckLabel className="my-2">
           <input
-            type="checkbox"
             checked={value.inherit}
             onChange={(event) => update({ inherit: event.target.checked })}
+            type="checkbox"
           />
           {inheritLabel}
         </CheckLabel>
@@ -98,11 +98,11 @@ export function AccessPanel({
           読み取り
           <Select
             className={cn("ml-[0.35rem]", accessScopeSelectClass)}
-            value={value.readScope}
             disabled={value.inherit}
             onChange={(event) =>
               update({ readScope: event.target.value as AccessScope })
             }
+            value={value.readScope}
           >
             {ACCESS_SCOPES.map((scope) => (
               <option key={scope} value={scope}>
@@ -115,11 +115,11 @@ export function AccessPanel({
           書き込み
           <Select
             className={cn("ml-[0.35rem]", accessScopeSelectClass)}
-            value={value.writeScope}
             disabled={value.inherit}
             onChange={(event) =>
               update({ writeScope: event.target.value as AccessScope })
             }
+            value={value.writeScope}
           >
             {writeOptions(value.readScope).map((scope) => (
               <option key={scope} value={scope}>
@@ -136,13 +136,13 @@ export function AccessPanel({
             <Row>
               <Input
                 className="flex-1"
-                type="email"
-                value={email}
+                disabled={disabled}
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="user@example.com"
-                disabled={disabled}
+                type="email"
+                value={email}
               />
-              <Button type="submit" disabled={disabled || !email.trim()}>
+              <Button disabled={disabled || !email.trim()} type="submit">
                 追加
               </Button>
             </Row>
@@ -153,13 +153,12 @@ export function AccessPanel({
             <ul className="m-0 list-none p-0">
               {value.grants.map((grant) => (
                 <li
-                  key={grant.email}
                   className="flex flex-wrap items-center gap-3 border-b border-border py-[0.35rem]"
+                  key={grant.email}
                 >
                   <span>{grant.email}</span>
                   <CheckLabel>
                     <input
-                      type="checkbox"
                       checked={grant.canWrite}
                       onChange={(event) =>
                         update({
@@ -170,11 +169,11 @@ export function AccessPanel({
                           ),
                         })
                       }
+                      type="checkbox"
                     />
                     書き込み
                   </CheckLabel>
                   <Button
-                    variant="ghost"
                     onClick={() =>
                       update({
                         grants: value.grants.filter(
@@ -182,6 +181,7 @@ export function AccessPanel({
                         ),
                       })
                     }
+                    variant="ghost"
                   >
                     削除
                   </Button>

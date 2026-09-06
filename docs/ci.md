@@ -17,7 +17,7 @@ Actions が有効ならそのまま動く。ローカルと同じコマンド。
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm check            # Oxlint + Oxfmt（チェックのみ）
+pnpm check            # Biome（lint + format、チェックのみ）
 pnpm typecheck        # 全パッケージの TypeScript 型チェック
 pnpm licenses:check   # 本番依存の SPDX 許可リスト
 pnpm test
@@ -25,15 +25,20 @@ pnpm test
 
 `licenses:check` は Test ワークフローでも走る。許可 SPDX と禁止パッケージは [docs/licenses.md](licenses.md)。
 
-Lint & Format & TypeCheck は `pnpm lint`（Oxlint）、`pnpm format:check`
-（Oxfmt）、`pnpm typecheck` を順に実行する。Test はライセンス検査とテストを実行する。
+Lint & Format & TypeCheck は `pnpm check`（Biome）と `pnpm typecheck` を実行する。
+Test はライセンス検査とテストを実行する。
 自動修正は `pnpm check:fix`、整形のみなら `pnpm format`。
-設定は `.oxlintrc.json` / `.oxfmtrc.json`。生成物とロックファイルは整形対象から除外する。
+`pnpm check` は format + lint + assist をまとめて見る。
+設定は `biome.json`。生成物とロックファイルは対象から除外する。
 
-Oxlint の correctness ルールはエラー扱い。移行で新たに検出される React Compiler
-関連（`set-state-in-effect` / `refs` / `immutability`）、非対話要素のイベント、
-文字列の startsWith / endsWith 推奨と、従来から警告だったフック依存は警告として残す。
-既存のアクセシビリティ例外は対応するルールへ引き継ぐ。移行に無関係なUI動作の変更は行わない。
+フォーマットはスペース 2・LF・行幅 80・ダブルクォート・セミコロンあり。HTML も同じフォーマッタ。
+assist は import 整列と `useSorted*`（キー / 属性 / enum / interface / CSS プロパティ / package.json / GraphQL）を on。
+`package.json` だけ `useSortedKeys` を切る（アルファベット順と `useSortedPackageJson` の規約順が衝突するため）。
+Tailwind の `useSortedClasses` は nursery の lint なので入れない。
+ルールは recommended を土台に、直す先が1つに決まるもの（`noUseless*`、`useImportType`、`useOptionalChain`、`useBlockStatements` など）を error にする。
+循環 import と未宣言依存も error。
+認知的複雑度は 15 超を error。行数上限・`noTernary` / `noMagicNumbers` / nursery / CSS lint は足さない。
+フック依存は警告。既存のアクセシビリティ例外はそのまま。
 
 ## 2. Cloudflare デプロイ
 

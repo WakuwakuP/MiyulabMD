@@ -9,27 +9,10 @@ import { OgCardView } from "../OgCardView.tsx";
 import { expandOgCard } from "./auto-link-card.ts";
 
 export const OgCard = Node.create({
-  name: "ogCard",
-  group: "block",
-  atom: true,
-  draggable: true,
-
   addAttributes() {
     return {
       href: { default: "" },
     };
-  },
-
-  parseHTML() {
-    return [{ tag: "div[data-og-card]" }];
-  },
-
-  renderHTML({ HTMLAttributes }: { HTMLAttributes: Record<string, string> }) {
-    return ["div", mergeAttributes({ "data-og-card": "" }, HTMLAttributes)];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(OgCardView);
   },
 
   addKeyboardShortcuts() {
@@ -43,17 +26,35 @@ export const OgCard = Node.create({
           return false;
         }
         const tr = expandOgCard(editor.state, selection.from);
-        if (!tr) return false;
+        if (!tr) {
+          return false;
+        }
         editor.view.dispatch(tr);
         return true;
       },
     };
   },
 
+  addNodeView() {
+    return ReactNodeViewRenderer(OgCardView);
+  },
+  atom: true,
+  draggable: true,
+  group: "block",
+  name: "ogCard",
+
+  parseHTML() {
+    return [{ tag: "div[data-og-card]" }];
+  },
+
+  renderHTML({ HTMLAttributes }: { HTMLAttributes: Record<string, string> }) {
+    return ["div", mergeAttributes({ "data-og-card": "" }, HTMLAttributes)];
+  },
+
   ...createAtomBlockMarkdownSpec({
+    allowedAttributes: ["href"],
     nodeName: "ogCard",
     requiredAttributes: ["href"],
-    allowedAttributes: ["href"],
   }),
 
   renderMarkdown: (node) => {

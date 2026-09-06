@@ -31,7 +31,9 @@ export function colorForEmail(
 
 export function initialFromName(label: string): string {
   const trimmed = label.trim();
-  if (!trimmed) return "?";
+  if (!trimmed) {
+    return "?";
+  }
   const first = [
     ...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
       trimmed,

@@ -13,7 +13,7 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <label htmlFor={htmlFor} className={cn("grid gap-[0.35rem]", className)}>
+    <label className={cn("grid gap-[0.35rem]", className)} htmlFor={htmlFor}>
       <span className="text-[0.85rem] text-muted">{label}</span>
       {children}
     </label>

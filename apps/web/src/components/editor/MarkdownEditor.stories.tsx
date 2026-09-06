@@ -20,7 +20,7 @@ function StoryMarkdownEditor({
       doc,
       { connect: false },
     );
-    return { doc, yText, provider };
+    return { doc, provider, yText };
   });
 
   useEffect(() => {
@@ -33,19 +33,19 @@ function StoryMarkdownEditor({
   return (
     <div className="max-w-3xl bg-canvas text-ink">
       <MarkdownEditor
-        noteId="storybook"
-        yText={session.yText}
         awareness={session.provider.awareness}
         lineNumbers={lineNumbers}
+        noteId="storybook"
+        yText={session.yText}
       />
     </div>
   );
 }
 
 const meta = {
-  title: "Editor/MarkdownEditor",
-  tags: ["autodocs"],
   parameters: { layout: "padded" },
+  tags: ["autodocs"],
+  title: "Editor/MarkdownEditor",
 } satisfies Meta;
 
 export default meta;

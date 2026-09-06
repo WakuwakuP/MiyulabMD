@@ -7,9 +7,9 @@ import { viewDeniedHttpStatus } from "./permissions.ts";
 const MAX_BYTES = 10 * 1024 * 1024;
 
 const EXT_BY_TYPE: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
   "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/png": "png",
   "image/webp": "webp",
 };
 
@@ -28,10 +28,7 @@ type ImageRow = {
   content_type: string;
 };
 
-async function findNoteRow(
-  env: Env,
-  idOrShortId: string,
-): Promise<NoteRow | null> {
+function findNoteRow(env: Env, idOrShortId: string): Promise<NoteRow | null> {
   return db(env)
     .prepare(
       "SELECT id, owner_id, folder, read_scope, write_scope FROM notes WHERE id = ? OR short_id = ?",
@@ -42,9 +39,9 @@ async function findNoteRow(
 
 function accessFields(row: NoteRow) {
   return {
+    folder: row.folder ?? "",
     id: row.id,
     ownerId: row.owner_id,
-    folder: row.folder ?? "",
     readScope:
       row.read_scope && isAccessScope(row.read_scope) ? row.read_scope : null,
     writeScope:
@@ -54,7 +51,7 @@ function accessFields(row: NoteRow) {
   };
 }
 
-async function findImageRow(
+function findImageRow(
   env: Env,
   noteId: string,
   imageId: string,
@@ -80,6 +77,61 @@ export type GetImageResult =
 
 export function createImageService(env: Env) {
   return {
+    async deleteAllForNote(noteId: string): Promise<void> {
+      const rows = await db(env)
+        .prepare("SELECT r2_key FROM images WHERE note_id = ?")
+        .bind(noteId)
+        .all<{ r2_key: string }>();
+
+      const keys = rows.results ?? [];
+      if (keys.length === 0) {
+        return;
+      }
+
+      await Promise.all(keys.map((entry) => env.IMAGES.delete(entry.r2_key)));
+    },
+
+    async get(
+      noteIdOrShortId: string,
+      imageId: string,
+      user?: SessionUser,
+    ): Promise<GetImageResult> {
+      const row = await findNoteRow(env, noteIdOrShortId);
+      if (!row) {
+        return { kind: "not_found" };
+      }
+
+      const access = await resolveNoteAccess(env, accessFields(row), user);
+      if (!access.flags.canView) {
+        return {
+          kind: "denied",
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { flags: access.flags, ownerId: row.owner_id },
+                  undefined,
+                  env,
+                )
+              : 403,
+        };
+      }
+
+      const image = await findImageRow(env, row.id, imageId);
+      if (!image) {
+        return { kind: "not_found" };
+      }
+
+      const object = await env.IMAGES.get(image.r2_key);
+      if (!object?.body) {
+        return { kind: "not_found" };
+      }
+
+      return {
+        body: object.body,
+        contentType: image.content_type,
+        kind: "ok",
+      };
+    },
     async upload(
       noteIdOrShortId: string,
       user: SessionUser | undefined,
@@ -97,7 +149,7 @@ export function createImageService(env: Env) {
           status:
             user === undefined
               ? viewDeniedHttpStatus(
-                  { ownerId: row.owner_id, flags: access.flags },
+                  { flags: access.flags, ownerId: row.owner_id },
                   undefined,
                   env,
                 )
@@ -108,11 +160,11 @@ export function createImageService(env: Env) {
       const contentType = file.type;
       const ext = EXT_BY_TYPE[contentType];
       if (!ext) {
-        return { kind: "bad_request", error: "unsupported content type" };
+        return { error: "unsupported content type", kind: "bad_request" };
       }
 
       if (file.size > MAX_BYTES) {
-        return { kind: "bad_request", error: "file exceeds 10MB limit" };
+        return { error: "file exceeds 10MB limit", kind: "bad_request" };
       }
 
       const imageId = crypto.randomUUID();
@@ -145,66 +197,10 @@ export function createImageService(env: Env) {
       }
 
       return {
-        kind: "ok",
         id: imageId,
+        kind: "ok",
         url: `/api/notes/${row.id}/images/${imageId}`,
       };
-    },
-
-    async get(
-      noteIdOrShortId: string,
-      imageId: string,
-      user?: SessionUser,
-    ): Promise<GetImageResult> {
-      const row = await findNoteRow(env, noteIdOrShortId);
-      if (!row) {
-        return { kind: "not_found" };
-      }
-
-      const access = await resolveNoteAccess(env, accessFields(row), user);
-      if (!access.flags.canView) {
-        return {
-          kind: "denied",
-          status:
-            user === undefined
-              ? viewDeniedHttpStatus(
-                  { ownerId: row.owner_id, flags: access.flags },
-                  undefined,
-                  env,
-                )
-              : 403,
-        };
-      }
-
-      const image = await findImageRow(env, row.id, imageId);
-      if (!image) {
-        return { kind: "not_found" };
-      }
-
-      const object = await env.IMAGES.get(image.r2_key);
-      if (!object?.body) {
-        return { kind: "not_found" };
-      }
-
-      return {
-        kind: "ok",
-        body: object.body,
-        contentType: image.content_type,
-      };
-    },
-
-    async deleteAllForNote(noteId: string): Promise<void> {
-      const rows = await db(env)
-        .prepare("SELECT r2_key FROM images WHERE note_id = ?")
-        .bind(noteId)
-        .all<{ r2_key: string }>();
-
-      const keys = rows.results ?? [];
-      if (keys.length === 0) {
-        return;
-      }
-
-      await Promise.all(keys.map((entry) => env.IMAGES.delete(entry.r2_key)));
     },
   };
 }

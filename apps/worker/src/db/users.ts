@@ -20,9 +20,9 @@ function normalizeEmail(email: string): string {
 
 export function toSessionUser(user: DbUser): SessionUser {
   return {
-    id: user.id,
-    email: user.email,
     displayName: user.displayName,
+    email: user.email,
+    id: user.id,
   };
 }
 
@@ -49,9 +49,9 @@ export async function upsertUserByEmail(
       .run();
 
     return {
-      id: existing.id,
-      email: existing.email,
       displayName: nextDisplayName,
+      email: existing.email,
+      id: existing.id,
     };
   }
 
@@ -64,9 +64,9 @@ export async function upsertUserByEmail(
     .run();
 
   return {
-    id,
-    email: normalizedEmail,
     displayName: displayName ?? null,
+    email: normalizedEmail,
+    id,
   };
 }
 
@@ -82,9 +82,9 @@ export async function findUserByEmail(
     return null;
   }
   return {
-    id: row.id,
-    email: row.email,
     displayName: row.display_name,
+    email: row.email,
+    id: row.id,
   };
 }
 
@@ -107,8 +107,8 @@ export async function updateDisplayName(
     return null;
   }
   return {
-    id: row.id,
-    email: row.email,
     displayName: row.display_name,
+    email: row.email,
+    id: row.id,
   };
 }

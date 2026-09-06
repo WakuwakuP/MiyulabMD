@@ -24,13 +24,13 @@ export function MenuPanel({
 }: PanelProps) {
   return (
     <div
+      aria-labelledby={labelledBy}
       className={cn(
         panelClass,
         "absolute top-[calc(100%+0.45rem)]",
         align === "end" ? "right-0" : "left-0",
       )}
       role={role}
-      aria-labelledby={labelledBy}
       style={{ minWidth: width, ...style }}
     >
       {children}
@@ -86,7 +86,7 @@ export function MenuItem({
 
   if (to) {
     return (
-      <Link to={to} role="menuitem" className={className} onClick={onClick}>
+      <Link className={className} onClick={onClick} role="menuitem" to={to}>
         {children}
       </Link>
     );
@@ -94,7 +94,7 @@ export function MenuItem({
 
   if (href) {
     return (
-      <a href={href} role="menuitem" className={className}>
+      <a className={className} href={href} role="menuitem">
         {children}
       </a>
     );
@@ -102,10 +102,10 @@ export function MenuItem({
 
   return (
     <button
-      type="button"
-      role="menuitem"
       className={className}
       onClick={onClick}
+      role="menuitem"
+      type="button"
     >
       {children}
     </button>

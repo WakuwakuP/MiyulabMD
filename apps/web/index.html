@@ -1,43 +1,44 @@
 <!doctype html>
 <html lang="ja">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8">
     <meta
-      name="viewport"
       content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
-    />
+      name="viewport"
+    >
     <title>MiyulabMD</title>
     <script>
-      (() => {
-        try {
-          const stored = localStorage.getItem("miyulabmd:theme") ?? "";
-          const root = document.documentElement;
-          if (stored === "black") {
-            root.dataset.theme = "black";
-            root.style.colorScheme = "dark";
-          } else {
-            delete root.dataset.theme;
-            root.style.colorScheme =
-              stored === "light"
-                ? "light"
-                : stored === "dark"
-                  ? "dark"
-                  : "light dark";
+    (() => {
+      try {
+        const stored = localStorage.getItem("miyulabmd:theme") ?? "";
+        const root = document.documentElement;
+        if (stored === "black") {
+          root.dataset.theme = "black";
+          root.style.colorScheme = "dark";
+        } else {
+          delete root.dataset.theme;
+          let colorScheme = "light dark";
+          if (stored === "light") {
+            colorScheme = "light";
+          } else if (stored === "dark") {
+            colorScheme = "dark";
           }
-        } catch {
-          /* ignore */
+          root.style.colorScheme = colorScheme;
         }
-      })();
+      } catch {
+        /* ignore */
+      }
+    })();
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com" rel="preconnect">
+    <link crossorigin href="https://fonts.gstatic.com" rel="preconnect">
     <link
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=M+PLUS+2:wght@400;500;600;700&display=swap"
       rel="stylesheet"
-    />
+    >
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script src="/src/main.tsx" type="module"></script>
   </body>
 </html>

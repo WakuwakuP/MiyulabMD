@@ -13,8 +13,8 @@ test("clientsForAwarenessBroadcast includes removed ids", () => {
   assert.deepEqual(
     clientsForAwarenessBroadcast({
       added: [1],
-      updated: [2],
       removed: [3],
+      updated: [2],
     }),
     [1, 2, 3],
   );
@@ -25,7 +25,7 @@ test("applyOwnedClientChanges ignores relayed updated ids", () => {
   owned = applyOwnedClientChanges(owned, { added: [], removed: [] });
   assert.deepEqual(owned, [123]);
 
-  const relayed = { added: [] as number[], updated: [456], removed: [] };
+  const relayed = { added: [] as number[], removed: [], updated: [456] };
   owned = applyOwnedClientChanges(owned, relayed);
   assert.deepEqual(owned, [123]);
   assert.equal(owned.includes(456), false);
@@ -35,11 +35,18 @@ test("applyOwnedClientChanges ignores relayed updated ids", () => {
 });
 
 test("nextAwarenessClocks stores clocks only for owned ids", () => {
-  const clockOf = (id: number) => (id === 123 ? 4 : id === 456 ? 9 : undefined);
+  const clockOf = (id: number) => {
+    if (id === 123) {
+      return 4;
+    }
+    if (id === 456) {
+      return 9;
+    }
+  };
   const clocks = nextAwarenessClocks(
     {},
     [123],
-    { added: [123], updated: [456], removed: [] },
+    { added: [123], removed: [], updated: [456] },
     clockOf,
   );
   assert.deepEqual(clocks, { "123": 4 });

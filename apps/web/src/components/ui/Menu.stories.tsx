@@ -10,8 +10,8 @@ import {
 } from "./Menu.tsx";
 
 const meta = {
-  title: "UI/Menu",
   tags: ["autodocs"],
+  title: "UI/Menu",
 } satisfies Meta;
 
 export default meta;
@@ -21,8 +21,8 @@ export const Account: Story = {
   render: () => (
     <div className="relative h-80">
       <MenuPanel width="20rem">
-        <MenuHeader name="Waku" email="waku@example.com">
-          <Avatar name="Waku" color="#2563eb" size="lg" />
+        <MenuHeader email="waku@example.com" name="Waku">
+          <Avatar color="#2563eb" name="Waku" size="lg" />
         </MenuHeader>
         <MenuSeparator />
         <MenuRow>
@@ -42,7 +42,7 @@ export const Guest: Story = {
     <div className="relative h-80">
       <MenuPanel width="20rem">
         <MenuHeader name="ゲスト">
-          <Avatar name="ゲスト" color="#0d9488" size="lg" />
+          <Avatar color="#0d9488" name="ゲスト" size="lg" />
         </MenuHeader>
         <MenuSeparator />
         <MenuRow>
@@ -60,11 +60,11 @@ export const Items: Story = {
   render: () => (
     <div className="relative h-40">
       <MenuPanel>
-        <MenuItem active>分割</MenuItem>
+        <MenuItem active={true}>分割</MenuItem>
         <MenuItem>テキスト</MenuItem>
         <MenuItem>リッチ</MenuItem>
         <MenuSeparator />
-        <MenuItem danger>削除</MenuItem>
+        <MenuItem danger={true}>削除</MenuItem>
       </MenuPanel>
     </div>
   ),

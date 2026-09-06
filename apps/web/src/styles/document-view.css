@@ -19,11 +19,11 @@
   box-sizing: border-box;
   width: min(100%, 46rem);
   min-height: 24rem;
-  margin: 0 auto;
   padding: 2.5rem 1rem 6rem;
+  margin: 0 auto;
   overflow: visible;
-  border: 0;
   background: transparent;
+  border: 0;
 }
 
 @media (min-width: 640px) {

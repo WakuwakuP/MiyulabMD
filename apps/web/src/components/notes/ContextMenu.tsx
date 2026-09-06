@@ -17,7 +17,9 @@ type Props = {
 export function ContextMenu({ x, y, items, onClose }: Props) {
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+      }
     }
     function handlePointer() {
       onClose();
@@ -40,8 +42,8 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
       <MenuFixed x={x} y={y}>
         {items.map((item) => (
           <MenuItem
-            key={item.label}
             danger={item.danger}
+            key={item.label}
             onClick={() => {
               item.onSelect();
               onClose();

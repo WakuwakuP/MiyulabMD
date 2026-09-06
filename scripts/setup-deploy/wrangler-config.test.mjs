@@ -23,26 +23,26 @@ const ogToml = `name = "miyulabmd-og-fetch"
 test("readDeployOverridesFromEnv ignores empty strings", () => {
   assert.deepEqual(
     readDeployOverridesFromEnv({
+      ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com",
       D1_DATABASE_ID: " db-1 ",
       WORKER_NAME: "",
-      ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com",
     }),
     {
-      workerName: undefined,
-      ogFetchName: undefined,
-      d1Name: undefined,
-      d1Id: "db-1",
-      r2Name: undefined,
       accessTeamDomain: "team.cloudflareaccess.com",
       customHostname: undefined,
+      d1Id: "db-1",
+      d1Name: undefined,
+      ogFetchName: undefined,
+      r2Name: undefined,
+      workerName: undefined,
     },
   );
 });
 
 test("applyDeployOverrides only rewrites provided keys", () => {
   const next = applyDeployOverrides(wranglerToml, ogToml, {
-    d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     accessTeamDomain: "fork.cloudflareaccess.com",
+    d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
   });
   assert.equal(readTomlQuotedValue(next.wranglerToml, "name"), "miyulabmd");
   assert.equal(
@@ -58,9 +58,9 @@ test("applyDeployOverrides only rewrites provided keys", () => {
 
 test("applyDeployOverrides can rename workers and add a custom domain", () => {
   const next = applyDeployOverrides(wranglerToml, ogToml, {
-    workerName: "fork-md",
-    ogFetchName: "fork-md-og-fetch",
     customHostname: "md.fork.dev",
+    ogFetchName: "fork-md-og-fetch",
+    workerName: "fork-md",
   });
   assert.equal(readTomlQuotedValue(next.wranglerToml, "name"), "fork-md");
   assert.equal(
@@ -79,15 +79,15 @@ test("assertRemoteOverrides rejects the shared placeholder", () => {
   assert.throws(
     () =>
       assertRemoteOverrides({
-        d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         accessTeamDomain: PLACEHOLDER_ACCESS_TEAM_DOMAIN,
+        d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
       }),
     /ACCESS_TEAM_DOMAIN/,
   );
   assert.doesNotThrow(() =>
     assertRemoteOverrides({
-      d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
       accessTeamDomain: "fork.cloudflareaccess.com",
+      d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     }),
   );
 });

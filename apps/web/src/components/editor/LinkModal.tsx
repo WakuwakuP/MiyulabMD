@@ -33,8 +33,8 @@ export function LinkModal({
   return (
     <Modal
       as="form"
-      labelledBy="link-modal-title"
       className="w-[min(26rem,100%)]"
+      labelledBy="link-modal-title"
       onClose={onClose}
       onSubmit={(event) => {
         event.preventDefault();
@@ -46,27 +46,27 @@ export function LinkModal({
         onSubmit(url);
       }}
     >
-      <ModalHeader id="link-modal-title" title={title} onClose={onClose} />
+      <ModalHeader id="link-modal-title" onClose={onClose} title={title} />
       <Field label="URL">
         <Input
-          ref={inputRef}
           className="w-full"
-          type="url"
           inputMode="url"
-          placeholder="https://example.com"
-          value={value}
           onChange={(event) => {
             setValue(event.target.value);
             setError(null);
           }}
+          placeholder="https://example.com"
+          ref={inputRef}
+          type="url"
+          value={value}
         />
       </Field>
       {error && <ErrorText>{error}</ErrorText>}
       <ModalFooter>
-        <Button variant="ghost" onClick={onClose}>
+        <Button onClick={onClose} variant="ghost">
           キャンセル
         </Button>
-        <Button variant="accent" type="submit">
+        <Button type="submit" variant="accent">
           {submitLabel}
         </Button>
       </ModalFooter>

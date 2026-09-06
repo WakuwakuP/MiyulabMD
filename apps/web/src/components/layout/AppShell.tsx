@@ -45,27 +45,27 @@ export function AppShell() {
   );
 
   const context: AppShellContext = {
+    setHeader,
+    setUser,
     user,
     userLoading: loading,
-    setUser,
-    setHeader,
   };
 
   return (
     <div
-      data-layout={editor ? "editor" : "page"}
       className={cn(
         "flex flex-col",
         editor ? "h-full min-h-0" : "min-h-[var(--app-height,100dvh)]",
       )}
+      data-layout={editor ? "editor" : "page"}
     >
       <AppHeader
         actions={headerActions}
+        authConfig={authConfig}
         end={headerEnd}
         folder={headerFolder}
-        user={user}
         loading={loading}
-        authConfig={authConfig}
+        user={user}
       />
       <main
         className={

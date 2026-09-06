@@ -8,8 +8,12 @@ export function isThemePreference(value: string): value is ThemePreference {
 }
 
 export function colorSchemeFor(theme: ThemePreference): string {
-  if (theme === "light") return "light";
-  if (theme === "dark" || theme === "black") return "dark";
+  if (theme === "light") {
+    return "light";
+  }
+  if (theme === "dark" || theme === "black") {
+    return "dark";
+  }
   return "light dark";
 }
 

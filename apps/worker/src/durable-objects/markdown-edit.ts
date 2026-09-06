@@ -39,28 +39,28 @@ export function planReplace(
 ): EditPlan {
   if (oldString.length === 0) {
     return {
-      ok: false,
       error: "invalid",
       message: "old_string must not be empty",
+      ok: false,
     };
   }
 
   const indexes = findMatches(current, oldString);
   if (indexes.length === 0) {
     return {
-      ok: false,
       error: "not_found",
-      message: "old_string was not found",
       matches: 0,
+      message: "old_string was not found",
+      ok: false,
     };
   }
   if (indexes.length > 1 && !replaceAll) {
     return {
-      ok: false,
       error: "ambiguous",
+      matches: indexes.length,
       message:
         "old_string matched more than once; pass replace_all or add context",
-      matches: indexes.length,
+      ok: false,
     };
   }
 
@@ -68,12 +68,16 @@ export function planReplace(
   let cursor: AgentCursor = { anchor: 0, head: 0 };
   const shift = newString.length - oldString.length;
   for (let i = 0; i < indexes.length; i += 1) {
-    const index = indexes[i]! + i * shift;
+    const found = indexes[i];
+    if (found === undefined) {
+      continue;
+    }
+    const index = found + i * shift;
     next =
       next.slice(0, index) + newString + next.slice(index + oldString.length);
     cursor = { anchor: index, head: index + newString.length };
   }
-  return { ok: true, next, cursor };
+  return { cursor, next, ok: true };
 }
 
 /** after / before は一意であること。 */
@@ -83,58 +87,66 @@ export function planInsert(
   position: InsertPosition,
 ): EditPlan {
   if (text.length === 0) {
-    return { ok: false, error: "invalid", message: "text must not be empty" };
+    return { error: "invalid", message: "text must not be empty", ok: false };
   }
 
   if ("at" in position) {
     if (position.at === "start") {
       return {
-        ok: true,
-        next: text + current,
         cursor: { anchor: 0, head: text.length },
+        next: text + current,
+        ok: true,
       };
     }
     return {
-      ok: true,
-      next: current + text,
       cursor: { anchor: current.length, head: current.length + text.length },
+      next: current + text,
+      ok: true,
     };
   }
 
   const needle = "after" in position ? position.after : position.before;
   if (needle.length === 0) {
     return {
-      ok: false,
       error: "invalid",
       message: "after / before must not be empty",
+      ok: false,
     };
   }
 
   const indexes = findMatches(current, needle);
   if (indexes.length === 0) {
     return {
-      ok: false,
       error: "not_found",
-      message: "after / before context was not found",
       matches: 0,
+      message: "after / before context was not found",
+      ok: false,
     };
   }
   if (indexes.length > 1) {
     return {
-      ok: false,
       error: "ambiguous",
+      matches: indexes.length,
       message:
         "after / before context matched more than once; add more context",
-      matches: indexes.length,
+      ok: false,
     };
   }
 
-  const index = indexes[0]!;
+  const index = indexes[0];
+  if (index === undefined) {
+    return {
+      error: "not_found",
+      matches: 0,
+      message: "after / before context was not found",
+      ok: false,
+    };
+  }
   const insertAt = "after" in position ? index + needle.length : index;
   return {
-    ok: true,
-    next: current.slice(0, insertAt) + text + current.slice(insertAt),
     cursor: { anchor: insertAt, head: insertAt + text.length },
+    next: current.slice(0, insertAt) + text + current.slice(insertAt),
+    ok: true,
   };
 }
 
@@ -144,7 +156,9 @@ export function applyTextDiff(
   origin?: unknown,
 ): boolean {
   const current = yText.toString();
-  if (current === next) return false;
+  if (current === next) {
+    return false;
+  }
 
   const changes = diff(current, next);
   yText.doc?.transact(() => {
@@ -182,11 +196,18 @@ export function markdownOutline(markdown: string): MarkdownHeading[] {
   const lines = markdown.split("\n");
   for (let i = 0; i < lines.length; i += 1) {
     const match = /^(#{1,6})\s+(.+)$/.exec(lines[i] ?? "");
-    if (!match) continue;
+    if (!match) {
+      continue;
+    }
+    const marks = match[1];
+    const heading = match[2];
+    if (!marks || heading === undefined) {
+      continue;
+    }
     headings.push({
-      level: match[1]!.length,
-      text: match[2]!.trim(),
+      level: marks.length,
       line: i + 1,
+      text: heading.trim(),
     });
   }
   return headings;
@@ -202,11 +223,15 @@ export function numberMarkdownLines(markdown: string): string {
 
 function findMatches(haystack: string, needle: string): number[] {
   const indexes: number[] = [];
-  if (needle.length === 0) return indexes;
+  if (needle.length === 0) {
+    return indexes;
+  }
   let from = 0;
   while (from <= haystack.length - needle.length) {
     const index = haystack.indexOf(needle, from);
-    if (index === -1) break;
+    if (index === -1) {
+      break;
+    }
     indexes.push(index);
     from = index + needle.length;
   }

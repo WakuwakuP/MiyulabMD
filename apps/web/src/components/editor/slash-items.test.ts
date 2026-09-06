@@ -14,9 +14,9 @@ import {
 } from "./slash-items.ts";
 
 const noopHandlers = {
-  onImage: () => {},
-  onYoutube: () => {},
-  onOgCard: () => {},
+  onImage: () => undefined,
+  onOgCard: () => undefined,
+  onYoutube: () => undefined,
 };
 
 test("slash items cover turn-into block types", () => {
@@ -45,13 +45,13 @@ test("blockTypeLabel returns Japanese labels", () => {
 
 test("applyBlockType converts a paragraph into a heading", () => {
   const editor = new Editor({
-    extensions: [StarterKit, Markdown],
     content: {
-      type: "doc",
       content: [
-        { type: "paragraph", content: [{ type: "text", text: "hello" }] },
+        { content: [{ text: "hello", type: "text" }], type: "paragraph" },
       ],
+      type: "doc",
     },
+    extensions: [StarterKit, Markdown],
   });
   applyBlockType(editor, "h2");
   assert.equal(currentBlockType(editor), "h2");
@@ -69,11 +69,11 @@ test("slash items include a table block command", () => {
 
 test("table slash item inserts a markdown table", () => {
   const editor = new Editor({
-    extensions: [StarterKit, TableKit, Markdown],
     content: {
-      type: "doc",
       content: [{ type: "paragraph" }],
+      type: "doc",
     },
+    extensions: [StarterKit, TableKit, Markdown],
   });
   const table = SLASH_ITEMS.find((item) => item.id === "table");
   assert.ok(table);

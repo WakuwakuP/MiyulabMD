@@ -32,7 +32,7 @@ export function runCommand(command, args, options = {}) {
 
     child.on("error", reject);
     child.on("close", (code) => {
-      const result = { code: code ?? 1, stdout, stderr };
+      const result = { code: code ?? 1, stderr, stdout };
       if (code !== 0 && !allowFail) {
         const detail = (stderr || stdout || `exit ${code}`).trim();
         const error = new Error(detail);

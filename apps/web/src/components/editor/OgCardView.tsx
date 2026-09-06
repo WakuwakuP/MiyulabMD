@@ -19,7 +19,7 @@ function CardBody({
 }) {
   return (
     <>
-      {card?.image && <img src={card.image} alt="" />}
+      {card?.image && <img alt="" src={card.image} />}
       <span className="embed-og-body">
         <strong>{loading ? "読み込み中…" : card?.title || href}</strong>
         {card?.description && (
@@ -45,7 +45,9 @@ export function OgCardView({ node, editor, getPos }: NodeViewProps) {
     let cancelled = false;
     setLoading(true);
     fetchOgPreview(href).then((result) => {
-      if (cancelled) return;
+      if (cancelled) {
+        return;
+      }
       setCard(result.ok ? result.data : null);
       setLoading(false);
     });
@@ -55,18 +57,24 @@ export function OgCardView({ node, editor, getPos }: NodeViewProps) {
   }, [href]);
 
   function expand(event: MouseEvent) {
-    if (!editable) return;
+    if (!editable) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const pos = getPos();
-    if (typeof pos !== "number") return;
+    if (typeof pos !== "number") {
+      return;
+    }
     const tr = expandOgCard(editor.state, pos);
-    if (!tr) return;
+    if (!tr) {
+      return;
+    }
     editor.view.dispatch(tr);
     editor.view.focus();
   }
 
-  const body = <CardBody href={href} card={card} loading={loading} />;
+  const body = <CardBody card={card} href={href} loading={loading} />;
 
   return (
     <NodeViewWrapper className="embed-og-wrap" data-og-card="">
@@ -75,7 +83,7 @@ export function OgCardView({ node, editor, getPos }: NodeViewProps) {
           {body}
         </div>
       ) : (
-        <a className={cardClass} href={href} target="_blank" rel="noreferrer">
+        <a className={cardClass} href={href} rel="noreferrer" target="_blank">
           {body}
         </a>
       )}

@@ -2,10 +2,10 @@ import { GITHUB_ENVIRONMENT, parseGitHubRemote } from "./helpers.mjs";
 import { runCommand } from "./process.mjs";
 
 export async function gh(args, options = {}) {
-  return runCommand(options.ghBin, args, {
+  return await runCommand(options.ghBin, args, {
+    allowFail: options.allowFail,
     cwd: options.cwd,
     inherit: options.inherit,
-    allowFail: options.allowFail,
   });
 }
 
@@ -41,11 +41,11 @@ export async function detectGitHubRepo(ghBin, rootDir) {
     const repo = JSON.parse(viewed.stdout);
     const [owner, name] = repo.nameWithOwner.split("/");
     return {
-      owner,
+      isFork: Boolean(repo.isFork),
       name,
       nameWithOwner: repo.nameWithOwner,
+      owner,
       url: repo.url,
-      isFork: Boolean(repo.isFork),
     };
   } catch {
     const remote = await runCommand("git", ["remote", "get-url", "origin"], {
@@ -54,9 +54,9 @@ export async function detectGitHubRepo(ghBin, rootDir) {
     const parsed = parseGitHubRemote(remote.stdout);
     return {
       ...parsed,
+      isFork: null,
       nameWithOwner: `${parsed.owner}/${parsed.name}`,
       url: `https://github.com/${parsed.owner}/${parsed.name}`,
-      isFork: null,
     };
   }
 }

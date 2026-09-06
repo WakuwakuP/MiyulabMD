@@ -5,8 +5,8 @@
 
 .hljs-comment,
 .hljs-quote {
-  color: var(--syn-comment);
   font-style: italic;
+  color: var(--syn-comment);
 }
 
 .hljs-doctag,
@@ -81,15 +81,15 @@
 .md-code-filename,
 .md-code-toolbar {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   padding: 0.4rem 0.75rem;
-  border-radius: 0.5rem 0.5rem 0 0;
-  background: var(--syn-code-bg);
-  color: var(--color-muted);
   font-family: var(--font-mono);
   font-size: 0.8em;
   line-height: 1.4;
+  color: var(--color-muted);
+  background: var(--syn-code-bg);
+  border-radius: 0.5rem 0.5rem 0 0;
 }
 
 .md-code-filename {

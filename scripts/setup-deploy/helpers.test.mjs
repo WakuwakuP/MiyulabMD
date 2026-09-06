@@ -22,7 +22,7 @@ test("extractJson skips wrangler banner text", () => {
 ────────────────────
 { "type": "oauth", "token": "cfut_test" }
 `;
-  assert.deepEqual(extractJson(text), { type: "oauth", token: "cfut_test" });
+  assert.deepEqual(extractJson(text), { token: "cfut_test", type: "oauth" });
 });
 
 test("extractJson reads a JSON array", () => {
@@ -56,17 +56,17 @@ test("parseGitHubRemote accepts ssh and https", () => {
   assert.deepEqual(
     parseGitHubRemote("git@github.com:WakuwakuP/MiyulabMD.git"),
     {
-      owner: "WakuwakuP",
       name: "MiyulabMD",
+      owner: "WakuwakuP",
     },
   );
   assert.deepEqual(parseGitHubRemote("https://github.com/someone/MiyulabMD"), {
-    owner: "someone",
     name: "MiyulabMD",
+    owner: "someone",
   });
   assert.deepEqual(parseGitHubRemote("ssh://git@github.com/someone/fork"), {
-    owner: "someone",
     name: "fork",
+    owner: "someone",
   });
 });
 
@@ -98,8 +98,8 @@ test("parseAccessIncludes maps emails, domains, and everyone", () => {
 
 test("token template URL encodes permissions and account", () => {
   const url = buildUserTokenTemplateUrl({
-    name: "MiyulabMD GitHub Actions",
     accountId: "acc123",
+    name: "MiyulabMD GitHub Actions",
     permissions: ACCESS_TOKEN_PERMISSIONS,
   });
   assert.ok(url.startsWith("https://dash.cloudflare.com/profile/api-tokens?"));
@@ -112,6 +112,6 @@ test("token template URL encodes permissions and account", () => {
 });
 
 test("isDurableApiToken rejects oauth", () => {
-  assert.equal(isDurableApiToken({ type: "oauth", token: "x" }), false);
-  assert.equal(isDurableApiToken({ type: "api_token", token: "x" }), true);
+  assert.equal(isDurableApiToken({ token: "x", type: "oauth" }), false);
+  assert.equal(isDurableApiToken({ token: "x", type: "api_token" }), true);
 });

@@ -17,7 +17,7 @@ export function CodeBlockView({
   const language = String(node.attrs.language ?? "");
   const filename = String(node.attrs.filename ?? "");
   const editable = editor.isEditable;
-  const highlight = highlightLanguage({ language, filename });
+  const highlight = highlightLanguage({ filename, language });
   const languages = CODE_BLOCK_LANGUAGES.includes(language)
     ? CODE_BLOCK_LANGUAGES
     : [language, ...CODE_BLOCK_LANGUAGES].filter((item, index, all) => {
@@ -36,10 +36,10 @@ export function CodeBlockView({
           <Select
             aria-label="言語"
             className="w-auto rounded-md px-2 py-1 text-[0.8rem]"
-            value={language}
             onChange={(event) => {
               updateAttributes({ language: event.target.value || null });
             }}
+            value={language}
           >
             <option value="">プレーン</option>
             {languages
@@ -53,8 +53,6 @@ export function CodeBlockView({
           <Input
             aria-label="ファイル名"
             className="min-w-0 flex-1 rounded-md px-2 py-1 text-[0.8rem]"
-            placeholder="ファイル名（hoge.ts）"
-            value={filename}
             onChange={(event) => {
               const next = normalizeFilename(event.target.value);
               const inferred = inferLanguageFromFilename(next);
@@ -63,6 +61,8 @@ export function CodeBlockView({
                 ...(language || !inferred ? {} : { language: inferred }),
               });
             }}
+            placeholder="ファイル名（hoge.ts）"
+            value={filename}
           />
         </div>
       ) : (

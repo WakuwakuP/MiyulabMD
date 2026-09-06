@@ -49,9 +49,9 @@ export function DriveRow({
       onContextMenu={onMenu}
     >
       <Link
-        to={href}
         className="flex min-h-12 min-w-0 flex-1 items-center gap-[0.7rem] px-[0.9rem] py-[0.55rem] text-inherit no-underline"
         onPointerEnter={onPointerEnter}
+        to={href}
       >
         {icon}
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -60,13 +60,13 @@ export function DriveRow({
       </Link>
       {meta ? <span className="mr-1 shrink-0">{meta}</span> : null}
       <IconButton
+        aria-expanded={menuOpen}
+        aria-haspopup="menu"
+        aria-label={`${name} の操作`}
         className={cn(
           "mr-[0.4rem] size-9 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
           menuOpen && "opacity-100",
         )}
-        aria-label={`${name} の操作`}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
         onClick={onMenu}
         onContextMenu={onMenu}
       >

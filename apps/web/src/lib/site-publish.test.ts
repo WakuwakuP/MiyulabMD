@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { matchingSiteSource } from "./site-publish.ts";
 
 const sources = [
-  { id: "blog", folder: "blog" },
-  { id: "tech", folder: "blog/tech" },
+  { folder: "blog", id: "blog" },
+  { folder: "blog/tech", id: "tech" },
 ];
 
 test("matchingSiteSource hides when folder is unknown", () => {
@@ -25,7 +25,7 @@ test("matchingSiteSource picks the deepest site for a descendant", () => {
 });
 
 test("matchingSiteSource allows a root site only at root", () => {
-  const withRoot = [...sources, { id: "root", folder: "" }];
+  const withRoot = [...sources, { folder: "", id: "root" }];
   assert.equal(matchingSiteSource("", withRoot)?.id, "root");
   assert.equal(matchingSiteSource("blog", withRoot)?.id, "blog");
 });

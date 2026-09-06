@@ -18,13 +18,15 @@ type Pos = { top: number; left: number };
 
 function readToolbarPos(editor: Editor): Pos | null {
   const { empty, from, to } = editor.state.selection;
-  if (empty || from === to) return null;
+  if (empty || from === to) {
+    return null;
+  }
   const start = editor.view.coordsAtPos(from);
   const end = editor.view.coordsAtPos(to);
   const left =
     (Math.min(start.left, end.left) + Math.max(start.right, end.right)) / 2;
   const top = Math.min(start.top, end.top) - 8;
-  return { top, left };
+  return { left, top };
 }
 
 type Props = {
@@ -44,7 +46,9 @@ export function SelectionToolbar({ editor, onLink }: Props) {
     const sync = () => {
       const next = readToolbarPos(editor);
       setPos(next);
-      if (!next) setTurnOpen(false);
+      if (!next) {
+        setTurnOpen(false);
+      }
       setTick((value) => value + 1);
     };
     editor.on("selectionUpdate", sync);
@@ -61,7 +65,9 @@ export function SelectionToolbar({ editor, onLink }: Props) {
     };
   }, [editor]);
 
-  if (!pos) return null;
+  if (!pos) {
+    return null;
+  }
 
   const activeType = currentBlockType(editor);
 
@@ -78,33 +84,33 @@ export function SelectionToolbar({ editor, onLink }: Props) {
 
   return (
     <div
-      ref={rootRef}
       className="fixed z-30 flex -translate-x-1/2 -translate-y-full items-center gap-[0.15rem] rounded-[10px] border border-border bg-canvas p-1 shadow-menu"
-      style={{ top: pos.top, left: pos.left }}
+      ref={rootRef}
+      style={{ left: pos.left, top: pos.top }}
     >
       <div className="relative">
         <button
-          type="button"
+          aria-expanded={turnOpen}
+          aria-haspopup="menu"
           className={cn(
             itemClass(turnOpen),
             "inline-flex items-center gap-1 px-[0.55rem]",
           )}
-          aria-haspopup="menu"
-          aria-expanded={turnOpen}
           onMouseDown={(event) => {
             event.preventDefault();
             setTurnOpen((value) => !value);
           }}
+          type="button"
         >
           {blockTypeLabel(activeType)}
           <ChevronDownIcon className="opacity-70" />
         </button>
         {turnOpen && (
-          <MenuPanel align="start" width="11rem" style={{ zIndex: 40 }}>
+          <MenuPanel align="start" style={{ zIndex: 40 }} width="11rem">
             {BLOCK_TYPES.map((item) => (
               <MenuItem
-                key={item.id}
                 active={item.id === activeType}
+                key={item.id}
                 onClick={() => turnInto(item.id)}
               >
                 <span className="flex items-center gap-2">
@@ -118,74 +124,74 @@ export function SelectionToolbar({ editor, onLink }: Props) {
       </div>
       <span className="mx-[0.1rem] h-5 w-px bg-border" />
       <button
-        type="button"
+        aria-label="太字"
         className={cn(
           itemClass(editor.isActive("bold")),
           "grid place-items-center",
         )}
-        aria-label="太字"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleBold().run();
         }}
+        type="button"
       >
-        <Bold aria-hidden className="size-4" />
+        <Bold aria-hidden={true} className="size-4" />
       </button>
       <button
-        type="button"
+        aria-label="斜体"
         className={cn(
           itemClass(editor.isActive("italic")),
           "grid place-items-center",
         )}
-        aria-label="斜体"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleItalic().run();
         }}
+        type="button"
       >
-        <Italic aria-hidden className="size-4" />
+        <Italic aria-hidden={true} className="size-4" />
       </button>
       <button
-        type="button"
+        aria-label="打ち消し"
         className={cn(
           itemClass(editor.isActive("strike")),
           "grid place-items-center",
         )}
-        aria-label="打ち消し"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleStrike().run();
         }}
+        type="button"
       >
-        <Strikethrough aria-hidden className="size-4" />
+        <Strikethrough aria-hidden={true} className="size-4" />
       </button>
       <button
-        type="button"
+        aria-label="コード"
         className={cn(
           itemClass(editor.isActive("code")),
           "grid place-items-center",
         )}
-        aria-label="コード"
         onMouseDown={(event) => {
           event.preventDefault();
           editor.chain().focus().toggleCode().run();
         }}
+        type="button"
       >
-        <Code aria-hidden className="size-4" />
+        <Code aria-hidden={true} className="size-4" />
       </button>
       <button
-        type="button"
+        aria-label="リンク"
         className={cn(
           itemClass(editor.isActive("link")),
           "grid place-items-center",
         )}
-        aria-label="リンク"
         onMouseDown={(event) => {
           event.preventDefault();
           onLink();
         }}
+        type="button"
       >
-        <Link aria-hidden className="size-4" />
+        <Link aria-hidden={true} className="size-4" />
       </button>
     </div>
   );

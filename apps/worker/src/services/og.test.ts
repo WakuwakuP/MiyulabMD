@@ -34,7 +34,7 @@ test("parseOgHtml decodes query entities in og:image", () => {
 test("fetchOgPreview sends a User-Agent", async () => {
   const original = globalThis.fetch;
   let userAgent = "";
-  globalThis.fetch = async (_input, init) => {
+  globalThis.fetch = (_input, init) => {
     userAgent = new Headers(init?.headers).get("user-agent") ?? "";
     return new Response("<html><head><title>Example</title></head></html>", {
       status: 200,
@@ -69,13 +69,13 @@ test("parseOgTargetUrl reads x-og-target and rejects workers.dev", () => {
 
 test("fetchOgPreview prefers the outbound fetcher", async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async () => {
+  globalThis.fetch = () => {
     throw new Error("should not use global fetch");
   };
   try {
     let targetHeader = "";
     const result = await fetchOgPreview("https://example.com/page", {
-      fetch: async (_input, init) => {
+      fetch: (_input, init) => {
         targetHeader = new Headers(init?.headers).get(OG_TARGET_HEADER) ?? "";
         return new Response(
           `<html><head><meta property="og:title" content="Via outbound"></head></html>`,

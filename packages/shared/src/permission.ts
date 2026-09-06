@@ -9,20 +9,20 @@ export const ACCESS_SCOPES = [
 export type AccessScope = (typeof ACCESS_SCOPES)[number];
 
 export const ACCESS_SCOPE_LABELS: Record<AccessScope, string> = {
-  public: "公開",
   link: "リンクを知っている全員",
+  public: "公開",
+  self: "自分のみ",
   signed_in: "ログイン済みのみ",
   users: "指定ユーザーのみ",
-  self: "自分のみ",
 };
 
 export const ACCESS_SCOPE_HINTS: Record<AccessScope, string> = {
-  public: "誰でもアクセスでき、公開一覧にも表示されます",
   link: "リンクを知っている全員がアクセスできます（公開一覧には表示されません）",
+  public: "誰でもアクセスでき、公開一覧にも表示されます",
+  self: "あなただけがアクセスできます",
   signed_in:
     "リンクを知っているログイン済みユーザーがアクセスできます（公開一覧には表示されません）",
   users: "追加したユーザーだけがアクセスできます",
-  self: "あなただけがアクセスできます",
 };
 
 /** マイドライブ（ユーザー root）の公開範囲。変更不可。 */
@@ -32,11 +32,11 @@ export const ROOT_SCOPES = {
 } as const satisfies { readScope: AccessScope; writeScope: AccessScope };
 
 const ACCESS_SCOPE_RANK: Record<AccessScope, number> = {
-  public: 0,
   link: 0,
+  public: 0,
+  self: 3,
   signed_in: 1,
   users: 2,
-  self: 3,
 };
 
 export function isAccessScope(value: string): value is AccessScope {
@@ -126,14 +126,20 @@ export function presetFromScopes(
   writeScope: AccessScope,
 ): PermissionPreset {
   const write = clampWriteScope(readScope, writeScope);
-  if (write === "public" || write === "link") return "freely";
+  if (write === "public" || write === "link") {
+    return "freely";
+  }
   if (write === "signed_in") {
     return readScope === "public" || readScope === "link"
       ? "editable"
       : "limited";
   }
-  if (readScope === "public" || readScope === "link") return "locked";
-  if (readScope === "self") return "private";
+  if (readScope === "public" || readScope === "link") {
+    return "locked";
+  }
+  if (readScope === "self") {
+    return "private";
+  }
   return "protected";
 }
 
@@ -145,22 +151,28 @@ export function actorFromUser(
   user: { id: string; email?: string } | null | undefined,
   ownerId: string,
 ): Actor {
-  if (!user) return { kind: "guest" };
-  if (user.id === ownerId) {
-    return { kind: "owner", userId: user.id, email: user.email };
+  if (!user) {
+    return { kind: "guest" };
   }
-  return { kind: "signed_in", userId: user.id, email: user.email };
+  if (user.id === ownerId) {
+    return { email: user.email, kind: "owner", userId: user.id };
+  }
+  return { email: user.email, kind: "signed_in", userId: user.id };
 }
 
 export function grantForActor(
   grants: AccessGrant[],
   actor: Actor,
 ): AccessGrant | null {
-  if (!actor.userId && !actor.email) return null;
+  if (!(actor.userId || actor.email)) {
+    return null;
+  }
   const email = actor.email?.trim().toLowerCase();
   return (
     grants.find((grant) => {
-      if (actor.userId && grant.userId === actor.userId) return true;
+      if (actor.userId && grant.userId === actor.userId) {
+        return true;
+      }
       return Boolean(email && grant.email === email);
     }) ?? null
   );
@@ -172,11 +184,19 @@ function scopeAllows(
   grant: AccessGrant | null,
   needWrite: boolean,
 ): boolean {
-  if (actor.kind === "owner") return true;
-  if (scope === "public" || scope === "link") return true;
-  if (scope === "signed_in") return actor.kind === "signed_in";
+  if (actor.kind === "owner") {
+    return true;
+  }
+  if (scope === "public" || scope === "link") {
+    return true;
+  }
+  if (scope === "signed_in") {
+    return actor.kind === "signed_in";
+  }
   if (scope === "users") {
-    if (!grant) return false;
+    if (!grant) {
+      return false;
+    }
     return needWrite ? grant.canWrite : true;
   }
   return false;
@@ -189,13 +209,13 @@ export function evaluateAccess(
   grant: AccessGrant | null = null,
 ): PermissionFlags {
   if (actor.kind === "owner") {
-    return { canView: true, canEdit: true, canAdmin: true };
+    return { canAdmin: true, canEdit: true, canView: true };
   }
 
   const write = clampWriteScope(readScope, writeScope);
   const canView = scopeAllows(readScope, actor, grant, false);
   const canEdit = canView && scopeAllows(write, actor, grant, true);
-  return { canView, canEdit, canAdmin: false };
+  return { canAdmin: false, canEdit, canView };
 }
 
 /** @deprecated 旧プリセット互換。新規コードは evaluateAccess を使う。 */
@@ -205,20 +225,14 @@ export function evaluatePermission(
   collaboratorRole?: CollaboratorRole,
 ): PermissionFlags {
   const { readScope, writeScope } = scopesFromPreset(preset);
-  const grant =
-    collaboratorRole === "editor"
-      ? {
-          email: actor.email ?? "",
-          userId: actor.userId ?? null,
-          canWrite: true,
-        }
-      : collaboratorRole === "viewer"
-        ? {
-            email: actor.email ?? "",
-            userId: actor.userId ?? null,
-            canWrite: false,
-          }
-        : null;
+  let grant: AccessGrant | null = null;
+  if (collaboratorRole === "editor" || collaboratorRole === "viewer") {
+    grant = {
+      canWrite: collaboratorRole === "editor",
+      email: actor.email ?? "",
+      userId: actor.userId ?? null,
+    };
+  }
   return evaluateAccess(readScope, writeScope, actor, grant);
 }
 
@@ -233,7 +247,9 @@ export function folderAncestors(folder: string): string[] {
 }
 
 export function folderContains(parent: string, folder: string): boolean {
-  if (parent === "") return true;
+  if (parent === "") {
+    return true;
+  }
   return folder === parent || folder.startsWith(`${parent}/`);
 }
 
@@ -243,7 +259,11 @@ export function rewriteFolderPrefix(
   from: string,
   to: string,
 ): string | null {
-  if (!from || !folderContains(from, folder)) return null;
-  if (folder === from) return to;
+  if (!(from && folderContains(from, folder))) {
+    return null;
+  }
+  if (folder === from) {
+    return to;
+  }
   return `${to}${folder.slice(from.length)}`;
 }

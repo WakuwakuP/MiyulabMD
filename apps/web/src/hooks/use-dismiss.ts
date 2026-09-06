@@ -6,13 +6,19 @@ export function useDismiss(
   rootRef: RefObject<HTMLElement | null>,
 ) {
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
 
     function handlePointer(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) onClose();
+      if (!rootRef.current?.contains(event.target as Node)) {
+        onClose();
+      }
     }
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+      }
     }
 
     window.addEventListener("mousedown", handlePointer);

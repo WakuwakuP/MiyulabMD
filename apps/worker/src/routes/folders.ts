@@ -37,8 +37,59 @@ async function parseJsonBody<T>(request: Request): Promise<T | null> {
 
 function normalizeFolderName(name: string): string | null {
   const normalized = normalizeFolder(name);
-  if (!normalized || normalized.includes("/")) return null;
+  if (!normalized || normalized.includes("/")) {
+    return null;
+  }
   return normalized;
+}
+
+async function applyFolderScopeChange(
+  ownerId: string,
+  folder: string,
+  body: UpdateFolderAccessInput,
+  current: Awaited<ReturnType<typeof resolveFolderAccess>>,
+): Promise<{ error: string; status: number } | null> {
+  if (body.inherit === true) {
+    await deleteFolderPolicy(env, ownerId, folder);
+    return null;
+  }
+  if (
+    !(
+      body.inherit === false ||
+      body.readScope !== undefined ||
+      body.writeScope !== undefined
+    )
+  ) {
+    return null;
+  }
+
+  const fallback = {
+    readScope: current.effectiveReadScope,
+    writeScope: current.effectiveWriteScope,
+  };
+  const requestedRead = body.readScope;
+  const requestedWrite = body.writeScope;
+  const readScope =
+    requestedRead && isAccessScope(requestedRead)
+      ? requestedRead
+      : fallback.readScope;
+  const writeScope = clampWriteScope(
+    readScope,
+    requestedWrite && isAccessScope(requestedWrite)
+      ? requestedWrite
+      : fallback.writeScope,
+  );
+  if (
+    (writeScope === "public" || writeScope === "link") &&
+    !instanceFlags(env).allowAnonymousEdits
+  ) {
+    return {
+      error: "匿名ユーザーによる書き込みは、匿名編集が無効なため使えません",
+      status: 400,
+    };
+  }
+  await upsertFolderPolicy(env, ownerId, folder, readScope, writeScope);
+  return null;
 }
 
 async function applyFolderAccessPatch(
@@ -54,41 +105,19 @@ async function applyFolderAccessPatch(
   }
 
   const current = await resolveFolderAccess(env, ownerId, folder, {
-    id: ownerId,
-    email: "",
     displayName: null,
+    email: "",
+    id: ownerId,
   });
 
-  if (body.inherit === true) {
-    await deleteFolderPolicy(env, ownerId, folder);
-  } else if (
-    body.inherit === false ||
-    body.readScope !== undefined ||
-    body.writeScope !== undefined
-  ) {
-    const fallback = {
-      readScope: current.effectiveReadScope,
-      writeScope: current.effectiveWriteScope,
-    };
-    const readScope = isAccessScope(body.readScope ?? "")
-      ? body.readScope!
-      : fallback.readScope;
-    const writeScope = clampWriteScope(
-      readScope,
-      isAccessScope(body.writeScope ?? "")
-        ? body.writeScope!
-        : fallback.writeScope,
-    );
-    if (
-      (writeScope === "public" || writeScope === "link") &&
-      !instanceFlags(env).allowAnonymousEdits
-    ) {
-      return {
-        error: "匿名ユーザーによる書き込みは、匿名編集が無効なため使えません",
-        status: 400,
-      };
-    }
-    await upsertFolderPolicy(env, ownerId, folder, readScope, writeScope);
+  const scopeError = await applyFolderScopeChange(
+    ownerId,
+    folder,
+    body,
+    current,
+  );
+  if (scopeError) {
+    return scopeError;
   }
 
   if (body.grants) {
@@ -105,6 +134,43 @@ async function applyFolderAccessPatch(
   }
 
   return null;
+}
+
+async function folderPathFromName(
+  userId: string,
+  name: string,
+  parentId?: string,
+): Promise<{ folder: string } | { error: string; status: number }> {
+  if (!parentId) {
+    return { folder: name };
+  }
+  const parent = await getFolderById(env, parentId);
+  if (!parent || parent.owner_id !== userId) {
+    return { error: "Not found", status: 404 };
+  }
+  return { folder: parent.folder ? `${parent.folder}/${name}` : name };
+}
+
+async function resolveCreateFolderPath(
+  userId: string,
+  body: { folder?: string; name?: string; parentId?: string } | null,
+): Promise<{ folder: string } | { error: string; status: number }> {
+  let folder = normalizeFolder(body?.folder ?? "");
+  if (!folder && body?.name) {
+    const name = normalizeFolderName(body.name);
+    if (!name) {
+      return { error: "フォルダ名が不正です", status: 400 };
+    }
+    const resolved = await folderPathFromName(userId, name, body.parentId);
+    if ("error" in resolved) {
+      return resolved;
+    }
+    folder = resolved.folder;
+  }
+  if (!folder) {
+    return { error: "マイドライブ自体は作成できません", status: 400 };
+  }
+  return { folder };
 }
 
 export const folderRoutes = new Elysia({ prefix: "/api/folders" })
@@ -176,32 +242,13 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       name?: string;
       parentId?: string;
     }>(request);
-    let folder = normalizeFolder(body?.folder ?? "");
-
-    if (!folder && body?.name) {
-      const name = normalizeFolderName(body.name);
-      if (!name) {
-        set.status = 400;
-        return { error: "フォルダ名が不正です" };
-      }
-      if (body.parentId) {
-        const parent = await getFolderById(env, body.parentId);
-        if (!parent || parent.owner_id !== user.id) {
-          set.status = 404;
-          return { error: "Not found" };
-        }
-        folder = parent.folder ? `${parent.folder}/${name}` : name;
-      } else {
-        folder = name;
-      }
+    const resolved = await resolveCreateFolderPath(user.id, body);
+    if ("error" in resolved) {
+      set.status = resolved.status;
+      return { error: resolved.error };
     }
 
-    if (!folder) {
-      set.status = 400;
-      return { error: "マイドライブ自体は作成できません" };
-    }
-
-    const parent = parentFolderPath(folder);
+    const parent = parentFolderPath(resolved.folder);
     if (parent) {
       const parentAccess = await resolveFolderAccess(
         env,
@@ -215,7 +262,7 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       }
     }
 
-    const access = await createOwnedFolder(env, user.id, folder, user);
+    const access = await createOwnedFolder(env, user.id, resolved.folder, user);
     set.status = 201;
     return access;
   })

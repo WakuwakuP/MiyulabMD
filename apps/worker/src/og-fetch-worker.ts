@@ -12,6 +12,6 @@ export default {
     if (!target) {
       return new Response("invalid url", { status: 400 });
     }
-    return fetch(target.toString(), ogRequestInit(request.signal));
+    return await fetch(target.toString(), ogRequestInit(request.signal));
   },
 };

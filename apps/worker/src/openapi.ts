@@ -1,43 +1,53 @@
 const errorSchema = {
-  type: "object",
-  required: ["error"],
   properties: {
     error: { type: "string" },
   },
+  required: ["error"],
+  type: "object",
 } as const;
 
 const schemaField = {
-  type: "object",
-  required: ["key", "type"],
   properties: {
-    key: { type: "string" },
-    type: {
-      type: "string",
-      enum: ["string", "number", "boolean", "date", "string[]"],
-    },
-    required: { type: "boolean" },
-    fixed: { type: "boolean" },
     default: {},
     enum: {
-      type: "array",
       items: { type: "string" },
+      type: "array",
+    },
+    fixed: { type: "boolean" },
+    key: { type: "string" },
+    required: { type: "boolean" },
+    type: {
+      enum: ["string", "number", "boolean", "date", "string[]"],
+      type: "string",
     },
   },
+  required: ["key", "type"],
+  type: "object",
 } as const;
 
 const collection = {
-  type: "object",
-  required: ["id", "name", "folder", "schema"],
   properties: {
-    id: { type: "string", format: "uuid" },
-    name: { type: "string" },
     folder: { type: "string" },
-    schema: { type: "array", items: schemaField },
+    id: { format: "uuid", type: "string" },
+    name: { type: "string" },
+    schema: { items: schemaField, type: "array" },
   },
+  required: ["id", "name", "folder", "schema"],
+  type: "object",
 } as const;
 
 const entry = {
-  type: "object",
+  properties: {
+    createdAt: { type: "integer" },
+    data: { additionalProperties: true, type: "object" },
+    editUrl: { format: "uri", type: "string" },
+    folder: { type: "string" },
+    id: { format: "uuid", type: "string" },
+    markdown: { type: "string" },
+    slug: { type: "string" },
+    title: { type: "string" },
+    updatedAt: { type: "integer" },
+  },
   required: [
     "id",
     "slug",
@@ -48,150 +58,129 @@ const entry = {
     "data",
     "editUrl",
   ],
-  properties: {
-    id: { type: "string", format: "uuid" },
-    slug: { type: "string" },
-    title: { type: "string" },
-    folder: { type: "string" },
-    createdAt: { type: "integer" },
-    updatedAt: { type: "integer" },
-    data: { type: "object", additionalProperties: true },
-    editUrl: { type: "string", format: "uri" },
-    markdown: { type: "string" },
-  },
+  type: "object",
 } as const;
 
 const unauthorized = {
-  description: "Bearer トークンが無い、または無効",
   content: {
     "application/json": {
       schema: errorSchema,
     },
   },
+  description: "Bearer トークンが無い、または無効",
 } as const;
 
 export function openApiDocument() {
   return {
-    openapi: "3.1.0",
-    info: {
-      title: "MiyulabMD Article API",
-      version: "1.0.0",
-      description:
-        "Astro など外部サイト向けの記事 API。メタデータはノート先頭の YAML frontmatter。Personal Access Token を Bearer で送る。Elysia の OpenAPI Type Gen は Workers では使えないため、この文書は手書き。",
-    },
-    servers: [{ url: "/" }],
-    tags: [{ name: "Articles", description: "PAT で読む公開記事" }],
     components: {
-      securitySchemes: {
-        bearerAuth: {
-          type: "http",
-          scheme: "bearer",
-          bearerFormat: "PAT",
-          description: "設定の MCP 画面で発行した mlb_ トークン",
-        },
-      },
       schemas: {
-        Error: errorSchema,
-        ArticleSchemaField: schemaField,
         ArticleCollection: collection,
         ArticleEntry: entry,
+        ArticleSchemaField: schemaField,
+        Error: errorSchema,
       },
-    },
-    security: [{ bearerAuth: [] }],
-    paths: {
-      "/openapi.json": {
-        get: {
-          tags: ["Articles"],
-          summary: "この OpenAPI 文書",
-          security: [],
-          responses: {
-            "200": {
-              description: "OpenAPI 3.1",
-              content: {
-                "application/json": {
-                  schema: { type: "object" },
-                },
-              },
-            },
-          },
+      securitySchemes: {
+        bearerAuth: {
+          bearerFormat: "PAT",
+          description: "設定の MCP 画面で発行した mlb_ トークン",
+          scheme: "bearer",
+          type: "http",
         },
       },
+    },
+    info: {
+      description:
+        "Astro など外部サイト向けの記事 API。メタデータはノート先頭の YAML frontmatter。Personal Access Token を Bearer で送る。Elysia の OpenAPI Type Gen は Workers では使えないため、この文書は手書き。",
+      title: "MiyulabMD Article API",
+      version: "1.0.0",
+    },
+    openapi: "3.1.0",
+    paths: {
       "/api/articles/collections": {
         get: {
-          tags: ["Articles"],
-          summary: "記事コレクション一覧",
           responses: {
             "200": {
-              description: "トークン所有者のソース",
               content: {
                 "application/json": {
                   schema: {
-                    type: "object",
-                    required: ["collections"],
                     properties: {
                       collections: {
-                        type: "array",
                         items: {
                           $ref: "#/components/schemas/ArticleCollection",
                         },
+                        type: "array",
                       },
                     },
+                    required: ["collections"],
+                    type: "object",
                   },
                 },
               },
+              description: "トークン所有者のソース",
             },
             "401": unauthorized,
           },
+          summary: "記事コレクション一覧",
+          tags: ["Articles"],
         },
       },
       "/api/articles/collections/{id}/entries": {
         get: {
-          tags: ["Articles"],
-          summary: "コレクション配下の記事一覧",
           description:
             "ソースディレクトリ直下と、何階層下のノートも含む。folder で配下の特定パスに絞れる。",
           parameters: [
             {
-              name: "id",
               in: "path",
+              name: "id",
               required: true,
-              schema: { type: "string", format: "uuid" },
+              schema: { format: "uuid", type: "string" },
             },
             {
-              name: "page",
-              in: "query",
-              required: false,
               description: "1 始まり。省略時は 1",
-              schema: { type: "integer", minimum: 1, default: 1 },
+              in: "query",
+              name: "page",
+              required: false,
+              schema: { default: 1, minimum: 1, type: "integer" },
             },
             {
-              name: "perPage",
-              in: "query",
-              required: false,
               description: "1 ページ件数。省略時 50、上限 100",
+              in: "query",
+              name: "perPage",
+              required: false,
               schema: {
-                type: "integer",
-                minimum: 1,
-                maximum: 100,
                 default: 50,
+                maximum: 100,
+                minimum: 1,
+                type: "integer",
               },
             },
             {
-              name: "folder",
-              in: "query",
-              required: false,
               description:
                 "コレクション配下のパス。指定するとそのディレクトリと子孫だけを返す",
-              schema: { type: "string", example: "work/infra/db" },
+              in: "query",
+              name: "folder",
+              required: false,
+              schema: { example: "work/infra/db", type: "string" },
             },
           ],
           responses: {
             "200": {
-              description: "本文なしのエントリ（ページネーション付き）",
               content: {
                 "application/json": {
                   schema: {
-                    type: "object",
+                    properties: {
+                      collection: {
+                        $ref: "#/components/schemas/ArticleCollection",
+                      },
+                      entries: {
+                        items: { $ref: "#/components/schemas/ArticleEntry" },
+                        type: "array",
+                      },
+                      hasMore: { type: "boolean" },
+                      page: { minimum: 1, type: "integer" },
+                      perPage: { maximum: 100, minimum: 1, type: "integer" },
+                      total: { minimum: 0, type: "integer" },
+                    },
                     required: [
                       "collection",
                       "entries",
@@ -200,87 +189,98 @@ export function openApiDocument() {
                       "total",
                       "hasMore",
                     ],
-                    properties: {
-                      collection: {
-                        $ref: "#/components/schemas/ArticleCollection",
-                      },
-                      entries: {
-                        type: "array",
-                        items: { $ref: "#/components/schemas/ArticleEntry" },
-                      },
-                      page: { type: "integer", minimum: 1 },
-                      perPage: { type: "integer", minimum: 1, maximum: 100 },
-                      total: { type: "integer", minimum: 0 },
-                      hasMore: { type: "boolean" },
-                    },
+                    type: "object",
                   },
                 },
               },
+              description: "本文なしのエントリ（ページネーション付き）",
             },
             "400": {
-              description: "page / perPage / folder が不正",
               content: {
                 "application/json": { schema: errorSchema },
               },
+              description: "page / perPage / folder が不正",
             },
             "401": unauthorized,
             "404": {
-              description: "コレクションが無い",
               content: {
                 "application/json": { schema: errorSchema },
               },
+              description: "コレクションが無い",
             },
           },
+          summary: "コレクション配下の記事一覧",
+          tags: ["Articles"],
         },
       },
       "/api/articles/collections/{id}/entries/{slug}": {
         get: {
-          tags: ["Articles"],
-          summary: "記事本文とメタデータ",
           parameters: [
             {
-              name: "id",
               in: "path",
+              name: "id",
               required: true,
-              schema: { type: "string", format: "uuid" },
+              schema: { format: "uuid", type: "string" },
             },
             {
-              name: "slug",
-              in: "path",
-              required: true,
               description: "alias または short_id",
+              in: "path",
+              name: "slug",
+              required: true,
               schema: { type: "string" },
             },
           ],
           responses: {
             "200": {
-              description:
-                "data は YAML frontmatter。markdown は frontmatter を除いた本文",
               content: {
                 "application/json": {
                   schema: {
-                    type: "object",
-                    required: ["collection", "entry"],
                     properties: {
                       collection: {
                         $ref: "#/components/schemas/ArticleCollection",
                       },
                       entry: { $ref: "#/components/schemas/ArticleEntry" },
                     },
+                    required: ["collection", "entry"],
+                    type: "object",
                   },
                 },
               },
+              description:
+                "data は YAML frontmatter。markdown は frontmatter を除いた本文",
             },
             "401": unauthorized,
             "404": {
-              description: "記事またはコレクションが無い",
               content: {
                 "application/json": { schema: errorSchema },
               },
+              description: "記事またはコレクションが無い",
             },
           },
+          summary: "記事本文とメタデータ",
+          tags: ["Articles"],
+        },
+      },
+      "/openapi.json": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: { type: "object" },
+                },
+              },
+              description: "OpenAPI 3.1",
+            },
+          },
+          security: [],
+          summary: "この OpenAPI 文書",
+          tags: ["Articles"],
         },
       },
     },
+    security: [{ bearerAuth: [] }],
+    servers: [{ url: "/" }],
+    tags: [{ description: "PAT で読む公開記事", name: "Articles" }],
   };
 }

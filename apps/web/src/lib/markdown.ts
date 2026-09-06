@@ -14,7 +14,9 @@ export function peekOgCards(markdown: string): Map<string, OgPreview> {
   const cards = new Map<string, OgPreview>();
   for (const url of ogUrls(markdown)) {
     const card = peekOgPreview(url);
-    if (card) cards.set(url, card);
+    if (card) {
+      cards.set(url, card);
+    }
   }
   return cards;
 }
@@ -33,7 +35,9 @@ export async function loadOgCards(
   await Promise.all(
     ogUrls(markdown).map(async (url) => {
       const result = await fetchOgPreview(url);
-      if (result.ok) cards.set(url, result.data);
+      if (result.ok) {
+        cards.set(url, result.data);
+      }
     }),
   );
   return cards;

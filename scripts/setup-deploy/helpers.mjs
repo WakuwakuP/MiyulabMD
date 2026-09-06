@@ -56,17 +56,17 @@ export function parseGitHubRemote(url) {
   const normalized = url.trim().replace(/\.git$/, "");
   const ssh = normalized.match(/^git@github\.com:([^/]+)\/([^/]+)$/);
   if (ssh) {
-    return { owner: ssh[1], name: ssh[2] };
+    return { name: ssh[2], owner: ssh[1] };
   }
   const https = normalized.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)$/);
   if (https) {
-    return { owner: https[1], name: https[2] };
+    return { name: https[2], owner: https[1] };
   }
   const sshAlt = normalized.match(
     /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+)$/,
   );
   if (sshAlt) {
-    return { owner: sshAlt[1], name: sshAlt[2] };
+    return { name: sshAlt[2], owner: sshAlt[1] };
   }
   throw new Error(`GitHub の remote として解釈できません: ${url}`);
 }
@@ -120,10 +120,10 @@ export function buildUserTokenTemplateUrl({
   permissions,
 }) {
   const params = new URLSearchParams({
-    permissionGroupKeys: JSON.stringify(permissions),
     accountId,
-    zoneId: "all",
     name,
+    permissionGroupKeys: JSON.stringify(permissions),
+    zoneId: "all",
   });
   return `https://dash.cloudflare.com/profile/api-tokens?${params}`;
 }

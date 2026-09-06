@@ -81,11 +81,11 @@ async function finishLogin(
   </body>
 </html>`;
   return new Response(html, {
-    status: 200,
     headers: {
-      "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
+      "Content-Type": "text/html; charset=utf-8",
     },
+    status: 200,
   });
 }
 
@@ -101,8 +101,8 @@ function accessFailurePage(reason: string): Response {
   </body>
 </html>`;
   return new Response(html, {
-    status: 401,
     headers: { "Content-Type": "text/html; charset=utf-8" },
+    status: 401,
   });
 }
 
@@ -120,16 +120,16 @@ function logoutResponse(
     const logout = new URL(`https://${teamDomain(env)}/cdn-cgi/access/logout`);
     logout.searchParams.set("returnTo", returnTo);
     headers.set("Location", logout.toString());
-    return new Response(null, { status: 302, headers });
+    return new Response(null, { headers, status: 302 });
   }
 
   if (preferRedirect) {
     headers.set("Location", "/");
-    return new Response(null, { status: 302, headers });
+    return new Response(null, { headers, status: 302 });
   }
 
   headers.set("Content-Type", "application/json");
-  return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+  return new Response(JSON.stringify({ ok: true }), { headers, status: 200 });
 }
 
 /** Access 通過後の生 Request を Elysia を介さず処理する。 */
@@ -174,8 +174,8 @@ export async function handleAuthRequest(
       return accessFailurePage(verified.reason);
     }
     return new Response(null, {
-      status: 302,
       headers: { Location: accessLoginUrl(request, env) },
+      status: 302,
     });
   }
 
@@ -189,8 +189,8 @@ export async function handleUpdateMe(
   const session = await readSession(request, env);
   if (!session) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
       headers: { "Content-Type": "application/json" },
+      status: 401,
     });
   }
 
@@ -203,23 +203,23 @@ export async function handleUpdateMe(
       return new Response(
         JSON.stringify({ error: "displayName must be a string" }),
         {
-          status: 400,
           headers: { "Content-Type": "application/json" },
+          status: 400,
         },
       );
     }
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
       headers: { "Content-Type": "application/json" },
+      status: 400,
     });
   }
 
   const updated = await updateDisplayName(env, session.id, displayName);
   if (!updated) {
     return new Response(JSON.stringify({ error: "Not found" }), {
-      status: 404,
       headers: { "Content-Type": "application/json" },
+      status: 404,
     });
   }
 
@@ -230,11 +230,11 @@ export async function handleUpdateMe(
     requestIsHttps(request),
   );
   return new Response(JSON.stringify({ user }), {
-    status: 200,
     headers: {
       "Content-Type": "application/json",
       "Set-Cookie": setCookie,
     },
+    status: 200,
   });
 }
 
@@ -245,8 +245,8 @@ export async function handleEstablishSession(
 ): Promise<Response> {
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", {
-      status: 405,
       headers: { Allow: "POST" },
+      status: 405,
     });
   }
 
@@ -271,11 +271,11 @@ export async function handleEstablishSession(
   }
 
   return new Response(null, {
-    status: 302,
     headers: {
+      "Cache-Control": "no-store",
       Location: "/",
       "Set-Cookie": sessionCookieFromToken(token, requestIsHttps(request)),
-      "Cache-Control": "no-store",
     },
+    status: 302,
   });
 }

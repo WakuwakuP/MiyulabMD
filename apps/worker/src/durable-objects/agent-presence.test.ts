@@ -29,7 +29,7 @@ test("agentAwarenessState is readable by collab clients", () => {
   const awareness = new awarenessProtocol.Awareness(doc);
   try {
     const state = agentAwarenessState(
-      { userId: "user-1", displayName: "みゆ" },
+      { displayName: "みゆ", userId: "user-1" },
       yText,
       {
         anchor: 6,

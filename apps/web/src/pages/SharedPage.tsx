@@ -35,14 +35,16 @@ export function SharedPage() {
 
   useEffect(() => {
     setHeader({
-      folder: null,
       actions: user ? <DrivePlaceNav current="shared" /> : null,
+      folder: null,
     });
     return () => setHeader(null);
   }, [setHeader, user]);
 
   useEffect(() => {
-    if (userLoading) return;
+    if (userLoading) {
+      return;
+    }
     if (!user) {
       navigate("/", { replace: true });
       return;
@@ -53,7 +55,9 @@ export function SharedPage() {
     setError(null);
     void Promise.all([loadNotes(true), fetchSharedFolders()]).then(
       ([noteList, folderResult]) => {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         setPending(false);
         setNotes(noteList);
         if (!folderResult.ok) {
@@ -69,7 +73,9 @@ export function SharedPage() {
     };
   }, [user, userLoading, navigate]);
 
-  if (!user) return null;
+  if (!user) {
+    return null;
+  }
 
   const sharedNotes = sharedNotesForUser(notes, user.id);
   const empty = folders.length === 0 && sharedNotes.length === 0;
@@ -122,10 +128,10 @@ export function SharedPage() {
         >
           {folders.map((folder) => (
             <DriveRow
-              key={folder.id}
               href={folderUrl(folder.id)}
-              name={folder.name}
               icon={<FolderIcon />}
+              key={folder.id}
+              menuOpen={menu?.id === folder.id}
               meta={
                 folder.readScope && folder.writeScope ? (
                   <AccessScopeMeta
@@ -134,24 +140,24 @@ export function SharedPage() {
                   />
                 ) : undefined
               }
-              menuOpen={menu?.id === folder.id}
+              name={folder.name}
               onMenu={(event) => openFolderMenu(event, folder)}
               onPointerEnter={() => prefetchFolder(folder.id)}
             />
           ))}
           {sharedNotes.map((note) => (
             <DriveRow
-              key={note.id}
               href={`/n/${note.id}`}
-              name={note.title}
               icon={<MarkdownIcon />}
+              key={note.id}
+              menuOpen={menu?.id === note.id}
               meta={
                 <AccessScopeMeta
                   readScope={note.access.effectiveReadScope}
                   writeScope={note.access.effectiveWriteScope}
                 />
               }
-              menuOpen={menu?.id === note.id}
+              name={note.title}
               onMenu={(event) => openNoteMenu(event, note)}
               onPointerEnter={() => prefetchNote(note.id)}
             />
@@ -160,10 +166,10 @@ export function SharedPage() {
       )}
       {menu && (
         <ContextMenu
-          x={menu.x}
-          y={menu.y}
           items={menu.items}
           onClose={() => setMenu(null)}
+          x={menu.x}
+          y={menu.y}
         />
       )}
     </section>

@@ -40,10 +40,10 @@ function applyInstanceFlags(
 
   const { allowAnonymousViews, allowAnonymousEdits } = instanceFlags(env);
   if (!allowAnonymousViews) {
-    return { canView: false, canEdit: false, canAdmin: false };
+    return { canAdmin: false, canEdit: false, canView: false };
   }
   if (!allowAnonymousEdits) {
-    return { ...flags, canEdit: false, canAdmin: false };
+    return { ...flags, canAdmin: false, canEdit: false };
   }
   return flags;
 }
@@ -77,15 +77,17 @@ export type FolderRow = {
 };
 
 function parseScope(value: string | null | undefined): AccessScope | null {
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
   return isAccessScope(value) ? value : null;
 }
 
 function rowToGrant(row: GrantRow): AccessGrant {
   return {
+    canWrite: row.can_write === 1,
     email: row.email,
     userId: row.user_id,
-    canWrite: row.can_write === 1,
   };
 }
 
@@ -114,7 +116,9 @@ async function loadFolderPolicies(
     string,
     { readScope: AccessScope; writeScope: AccessScope }
   >();
-  if (unique.length === 0) return map;
+  if (unique.length === 0) {
+    return map;
+  }
 
   const placeholders = unique.map(() => "?").join(", ");
   const rows = await db(env)
@@ -249,21 +253,21 @@ export async function resolveNoteAccess(
   );
 
   return {
-    inherit,
-    readScope: note.readScope,
-    writeScope: note.writeScope,
     effectiveReadScope,
     effectiveWriteScope,
+    flags,
+    grants,
+    inherit,
+    readScope: note.readScope,
     source,
     sourceFolder,
-    grants,
-    flags,
+    writeScope: note.writeScope,
   };
 }
 
 export function folderName(folder: string): string {
   const parts = folder.split("/").filter(Boolean);
-  return parts[parts.length - 1] ?? "";
+  return parts.at(-1) ?? "";
 }
 
 export function parentFolderPath(folder: string): string {
@@ -313,16 +317,16 @@ async function loadFolderEffective(
 ): Promise<FolderPolicyResolved> {
   if (folder === "") {
     return {
-      folder: "",
-      inherit: false,
-      readScope: ROOT_SCOPES.readScope,
-      writeScope: ROOT_SCOPES.writeScope,
       effectiveReadScope: ROOT_SCOPES.readScope,
       effectiveWriteScope: ROOT_SCOPES.writeScope,
+      folder: "",
+      grants: [],
+      inherit: false,
+      locked: true,
+      readScope: ROOT_SCOPES.readScope,
       source: "folder",
       sourceFolder: "",
-      grants: [],
-      locked: true,
+      writeScope: ROOT_SCOPES.writeScope,
     };
   }
 
@@ -340,19 +344,19 @@ async function loadFolderEffective(
         source: "folder" as const,
         sourceFolder: folder,
       }
-    : resolveFromPolicies(folderAncestors(folder).slice(1)[0] ?? "", policies);
+    : resolveFromPolicies(folderAncestors(folder).at(1) ?? "", policies);
 
   return {
-    folder,
-    inherit,
-    readScope: stored?.readScope ?? null,
-    writeScope: stored?.writeScope ?? null,
     effectiveReadScope: resolved.effectiveReadScope,
     effectiveWriteScope: resolved.effectiveWriteScope,
+    folder,
+    grants,
+    inherit,
+    locked: false,
+    readScope: stored?.readScope ?? null,
     source: stored ? "folder" : resolved.source,
     sourceFolder: stored ? folder : resolved.sourceFolder,
-    grants,
-    locked: false,
+    writeScope: stored?.writeScope ?? null,
   };
 }
 
@@ -426,7 +430,9 @@ async function visibleCrumbs(
   for (let i = 1; i <= parts.length; i += 1) {
     const path = parts.slice(0, i).join("/");
     const rec = await getFolderByPath(env, ownerId, path);
-    if (!rec) continue;
+    if (!rec) {
+      continue;
+    }
     const access = await loadFolderAccessState(env, ownerId, path, user);
     // 自分自身の URL は既知。祖先の URL は別途発見可能な場合だけ返す。
     if (
@@ -458,7 +464,9 @@ async function listVisibleChildren(
 
   const children: FolderRecord[] = [];
   for (const row of rows.results ?? []) {
-    if (!row.folder || parentFolderPath(row.folder) !== folder) continue;
+    if (!row.folder || parentFolderPath(row.folder) !== folder) {
+      continue;
+    }
     const effective = await loadFolderEffective(env, ownerId, row.folder);
     const actor = actorFromUser(user, ownerId);
     const grant = grantForActor(effective.grants, actor);
@@ -472,16 +480,21 @@ async function listVisibleChildren(
       actor,
       env,
     );
-    if (!flags.canView) continue;
+    if (!flags.canView) {
+      continue;
+    }
     // 既知のフォルダから継承した子は辿れるが、別のリンク限定設定は列挙しない。
     const inheritsKnownFolder =
       effective.sourceFolder !== null &&
       folderContains(effective.sourceFolder, folder);
     if (
-      !inheritsKnownFolder &&
-      !canDiscoverAccess({ ...effective, flags }, ownerId, user)
-    )
+      !(
+        inheritsKnownFolder ||
+        canDiscoverAccess({ ...effective, flags }, ownerId, user)
+      )
+    ) {
       continue;
+    }
     children.push({
       id: row.id,
       name: folderName(row.folder),
@@ -498,12 +511,11 @@ function presentFolderAccess(
   access: FolderAccess,
   isOwner: boolean,
 ): FolderAccess {
-  if (isOwner) return access;
+  if (isOwner) {
+    return access;
+  }
   return {
     ...access,
-    folder: undefined,
-    sourceFolder: null,
-    grants: [],
     children: access.children.map((child) => ({
       id: child.id,
       name: child.name,
@@ -511,6 +523,9 @@ function presentFolderAccess(
       readScope: child.readScope,
       writeScope: child.writeScope,
     })),
+    folder: undefined,
+    grants: [],
+    sourceFolder: null,
   };
 }
 
@@ -529,24 +544,23 @@ export async function resolveFolderAccess(
   const id = await ensureFolderRow(env, ownerId, folder);
   const crumbs = folder ? await visibleCrumbs(env, ownerId, folder, user) : [];
   const isOwner = user?.id === ownerId;
-  const parentId = folder
-    ? crumbs.length >= 2
-      ? (crumbs[crumbs.length - 2]?.id ?? null)
-      : isOwner
-        ? await ensureFolderRow(env, ownerId, "")
-        : null
-    : null;
+  let parentId: string | null = null;
+  if (folder && crumbs.length >= 2) {
+    parentId = crumbs.at(-2)?.id ?? null;
+  } else if (folder && isOwner) {
+    parentId = await ensureFolderRow(env, ownerId, "");
+  }
   const children = await listVisibleChildren(env, ownerId, folder, id, user);
 
   return presentFolderAccess(
     {
       ...effective,
+      children,
+      crumbs,
+      flags,
       id,
       name: folder ? folderName(folder) : MY_DRIVE_NAME,
       parentId,
-      crumbs,
-      children,
-      flags,
       ...(isOwner ? { folder } : { folder: undefined, sourceFolder: null }),
     },
     isOwner,
@@ -564,7 +578,9 @@ export async function ensureFolderRow(
   }
 
   const existing = await getFolderByPath(env, ownerId, folder);
-  if (existing) return existing.id;
+  if (existing) {
+    return existing.id;
+  }
 
   const id = crypto.randomUUID();
   try {
@@ -593,12 +609,12 @@ export async function listOwnedFolders(
     .all<FolderRow>();
   const byPath = new Map((rows.results ?? []).map((row) => [row.folder, row]));
   return (rows.results ?? []).map((row) => ({
+    folder: row.folder,
     id: row.id,
     name: row.folder ? folderName(row.folder) : MY_DRIVE_NAME,
     parentId: isDriveRootPath(row.folder)
       ? null
       : (byPath.get(parentFolderPath(row.folder))?.id ?? null),
-    folder: row.folder,
   }));
 }
 
@@ -611,7 +627,9 @@ export async function listSharedFolders(
   const folders: FolderRecord[] = [];
 
   for (const grant of grants) {
-    if (grant.ownerId === user.id || isDriveRootPath(grant.folder)) continue;
+    if (grant.ownerId === user.id || isDriveRootPath(grant.folder)) {
+      continue;
+    }
     const access = await resolveFolderAccess(
       env,
       grant.ownerId,
@@ -620,11 +638,18 @@ export async function listSharedFolders(
     );
     // resolveFolderAccess は非オーナーの grants を伏せるため、内部状態で判定する。
     if (
-      !(await folderDiscoveryAllowed(env, grant.ownerId, grant.folder, user)) ||
-      !access.id ||
+      !(
+        (await folderDiscoveryAllowed(
+          env,
+          grant.ownerId,
+          grant.folder,
+          user,
+        )) && access.id
+      ) ||
       seen.has(access.id)
-    )
+    ) {
       continue;
+    }
     seen.add(access.id);
     folders.push({
       id: access.id,
@@ -646,7 +671,9 @@ export async function listPublicSharedFolders(
   const folders: FolderRecord[] = [];
 
   for (const grant of grants) {
-    if (isDriveRootPath(grant.folder)) continue;
+    if (isDriveRootPath(grant.folder)) {
+      continue;
+    }
     const access = await resolveFolderAccess(
       env,
       grant.ownerId,
@@ -660,7 +687,9 @@ export async function listPublicSharedFolders(
     ) {
       continue;
     }
-    if (seen.has(access.id)) continue;
+    if (seen.has(access.id)) {
+      continue;
+    }
     seen.add(access.id);
     folders.push({
       id: access.id,
@@ -685,7 +714,7 @@ export async function createOwnedFolder(
     env,
     ownerId,
     folder,
-    user ?? { id: ownerId, email: "", displayName: null },
+    user ?? { displayName: null, email: "", id: ownerId },
   );
   if (current.inherit) {
     await upsertFolderPolicy(
@@ -700,7 +729,7 @@ export async function createOwnedFolder(
     env,
     ownerId,
     folder,
-    user ?? { id: ownerId, email: "", displayName: null },
+    user ?? { displayName: null, email: "", id: ownerId },
   );
 }
 
@@ -714,8 +743,8 @@ export async function listPublicFolderCandidates(
     .all<{ owner_id: string; folder: string }>();
 
   return (rows.results ?? []).map((row) => ({
-    ownerId: row.owner_id,
     folder: row.folder,
+    ownerId: row.owner_id,
   }));
 }
 
@@ -734,13 +763,15 @@ export async function replaceGrants(
     if (!email) {
       return { error: "invalid grant email" };
     }
-    if (seen.has(email)) continue;
+    if (seen.has(email)) {
+      continue;
+    }
     seen.add(email);
     const user = await findUserByEmail(env, email);
     normalized.push({
+      canWrite: Boolean(input.canWrite),
       email,
       userId: user?.id ?? null,
-      canWrite: Boolean(input.canWrite),
     });
   }
 
@@ -816,7 +847,9 @@ export async function renameFolderTree(
   from: string,
   to: string,
 ): Promise<void> {
-  if (!from || !to || from === to) return;
+  if (!(from && to) || from === to) {
+    return;
+  }
 
   const folderRows = await db(env)
     .prepare("SELECT folder FROM folders WHERE owner_id = ?")
@@ -835,7 +868,9 @@ export async function renameFolderTree(
 
   for (const row of folderRows.results ?? []) {
     const next = rewriteFolderPrefix(row.folder, from, to);
-    if (next === null) continue;
+    if (next === null) {
+      continue;
+    }
     await db(env)
       .prepare(
         "UPDATE folders SET folder = ? WHERE owner_id = ? AND folder = ?",
@@ -846,7 +881,9 @@ export async function renameFolderTree(
 
   for (const row of policyRows.results ?? []) {
     const next = rewriteFolderPrefix(row.folder, from, to);
-    if (next === null) continue;
+    if (next === null) {
+      continue;
+    }
     await db(env)
       .prepare(
         "UPDATE folder_policies SET folder = ? WHERE owner_id = ? AND folder = ?",
@@ -857,7 +894,9 @@ export async function renameFolderTree(
 
   for (const row of grantRows.results ?? []) {
     const next = rewriteFolderPrefix(row.target_key, from, to);
-    if (next === null) continue;
+    if (next === null) {
+      continue;
+    }
     await db(env)
       .prepare("UPDATE access_grants SET target_key = ? WHERE id = ?")
       .bind(next, row.id)
@@ -870,14 +909,18 @@ export async function deleteFolderTree(
   ownerId: string,
   folder: string,
 ): Promise<void> {
-  if (!folder) return;
+  if (!folder) {
+    return;
+  }
   const rows = await db(env)
     .prepare("SELECT folder FROM folders WHERE owner_id = ?")
     .bind(ownerId)
     .all<{ folder: string }>();
 
   for (const row of rows.results ?? []) {
-    if (!folderContains(folder, row.folder)) continue;
+    if (!folderContains(folder, row.folder)) {
+      continue;
+    }
     await deleteFolderPolicy(env, ownerId, row.folder);
     await db(env)
       .prepare(
@@ -910,8 +953,8 @@ export async function listSharedFolderCandidates(
     .all<{ owner_id: string; target_key: string }>();
 
   return (rows.results ?? []).map((row) => ({
-    ownerId: row.owner_id,
     folder: row.target_key,
+    ownerId: row.owner_id,
   }));
 }
 

@@ -36,8 +36,9 @@ function sameSharing(a: EffectiveAccess, b: EffectiveAccess): boolean {
   if (
     a.effectiveReadScope !== b.effectiveReadScope ||
     a.effectiveWriteScope !== b.effectiveWriteScope
-  )
+  ) {
     return false;
+  }
 
   // Grants only affect access when either scope targets specific users.
   if (a.effectiveReadScope !== "users" && a.effectiveWriteScope !== "users") {
@@ -74,7 +75,7 @@ export function sharedByMeItems(
   const parents = new Map(sharedFolders.map((folder) => [folder.id, folder]));
   const isBoundary = (access: EffectiveAccess, parentId: string | null) => {
     const parent = parents.get(parentId);
-    return !parent || !sameSharing(access, parent);
+    return !(parent && sameSharing(access, parent));
   };
   return {
     folders: sharedFolders.filter((folder) =>

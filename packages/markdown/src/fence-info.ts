@@ -94,13 +94,17 @@ const EXTENSION_LANGUAGES: Record<string, string> = {
 };
 
 function looksLikeFilename(value: string): boolean {
-  if (!value.includes(".") || value.endsWith(".")) return false;
+  if (!value.includes(".") || value.endsWith(".")) {
+    return false;
+  }
   return !/\s/.test(value);
 }
 
 export function resolveLanguage(value: string): string {
   const key = value.trim().toLowerCase();
-  if (!key) return "";
+  if (!key) {
+    return "";
+  }
   return LANGUAGE_ALIASES[key] ?? key;
 }
 
@@ -110,29 +114,35 @@ export function isKnownLanguage(value: string): boolean {
 
 export function inferLanguageFromFilename(filename: string): string {
   const base = filename.trim().split(/[/\\]/).pop() ?? "";
-  if (/^dockerfile$/i.test(base)) return "dockerfile";
+  if (/^dockerfile$/i.test(base)) {
+    return "dockerfile";
+  }
   const dot = base.lastIndexOf(".");
-  if (dot <= 0) return "";
+  if (dot <= 0) {
+    return "";
+  }
   return EXTENSION_LANGUAGES[base.slice(dot + 1).toLowerCase()] ?? "";
 }
 
 export function parseFenceInfo(info: string): FenceInfo {
   const trimmed = info.trim();
-  if (!trimmed) return { language: "", filename: "" };
+  if (!trimmed) {
+    return { filename: "", language: "" };
+  }
 
   const colon = trimmed.indexOf(":");
   if (colon >= 0) {
     return {
-      language: trimmed.slice(0, colon).trim(),
       filename: normalizeFilename(trimmed.slice(colon + 1)),
+      language: trimmed.slice(0, colon).trim(),
     };
   }
 
   if (!isKnownLanguage(trimmed) && looksLikeFilename(trimmed)) {
-    return { language: "", filename: normalizeFilename(trimmed) };
+    return { filename: normalizeFilename(trimmed), language: "" };
   }
 
-  return { language: trimmed, filename: "" };
+  return { filename: "", language: trimmed };
 }
 
 export function highlightLanguage(info: FenceInfo): string {
@@ -140,7 +150,9 @@ export function highlightLanguage(info: FenceInfo): string {
     return resolveLanguage(info.language);
   }
   const inferred = inferLanguageFromFilename(info.filename || info.language);
-  if (inferred) return inferred;
+  if (inferred) {
+    return inferred;
+  }
   return resolveLanguage(info.language);
 }
 
@@ -151,6 +163,8 @@ export function normalizeFilename(filename: string): string {
 export function serializeFenceInfo(info: FenceInfo): string {
   const language = info.language.trim();
   const filename = normalizeFilename(info.filename);
-  if (language && filename) return `${language}:${filename}`;
+  if (language && filename) {
+    return `${language}:${filename}`;
+  }
   return filename || language;
 }

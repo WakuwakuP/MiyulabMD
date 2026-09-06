@@ -15,7 +15,9 @@ import {
 } from "../../lib/api.ts";
 
 function formatTimestamp(ms: number | null): string {
-  if (ms === null) return "未使用";
+  if (ms === null) {
+    return "未使用";
+  }
   return new Date(ms).toLocaleString();
 }
 
@@ -119,18 +121,18 @@ export function McpSettingsPage() {
       {loggedIn && (
         <>
           <form onSubmit={(event) => void handleCreate(event)}>
-            <Field label="トークン名" htmlFor="token-name">
+            <Field htmlFor="token-name" label="トークン名">
               <Row className="mt-[0.35rem] max-[640px]:flex-col">
                 <Input
-                  id="token-name"
                   className="flex-1"
-                  type="text"
-                  value={name}
+                  disabled={creating}
+                  id="token-name"
                   onChange={(event) => setName(event.target.value)}
                   placeholder="例: Cursor on laptop"
-                  disabled={creating}
+                  type="text"
+                  value={name}
                 />
-                <Button variant="outline" type="submit" disabled={creating}>
+                <Button disabled={creating} type="submit" variant="outline">
                   {creating ? "発行中…" : "トークンを発行"}
                 </Button>
               </Row>
@@ -139,25 +141,25 @@ export function McpSettingsPage() {
 
           {createdToken ? (
             <McpSetupHelp
+              onClose={() => setCreatedToken(null)}
               origin={window.location.origin}
               token={createdToken.token}
               tokenName={createdToken.name}
-              onClose={() => setCreatedToken(null)}
             />
           ) : (
             <McpClientGuide origin={window.location.origin} />
           )}
 
-          {loading ? (
-            <p>読み込み中…</p>
-          ) : tokens.length === 0 ? (
+          {loading && <p>読み込み中…</p>}
+          {!loading && tokens.length === 0 && (
             <p>発行済みトークンはありません。</p>
-          ) : (
+          )}
+          {!loading && tokens.length > 0 && (
             <ul className="list-none p-0">
               {tokens.map((token) => (
                 <li
-                  key={token.id}
                   className="flex justify-between gap-4 border-b border-border py-3 max-[640px]:flex-col max-[640px]:items-start"
+                  key={token.id}
                 >
                   <div>
                     <strong>{token.name}</strong>
@@ -167,8 +169,8 @@ export function McpSettingsPage() {
                     </MutedText>
                   </div>
                   <Button
-                    variant="outline"
                     onClick={() => void handleRevoke(token.id)}
+                    variant="outline"
                   >
                     失効
                   </Button>

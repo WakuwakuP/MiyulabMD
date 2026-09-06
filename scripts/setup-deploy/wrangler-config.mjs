@@ -10,13 +10,13 @@ export const WRANGLER_DEPLOY_TOML = "wrangler.deploy.toml";
 export const OG_FETCH_DEPLOY_TOML = "wrangler.og-fetch.deploy.toml";
 
 export const DEPLOY_VAR_NAMES = {
-  workerName: "WORKER_NAME",
-  ogFetchName: "OG_FETCH_WORKER_NAME",
-  d1Name: "D1_DATABASE_NAME",
-  d1Id: "D1_DATABASE_ID",
-  r2Name: "R2_BUCKET_NAME",
   accessTeamDomain: "ACCESS_TEAM_DOMAIN",
   customHostname: "CUSTOM_HOSTNAME",
+  d1Id: "D1_DATABASE_ID",
+  d1Name: "D1_DATABASE_NAME",
+  ogFetchName: "OG_FETCH_WORKER_NAME",
+  r2Name: "R2_BUCKET_NAME",
+  workerName: "WORKER_NAME",
 };
 
 function trimToUndef(value) {
@@ -26,13 +26,13 @@ function trimToUndef(value) {
 
 export function readDeployOverridesFromEnv(env = process.env) {
   return {
-    workerName: trimToUndef(env.WORKER_NAME),
-    ogFetchName: trimToUndef(env.OG_FETCH_WORKER_NAME),
-    d1Name: trimToUndef(env.D1_DATABASE_NAME),
-    d1Id: trimToUndef(env.D1_DATABASE_ID),
-    r2Name: trimToUndef(env.R2_BUCKET_NAME),
     accessTeamDomain: trimToUndef(env.ACCESS_TEAM_DOMAIN),
     customHostname: trimToUndef(env.CUSTOM_HOSTNAME),
+    d1Id: trimToUndef(env.D1_DATABASE_ID),
+    d1Name: trimToUndef(env.D1_DATABASE_NAME),
+    ogFetchName: trimToUndef(env.OG_FETCH_WORKER_NAME),
+    r2Name: trimToUndef(env.R2_BUCKET_NAME),
+    workerName: trimToUndef(env.WORKER_NAME),
   };
 }
 
@@ -92,7 +92,7 @@ export function applyDeployOverrides(wranglerToml, ogToml, overrides) {
     nextOg = replaceTomlQuotedValue(nextOg, "name", overrides.ogFetchName);
   }
 
-  return { wranglerToml: nextWrangler, ogToml: nextOg };
+  return { ogToml: nextOg, wranglerToml: nextWrangler };
 }
 
 export function assertRemoteOverrides(overrides) {
