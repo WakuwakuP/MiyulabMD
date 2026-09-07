@@ -11,6 +11,9 @@ export const MCP_TOOLS = [
   "search_notes",
   "agent_join",
   "agent_leave",
+  "list_note_history",
+  "get_revision",
+  "restore_revision",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOLS)[number];

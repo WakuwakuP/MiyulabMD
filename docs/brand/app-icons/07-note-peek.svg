@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: character peeking over a markdown note">
+  <title>Note peek + MD</title>
+  <desc>Markdown document with Miyu ears, bangs, and side hair over the page.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFF8FC"/>
+  <path fill="#2E2438" d="M170 148 216 40l48 100z"/>
+  <path fill="#2E2438" d="M258 140 308 40l50 108z"/>
+  <!-- bangs over the page top -->
+  <path fill="#2E2438" d="M156 156q100-36 200 0l6 40q-106 28-212 0z"/>
+  <!-- note -->
+  <path fill="#FFCCFF" d="M108 188h228l76 76v172a36 36 0 0 1-36 36H108a36 36 0 0 1-36-36V224a36 36 0 0 1 36-36z"/>
+  <path fill="#FF77FF" d="M336 188v60a16 16 0 0 0 16 16h60z"/>
+  <!-- long side hair -->
+  <path fill="#2E2438" d="M108 196c-16 64-4 140 28 176 4-56 0-112 20-160z"/>
+  <path fill="#2E2438" d="M404 196c16 64 4 140-28 176-4-56 0-112-20-160z"/>
+  <g fill="#464646" transform="translate(154 308)">
+    <path d="M4 72V8h24l20 32 20-32h24v64h-22V32L48 58 26 32v40z"/>
+    <path fill-rule="evenodd" d="M112 8h36c36 0 50 16 50 32s-14 32-50 32h-36zm22 16v32h16c18 0 26-8 26-16s-8-16-26-16z"/>
+  </g>
+</svg>

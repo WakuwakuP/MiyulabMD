@@ -3,7 +3,13 @@ import type {
   FolderRecord,
   NoteSummary,
 } from "@miyulabmd/shared";
-import { type MouseEvent, type ReactNode, useEffect, useState } from "react";
+import {
+  type MouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
@@ -337,6 +343,16 @@ export function HomePage() {
     });
   }, [folderId, user, userLoading]);
 
+  // Header updates re-render AppShell and this page. Keep its callbacks stable
+  // so useHomeHeader does not publish another header on every parent render.
+  const handleCreateFolder = useCallback(() => {
+    setFolderCreateError(null);
+    setFolderCreateOpen(true);
+  }, []);
+  const handleCreateNote = useCallback(() => {
+    void persistNewNote(visibleFolder, navigate, setCreating, setError);
+  }, [visibleFolder, navigate]);
+
   useHomeHeader(
     headerFolder,
     user,
@@ -345,13 +361,8 @@ export function HomePage() {
     flags.canAdmin,
     creating,
     setHeader,
-    () => {
-      setFolderCreateError(null);
-      setFolderCreateOpen(true);
-    },
-    () => {
-      void persistNewNote(visibleFolder, navigate, setCreating, setError);
-    },
+    handleCreateFolder,
+    handleCreateNote,
   );
 
   return (

@@ -9,6 +9,75 @@ import type {
 
 export type NoteId = string;
 
+export const NOTE_HISTORY_ACTOR_KINDS = ["user", "agent", "guest"] as const;
+export type NoteHistoryActorKind = (typeof NOTE_HISTORY_ACTOR_KINDS)[number];
+
+export const NOTE_EDIT_OPS = [
+  "insert",
+  "delete",
+  "replace",
+  "restore",
+] as const;
+export type NoteEditOp = (typeof NOTE_EDIT_OPS)[number];
+
+export type NoteHistoryActor = {
+  kind: NoteHistoryActorKind;
+  userId: string | null;
+  name: string;
+};
+
+export type NoteEditEvent = {
+  id: string;
+  noteId: NoteId;
+  revisionId: string | null;
+  actor: NoteHistoryActor;
+  startedAt: number;
+  endedAt: number;
+  startOffset: number;
+  endOffset: number;
+  op: NoteEditOp;
+  excerpt: string;
+  createdAt: number;
+};
+
+export type NoteRevision = {
+  id: string;
+  noteId: NoteId;
+  eventId: string | null;
+  r2Key: string;
+  byteSize: number;
+  actor: NoteHistoryActor;
+  createdAt: number;
+};
+
+export type NoteHistoryPage = {
+  events: NoteEditEvent[];
+  nextBefore: number | null;
+};
+
+export type NoteRevisionBody = NoteRevision & {
+  markdown: string;
+};
+
+export type NoteRevisionRestore = {
+  restored: true;
+  revisionId: string;
+  message: string;
+};
+
+export const NOTE_RESTORE_MESSAGE =
+  "今の本文を、選んだ時点の全文で置き換えました。同時に編集していた内容は上書きされます。";
+
+export function isNoteHistoryActorKind(
+  value: string,
+): value is NoteHistoryActorKind {
+  return (NOTE_HISTORY_ACTOR_KINDS as readonly string[]).includes(value);
+}
+
+export function isNoteEditOp(value: string): value is NoteEditOp {
+  return (NOTE_EDIT_OPS as readonly string[]).includes(value);
+}
+
 export type NoteAccess = EffectiveAccess & {
   flags: PermissionFlags;
 };

@@ -9,7 +9,7 @@
     "db:migrate": "wrangler d1 migrations apply DB --local",
     "deploy": "wrangler deploy -c wrangler.og-fetch.toml && wrangler deploy",
     "predev": "node -e \"require('node:fs').mkdirSync('../web/dist', { recursive: true })\"",
-    "dev": "wrangler dev -c wrangler.toml -c wrangler.og-fetch.toml",
+    "dev": "node scripts/dev.mjs",
     "test": "node --experimental-strip-types --test src/ssr/*.test.ts src/services/*.test.ts src/durable-objects/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@types/fast-diff": "^1.2.2",
-    "typescript": "^5.9.2",
+    "typescript": "7.0.2",
     "wrangler": "^4.129.0"
   }
 }

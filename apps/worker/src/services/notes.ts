@@ -50,6 +50,7 @@ import {
   escapeLikePattern,
   rewriteArticleSourceFolders,
 } from "./articles.ts";
+import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
 
@@ -647,6 +648,7 @@ async function deleteOwnedNotesInFolder(
       continue;
     }
     await images.deleteAllForNote(row.id);
+    await deleteRevisionsForNote(env, row.id);
     await db(env)
       .prepare(
         "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
@@ -832,6 +834,7 @@ export function createNoteService(env: Env) {
       }
 
       await createImageService(env).deleteAllForNote(row.id);
+      await deleteRevisionsForNote(env, row.id);
       await db(env)
         .prepare(
           "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",

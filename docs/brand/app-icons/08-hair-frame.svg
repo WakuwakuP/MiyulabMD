@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: hair frame around MD document">
+  <title>Hair frame + MD document</title>
+  <desc>Hair silhouette as a brand frame, document and MD inside.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFF8FC"/>
+  <path fill="#2E2438" d="M158 164 210 40l54 116z"/>
+  <path fill="#2E2438" d="M248 156 304 40l56 124z"/>
+  <path fill="#2E2438" d="M118 196c-24 64-16 188 36 236 28-60 16-148 40-200h124c24 52 12 140 40 200 52-48 60-172 36-236-44-52-188-52-276 0z"/>
+  <ellipse cx="256" cy="268" rx="102" ry="108" fill="#F6E4DC"/>
+  <path fill="#322848" d="M168 188q88-36 176 0l8 48q-96 28-192 0z"/>
+  <ellipse cx="228" cy="256" rx="8" ry="10" fill="#E85A78"/>
+  <ellipse cx="284" cy="256" rx="8" ry="10" fill="#E85A78"/>
+  <rect x="176" y="268" width="160" height="132" rx="18" fill="#FFCCFF"/>
+  <path fill="#FF77FF" d="M300 268v26a10 10 0 0 0 10 10h26z"/>
+  <g fill="#464646" transform="translate(196 300)">
+    <path d="M4 56V8h18l14 22 14-22h18v48h-16V26L36 44 20 26v30z"/>
+    <path fill-rule="evenodd" d="M84 8h24c26 0 36 10 36 20s-10 20-36 20H84zm16 12v16h10c10 0 14-4 14-8s-4-8-14-8z"/>
+  </g>
+</svg>

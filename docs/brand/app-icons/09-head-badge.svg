@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: character head with MD note badge">
+  <title>Head + MD badge</title>
+  <desc>Character bust with bangs and long hair, plus a folded MD note badge.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFCCFF"/>
+  <path fill="#2E2438" d="M160 180 210 52l52 116z"/>
+  <path fill="#2E2438" d="M250 172 304 52l52 128z"/>
+  <path fill="#2E2438" d="M128 204c-28 68-16 196 32 244 24-60 12-148 36-204h120c24 56 12 144 36 204 48-48 60-176 32-244-44-48-168-48-256 0z"/>
+  <ellipse cx="256" cy="248" rx="74" ry="76" fill="#F6E4DC"/>
+  <path fill="#322848" d="M186 180q70-28 140 0l8 50q-78 26-156 0z"/>
+  <ellipse cx="230" cy="256" rx="8" ry="10" fill="#E85A78"/>
+  <ellipse cx="282" cy="256" rx="8" ry="10" fill="#E85A78"/>
+  <path fill="#F4F1F7" d="M218 206c0-5 6-8 10-4 4-4 10-1 10 4 0 7-10 12-10 12s-10-5-10-12z"/>
+  <g transform="translate(292 328)">
+    <rect width="176" height="140" rx="24" fill="#FFF8FC"/>
+    <path fill="#FF77FF" d="M124 0v34a10 10 0 0 0 10 10h42z"/>
+    <g fill="#464646" transform="translate(24 42)">
+      <path d="M4 64V8h20l16 26 16-26h20v56h-18V30L40 50 22 30v34z"/>
+      <path fill-rule="evenodd" d="M92 8h26c28 0 40 12 40 24s-12 24-40 24H92zm16 12v24h12c14 0 20-6 20-12s-6-12-20-12z"/>
+    </g>
+  </g>
+</svg>

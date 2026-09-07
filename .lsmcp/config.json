@@ -1,0 +1,6 @@
+{
+  "$schema": "../node_modules/@mizchi/lsmcp/lsmcp.schema.json",
+  "args": ["--lsp", "--stdio"],
+  "bin": "tsc",
+  "files": ["**/*.ts", "**/*.tsx", "**/*.d.ts"]
+}

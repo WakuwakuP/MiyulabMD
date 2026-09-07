@@ -1,0 +1,11 @@
+procs:
+  web:
+    cmd:
+      $select: os
+      windows: ["cmd.exe", "/d", "/s", "/c", "pnpm dev:web"]
+      $else: ["pnpm", "dev:web"]
+  worker:
+    cmd:
+      $select: os
+      windows: ["cmd.exe", "/d", "/s", "/c", "pnpm dev:worker"]
+      $else: ["pnpm", "dev:worker"]

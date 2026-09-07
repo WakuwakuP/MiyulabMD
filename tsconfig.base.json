@@ -9,6 +9,7 @@
     "noUncheckedIndexedAccess": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "stableTypeOrdering": true,
     "strict": true,
     "target": "ES2022",
     "verbatimModuleSyntax": true

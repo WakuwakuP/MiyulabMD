@@ -14,3 +14,9 @@ coverage/
 storybook-static/
 .turbo/
 *.tsbuildinfo
+
+# lsmcp cache
+.lsmcp/cache
+
+# code-graph index
+.code-graph/

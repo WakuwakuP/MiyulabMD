@@ -1,15 +1,22 @@
 import { env } from "cloudflare:workers";
-import { ACCESS_SCOPES, type Note, type SessionUser } from "@miyulabmd/shared";
+import {
+  ACCESS_SCOPES,
+  NOTE_RESTORE_MESSAGE,
+  type Note,
+  type SessionUser,
+} from "@miyulabmd/shared";
 import { McpServer } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
+import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import {
   type InsertPosition,
   markdownOutline,
   numberMarkdownLines,
 } from "../durable-objects/markdown-edit.ts";
+import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import {
   createNoteService,
   type GetNoteResult,
@@ -124,7 +131,7 @@ type ToolTextResult =
   | ReturnType<typeof textResult>
   | ReturnType<typeof textError>;
 
-async function requireEditableNote(
+async function requireViewableNote(
   notes: ReturnType<typeof createNoteService>,
   id: string,
   user: SessionUser,
@@ -134,10 +141,25 @@ async function requireEditableNote(
   if (error) {
     return { error, ok: false };
   }
-  if (loaded.kind !== "ok" || !loaded.note.access.flags.canEdit) {
-    return { error: textError("Forbidden"), ok: false };
+  if (loaded.kind !== "ok") {
+    return { error: textError("Not found"), ok: false };
   }
   return { note: loaded.note, ok: true };
+}
+
+async function requireEditableNote(
+  notes: ReturnType<typeof createNoteService>,
+  id: string,
+  user: SessionUser,
+): Promise<{ ok: true; note: Note } | { ok: false; error: ToolTextResult }> {
+  const loaded = await requireViewableNote(notes, id, user);
+  if (!loaded.ok) {
+    return loaded;
+  }
+  if (!loaded.note.access.flags.canEdit) {
+    return { error: textError("Forbidden"), ok: false };
+  }
+  return loaded;
 }
 
 function grantsWithCollaborator(
@@ -185,6 +207,83 @@ async function insertInNoteTool(
     text: input.text,
   });
   return editToolResult(loaded.note.id, result);
+}
+
+async function listNoteHistoryTool(
+  notes: ReturnType<typeof createNoteService>,
+  input: { id: string; limit?: number; before?: number },
+): Promise<ToolTextResult> {
+  const user = requireUser();
+  if (!user) {
+    return textError("Unauthorized");
+  }
+
+  const loaded = await requireViewableNote(notes, input.id, user);
+  if (!loaded.ok) {
+    return loaded.error;
+  }
+
+  const page = await listNoteEditEvents(env, loaded.note.id, {
+    before: input.before,
+    limit: input.limit,
+  });
+  return textResult(page);
+}
+
+async function getRevisionTool(
+  notes: ReturnType<typeof createNoteService>,
+  input: { id: string; revisionId: string },
+): Promise<ToolTextResult> {
+  const user = requireUser();
+  if (!user) {
+    return textError("Unauthorized");
+  }
+
+  const loaded = await requireViewableNote(notes, input.id, user);
+  if (!loaded.ok) {
+    return loaded.error;
+  }
+
+  const revision = await getNoteRevision(env, loaded.note.id, input.revisionId);
+  if (!revision) {
+    return textError("Not found");
+  }
+  return textResult(revision);
+}
+
+async function restoreRevisionTool(
+  notes: ReturnType<typeof createNoteService>,
+  input: { id: string; revisionId: string },
+): Promise<ToolTextResult> {
+  const user = requireUser();
+  if (!user) {
+    return textError("Unauthorized");
+  }
+
+  const loaded = await requireEditableNote(notes, input.id, user);
+  if (!loaded.ok) {
+    return loaded.error;
+  }
+
+  const revision = await getNoteRevision(env, loaded.note.id, input.revisionId);
+  if (!revision) {
+    return textError("Not found");
+  }
+
+  const applied = await documentRoom(loaded.note.id).restoreMarkdown(
+    loaded.note.id,
+    revision.markdown,
+    actorFromSessionUser(user),
+  );
+  if (!applied.ok) {
+    return textError(applied.message);
+  }
+
+  return textResult({
+    message: NOTE_RESTORE_MESSAGE,
+    restored: true,
+    revisionId: revision.id,
+  });
 }
 
 async function inviteCollaboratorTool(
@@ -625,6 +724,50 @@ export function createMcpServerFactory() {
       await documentRoom(result.note.id).clearAgentPresence();
       return textResult({ id: result.note.id, left: true });
     },
+  );
+
+  server.registerTool(
+    "list_note_history",
+    {
+      description:
+        "List edit events for a note, newest first. Use before (created_at) to page.",
+      inputSchema: {
+        before: z
+          .number()
+          .optional()
+          .describe("Return events created before this epoch millisecond"),
+        id: z.string().describe("Note UUID or short ID"),
+        limit: z.number().optional().describe("Page size (default 30)"),
+      },
+    },
+    async ({ id, limit, before }) =>
+      listNoteHistoryTool(notes, { before, id, limit }),
+  );
+
+  server.registerTool(
+    "get_revision",
+    {
+      description: "Get the markdown stored for a note revision.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+        revisionId: z.string().describe("Revision UUID"),
+      },
+    },
+    async ({ id, revisionId }) => getRevisionTool(notes, { id, revisionId }),
+  );
+
+  server.registerTool(
+    "restore_revision",
+    {
+      description:
+        "Replace the live note with a stored revision. Concurrent edits are overwritten. Requires canEdit.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+        revisionId: z.string().describe("Revision UUID to restore"),
+      },
+    },
+    async ({ id, revisionId }) =>
+      restoreRevisionTool(notes, { id, revisionId }),
   );
 
   return server;
