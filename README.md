@@ -28,8 +28,8 @@ pnpm db:migrate
 
 # 4. 動作確認
 pnpm dev
-# ブラウザで http://miyulabmd.localhost:1355 を開く
-# http://miyulabmd.localhost:1355/api/health => {"ok":true}
+# ブラウザで http://miyulabmd.localhost を開く
+# http://miyulabmd.localhost/api/health => {"ok":true}
 ```
 
 `wrangler.toml` の `database_id` はプレースホルダのままでよい。`wrangler d1 ... --local` と `wrangler dev` はローカル SQLite を使う。アカウント固有の D1 ID や Access チームドメインは GitHub Actions の Variables に置く。
@@ -44,14 +44,16 @@ pnpm dev
 
 | プロセス | 単独起動コマンド | URL（標準設定） |
 | ---------- | ----------------- | --------------------- |
-| Web (Vite) | `pnpm dev:web` | http://miyulabmd.localhost:1355 |
-| Worker | `pnpm dev:worker` | http://worker.miyulabmd.localhost:1355 |
+| Web (Vite) | `pnpm dev:web` | http://miyulabmd.localhost |
+| Worker | `pnpm dev:worker` | http://worker.miyulabmd.localhost |
 
 mprocs は左の一覧に `web` / `worker`、右に選択したプロセスのログを表示する。プロセス一覧にフォーカスした状態で ↑/↓ で選択、`r` で再起動、`x` で停止、`s` で開始、`q` で両方を終了する。Ctrl+A でログ側とフォーカスを切り替える。キー操作は画面下部にも表示される。Windows ではプロファイルを読み込まない `cmd.exe /d` を使い、個人の PowerShell 起動処理を実行しない。
 
-標準は **HTTP / 1355 番ポート / ループバックのみ**。共通の `scripts/portless.mjs` が同時起動・単独起動に同じ設定を適用する。OpenSSL のインストール、証明書の信頼登録、管理者権限は不要で、hosts ファイルも自動変更しない。Chrome / Edge / Firefox で開くこと。OS の DNS に依存する curl 等では、例えば `curl --resolve miyulabmd.localhost:1355:127.0.0.1 http://miyulabmd.localhost:1355/api/health` を使う。
+標準は **HTTP / 80 番ポート / ループバックのみ**で、URL にポート番号を書く必要はない。共通の `scripts/portless.mjs` が同時起動・単独起動に同じ設定を適用する。OpenSSL のインストールや証明書の信頼登録は不要で、hosts ファイルも自動変更しない。macOS / Linux では標準ポートの利用に portless が sudo による昇格を求める場合がある。Chrome / Edge / Firefox で開くこと。OS の DNS に依存する curl 等では、例えば `curl --resolve miyulabmd.localhost:80:127.0.0.1 http://miyulabmd.localhost/api/health` を使う。
 
-HTTPS が必要な場合だけ、OpenSSL と証明書の信頼登録を準備し、`PORTLESS_HTTPS=1` を環境変数に設定して起動する（PowerShell なら `$env:PORTLESS_HTTPS="1"; pnpm dev`）。必要に応じて `PORTLESS_PORT` も指定できる。既存の共有プロキシと設定が異なる場合は、他のプロジェクトが使っていないことを確認して `pnpm exec portless proxy stop` で停止してから起動する。実際の URL は起動ログを参照。
+HTTPS が必要な場合だけ、OpenSSL と証明書の信頼登録を準備し、`PORTLESS_HTTPS=1` を環境変数に設定して起動する（PowerShell なら `$env:PORTLESS_HTTPS="1"; pnpm dev`）。この場合は標準の 443 番を使い、URL は `https://miyulabmd.localhost` になる。80 / 443 番が別のサービスで使用中、または昇格を避けたい場合は `PORTLESS_PORT` を指定できるが、その場合は URL にポート番号が必要になる。
+
+以前の 1355 番設定など、既存の共有プロキシと設定が異なる場合は、起動中の Web / Worker を終了し、他のプロジェクトが使っていないことを確認して `pnpm exec portless proxy stop` で停止してから `pnpm dev` を起動する。環境変数に `PORTLESS_PORT` を設定している場合はそれが優先されるため、標準ポートに戻すには解除する。実際の URL は起動ログを参照。
 
 Vite は `/api` `/auth` `/mcp` `/openapi.json` `/ws` を portless 経由で Worker にプロキシする。ブラウザでは Web 側の URL を使うことでログインと WebSocket を同一オリジンに保つ。バックエンドのポートは portless が割り当て、Worker にも `PORT` を渡すため、5173 / 8787 の空きを気にする必要はない。
 

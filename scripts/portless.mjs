@@ -1,9 +1,9 @@
 import { fileURLToPath } from "node:url";
 
-// Cross-platform defaults: no OpenSSL, certificate trust, hosts edits or sudo.
-// Explicit environment variables still allow opting into HTTPS.
+// Use standard ports so local URLs do not need a port suffix.
+// HTTP needs no OpenSSL or certificate trust; HTTPS remains opt-in.
 process.env.PORTLESS_HTTPS ??= "0";
-process.env.PORTLESS_PORT ??= "1355";
+process.env.PORTLESS_PORT ??= process.env.PORTLESS_HTTPS === "1" ? "443" : "80";
 process.env.PORTLESS_SYNC_HOSTS ??= "0";
 process.env.PORTLESS_LAN ??= "0";
 process.env.PORTLESS_TLD ??= "localhost";
