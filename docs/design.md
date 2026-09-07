@@ -25,10 +25,11 @@
 - 画像のペースト / ドロップを R2 に保存し、ノート権限に従って配信する
 - Cursor 等の MCP クライアントからノートの一覧・取得・作成・更新・権限変更ができる
 - 単一 Worker で API / WebSocket / 静的配信 / MCP を提供する
+- いつ・誰が・どの範囲を・どう編集したかを時系列で見られ、ある時点の本文へ戻せる
 
 ### 非ゴール（初期リリース外）
 
-- ノートの版管理 UI・ブランチ・コメントスレッド
+- ブランチ、コメントスレッド、キーストローク再生、ノート横断の履歴検索
 - 組織 / チームワークスペース（個人所有 + 招待まで）
 - WYSIWYG 編集（初期はソース + プレビュー分割）
 - 全文検索エンジン（D1 の LIKE / FTS5 で足りる範囲に留める）
@@ -48,7 +49,7 @@ flowchart LR
     Worker[Worker fetch / Elysia]
     DO[DocumentRoom DO]
     D1[(D1 metadata)]
-    R2[(R2 images)]
+    R2[(R2 images / revisions)]
   end
 
   Browser -->|HTTPS + WebSocket| Worker
@@ -66,8 +67,8 @@ flowchart LR
 | `apps/web`                | React フロント。CodeMirror 6 + Yjs、プレビュー、権限 UI                       |
 | Worker (`fetch` + Elysia) | 入口は `fetch` 分岐。REST / 認証 / MCP は Elysia。WS と Assets は公式ハンドラ |
 | `DocumentRoom` DO         | ノート 1 件につき 1 インスタンス。Yjs 同期・awareness・永続化                 |
-| D1                        | ユーザー、ノートメタ、権限、招待、API トークン、Markdown スナップショット     |
-| R2                        | 貼付画像                                                                      |
+| D1                        | ユーザー、ノートメタ、権限、招待、API トークン、最新スナップショット、編集イベント、リビジョンメタ |
+| R2                        | 貼付画像、リビジョン本文                                                      |
 | Access                    | ログイン IdP。公開ノートの閲覧は Worker 側で許可判定する                      |
 
 ## 4. 技術選定
@@ -270,9 +271,78 @@ api_tokens (
 )
 ```
 
-本文の最新状態は DO 内の Yjs。D1 の `markdown_snapshot` は一覧・検索・MCP の読み取り・共有ページの初期表示用。DO がデバウンスして書き戻す（目安: 5 秒または 50 操作ごと）。
+本文の最新状態は DO 内の Yjs。D1 の `markdown_snapshot` は一覧・検索・MCP の読み取り・共有ページの初期表示用。DO がデバウンスして書き戻す（目安: 3 秒）。
 
 ユーザーが未ログインのまま `freely` ノートを編集する場合、`users` 行は作らない。owner がいないノートは初期では作らない（`ALLOW_ANONYMOUS=false`）。将来ゲスト作成を許すなら `owner_id` を NULL 可にする。
+
+### 7.1 編集履歴
+
+「誰がどこをどう変えたか」と「ある時点に戻す」は別物。共同編集では、ある人の差分だけを巻き戻すと他人の同時編集を壊す。
+
+| 層 | 役割 | 保存先 |
+| --- | --- | --- |
+| 編集イベント | いつ・誰が・どの範囲を・どう変えたか | D1 `note_edit_events` |
+| リビジョン | その時点の全文。復元の単位 | D1 `note_revisions`（メタ）+ R2 本文 |
+
+```sql
+note_edit_events (
+  id            TEXT PRIMARY KEY,
+  note_id       TEXT NOT NULL REFERENCES notes(id),
+  revision_id   TEXT,                          -- 確定時のリビジョン。後から埋める
+  actor_kind    TEXT NOT NULL,                 -- user|agent|guest
+  actor_user_id TEXT,
+  actor_name    TEXT NOT NULL,                 -- 記録時点の表示名
+  started_at    INTEGER NOT NULL,
+  ended_at      INTEGER NOT NULL,
+  start_offset  INTEGER NOT NULL,
+  end_offset    INTEGER NOT NULL,
+  op            TEXT NOT NULL,                 -- insert|delete|replace|restore
+  excerpt       TEXT NOT NULL,
+  created_at    INTEGER NOT NULL
+)
+
+note_revisions (
+  id            TEXT PRIMARY KEY,
+  note_id       TEXT NOT NULL REFERENCES notes(id),
+  event_id      TEXT,
+  r2_key        TEXT NOT NULL UNIQUE,          -- notes/{noteId}/revisions/{id}.md
+  byte_size     INTEGER NOT NULL,
+  actor_kind    TEXT NOT NULL,
+  actor_user_id TEXT,
+  actor_name    TEXT NOT NULL,
+  created_at    INTEGER NOT NULL
+)
+```
+
+方針:
+
+- 記録の入口は DocumentRoom だけ。D1 の `markdown_snapshot` を直接書く経路は履歴を迂回するので使わない
+- 粒度はキーストロークではなく、同一アクターの入力セッション（無操作約 3 秒で確定）。MCP の 1 操作は 1 イベント
+- 範囲は文字オフセット（開始・終了）と挿入/削除の抜粋
+- アクターは `user` / `agent` / `guest`。表示名は記録時点のスナップショット
+- 閲覧は `canView`、復元は `canEdit`
+- 復元は履歴を消さない。選んだリビジョンの全文を現行 Yjs に載せ、新しい `restore` イベントとリビジョンを足す
+- 履歴の書き込み失敗で編集自体は落とさない
+- 保持は日数ではなくノートあたりの件数と本文容量。書き込みのたびに間引く（cron は持たない）
+
+初期の非対象: ブランチ、コメント、キーストローク再生、ノート横断検索。
+
+### 保持とコンパクション
+
+よく触るノートだけが膨らむので、期限（日数）は設けない。ノート単位の上限だけを見る。
+
+| 対象 | 上限 | 超過時 |
+| --- | --- | --- |
+| 編集イベント | 200 件 | 古い行から削除 |
+| リビジョン本文 | 80 件、または合計 8MB | 古い R2 本文から削除。イベントの `revision_id` は null |
+
+削除順:
+
+1. リビジョン本文（R2 → `note_revisions` → イベントの `revision_id` を外す）。イベント行は残すので「誰がいつどこを変えたか」は見える
+2. それでもイベントが 200 を超えたら、古いイベント行を消す
+3. イベントを消したあとに参照の無いリビジョンが残ったら、それも消す
+
+最新 1 件のリビジョンは、本文が 8MB を超えていても残す。復元の起点を無くさないため。`restore` も通常の件数に含める。間引き失敗は次の記録で再試行する。
 
 ## 8. 共同編集（Durable Objects）
 
@@ -303,6 +373,7 @@ sequenceDiagram
 - 読み取り専用接続（`locked` のゲストなど）は update を拒否し、awareness は許可してよい
 - MCP からの本文変更は `applyEdit` RPC で `Y.Text("markdown")` に差分を載せ、接続中クライアントへ配信する。全文置換は `applyTextDiff` 経由の最終手段
 - MCP エージェントは DO 内の合成 awareness（`kind: "agent"`）としてカーソルと presence を出す。ブラウザ側の既存リモートカーソル描画をそのまま使う
+- `Y.Text` の observe で delta と origin（WS attachment または MCP agent）を編集イベントに結合し、確定時にリビジョン本文を R2 へ書く
 
 クライアント:
 
@@ -348,6 +419,9 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 | `search_notes`        | ログインユーザー | title / snapshot の部分一致                                                  |
 | `agent_join`          | `canView`        | `AI(ユーザー名)` カーソルだけ出す                                            |
 | `agent_leave`         | `canView`        | `AI(ユーザー名)` カーソルを消す                                              |
+| `list_note_history`   | `canView`        | 編集イベントの時系列（ページング）                                           |
+| `get_revision`        | `canView`        | 指定リビジョンの Markdown                                                    |
+| `restore_revision`    | `canEdit`        | 指定リビジョンの全文を現行 Yjs に載せる                                      |
 
 編集・`get_note` は DocumentRoom の合成 awareness に `AI(ユーザー名)` を載せる。名前は MCP トークン所有者の displayName（なければ email）。接続中のエディタは通常の共同編集者と同じ経路でカーソルを見る。スナップショットだけを D1 に書いて DO を迂回しない。オフセット直指定の API は出さない（同時編集ですぐ腐る）。
 
@@ -384,6 +458,9 @@ Cursor 側の設定例:
 | `POST`   | `/api/notes/:id/collaborators`   | `canAdmin`                                    |
 | `POST`   | `/api/notes/:id/images`          | `canEdit`                                     |
 | `GET`    | `/api/notes/:id/images/:imageId` | `canView`                                     |
+| `GET`    | `/api/notes/:id/history`         | `canView`。編集イベントの時系列（ページング） |
+| `GET`    | `/api/notes/:id/revisions/:revisionId` | `canView`。その時点の Markdown          |
+| `POST`   | `/api/notes/:id/revisions/:revisionId/restore` | `canEdit`。全文をその版で置き換え |
 | `GET`    | `/ws/notes/:id`                  | `canView`（upgrade）                          |
 | `POST`   | `/mcp`                           | Bearer                                        |
 
@@ -394,7 +471,7 @@ Cursor 側の設定例:
 初期画面:
 
 - `/` ノート一覧（要ログイン）。未ログインならログイン導線と、共有リンクの説明
-- `/n/:id` 編集。左ソース / 右プレビュー。権限ピッカー、招待、存在表示
+- `/n/:id` 編集。左ソース / 右プレビュー。権限ピッカー、招待、存在表示、履歴パネル
 - `/s/:id` 読み取り専用プレビュー
 - `/settings` プロフィール表示、PAT 発行
 
@@ -480,6 +557,7 @@ Worker が `apps/web` のビルド成果を Assets として配信する。開�
 | 3        | R2 画像ペースト、権限付き配信                                |
 | 4        | MCP ツール、PAT                                              |
 | 5        | 招待、alias、Explore、オフライン IndexedDB                   |
+| 6        | 編集履歴（イベント + リビジョン）、履歴 UI、復元、MCP、保持 |
 
 ## 17. 未決事項
 

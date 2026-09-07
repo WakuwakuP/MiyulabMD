@@ -56,10 +56,25 @@ export type {
   Note,
   NoteAccess,
   NoteCollaborator,
+  NoteEditEvent,
+  NoteEditOp,
+  NoteHistoryActor,
+  NoteHistoryActorKind,
+  NoteHistoryPage,
   NoteId,
+  NoteRevision,
+  NoteRevisionBody,
+  NoteRevisionRestore,
   NoteSummary,
   UpdateFolderAccessInput,
   UpdateNoteMetaInput,
+} from "./note.ts";
+export {
+  isNoteEditOp,
+  isNoteHistoryActorKind,
+  NOTE_EDIT_OPS,
+  NOTE_HISTORY_ACTOR_KINDS,
+  NOTE_RESTORE_MESSAGE,
 } from "./note.ts";
 export type {
   AccessGrant,

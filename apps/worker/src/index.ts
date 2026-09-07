@@ -132,9 +132,10 @@ async function handleNotePage(
 
 function applyWsUserHeaders(
   headers: Headers,
-  user: { id: string; displayName: string | null },
+  user: { id: string; displayName: string | null; email: string },
 ): void {
   headers.set("X-User-Id", user.id);
+  headers.set("X-User-Email", user.email);
   if (user.displayName) {
     headers.set("X-Display-Name", user.displayName);
   }

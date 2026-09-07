@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import type { NoteHistoryActor } from "@miyulabmd/shared";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
 import * as awarenessProtocol from "y-protocols/awareness";
@@ -6,6 +7,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 
 import { db } from "../db/client.ts";
+import { recordNoteEditEvent } from "../services/history.ts";
 import { persistMarkdownSnapshot } from "../services/notes.ts";
 import {
   AGENT_IDLE_MS,
@@ -20,6 +22,22 @@ import {
   encodeAwarenessNullUpdate,
   nextAwarenessClocks,
 } from "./awareness-sync.ts";
+import {
+  APPLY_EDIT_ORIGIN,
+  APPLY_MARKDOWN_ORIGIN,
+  actorFromAgent,
+  actorFromWsAttachment,
+  applyEditOp,
+  applyHunkToSession,
+  eventFromSession,
+  HISTORY_IDLE_MS,
+  historyActorKey,
+  type PendingHistorySession,
+  sessionFromApplyEdit,
+  sessionFromHunk,
+  shouldSkipHistoryOrigin,
+  summarizeTextDelta,
+} from "./history-edit.ts";
 import {
   type AgentCursor,
   applyTextDiff,
@@ -42,6 +60,8 @@ type WsAttachment = {
   canEdit: boolean;
   userId?: string;
   displayName?: string;
+  email?: string;
+  historySessionId?: string;
   awarenessClientIds: number[];
   awarenessClocks: Record<string, number>;
 };
@@ -93,6 +113,9 @@ export class DocumentRoom extends DurableObject<Env> {
   private loading: Promise<void> | null = null;
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
   private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private historyPending = new Map<string, PendingHistorySession>();
+  private historyMarkdown = new Map<string, string>();
+  private historyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private requireDoc(): Y.Doc {
     if (!this.doc) {
@@ -127,6 +150,7 @@ export class DocumentRoom extends DurableObject<Env> {
     const canEdit = request.headers.get("X-Can-Edit") === "true";
     const userId = request.headers.get("X-User-Id") ?? undefined;
     const displayName = request.headers.get("X-Display-Name") ?? undefined;
+    const email = request.headers.get("X-User-Email") ?? undefined;
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -138,6 +162,8 @@ export class DocumentRoom extends DurableObject<Env> {
       awarenessClocks: {},
       canEdit,
       displayName,
+      email,
+      historySessionId: crypto.randomUUID(),
       userId,
     };
     server.serializeAttachment(attachment);
@@ -220,6 +246,13 @@ export class DocumentRoom extends DurableObject<Env> {
     await this.ensureInitialized();
 
     const attachment = ws.deserializeAttachment() as WsAttachment | null;
+    if (attachment) {
+      const actor = actorFromWsAttachment(attachment);
+      await this.flushHistorySession(
+        historyActorKey(actor, attachment.historySessionId),
+      ).catch(() => undefined);
+    }
+
     const owned = attachment?.awarenessClientIds ?? [];
     if (owned.length === 0) {
       return;
@@ -253,7 +286,7 @@ export class DocumentRoom extends DurableObject<Env> {
   async applyMarkdown(markdown: string, noteId?: string): Promise<void> {
     await this.ensureInitialized(noteId);
     const ytext = this.requireDoc().getText("markdown");
-    applyTextDiff(ytext, markdown, "applyMarkdown");
+    applyTextDiff(ytext, markdown, APPLY_MARKDOWN_ORIGIN);
     this.scheduleSnapshotPersist();
   }
 
@@ -315,14 +348,37 @@ export class DocumentRoom extends DurableObject<Env> {
       return plan;
     }
 
-    applyTextDiff(ytext, plan.next, "applyEdit");
+    applyTextDiff(ytext, plan.next, APPLY_EDIT_ORIGIN);
     this.touchAgentPresence(input.agent, plan.cursor);
     this.scheduleSnapshotPersist();
+    await this.recordApplyEditHistory(input, plan.cursor, plan.next);
 
     return {
       cursor: plan.cursor,
       excerpt: excerptAround(plan.next, plan.cursor.anchor, plan.cursor.head),
       markdownLength: plan.next.length,
+      ok: true,
+    };
+  }
+
+  /** 選んだ時点の全文で現行 Yjs を置き換える。履歴は消さず restore を足す。 */
+  async restoreMarkdown(
+    noteId: string,
+    markdown: string,
+    actor: NoteHistoryActor,
+  ): Promise<ApplyEditResult> {
+    await this.ensureInitialized(noteId);
+    const ytext = this.requireDoc().getText("markdown");
+    const current = ytext.toString();
+    const cursor = cursorAfterSet(current, markdown);
+    applyTextDiff(ytext, markdown, APPLY_EDIT_ORIGIN);
+    this.scheduleSnapshotPersist();
+    const session = sessionFromApplyEdit(actor, cursor, "restore", Date.now());
+    await this.persistHistorySession(session, markdown).catch(() => undefined);
+    return {
+      cursor,
+      excerpt: excerptAround(markdown, cursor.anchor, cursor.head),
+      markdownLength: markdown.length,
       ok: true,
     };
   }
@@ -372,6 +428,10 @@ export class DocumentRoom extends DurableObject<Env> {
         }
       }
     }
+
+    doc.getText("markdown").observe((event, transaction) => {
+      this.onMarkdownHistory(event, transaction);
+    });
 
     doc.on("update", (update: Uint8Array, origin: unknown) => {
       void this.onDocUpdate(update, origin);
@@ -551,6 +611,127 @@ export class DocumentRoom extends DurableObject<Env> {
 
     const markdown = this.doc.getText("markdown").toString();
     await persistMarkdownSnapshot(this.env, noteId, markdown);
+  }
+
+  private onMarkdownHistory(
+    event: Y.YTextEvent,
+    transaction: Y.Transaction,
+  ): void {
+    if (shouldSkipHistoryOrigin(transaction.origin)) {
+      return;
+    }
+    if (!isRoomSocket(transaction.origin)) {
+      return;
+    }
+
+    const attachment =
+      transaction.origin.deserializeAttachment() as WsAttachment | null;
+    if (!attachment) {
+      return;
+    }
+
+    const hunk = summarizeTextDelta(event.changes.delta);
+    if (!hunk) {
+      return;
+    }
+
+    const actor = actorFromWsAttachment(attachment);
+    const session = this.historyPending.get(
+      historyActorKey(actor, attachment.historySessionId),
+    );
+    const now = Date.now();
+    const next = session
+      ? applyHunkToSession(session, hunk, now)
+      : sessionFromHunk(actor, hunk, now, attachment.historySessionId);
+    this.historyPending.set(next.actorKey, next);
+    this.historyMarkdown.set(
+      next.actorKey,
+      this.requireDoc().getText("markdown").toString(),
+    );
+    this.scheduleHistoryFlush(next.actorKey);
+  }
+
+  private async recordApplyEditHistory(
+    input: ApplyEditInput,
+    cursor: AgentCursor,
+    nextMarkdown: string,
+  ): Promise<void> {
+    let deleted = input.op === "set";
+    let newTextLength = 0;
+    if (input.op === "insert") {
+      newTextLength = input.text.length;
+    } else if (input.op === "replace") {
+      deleted = input.oldString.length > 0;
+      newTextLength = input.newString.length;
+    } else {
+      newTextLength = input.markdown.length;
+    }
+    const session = sessionFromApplyEdit(
+      actorFromAgent(input.agent),
+      cursor,
+      applyEditOp(input.op, newTextLength, deleted),
+      Date.now(),
+    );
+    await this.persistHistorySession(session, nextMarkdown).catch(
+      () => undefined,
+    );
+  }
+
+  private scheduleHistoryFlush(actorKey: string): void {
+    const existing = this.historyTimers.get(actorKey);
+    if (existing !== undefined) {
+      clearTimeout(existing);
+    }
+    this.historyTimers.set(
+      actorKey,
+      setTimeout(() => {
+        this.historyTimers.delete(actorKey);
+        void this.flushHistorySession(actorKey).catch(() => undefined);
+      }, HISTORY_IDLE_MS),
+    );
+  }
+
+  private async flushHistorySession(actorKey: string): Promise<void> {
+    const timer = this.historyTimers.get(actorKey);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.historyTimers.delete(actorKey);
+    }
+
+    const session = this.historyPending.get(actorKey);
+    if (!session) {
+      return;
+    }
+    this.historyPending.delete(actorKey);
+
+    const markdown =
+      this.historyMarkdown.get(actorKey) ??
+      this.doc?.getText("markdown").toString() ??
+      "";
+    this.historyMarkdown.delete(actorKey);
+    await this.persistHistorySession(session, markdown);
+  }
+
+  private async persistHistorySession(
+    session: PendingHistorySession,
+    markdown: string,
+  ): Promise<void> {
+    const noteId = await this.ctx.storage.get<string>(STORAGE_NOTE_ID_KEY);
+    if (!noteId) {
+      return;
+    }
+
+    const excerpt = excerptAround(
+      markdown,
+      session.startOffset,
+      session.endOffset,
+    );
+    await recordNoteEditEvent(
+      this.env,
+      noteId,
+      eventFromSession(session, excerpt),
+      markdown,
+    );
   }
 }
 
