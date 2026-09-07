@@ -7,8 +7,9 @@
     "check": "biome check .",
     "check:fix": "biome check --write .",
     "db:migrate": "pnpm --filter @miyulabmd/worker db:migrate",
-    "dev": "pnpm --filter @miyulabmd/web dev",
-    "dev:worker": "pnpm --filter @miyulabmd/worker dev",
+    "dev": "node scripts/portless.mjs proxy start && mprocs",
+    "dev:web": "node scripts/portless.mjs miyulabmd pnpm --filter @miyulabmd/web dev",
+    "dev:worker": "node scripts/portless.mjs worker.miyulabmd pnpm --filter @miyulabmd/worker dev",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "licenses:check": "node scripts/check-licenses.mjs",
@@ -22,6 +23,8 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
     "@mizchi/lsmcp": "0.10.0",
+    "mprocs": "0.9.6",
+    "portless": "0.15.6",
     "typescript": "7.0.2"
   },
   "packageManager": "pnpm@10.14.0"
