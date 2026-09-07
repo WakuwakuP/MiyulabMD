@@ -2,7 +2,7 @@
 
 共同編集できる Markdown エディタ。Cloudflare Workers / Durable Objects / R2 / Zero Trust 上でホストし、MCP からもノートを編集できる。
 
-設計の詳細は [docs/design.md](docs/design.md) を参照。
+設計の詳細は [docs/design.md](docs/design.md) を参照。エージェント向けのコードグラフは [docs/code-graph.md](docs/code-graph.md)。
 
 ```
 apps/web          フロント（React + Vite + CodeMirror 予定）

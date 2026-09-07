@@ -20,7 +20,9 @@
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.12"
+    "@biomejs/biome": "^2.5.12",
+    "@mizchi/lsmcp": "0.10.0",
+    "typescript": "7.0.2"
   },
   "packageManager": "pnpm@10.14.0"
 }

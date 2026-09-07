@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@types/fast-diff": "^1.2.2",
-    "typescript": "^5.9.2",
+    "typescript": "7.0.2",
     "wrangler": "^4.129.0"
   }
 }
