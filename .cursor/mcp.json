@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "code-graph": {
+      "args": ["-y", "@sdsrs/code-graph@0.136.0"],
+      "command": "npx",
+      "type": "stdio"
+    },
+    "lsmcp": {
+      "args": [
+        "exec",
+        "lsmcp",
+        "--bin",
+        "tsc --lsp --stdio",
+        "--files",
+        "**/*.ts,**/*.tsx,**/*.d.ts"
+      ],
+      "command": "pnpm",
+      "type": "stdio"
+    }
+  }
+}

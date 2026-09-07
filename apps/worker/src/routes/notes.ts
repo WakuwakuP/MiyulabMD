@@ -1,14 +1,21 @@
 import { env } from "cloudflare:workers";
-import type {
-  CreateNoteInput,
-  Note,
-  SessionUser,
-  UpdateNoteMetaInput,
+import {
+  type CreateNoteInput,
+  NOTE_RESTORE_MESSAGE,
+  type Note,
+  type SessionUser,
+  type UpdateNoteMetaInput,
 } from "@miyulabmd/shared";
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
+import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
+import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import { createNoteService, type MutateNoteResult } from "../services/notes.ts";
+
+function documentRoom(noteId: string) {
+  return env.DOCUMENT_ROOM.get(env.DOCUMENT_ROOM.idFromName(noteId));
+}
 
 const notes = createNoteService(env);
 
@@ -108,6 +115,94 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
     set.status = 201;
     return created;
   })
+  .get("/:id/history", async ({ request, params, set }) => {
+    const user = await readSession(request, env);
+    const result = await notes.get(params.id, user ?? undefined);
+    if (result.kind === "not_found") {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    if (result.kind === "denied") {
+      set.status = result.status;
+      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+    }
+
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get("limit"));
+    const before = Number(url.searchParams.get("before"));
+    return listNoteEditEvents(env, result.note.id, {
+      before: Number.isFinite(before) && before > 0 ? before : undefined,
+      limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+    });
+  })
+  .get("/:id/revisions/:revisionId", async ({ request, params, set }) => {
+    const user = await readSession(request, env);
+    const result = await notes.get(params.id, user ?? undefined);
+    if (result.kind === "not_found") {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    if (result.kind === "denied") {
+      set.status = result.status;
+      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+    }
+
+    const revision = await getNoteRevision(
+      env,
+      result.note.id,
+      params.revisionId,
+    );
+    if (!revision) {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    return revision;
+  })
+  .post(
+    "/:id/revisions/:revisionId/restore",
+    async ({ request, params, set }) => {
+      const user = await readSession(request, env);
+      const result = await notes.get(params.id, user ?? undefined);
+      if (result.kind === "not_found") {
+        set.status = 404;
+        return { error: "Not found" };
+      }
+      if (result.kind === "denied") {
+        set.status = result.status;
+        return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+      }
+      if (!result.note.access.flags.canEdit) {
+        set.status = user ? 403 : 401;
+        return { error: user ? "Forbidden" : "Unauthorized" };
+      }
+
+      const revision = await getNoteRevision(
+        env,
+        result.note.id,
+        params.revisionId,
+      );
+      if (!revision) {
+        set.status = 404;
+        return { error: "Not found" };
+      }
+
+      const applied = await documentRoom(result.note.id).restoreMarkdown(
+        result.note.id,
+        revision.markdown,
+        actorFromSessionUser(user ?? null),
+      );
+      if (!applied.ok) {
+        set.status = 400;
+        return { error: applied.message };
+      }
+
+      return {
+        message: NOTE_RESTORE_MESSAGE,
+        restored: true as const,
+        revisionId: revision.id,
+      };
+    },
+  )
   .get("/:id", async ({ request, params, set }) => {
     const user = await readSession(request, env);
     const result = await notes.get(params.id, user ?? undefined);

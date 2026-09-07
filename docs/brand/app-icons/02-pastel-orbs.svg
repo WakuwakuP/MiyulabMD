@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: pastel orbs with M">
+  <title>Miyulab pastel orbs</title>
+  <desc>Official-site pastel circles behind a geometric ink M.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFF8FC"/>
+  <circle cx="168" cy="196" r="128" fill="#F3B8F3" fill-opacity="0.88"/>
+  <circle cx="352" cy="168" r="118" fill="#D4C4F8" fill-opacity="0.82"/>
+  <circle cx="372" cy="340" r="132" fill="#C0E8F0" fill-opacity="0.86"/>
+  <circle cx="176" cy="360" r="108" fill="#F0E8B0" fill-opacity="0.8"/>
+  <path
+    fill="#464646"
+    d="M148 360V168h52l56 96 56-96h52v192h-48V236l-60 92-60-92v124z"
+  />
+</svg>

@@ -15,6 +15,7 @@ import {
 import { Link, useOutletContext, useParams } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
+import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
@@ -26,7 +27,7 @@ import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterA
 import { draftFromNote } from "../components/notes/access-draft.ts";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
-import { ShareIcon } from "../components/ui/icons.tsx";
+import { HistoryIcon, ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { cn } from "../lib/cn.ts";
@@ -218,12 +219,14 @@ function EditorWorkspace({
   canEdit,
   splitScroll,
   shareOpen,
+  historyOpen,
   headingTitle,
   user,
   isOwner,
   onSplitScroll,
   onPersistAccess,
   onCloseShare,
+  onCloseHistory,
 }: {
   note: Note;
   markdown: string;
@@ -239,12 +242,14 @@ function EditorWorkspace({
   canEdit: boolean;
   splitScroll: number;
   shareOpen: boolean;
+  historyOpen: boolean;
   headingTitle: string;
   user: AppShellContext["user"];
   isOwner: boolean;
   onSplitScroll: (ratio: number) => void;
   onPersistAccess: (next: AccessDraft) => void;
   onCloseShare: () => void;
+  onCloseHistory: () => void;
 }) {
   const showSource = viewMode === "split" || viewMode === "source";
   const showPreview = viewMode === "split" || viewMode === "preview";
@@ -297,6 +302,13 @@ function EditorWorkspace({
         shareOpen={shareOpen}
         user={user}
       />
+      {historyOpen && (
+        <HistoryPanel
+          canEdit={canEdit}
+          noteId={note.id}
+          onClose={onCloseHistory}
+        />
+      )}
     </section>
   );
 }
@@ -337,6 +349,7 @@ function EditorHeaderEnd({
   isOwner,
   onFolderChange,
   onFolderBlur,
+  onHistory,
   onShare,
 }: {
   awareness: YjsSession["awareness"] | undefined;
@@ -345,6 +358,7 @@ function EditorHeaderEnd({
   isOwner: boolean;
   onFolderChange: (folder: string) => void;
   onFolderBlur: () => void;
+  onHistory: () => void;
   onShare: () => void;
 }) {
   return (
@@ -357,6 +371,7 @@ function EditorHeaderEnd({
         onFolderBlur={onFolderBlur}
         onFolderChange={onFolderChange}
       />
+      <HeaderButton icon={<HistoryIcon />} label="履歴" onClick={onHistory} />
       <HeaderButton
         icon={<ShareIcon />}
         label="共有"
@@ -400,6 +415,7 @@ export function EditorPage() {
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
   const [mode, setMode] = useState<EditorMode>("preview");
   const [splitScroll, setSplitScroll] = useState(0);
@@ -512,6 +528,7 @@ export function EditorPage() {
       setAccessDraft,
       setFolder,
       setHeader,
+      setHistoryOpen,
       setMode,
       setNote,
       setSaveError,
@@ -544,9 +561,11 @@ export function EditorPage() {
             awareness={awareness}
             canEdit={flags.canEdit}
             headingTitle={headingTitle}
+            historyOpen={historyOpen}
             isOwner={flags.isOwner}
             markdown={markdown}
             note={note}
+            onCloseHistory={() => setHistoryOpen(false)}
             onCloseShare={() => setShareOpen(false)}
             onPersistAccess={(next) => {
               void persistEditorAccess(note, next, {
@@ -587,6 +606,7 @@ function bindEditorHeader(input: {
   setNote: (note: Note) => void;
   setAccessDraft: (draft: AccessDraft) => void;
   setShareOpen: (open: boolean) => void;
+  setHistoryOpen: (open: boolean) => void;
 }) {
   if (!input.note) {
     input.setHeader({ folder: null, layout: "editor" });
@@ -617,6 +637,7 @@ function bindEditorHeader(input: {
           });
         }}
         onFolderChange={input.setFolder}
+        onHistory={() => input.setHistoryOpen(true)}
         onShare={() => input.setShareOpen(true)}
       />
     ),

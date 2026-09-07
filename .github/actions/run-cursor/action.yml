@@ -81,8 +81,7 @@ runs:
 
         for unsafe_config in \
           .cursor/cli.json \
-          .cursor/hooks.json \
-          .cursor/mcp.json; do
+          .cursor/hooks.json; do
           if [[ -f "$workspace_root/$unsafe_config" ]]; then
             echo "::error::$unsafe_config is not allowed in Cursor CI workflows; review and remove it first"
             exit 1

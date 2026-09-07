@@ -5,6 +5,7 @@ import {
   Eye,
   FileText,
   Folder,
+  History,
   Monitor,
   Moon,
   Pencil,
@@ -73,6 +74,10 @@ export function PlusIcon({ className }: IconProps) {
 
 export function ShareIcon({ className }: IconProps) {
   return <Share2 aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function HistoryIcon({ className }: IconProps) {
+  return <History aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function RefreshIcon({ className }: IconProps) {

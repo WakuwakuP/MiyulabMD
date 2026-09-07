@@ -9,6 +9,7 @@ type ModalProps = {
   labelledBy: string;
   className?: string;
   as?: "div" | "form";
+  overflow?: "auto" | "hidden";
   onClose: () => void;
   onSubmit?: FormEventHandler<HTMLFormElement>;
 };
@@ -18,6 +19,7 @@ export function Modal({
   labelledBy,
   className,
   as = "div",
+  overflow = "auto",
   onClose,
   onSubmit,
 }: ModalProps) {
@@ -32,7 +34,8 @@ export function Modal({
   }, [onClose]);
 
   const bodyClass = cn(
-    "max-h-[min(40rem,calc(var(--app-height,100dvh)*0.9))] w-[min(32rem,100%)] overflow-auto rounded-xl bg-canvas px-[1.35rem] pt-5 pb-4 shadow-modal",
+    "max-h-[min(40rem,calc(var(--app-height,100dvh)*0.9))] w-[min(32rem,100%)] rounded-xl bg-canvas px-[1.35rem] pt-5 pb-4 shadow-modal",
+    overflow === "hidden" ? "overflow-hidden" : "overflow-auto",
     className,
   );
 

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: long hime hair behind a markdown note">
+  <title>Note + long hime hair</title>
+  <desc>04 note with bowl hime hair. Longer hair peeks from behind the page.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFF8FC"/>
+  <path fill="#2E2438" d="M68 128c-14 92-10 220 10 312 6 24 24 10 22-12-12-96-8-208 8-288z"/>
+  <path fill="#2E2438" d="M444 128c14 92 10 220-10 312-6 24-24 10-22-12 12-96 8-208-8-288z"/>
+  <path fill="#FFCCFF" d="M128 84h208l92 92v252a40 40 0 0 1-40 40H128a40 40 0 0 1-40-40V124a40 40 0 0 1 40-40z"/>
+  <path fill="#FF77FF" d="M336 84v76a16 16 0 0 0 16 16h76z"/>
+  <path fill="#464646" d="M176 228h28v-28h28v28h36v-28h28v28h28v28h-28v20h28v28h-28v28h-28v-28h-36v28h-28v-28h-28v-28h28v-20h-28zm64 48v20h36v-20z"/>
+  <rect x="176" y="364" width="176" height="22" rx="8" fill="#464646"/>
+  <rect x="176" y="408" width="128" height="22" rx="8" fill="#464646"/>
+  <path fill="#2E2438" d="M148 88c0-26 216-26 216 0v70H148z"/>
+  <path fill="#2E2438" d="M146 148c-16 52-22 118-14 176l12 2c-4-56 4-118 18-170z"/>
+  <path fill="#2E2438" d="M366 148c16 52 22 118 14 176l-12 2c4-56-4-118-18-170z"/>
+  <path fill="#2E2438" d="M186 76 218 4 254 78z"/>
+  <path fill="#2E2438" d="M258 76 296 4 332 78z"/>
+  <path fill="#6A5A78" d="M204 68 218 22 234 70z"/>
+  <path fill="#6A5A78" d="M278 68 296 22 312 70z"/>
+  <path fill="#F4F1F7" d="M224 128c-5-2-13-8-8-2-5 1-5 6 3 5l5 3 5-3c8 1 8-4 3-5 5-6-3 0-8 2z"/>
+  <path fill="#F4F1F7" d="M308 130c0-4 5-6 8-3 3-3 8-1 8 3 0 6-8 9-8 9s-8-3-8-9z"/>
+</svg>

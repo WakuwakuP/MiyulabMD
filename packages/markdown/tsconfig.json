@@ -2,7 +2,8 @@
   "compilerOptions": {
     "allowImportingTsExtensions": true,
     "lib": ["ES2022", "DOM"],
-    "noEmit": true
+    "noEmit": true,
+    "types": []
   },
   "exclude": ["src/**/*.test.ts"],
   "extends": "../../tsconfig.base.json",

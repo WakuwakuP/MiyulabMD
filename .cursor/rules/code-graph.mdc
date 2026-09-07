@@ -1,0 +1,14 @@
+---
+description: コードグラフと LSP のツール振り分け
+alwaysApply: true
+---
+
+# コード解析ツール
+
+振り分けの正本はリポジトリ直下の `AGENTS.md`。詳細は `docs/code-graph.md`。
+
+- 意味・目的・影響範囲・呼び出し関係 → code-graph
+- 定義元・参照・型・リネーム（名前が分かっている） → lsmcp
+- 設計書は `docs/` を Read
+- Grep / Glob / Read はグラフで見つからないときの最終手段
+- フォールバック: code-graph 0件 → lsmcp → Grep

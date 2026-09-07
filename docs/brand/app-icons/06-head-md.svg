@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: character head and MD">
+  <title>Miyu head + MD</title>
+  <desc>Cat ears, blunt bangs, long side hair, and MD letters.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFCCFF"/>
+  <!-- ears -->
+  <path fill="#2E2438" d="M168 176 214 56l50 112z"/>
+  <path fill="#2E2438" d="M248 168 298 56l50 120z"/>
+  <!-- long hair -->
+  <path fill="#2E2438" d="M146 196c-28 56-24 168 20 228l36-40c-20-52-16-120 8-168h92c24 48 28 116 8 168l36 40c44-60 48-172 20-228-36-40-148-40-184 0z"/>
+  <!-- face -->
+  <ellipse cx="256" cy="250" rx="70" ry="72" fill="#F6E4DC"/>
+  <!-- bangs -->
+  <path fill="#322848" d="M188 178q68-28 136 0l8 52q-76 28-152 0z"/>
+  <!-- eyes -->
+  <ellipse cx="230" cy="256" rx="8" ry="10" fill="#E85A78"/>
+  <ellipse cx="282" cy="256" rx="8" ry="10" fill="#E85A78"/>
+  <!-- heart clip -->
+  <path fill="#F4F1F7" d="M220 204c0-5 6-8 10-4 4-4 10-1 10 4 0 7-10 12-10 12s-10-5-10-12z"/>
+  <!-- MD -->
+  <g fill="#464646" transform="translate(150 394)">
+    <path d="M4 56V8h20l16 24 16-24h20v48h-18V26L40 46 22 26v30z"/>
+    <path fill-rule="evenodd" d="M92 8h28c30 0 42 12 42 24s-12 24-42 24H92zm18 12v24h12c14 0 20-6 20-12s-6-12-20-12z"/>
+  </g>
+</svg>

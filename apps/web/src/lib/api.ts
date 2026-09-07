@@ -7,6 +7,9 @@ import type {
   FolderAccess,
   FolderRecord,
   Note,
+  NoteHistoryPage,
+  NoteRevisionBody,
+  NoteRevisionRestore,
   NoteSummary,
   PermissionPreset,
   SessionUser,
@@ -79,6 +82,53 @@ export async function fetchNote(id: string): Promise<ApiResult<Note>> {
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as Note, ok: true };
+}
+
+export async function fetchNoteHistory(
+  id: string,
+  query: { limit?: number; before?: number } = {},
+): Promise<ApiResult<NoteHistoryPage>> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) {
+    params.set("limit", String(query.limit));
+  }
+  if (query.before !== undefined) {
+    params.set("before", String(query.before));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const res = await fetch(`/api/notes/${id}/history${suffix}`, fetchOpts);
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as NoteHistoryPage, ok: true };
+}
+
+export async function fetchNoteRevision(
+  id: string,
+  revisionId: string,
+): Promise<ApiResult<NoteRevisionBody>> {
+  const res = await fetch(
+    `/api/notes/${id}/revisions/${revisionId}`,
+    fetchOpts,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as NoteRevisionBody, ok: true };
+}
+
+export async function restoreNoteRevision(
+  id: string,
+  revisionId: string,
+): Promise<ApiResult<NoteRevisionRestore>> {
+  const res = await fetch(`/api/notes/${id}/revisions/${revisionId}/restore`, {
+    ...fetchOpts,
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as NoteRevisionRestore, ok: true };
 }
 
 export async function createNote(

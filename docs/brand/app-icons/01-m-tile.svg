@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: magenta tile with M">
+  <title>Miyulab M tile</title>
+  <desc>Official magenta rounded tile with a geometric ink M.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFCCFF"/>
+  <path
+    fill="#464646"
+    d="M148 360V168h52l56 96 56-96h52v192h-48V236l-60 92-60-92v124z"
+  />
+</svg>

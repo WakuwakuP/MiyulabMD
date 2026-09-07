@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: diagonal lab stripes with M">
+  <title>Miyulab stripe lab</title>
+  <desc>Three diagonal stripes in official magenta on ink, with a white M.</desc>
+  <rect width="512" height="512" rx="112" fill="#464646"/>
+  <g transform="rotate(-32 256 256)">
+    <rect x="-40" y="148" width="600" height="44" fill="#FFCCFF"/>
+    <rect x="-40" y="234" width="600" height="44" fill="#FF77FF"/>
+    <rect x="-40" y="320" width="600" height="44" fill="#FF44FF"/>
+  </g>
+  <path
+    fill="#FFFFFF"
+    d="M148 360V168h52l56 96 56-96h52v192h-48V236l-60 92-60-92v124z"
+  />
+</svg>
