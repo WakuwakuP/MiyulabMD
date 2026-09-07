@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: markdown note">
+  <title>MiyulabMD note</title>
+  <desc>Folded note with a markdown heading mark and body lines.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFF8FC"/>
+  <path fill="#FFCCFF" d="M128 84h208l92 92v252a40 40 0 0 1-40 40H128a40 40 0 0 1-40-40V124a40 40 0 0 1 40-40z"/>
+  <path fill="#FF77FF" d="M336 84v76a16 16 0 0 0 16 16h76z"/>
+  <path fill="#464646" d="M176 196h28v-28h28v28h36v-28h28v28h28v28h-28v20h28v28h-28v28h-28v-28h-36v28h-28v-28h-28v-28h28v-20h-28zm64 48v20h36v-20z"/>
+  <rect x="176" y="336" width="176" height="22" rx="8" fill="#464646"/>
+  <rect x="176" y="380" width="128" height="22" rx="8" fill="#464646"/>
+</svg>

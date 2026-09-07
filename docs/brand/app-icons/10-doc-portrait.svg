@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MiyulabMD icon: markdown document with character portrait">
+  <title>Document portrait + MD</title>
+  <desc>Folded document body with a character portrait and MD title.</desc>
+  <rect width="512" height="512" rx="112" fill="#FFF8FC"/>
+  <path fill="#FFCCFF" d="M96 72h248l80 80v288a40 40 0 0 1-40 40H96a40 40 0 0 1-40-40V112a40 40 0 0 1 40-40z"/>
+  <path fill="#FF77FF" d="M344 72v64a16 16 0 0 0 16 16h64z"/>
+  <path fill="#2E2438" d="M198 168 230 88l36 72z"/>
+  <path fill="#2E2438" d="M258 160 294 88l38 80z"/>
+  <path fill="#2E2438" d="M176 188c-16 40-10 112 20 140 14-36 8-84 20-116h80c12 32 6 80 20 116 30-28 36-100 20-140-24-28-96-28-160 0z"/>
+  <ellipse cx="256" cy="220" rx="48" ry="50" fill="#F6E4DC"/>
+  <path fill="#322848" d="M212 178q44-18 88 0l6 32q-50 16-100 0z"/>
+  <ellipse cx="238" cy="226" rx="6" ry="7" fill="#E85A78"/>
+  <ellipse cx="274" cy="226" rx="6" ry="7" fill="#E85A78"/>
+  <g fill="#464646" transform="translate(148 356)">
+    <path d="M4 72V8h24l20 32 20-32h24v64h-22V32L48 58 26 32v40z"/>
+    <path fill-rule="evenodd" d="M112 8h36c36 0 50 16 50 32s-14 32-50 32h-36zm22 16v32h16c18 0 26-8 26-16s-8-16-26-16z"/>
+  </g>
+</svg>
