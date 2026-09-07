@@ -9,10 +9,10 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const variants: Record<ButtonVariant, string> = {
-  outline: "border-border bg-fill text-ink hover:enabled:bg-fill-hover",
   accent: "border-accent bg-accent text-white hover:enabled:brightness-105",
-  ghost: "border-transparent bg-transparent text-accent",
   danger: "border-transparent bg-error text-white",
+  ghost: "border-transparent bg-transparent text-accent",
+  outline: "border-border bg-fill text-ink hover:enabled:bg-fill-hover",
 };
 
 export function Button({
@@ -24,13 +24,13 @@ export function Button({
 }: Props) {
   return (
     <button
-      type={type}
       className={cn(
         "inline-flex min-h-9 cursor-pointer items-center justify-center gap-[0.35rem] rounded-full border px-[0.85rem] py-[0.28rem] leading-tight",
         "disabled:cursor-default disabled:opacity-65",
         variants[variant],
         className,
       )}
+      type={type}
       {...props}
     >
       {children}

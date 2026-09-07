@@ -39,12 +39,16 @@ const IMAGE_TYPES = new Set([
 ]);
 
 function imageFileFromClipboard(data: DataTransfer | null): File | null {
-  if (!data) return null;
+  if (!data) {
+    return null;
+  }
 
   for (const item of data.items) {
     if (item.kind === "file" && IMAGE_TYPES.has(item.type)) {
       const file = item.getAsFile();
-      if (file) return file;
+      if (file) {
+        return file;
+      }
     }
   }
 
@@ -52,7 +56,9 @@ function imageFileFromClipboard(data: DataTransfer | null): File | null {
 }
 
 function imageFileFromDataTransfer(data: DataTransfer | null): File | null {
-  if (!data) return null;
+  if (!data) {
+    return null;
+  }
 
   for (const file of data.files) {
     if (IMAGE_TYPES.has(file.type)) {
@@ -93,38 +99,52 @@ function imageUploadHandlers(
   }
 
   return EditorView.domEventHandlers({
-    paste(event, view) {
-      if (readOnly) return false;
-      const file = imageFileFromClipboard(event.clipboardData);
-      if (!file) return false;
-
-      event.preventDefault();
-      void handleImageFile(view, file);
-      return true;
-    },
-    dragover(event) {
-      if (readOnly) return false;
-      if (!dataTransferHasImage(event.dataTransfer)) return false;
-      event.preventDefault();
-      return true;
-    },
-    drop(event, view) {
-      if (readOnly) return false;
-      const file = imageFileFromDataTransfer(event.dataTransfer);
-      if (!file) return false;
-
-      event.preventDefault();
-      void handleImageFile(view, file);
-      return true;
-    },
     contextmenu(event, view) {
-      if (readOnly) return false;
+      if (readOnly) {
+        return false;
+      }
       event.preventDefault();
       const coords = view.posAtCoords({ x: event.clientX, y: event.clientY });
       if (coords != null) {
         view.dispatch({ selection: { anchor: coords, head: coords } });
       }
       onContextMenu(event, view);
+      return true;
+    },
+    dragover(event) {
+      if (readOnly) {
+        return false;
+      }
+      if (!dataTransferHasImage(event.dataTransfer)) {
+        return false;
+      }
+      event.preventDefault();
+      return true;
+    },
+    drop(event, view) {
+      if (readOnly) {
+        return false;
+      }
+      const file = imageFileFromDataTransfer(event.dataTransfer);
+      if (!file) {
+        return false;
+      }
+
+      event.preventDefault();
+      void handleImageFile(view, file);
+      return true;
+    },
+    paste(event, view) {
+      if (readOnly) {
+        return false;
+      }
+      const file = imageFileFromClipboard(event.clipboardData);
+      if (!file) {
+        return false;
+      }
+
+      event.preventDefault();
+      void handleImageFile(view, file);
       return true;
     },
   });
@@ -137,7 +157,9 @@ function scrollRatioFrom(el: HTMLElement): number {
 
 function applyScrollRatio(el: HTMLElement, ratio: number) {
   const max = el.scrollHeight - el.clientHeight;
-  if (max <= 0) return;
+  if (max <= 0) {
+    return;
+  }
   el.scrollTop = max * ratio;
 }
 
@@ -167,7 +189,9 @@ export function MarkdownEditor({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const undoManager = readOnly ? false : new Y.UndoManager(yText);
 
@@ -183,26 +207,26 @@ export function MarkdownEditor({
         scrollPastEnd(),
         EditorView.scrollMargins.of((view) => {
           const pad = readEditorScrollPadPx(view.dom);
-          return { top: pad, bottom: pad };
+          return { bottom: pad, top: pad };
         }),
         EditorView.lineWrapping,
         EditorView.theme({
-          "&": {
-            backgroundColor: "var(--color-canvas)",
-            color: "var(--color-ink)",
-          },
-          ".cm-content": { caretColor: "var(--color-ink)" },
-          ".cm-line": { caretColor: "var(--color-ink)" },
-          ".cm-gutters": {
-            backgroundColor: "var(--cm-gutter-bg)",
-            color: "var(--color-muted)",
-            borderRight: "1px solid var(--color-border)",
+          ".cm-activeLine": {
+            backgroundColor: "var(--color-preview)",
           },
           ".cm-activeLineGutter": {
             backgroundColor: "var(--cm-gutter-active-bg)",
           },
-          ".cm-activeLine": {
-            backgroundColor: "var(--color-preview)",
+          ".cm-content": { caretColor: "var(--color-ink)" },
+          ".cm-gutters": {
+            backgroundColor: "var(--cm-gutter-bg)",
+            borderRight: "1px solid var(--color-border)",
+            color: "var(--color-muted)",
+          },
+          ".cm-line": { caretColor: "var(--color-ink)" },
+          "&": {
+            backgroundColor: "var(--color-canvas)",
+            color: "var(--color-ink)",
           },
         }),
         yCollab(yText, awareness, { undoManager }),
@@ -212,7 +236,9 @@ export function MarkdownEditor({
         }),
         EditorView.domEventHandlers({
           scroll(_event, view) {
-            if (applyingScroll.current) return false;
+            if (applyingScroll.current) {
+              return false;
+            }
             onScrollRatioRef.current?.(scrollRatioFrom(view.scrollDOM));
             return false;
           },
@@ -220,7 +246,7 @@ export function MarkdownEditor({
       ],
     });
 
-    const view = new EditorView({ state, parent: container });
+    const view = new EditorView({ parent: container, state });
     viewRef.current = view;
 
     return () => {
@@ -231,8 +257,12 @@ export function MarkdownEditor({
 
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || scrollRatio == null) return;
-    if (Math.abs(scrollRatioFrom(view.scrollDOM) - scrollRatio) < 0.004) return;
+    if (!view || scrollRatio == null) {
+      return;
+    }
+    if (Math.abs(scrollRatioFrom(view.scrollDOM) - scrollRatio) < 0.004) {
+      return;
+    }
     applyingScroll.current = true;
     applyScrollRatio(view.scrollDOM, scrollRatio);
     const timer = window.requestAnimationFrame(() => {
@@ -243,7 +273,9 @@ export function MarkdownEditor({
 
   async function uploadAtCursor(file: File) {
     const view = viewRef.current;
-    if (!view) return;
+    if (!view) {
+      return;
+    }
     const result = await uploadImage(noteId, file);
     if (!result.ok) {
       console.error("image upload failed:", result.error);
@@ -255,7 +287,6 @@ export function MarkdownEditor({
   return (
     <>
       <div
-        ref={containerRef}
         className={cn(
           "min-h-96 overflow-hidden rounded-md border border-border",
           "[[data-layout=editor]_&]:h-full [[data-layout=editor]_&]:min-h-0 [[data-layout=editor]_&]:rounded-none [[data-layout=editor]_&]:border-0",
@@ -266,28 +297,31 @@ export function MarkdownEditor({
           "[&_.cm-ySelectionInfo]:!opacity-100 [&_.cm-ySelectionInfo]:![transition-delay:0s]",
           "[&_.cm-ySelectionCaret]:border-x-2",
         )}
+        ref={containerRef}
       />
       <FileInput
-        ref={fileInputRef}
         accept={[...IMAGE_TYPES].join(",")}
         aria-label="画像をアップロード"
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
-          if (file) void uploadAtCursor(file);
+          if (file) {
+            void uploadAtCursor(file);
+          }
         }}
+        ref={fileInputRef}
       />
       {menu && !readOnly && (
         <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          onClose={() => setMenu(null)}
           items={[
             {
               label: "画像をアップロード",
               onSelect: () => fileInputRef.current?.click(),
             },
           ]}
+          onClose={() => setMenu(null)}
+          x={menu.x}
+          y={menu.y}
         />
       )}
     </>

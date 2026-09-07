@@ -31,7 +31,9 @@ function normalizeYamlValue(value: unknown): unknown {
       ? undefined
       : value.toISOString().slice(0, 10);
   }
-  if (Array.isArray(value)) return value.map(normalizeYamlValue);
+  if (Array.isArray(value)) {
+    return value.map(normalizeYamlValue);
+  }
   if (value && typeof value === "object") {
     const next: ArticleMeta = {};
     for (const [key, entry] of Object.entries(value)) {
@@ -45,10 +47,14 @@ function normalizeYamlValue(value: unknown): unknown {
 export function parseFrontmatterYaml(
   raw: string,
 ): { ok: true; data: ArticleMeta } | { ok: false; error: string } {
-  if (!raw.trim()) return { ok: true, data: {} };
+  if (!raw.trim()) {
+    return { data: {}, ok: true };
+  }
   try {
     const parsed: unknown = parseYaml(raw);
-    if (parsed == null) return { ok: true, data: {} };
+    if (parsed == null) {
+      return { data: {}, ok: true };
+    }
     const normalized = normalizeYamlValue(parsed);
     if (
       !normalized ||
@@ -56,14 +62,14 @@ export function parseFrontmatterYaml(
       Array.isArray(normalized)
     ) {
       return {
-        ok: false,
         error: "frontmatter はオブジェクトである必要があります",
+        ok: false,
       };
     }
-    return { ok: true, data: normalized as ArticleMeta };
+    return { data: normalized as ArticleMeta, ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: `YAML が不正です: ${message}` };
+    return { error: `YAML が不正です: ${message}`, ok: false };
   }
 }
 
@@ -85,7 +91,9 @@ export function articleMetaFromNote(
   const split = splitMarkdownFrontmatter(markdown);
   if (split.raw !== null && !split.unclosed) {
     const parsed = parseFrontmatterYaml(split.raw);
-    if (parsed.ok) return parsed.data;
+    if (parsed.ok) {
+      return parsed.data;
+    }
   }
   return parseArticleMeta(stored);
 }
@@ -95,20 +103,20 @@ export function readArticleFrontmatter(
 ): ArticleFrontmatterRead {
   const split = splitMarkdownFrontmatter(markdown);
   if (split.raw === null) {
-    return { data: {}, body: markdown, issues: [] };
+    return { body: markdown, data: {}, issues: [] };
   }
   if (split.unclosed) {
     return {
-      data: {},
       body: markdown,
+      data: {},
       issues: [{ message: "frontmatter の閉じの --- がありません" }],
     };
   }
   const parsed = parseFrontmatterYaml(split.raw);
   if (!parsed.ok) {
-    return { data: {}, body: split.body, issues: [{ message: parsed.error }] };
+    return { body: split.body, data: {}, issues: [{ message: parsed.error }] };
   }
-  return { data: parsed.data, body: split.body, issues: [] };
+  return { body: split.body, data: parsed.data, issues: [] };
 }
 
 export function validateArticleDocument(
@@ -118,13 +126,15 @@ export function validateArticleDocument(
   const split = splitMarkdownFrontmatter(markdown);
   if (split.raw === null) {
     return {
-      data: {},
       body: markdown,
+      data: {},
       issues: [{ message: "ノート先頭に YAML frontmatter（---）が必要です" }],
     };
   }
   const read = readArticleFrontmatter(markdown);
-  if (read.issues.length > 0) return read;
+  if (read.issues.length > 0) {
+    return read;
+  }
 
   const issues: ArticleFrontmatterIssue[] = [];
   for (const field of schema) {
@@ -158,13 +168,19 @@ export function validateArticleDocument(
     }
   }
 
-  return { data: read.data, body: read.body, issues };
+  return { body: read.body, data: read.data, issues };
 }
 
 function templateValue(field: ArticleSchemaField, title: string): unknown {
-  if (field.default !== undefined) return field.default;
-  if (field.key === "title") return title;
-  if (field.enum && field.enum.length > 0) return field.enum[0];
+  if (field.default !== undefined) {
+    return field.default;
+  }
+  if (field.key === "title") {
+    return title;
+  }
+  if (field.enum && field.enum.length > 0) {
+    return field.enum[0];
+  }
   switch (field.type) {
     case "boolean":
       return false;
@@ -186,7 +202,9 @@ export function articleFrontmatterObject(
   const meta: ArticleMeta = {};
   for (const field of schema) {
     const value = templateValue(field, title);
-    if (value !== undefined) meta[field.key] = value;
+    if (value !== undefined) {
+      meta[field.key] = value;
+    }
   }
   if (typeof meta.title !== "string" || !meta.title.trim()) {
     meta.title = title;
@@ -214,7 +232,9 @@ export function ensureArticleMarkdown(
   title = "無題",
 ): string {
   const split = splitMarkdownFrontmatter(markdown);
-  if (split.raw !== null && !split.unclosed) return markdown;
+  if (split.raw !== null && !split.unclosed) {
+    return markdown;
+  }
   const yaml = stringifyArticleFrontmatter(
     articleFrontmatterObject(schema, title),
   );

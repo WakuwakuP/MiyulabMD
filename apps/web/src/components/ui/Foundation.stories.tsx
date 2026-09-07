@@ -1,14 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 const COLORS = [
-  { name: "canvas", className: "bg-canvas border border-border" },
-  { name: "surface", className: "bg-surface" },
-  { name: "fill", className: "bg-fill" },
-  { name: "accent", className: "bg-accent" },
-  { name: "error", className: "bg-error" },
-  { name: "folder", className: "bg-folder" },
-  { name: "note", className: "bg-note" },
-  { name: "code", className: "bg-code" },
+  { className: "bg-canvas border border-border", name: "canvas" },
+  { className: "bg-surface", name: "surface" },
+  { className: "bg-fill", name: "fill" },
+  { className: "bg-accent", name: "accent" },
+  { className: "bg-error", name: "error" },
+  { className: "bg-folder", name: "folder" },
+  { className: "bg-note", name: "note" },
+  { className: "bg-code", name: "code" },
 ] as const;
 
 function Foundation() {
@@ -18,7 +18,7 @@ function Foundation() {
         <h2 className="m-0 text-lg font-semibold">Color</h2>
         <div className="grid grid-cols-4 gap-3">
           {COLORS.map((color) => (
-            <div key={color.name} className="grid gap-1">
+            <div className="grid gap-1" key={color.name}>
               <div className={`h-16 rounded-lg ${color.className}`} />
               <p className="m-0 text-[0.85rem] text-muted">{color.name}</p>
             </div>
@@ -48,9 +48,9 @@ function Foundation() {
 }
 
 const meta = {
-  title: "Foundation/Tokens",
   component: Foundation,
   tags: ["autodocs"],
+  title: "Foundation/Tokens",
 } satisfies Meta<typeof Foundation>;
 
 export default meta;

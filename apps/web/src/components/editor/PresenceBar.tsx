@@ -14,7 +14,9 @@ type Props = {
 function readAwarenessState(
   state: Record<string, unknown> | null,
 ): AwarenessUserState | null {
-  if (!state) return null;
+  if (!state) {
+    return null;
+  }
 
   const nested =
     state.user && typeof state.user === "object"
@@ -34,7 +36,7 @@ function readAwarenessState(
   if (!displayName) {
     return null;
   }
-  return { userId: userId ?? displayName, displayName, color };
+  return { color, displayName, userId: userId ?? displayName };
 }
 
 export function PresenceBar({ awareness }: Props) {
@@ -48,11 +50,15 @@ export function PresenceBar({ awareness }: Props) {
       const next: Array<AwarenessUserState & { clientId: number }> = [];
 
       awareness.getStates().forEach((state: unknown, clientId: number) => {
-        if (clientId === localClientId) return;
+        if (clientId === localClientId) {
+          return;
+        }
         const parsed = readAwarenessState(
           state as Record<string, unknown> | null,
         );
-        if (parsed) next.push({ ...parsed, clientId });
+        if (parsed) {
+          next.push({ ...parsed, clientId });
+        }
       });
 
       setPeers(next);
@@ -65,27 +71,27 @@ export function PresenceBar({ awareness }: Props) {
     };
   }, [awareness]);
 
-  if (peers.length === 0) return null;
+  if (peers.length === 0) {
+    return null;
+  }
 
   const packed = peers.length >= 5;
 
   return (
     <div
-      className="flex items-center p-[0.15rem] max-[640px]:hidden"
       aria-label="共同編集者"
+      className="flex items-center p-[0.15rem] max-[640px]:hidden"
     >
       {peers.map((peer, index) => (
         <span
-          key={peer.clientId}
           className={cn(
-            packed
-              ? "-ml-[0.45rem] shadow-[0_0_0_2px_var(--color-surface)] first:ml-0"
-              : index === 0
-                ? ""
-                : "ml-[0.28rem]",
+            packed &&
+              "-ml-[0.45rem] shadow-[0_0_0_2px_var(--color-surface)] first:ml-0",
+            !packed && index > 0 && "ml-[0.28rem]",
           )}
+          key={peer.clientId}
         >
-          <Avatar name={peer.displayName} color={peer.color} size="sm" />
+          <Avatar color={peer.color} name={peer.displayName} size="sm" />
         </span>
       ))}
     </div>

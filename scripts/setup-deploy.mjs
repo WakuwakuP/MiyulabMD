@@ -90,12 +90,12 @@ function logInfo(message) {
 }
 
 async function openUrl(url) {
-  const command =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "cmd"
-        : "xdg-open";
+  let command = "xdg-open";
+  if (process.platform === "darwin") {
+    command = "open";
+  } else if (process.platform === "win32") {
+    command = "cmd";
+  }
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   await runCommand(command, args, { allowFail: true });
 }
@@ -155,7 +155,7 @@ async function loginCloudflare(prompt, cloudflare) {
     if (useEnv) {
       await verifyToken(envToken);
       logInfo("環境変数の API トークンを使います。");
-      return { type: "api_token", token: envToken };
+      return { token: envToken, type: "api_token" };
     }
     delete process.env.CLOUDFLARE_API_TOKEN;
     logInfo("環境変数のトークンは使いません。wrangler login を使います。");
@@ -174,7 +174,9 @@ async function loginCloudflare(prompt, cloudflare) {
     }
   }
 
-  if (!loggedIn) {
+  if (loggedIn) {
+    logInfo("既存の wrangler ログインを使います。");
+  } else {
     logInfo(
       "ブラウザで Cloudflare にログインし、セットアップ用の一時 OAuth トークンを取得します。",
     );
@@ -190,8 +192,6 @@ async function loginCloudflare(prompt, cloudflare) {
       );
     }
     await cloudflare.wrangler(loginArgs, { inherit: true });
-  } else {
-    logInfo("既存の wrangler ログインを使います。");
   }
 
   const auth = await cloudflare.wranglerJson(["auth", "token", "--json"]);
@@ -220,8 +220,8 @@ async function selectAccount(prompt, token, cloudflare) {
   const account = await prompt.choose(
     "対象の Cloudflare アカウント:",
     accounts.map((item) => ({
-      value: { id: item.id, name: item.name },
       label: `${item.name} (${item.id})`,
+      value: { id: item.id, name: item.name },
     })),
   );
   logInfo(`Account ID: ${account.id}`);
@@ -246,7 +246,7 @@ async function collectNames(prompt, wranglerToml, ogToml) {
     "R2 バケット名",
     readTomlQuotedValue(wranglerToml, "bucket_name") ?? `${workerName}-images`,
   );
-  return { workerName, ogFetchName, d1Name, r2Name };
+  return { d1Name, ogFetchName, r2Name, workerName };
 }
 
 async function canUseAccessApi(token, accountId) {
@@ -269,8 +269,8 @@ async function canUseAccessApi(token, accountId) {
 
 async function promptForApiToken(prompt, { accountId, permissions, name }) {
   const url = buildUserTokenTemplateUrl({
-    name,
     accountId,
+    name,
     permissions,
   });
 
@@ -323,8 +323,8 @@ async function resolveApiTokens(
       logInfo("Access API には追加の API トークンが必要です。");
       const privileged = await promptForApiToken(prompt, {
         accountId,
-        permissions: ACCESS_TOKEN_PERMISSIONS,
         name: "MiyulabMD setup + GitHub Actions",
+        permissions: ACCESS_TOKEN_PERMISSIONS,
       });
       setupToken = privileged;
       githubToken = privileged;
@@ -335,26 +335,26 @@ async function resolveApiTokens(
     logInfo("GitHub Actions 用に有効期限の長い API トークンが必要です。");
     githubToken = await promptForApiToken(prompt, {
       accountId,
-      permissions: CI_TOKEN_PERMISSIONS,
       name: "MiyulabMD GitHub Actions",
+      permissions: CI_TOKEN_PERMISSIONS,
     });
   }
 
-  return { setupToken, githubToken };
+  return { githubToken, setupToken };
 }
 
 function toDeployOverrides({ names, databaseId, teamDomain, customHostname }) {
   return {
-    workerName: names.workerName,
-    ogFetchName: names.ogFetchName,
-    d1Name: names.d1Name,
-    d1Id: databaseId,
-    r2Name: names.r2Name,
     accessTeamDomain:
       teamDomain && teamDomain !== PLACEHOLDER_ACCESS_TEAM_DOMAIN
         ? teamDomain
         : undefined,
     customHostname: customHostname ?? undefined,
+    d1Id: databaseId,
+    d1Name: names.d1Name,
+    ogFetchName: names.ogFetchName,
+    r2Name: names.r2Name,
+    workerName: names.workerName,
   };
 }
 
@@ -373,8 +373,8 @@ async function setupAccess(prompt, token, account, hostname, loginEmail) {
     const authDomain = normalizeTeamDomain(teamInput);
     const displayName = await prompt.ask("チームの表示名", account.name);
     org = await createAccessOrganization(token, account.id, {
-      name: displayName,
       authDomain,
+      name: displayName,
     });
     logInfo(`Zero Trust 組織を作成しました: ${org.auth_domain}`);
   }
@@ -411,7 +411,7 @@ async function setupAccess(prompt, token, account, hostname, loginEmail) {
     logInfo(`IdP: ${idps.map((item) => item.name || item.type).join(", ")}`);
   }
 
-  return { teamDomain: org.auth_domain, aud };
+  return { aud, teamDomain: org.auth_domain };
 }
 
 async function deployWorkers(prompt, cloudflare, env, { applyMigrations }) {
@@ -469,19 +469,19 @@ async function deployWorkers(prompt, cloudflare, env, { applyMigrations }) {
 async function putSecrets(cloudflare, env, { sessionSecret, accessAud }) {
   if (sessionSecret) {
     await putWorkerSecret(cloudflare, {
+      config: WRANGLER_DEPLOY_TOML,
+      env,
       name: "SESSION_SECRET",
       value: sessionSecret,
-      env,
-      config: WRANGLER_DEPLOY_TOML,
     });
     logInfo("SESSION_SECRET を Worker に設定しました。");
   }
   if (accessAud) {
     await putWorkerSecret(cloudflare, {
+      config: WRANGLER_DEPLOY_TOML,
+      env,
       name: "ACCESS_AUD",
       value: accessAud,
-      env,
-      config: WRANGLER_DEPLOY_TOML,
     });
     logInfo("ACCESS_AUD を Worker に設定しました。");
   }
@@ -529,11 +529,11 @@ async function setupGitHub(
   );
 
   const variables = {
-    WORKER_NAME: names.workerName,
-    OG_FETCH_WORKER_NAME: names.ogFetchName,
-    D1_DATABASE_NAME: names.d1Name,
     D1_DATABASE_ID: d1.id,
+    D1_DATABASE_NAME: names.d1Name,
+    OG_FETCH_WORKER_NAME: names.ogFetchName,
     R2_BUCKET_NAME: names.r2Name,
+    WORKER_NAME: names.workerName,
   };
   if (teamDomain && teamDomain !== PLACEHOLDER_ACCESS_TEAM_DOMAIN) {
     variables.ACCESS_TEAM_DOMAIN = teamDomain;
@@ -549,6 +549,293 @@ async function setupGitHub(
     `Environment ${GITHUB_ENVIRONMENT} に Secrets と Variables を登録しました。wrangler.toml のコミットは不要です。`,
   );
   return repo;
+}
+
+function createdOrExisting(created, createdMessage, existingMessage) {
+  return created ? createdMessage : existingMessage;
+}
+
+function wranglerTokenEnv(auth) {
+  return isDurableApiToken(auth) ? { CLOUDFLARE_API_TOKEN: auth.token } : {};
+}
+
+function durableApiToken(auth, githubToken) {
+  return githubToken ?? (isDurableApiToken(auth) ? auth.token : null);
+}
+
+async function resolveWorkersDevHost(cfToken, account, names) {
+  const fallback = slugifyTeamName(account.name) || names.workerName;
+  const subdomain = await ensureWorkersSubdomain(cfToken, account.id, fallback);
+  const hostname = workersDevHostname(names.workerName, subdomain);
+  logInfo(`workers.dev: https://${hostname}`);
+  return { customHostname: null, customZone: null, hostname };
+}
+
+async function resolveCustomHost(prompt, cfToken, account) {
+  const zones = await listZones(cfToken, account.id);
+  if (zones.length === 0) {
+    throw new Error(
+      "このアカウントに Zone がありません。workers.dev を選んでください。",
+    );
+  }
+  const zone = await prompt.choose(
+    "Zone:",
+    zones.map((item) => ({
+      label: `${item.name} (${item.id})`,
+      value: item,
+    })),
+  );
+  const customHostname = normalizeHostname(
+    await prompt.ask("ホスト名", `md.${zone.name}`),
+  );
+  return {
+    customHostname,
+    customZone: zone,
+    hostname: customHostname,
+  };
+}
+
+async function resolvePublicHost(prompt, cfToken, account, names) {
+  const hostMode = await prompt.choose("公開ホスト:", [
+    { label: "workers.dev（カスタムドメインなし）", value: "workers_dev" },
+    { label: "カスタムドメイン", value: "custom" },
+  ]);
+  if (hostMode === "custom") {
+    return resolveCustomHost(prompt, cfToken, account);
+  }
+  return resolveWorkersDevHost(cfToken, account, names);
+}
+
+async function resolveLoginEmail(cloudflare) {
+  try {
+    return (await cloudflare.wranglerJson(["whoami", "--json"])).email ?? "";
+  } catch {
+    return "";
+  }
+}
+
+async function resolveAccessConfig(
+  prompt,
+  cloudflare,
+  cfToken,
+  account,
+  hostname,
+  wranglerToml,
+  configureAccess,
+) {
+  const teamDomain = readTomlQuotedValue(wranglerToml, "ACCESS_TEAM_DOMAIN");
+  if (!configureAccess) {
+    return { accessAud: null, teamDomain };
+  }
+  const loginEmail = await resolveLoginEmail(cloudflare);
+  const access = await setupAccess(
+    prompt,
+    cfToken,
+    account,
+    hostname,
+    loginEmail,
+  );
+  return { accessAud: access.aud, teamDomain: access.teamDomain };
+}
+
+async function attachCustomDomainIfNeeded(
+  cfToken,
+  account,
+  names,
+  customHostname,
+  customZone,
+) {
+  if (!customHostname) {
+    return;
+  }
+  if (!customZone) {
+    throw new Error("カスタムドメイン用の Zone が選ばれていません");
+  }
+  await attachCustomDomain(cfToken, account.id, {
+    hostname: customHostname,
+    service: names.workerName,
+    zoneId: customZone.id,
+  });
+  logInfo(`カスタムドメインを付けました: https://${customHostname}`);
+}
+
+async function rotateSessionAndPutSecrets(
+  prompt,
+  cloudflare,
+  wranglerEnv,
+  accessAud,
+) {
+  const rotateSecret = await prompt.confirm(
+    "SESSION_SECRET を新規発行して Worker に入れますか？（既存は上書き）",
+    true,
+  );
+  const sessionSecret = rotateSecret
+    ? randomBytes(32).toString("base64url")
+    : null;
+  await putSecrets(cloudflare, wranglerEnv, {
+    accessAud,
+    sessionSecret,
+  });
+}
+
+function printCompletion({ account, names, d1, hostname, teamDomain, repo }) {
+  console.log(`
+完了しました。
+
+  Cloudflare account : ${account.name} (${account.id})
+  Worker             : ${names.workerName}
+  D1                 : ${names.d1Name} (${d1.id})
+  R2                 : ${names.r2Name}
+  公開 URL           : https://${hostname}
+  Access チーム      : ${teamDomain ?? "（未設定）"}
+  GitHub             : ${repo?.nameWithOwner ?? "（未登録）"}
+  Environment        : ${GITHUB_ENVIRONMENT}
+
+次の作業:
+  - wrangler.toml は共通のまま。アカウント固有値は GitHub の Environment に入っています
+  - フォークでは Settings → Actions を有効にする
+  - 以降の本番デプロイは main への push、または Actions の workflow_dispatch
+`);
+}
+
+async function provisionStorage(prompt, cfToken, account, names) {
+  logStep(3, "D1 / R2");
+  const d1 = await ensureD1(cfToken, account.id, names.d1Name);
+  logInfo(
+    createdOrExisting(
+      d1.created,
+      `D1 を作成しました: ${d1.name} (${d1.id})`,
+      `既存の D1 を使います: ${d1.name} (${d1.id})`,
+    ),
+  );
+  const r2 = await ensureR2WithGuidance(
+    prompt,
+    cfToken,
+    account.id,
+    names.r2Name,
+  );
+  logInfo(
+    createdOrExisting(
+      r2.created,
+      `R2 バケットを作成しました: ${r2.name}`,
+      `既存の R2 バケットを使います: ${r2.name}`,
+    ),
+  );
+  return d1;
+}
+
+async function runInteractiveSetup(prompt) {
+  if (!(await commandExists(commandName("pnpm")))) {
+    throw new Error("pnpm が必要です。corepack enable を推奨します。");
+  }
+  await ensureDependencies(prompt);
+
+  const cloudflare = createCloudflare({
+    workerDir: WORKER_DIR,
+    wranglerArgs: ["exec", "wrangler"],
+    wranglerBin: commandName("pnpm"),
+  });
+
+  const auth = await loginCloudflare(prompt, cloudflare);
+  const account = await selectAccount(prompt, auth.token, cloudflare);
+  const wranglerEnv = {
+    CLOUDFLARE_ACCOUNT_ID: account.id,
+    ...wranglerTokenEnv(auth),
+  };
+
+  const wranglerToml = await readFile(WRANGLER_TOML, "utf8");
+  const ogToml = await readFile(OG_TOML, "utf8");
+  const names = await collectNames(prompt, wranglerToml, ogToml);
+
+  const configureAccess = await prompt.confirm(
+    "Zero Trust Access（ログイン）を設定しますか？",
+    true,
+  );
+  const configureGitHub = await prompt.confirm(
+    "GitHub Actions の Environment Secrets / Variables を登録しますか？",
+    true,
+  );
+
+  const { setupToken, githubToken } = await resolveApiTokens(
+    prompt,
+    auth,
+    account.id,
+    { needAccess: configureAccess, needGitHub: configureGitHub },
+  );
+  const durableToken = durableApiToken(auth, githubToken);
+  if (durableToken) {
+    wranglerEnv.CLOUDFLARE_API_TOKEN = durableToken;
+  }
+  const cfToken = setupToken;
+  const d1 = await provisionStorage(prompt, cfToken, account, names);
+  const { hostname, customHostname, customZone } = await resolvePublicHost(
+    prompt,
+    cfToken,
+    account,
+    names,
+  );
+  const { teamDomain, accessAud } = await resolveAccessConfig(
+    prompt,
+    cloudflare,
+    cfToken,
+    account,
+    hostname,
+    wranglerToml,
+    configureAccess,
+  );
+
+  await writeDeployConfigFiles(
+    WORKER_DIR,
+    toDeployOverrides({
+      customHostname,
+      databaseId: d1.id,
+      names,
+      teamDomain,
+    }),
+  );
+  logInfo(
+    `${WRANGLER_DEPLOY_TOML} を生成しました（git 管理外。共通の wrangler.toml は変更しません）。`,
+  );
+
+  const deployResult = await deployWorkers(prompt, cloudflare, wranglerEnv, {
+    applyMigrations: true,
+  });
+  if (deployResult.deployed) {
+    await attachCustomDomainIfNeeded(
+      cfToken,
+      account,
+      names,
+      customHostname,
+      customZone,
+    );
+    await rotateSessionAndPutSecrets(
+      prompt,
+      cloudflare,
+      wranglerEnv,
+      accessAud,
+    );
+  }
+
+  let repo = null;
+  if (configureGitHub) {
+    repo = await setupGitHub(prompt, commandName("gh"), {
+      account,
+      apiToken: githubToken,
+      customHostname,
+      d1,
+      names,
+      teamDomain,
+    });
+  }
+
+  printCompletion({
+    account,
+    d1,
+    hostname,
+    names,
+    repo,
+    teamDomain,
+  });
 }
 
 async function main(argv) {
@@ -576,199 +863,7 @@ async function main(argv) {
     ) {
       return;
     }
-
-    if (!(await commandExists(commandName("pnpm")))) {
-      throw new Error("pnpm が必要です。corepack enable を推奨します。");
-    }
-    await ensureDependencies(prompt);
-
-    const cloudflare = createCloudflare({
-      wranglerBin: commandName("pnpm"),
-      wranglerArgs: ["exec", "wrangler"],
-      workerDir: WORKER_DIR,
-    });
-
-    const auth = await loginCloudflare(prompt, cloudflare);
-    const account = await selectAccount(prompt, auth.token, cloudflare);
-    const wranglerEnv = {
-      CLOUDFLARE_ACCOUNT_ID: account.id,
-      ...(isDurableApiToken(auth) ? { CLOUDFLARE_API_TOKEN: auth.token } : {}),
-    };
-
-    const wranglerToml = await readFile(WRANGLER_TOML, "utf8");
-    const ogToml = await readFile(OG_TOML, "utf8");
-    const names = await collectNames(prompt, wranglerToml, ogToml);
-
-    const configureAccess = await prompt.confirm(
-      "Zero Trust Access（ログイン）を設定しますか？",
-      true,
-    );
-    const configureGitHub = await prompt.confirm(
-      "GitHub Actions の Environment Secrets / Variables を登録しますか？",
-      true,
-    );
-
-    const { setupToken, githubToken } = await resolveApiTokens(
-      prompt,
-      auth,
-      account.id,
-      { needAccess: configureAccess, needGitHub: configureGitHub },
-    );
-    const durableToken =
-      githubToken ?? (isDurableApiToken(auth) ? auth.token : null);
-    if (durableToken) {
-      wranglerEnv.CLOUDFLARE_API_TOKEN = durableToken;
-    }
-    const cfToken = setupToken;
-
-    logStep(3, "D1 / R2");
-    const d1 = await ensureD1(cfToken, account.id, names.d1Name);
-    logInfo(
-      d1.created
-        ? `D1 を作成しました: ${d1.name} (${d1.id})`
-        : `既存の D1 を使います: ${d1.name} (${d1.id})`,
-    );
-    const r2 = await ensureR2WithGuidance(
-      prompt,
-      cfToken,
-      account.id,
-      names.r2Name,
-    );
-    logInfo(
-      r2.created
-        ? `R2 バケットを作成しました: ${r2.name}`
-        : `既存の R2 バケットを使います: ${r2.name}`,
-    );
-
-    const hostMode = await prompt.choose("公開ホスト:", [
-      { value: "workers_dev", label: "workers.dev（カスタムドメインなし）" },
-      { value: "custom", label: "カスタムドメイン" },
-    ]);
-
-    let customHostname = null;
-    let customZone = null;
-    let hostname;
-    if (hostMode === "custom") {
-      const zones = await listZones(cfToken, account.id);
-      if (zones.length === 0) {
-        throw new Error(
-          "このアカウントに Zone がありません。workers.dev を選んでください。",
-        );
-      }
-      const zone = await prompt.choose(
-        "Zone:",
-        zones.map((item) => ({
-          value: item,
-          label: `${item.name} (${item.id})`,
-        })),
-      );
-      customHostname = normalizeHostname(
-        await prompt.ask("ホスト名", `md.${zone.name}`),
-      );
-      customZone = zone;
-      hostname = customHostname;
-    } else {
-      const fallback = slugifyTeamName(account.name) || names.workerName;
-      const subdomain = await ensureWorkersSubdomain(
-        cfToken,
-        account.id,
-        fallback,
-      );
-      hostname = workersDevHostname(names.workerName, subdomain);
-      logInfo(`workers.dev: https://${hostname}`);
-    }
-
-    let teamDomain = readTomlQuotedValue(wranglerToml, "ACCESS_TEAM_DOMAIN");
-    let accessAud = null;
-    if (configureAccess) {
-      let loginEmail = "";
-      try {
-        loginEmail =
-          (await cloudflare.wranglerJson(["whoami", "--json"])).email ?? "";
-      } catch {
-        loginEmail = "";
-      }
-      const access = await setupAccess(
-        prompt,
-        cfToken,
-        account,
-        hostname,
-        loginEmail,
-      );
-      teamDomain = access.teamDomain;
-      accessAud = access.aud;
-    }
-
-    const deployOverrides = toDeployOverrides({
-      names,
-      databaseId: d1.id,
-      teamDomain,
-      customHostname,
-    });
-    await writeDeployConfigFiles(WORKER_DIR, deployOverrides);
-    logInfo(
-      `${WRANGLER_DEPLOY_TOML} を生成しました（git 管理外。共通の wrangler.toml は変更しません）。`,
-    );
-
-    const deployResult = await deployWorkers(prompt, cloudflare, wranglerEnv, {
-      applyMigrations: true,
-    });
-
-    if (deployResult.deployed) {
-      if (customHostname) {
-        if (!customZone) {
-          throw new Error("カスタムドメイン用の Zone が選ばれていません");
-        }
-        await attachCustomDomain(cfToken, account.id, {
-          hostname: customHostname,
-          service: names.workerName,
-          zoneId: customZone.id,
-        });
-        logInfo(`カスタムドメインを付けました: https://${customHostname}`);
-      }
-
-      const rotateSecret = await prompt.confirm(
-        "SESSION_SECRET を新規発行して Worker に入れますか？（既存は上書き）",
-        true,
-      );
-      const sessionSecret = rotateSecret
-        ? randomBytes(32).toString("base64url")
-        : null;
-      await putSecrets(cloudflare, wranglerEnv, {
-        sessionSecret,
-        accessAud,
-      });
-    }
-
-    let repo = null;
-    if (configureGitHub) {
-      repo = await setupGitHub(prompt, commandName("gh"), {
-        account,
-        apiToken: githubToken,
-        names,
-        d1,
-        teamDomain,
-        customHostname,
-      });
-    }
-
-    console.log(`
-完了しました。
-
-  Cloudflare account : ${account.name} (${account.id})
-  Worker             : ${names.workerName}
-  D1                 : ${names.d1Name} (${d1.id})
-  R2                 : ${names.r2Name}
-  公開 URL           : https://${hostname}
-  Access チーム      : ${teamDomain ?? "（未設定）"}
-  GitHub             : ${repo?.nameWithOwner ?? "（未登録）"}
-  Environment        : ${GITHUB_ENVIRONMENT}
-
-次の作業:
-  - wrangler.toml は共通のまま。アカウント固有値は GitHub の Environment に入っています
-  - フォークでは Settings → Actions を有効にする
-  - 以降の本番デプロイは main への push、または Actions の workflow_dispatch
-`);
+    await runInteractiveSetup(prompt);
   } finally {
     prompt.close();
   }

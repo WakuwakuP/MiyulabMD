@@ -4,8 +4,8 @@
 
 .rich-editor-content .ProseMirror-selectednode,
 .rich-editor-content .ProseMirror-selectednoderange {
-  border-radius: 0.3rem;
   background: var(--color-preview);
+  border-radius: 0.3rem;
 }
 
 .rich-editor-content {

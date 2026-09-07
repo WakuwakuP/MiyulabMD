@@ -50,9 +50,11 @@ credential material it creates during the run.
 
 The profile uses Cursor's `static` channel and the action also passes
 `--disable-auto-update`, so the verified binary cannot replace itself at run
-time. Project Cursor configs are disabled, and the action fails closed if it
-finds a project CLI, MCP, or hook configuration (including Claude hooks or
-permissions entries). Native reads of Cursor's credential and configuration
+time. Project Cursor configs are disabled. The action fails closed if it finds a
+project CLI or hook configuration (`.cursor/cli.json`, `.cursor/hooks.json`,
+or Claude `hooks` / `permissions`). `.cursor/mcp.json` is allowed for the
+local code-graph / lsmcp servers; the weekly agent still does not load
+project MCP. Native reads of Cursor's credential and configuration
 directories are denied as well.
 
 ### Updating the pinned Cursor CLI

@@ -25,23 +25,25 @@ export function ConfirmDialog({
   onClose,
 }: Props) {
   const close = useCallback(() => {
-    if (!busy) onClose();
+    if (!busy) {
+      onClose();
+    }
   }, [busy, onClose]);
 
   return (
     <Modal
-      labelledBy="confirm-dialog-title"
       className="w-[min(26rem,100%)]"
+      labelledBy="confirm-dialog-title"
       onClose={close}
     >
       <ModalHeader id="confirm-dialog-title" title={title} />
       <p className="mb-4 mt-0">{message}</p>
       {error && <ErrorText>{error}</ErrorText>}
       <ModalFooter>
-        <Button variant="ghost" disabled={busy} onClick={close}>
+        <Button disabled={busy} onClick={close} variant="ghost">
           {cancelLabel}
         </Button>
-        <Button variant="danger" disabled={busy} onClick={onConfirm}>
+        <Button disabled={busy} onClick={onConfirm} variant="danger">
           {busy ? "削除中…" : confirmLabel}
         </Button>
       </ModalFooter>

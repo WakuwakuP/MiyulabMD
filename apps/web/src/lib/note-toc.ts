@@ -34,19 +34,25 @@ export function extractNoteToc(markdown: string): TocEntry[] {
       inFence = !inFence;
       continue;
     }
-    if (inFence) continue;
+    if (inFence) {
+      continue;
+    }
 
     const match = /^(#{1,3})\s+(.+?)\s*(?:#+\s*)?$/.exec(trimmed);
-    if (!match?.[1] || !match[2]) continue;
+    if (!(match?.[1] && match[2])) {
+      continue;
+    }
 
     const level = match[1].length as 1 | 2 | 3;
     const text = stripInlineMarkdown(match[2]);
-    if (!text) continue;
+    if (!text) {
+      continue;
+    }
 
     entries.push({
+      id: `${TOC_ID_PREFIX}${slugger.slug(text)}`,
       level,
       text,
-      id: `${TOC_ID_PREFIX}${slugger.slug(text)}`,
     });
   }
 

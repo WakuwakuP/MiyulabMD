@@ -5,10 +5,17 @@ import {
   titleFromMarkdown,
   validateArticleDocument,
 } from "@miyulabmd/shared";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Link, useOutletContext, useParams } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
+import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
@@ -17,48 +24,379 @@ import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx"
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterAlert.tsx";
+import { draftFromNote } from "../components/notes/access-draft.ts";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
-import { ShareIcon } from "../components/ui/icons.tsx";
+import { HistoryIcon, ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { fetchArticleSources, updateNote } from "../lib/api.ts";
 import { cn } from "../lib/cn.ts";
-import {
-  applyAwarenessUser,
-  createYjsSession,
-  type YjsSession,
-} from "../lib/collaboration.ts";
-import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
-import { loadOgCards } from "../lib/markdown.ts";
+import type { YjsSession } from "../lib/collaboration.ts";
+import type { EditorMode } from "../lib/editor-mode.ts";
 import {
   dismissStaleSsrPreview,
   removeSsrPreview,
 } from "../lib/note-bootstrap.ts";
-import { loadNote, noteFromCaches, seedNoteCache } from "../lib/note-cache.ts";
+import { loadNote, noteFromCaches } from "../lib/note-cache.ts";
+import {
+  applyEditorNoteLoad,
+  applySplitScroll,
+  beginEditorNoteLoad,
+  bindEditorCollab,
+  changeEditorMode,
+  editorGridClass,
+  ownerLabelFor,
+  persistEditorAccess,
+  persistEditorFolder,
+  sourceLineNumbers,
+  subscribeArticleSources,
+  syncCollabUser,
+  teardownCollab,
+} from "./editor-page.ts";
 
-function draftFromNote(note: Note): AccessDraft {
+function EditorLoadError({ message }: { message: string }) {
+  const showAuthLinks =
+    message.includes("ログイン") || message.includes("権限");
+  return (
+    <section className="flex flex-col px-5 py-4">
+      <ErrorText>{message}</ErrorText>
+      {showAuthLinks && (
+        <p>
+          <Link to="/">ホームに戻る</Link>
+          {" · "}
+          <a href="/auth/login">ログイン</a>
+        </p>
+      )}
+    </section>
+  );
+}
+
+function EditorSourcePane({
+  ready,
+  yMarkdown,
+  awareness,
+  noteId,
+  canEdit,
+  viewMode,
+  splitScroll,
+  onSplitScroll,
+}: {
+  ready: boolean;
+  yMarkdown: YjsSession["yMarkdown"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
+  noteId: string;
+  canEdit: boolean;
+  viewMode: EditorMode;
+  splitScroll: number;
+  onSplitScroll: (ratio: number) => void;
+}) {
+  if (ready && yMarkdown && awareness) {
+    return (
+      <MarkdownEditor
+        awareness={awareness}
+        lineNumbers={sourceLineNumbers(viewMode)}
+        noteId={noteId}
+        onScrollRatio={viewMode === "split" ? onSplitScroll : undefined}
+        readOnly={!canEdit}
+        scrollRatio={viewMode === "split" ? splitScroll : undefined}
+        yText={yMarkdown}
+      />
+    );
+  }
+  return (
+    <div className={editorLoadingClass}>
+      <p>共同編集に接続中…</p>
+    </div>
+  );
+}
+
+function EditorPreviewPane({
+  viewMode,
+  markdown,
+  splitScroll,
+  onSplitScroll,
+}: {
+  viewMode: EditorMode;
+  markdown: string;
+  splitScroll: number;
+  onSplitScroll: (ratio: number) => void;
+}) {
+  if (viewMode === "preview") {
+    return <PreviewWithToc documentScroll={true} markdown={markdown} />;
+  }
+  return (
+    <MarkdownPreview
+      markdown={markdown}
+      onScrollRatio={onSplitScroll}
+      scrollRatio={splitScroll}
+    />
+  );
+}
+
+function EditorRichPane({
+  ready,
+  yMarkdown,
+  awareness,
+  noteId,
+  canEdit,
+}: {
+  ready: boolean;
+  yMarkdown: YjsSession["yMarkdown"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
+  noteId: string;
+  canEdit: boolean;
+}) {
+  if (ready && yMarkdown && awareness) {
+    return (
+      <RichMarkdownEditor
+        awareness={awareness}
+        key={noteId}
+        noteId={noteId}
+        readOnly={!canEdit}
+        yText={yMarkdown}
+      />
+    );
+  }
+  return (
+    <div className={editorLoadingClass}>
+      <p>共同編集に接続中…</p>
+    </div>
+  );
+}
+
+function EditorShareDialog({
+  shareOpen,
+  headingTitle,
+  noteId,
+  user,
+  accessDraft,
+  isOwner,
+  saveError,
+  onChange,
+  onClose,
+}: {
+  shareOpen: boolean;
+  headingTitle: string;
+  noteId: string;
+  user: AppShellContext["user"];
+  accessDraft: AccessDraft;
+  isOwner: boolean;
+  saveError: string | null;
+  onChange: (next: AccessDraft) => void;
+  onClose: () => void;
+}) {
+  if (!shareOpen) {
+    return null;
+  }
+  return (
+    <ShareModal
+      disabled={!isOwner}
+      error={saveError}
+      inheritLabel="ディレクトリの設定に従う"
+      linkUrl={`${window.location.origin}/n/${noteId}`}
+      onChange={onChange}
+      onClose={onClose}
+      ownerLabel={ownerLabelFor(user)}
+      showInherit={isOwner}
+      title={headingTitle}
+      value={accessDraft}
+    />
+  );
+}
+
+function EditorWorkspace({
+  note,
+  markdown,
+  accessDraft,
+  saveError,
+  articleSource,
+  articleIssues,
+  viewMode,
+  usesInternalScroll,
+  ready,
+  yMarkdown,
+  awareness,
+  canEdit,
+  splitScroll,
+  shareOpen,
+  historyOpen,
+  headingTitle,
+  user,
+  isOwner,
+  onSplitScroll,
+  onPersistAccess,
+  onCloseShare,
+  onCloseHistory,
+}: {
+  note: Note;
+  markdown: string;
+  accessDraft: AccessDraft;
+  saveError: string | null;
+  articleSource: ArticleSource | null;
+  articleIssues: ReturnType<typeof validateArticleDocument>["issues"];
+  viewMode: EditorMode;
+  usesInternalScroll: boolean;
+  ready: boolean;
+  yMarkdown: YjsSession["yMarkdown"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
+  canEdit: boolean;
+  splitScroll: number;
+  shareOpen: boolean;
+  historyOpen: boolean;
+  headingTitle: string;
+  user: AppShellContext["user"];
+  isOwner: boolean;
+  onSplitScroll: (ratio: number) => void;
+  onPersistAccess: (next: AccessDraft) => void;
+  onCloseShare: () => void;
+  onCloseHistory: () => void;
+}) {
+  const showSource = viewMode === "split" || viewMode === "source";
+  const showPreview = viewMode === "split" || viewMode === "preview";
+  const showRich = viewMode === "rich";
+  return (
+    <section
+      className={cn("flex flex-col", usesInternalScroll && "h-full min-h-0")}
+    >
+      {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
+      {articleSource && <ArticleFrontmatterAlert issues={articleIssues} />}
+      <div className={editorGridClass(viewMode, usesInternalScroll, cn)}>
+        {showSource && (
+          <EditorSourcePane
+            awareness={awareness}
+            canEdit={canEdit}
+            noteId={note.id}
+            onSplitScroll={onSplitScroll}
+            ready={ready}
+            splitScroll={splitScroll}
+            viewMode={viewMode}
+            yMarkdown={yMarkdown}
+          />
+        )}
+        {showPreview && (
+          <EditorPreviewPane
+            markdown={markdown}
+            onSplitScroll={onSplitScroll}
+            splitScroll={splitScroll}
+            viewMode={viewMode}
+          />
+        )}
+        {showRich && (
+          <EditorRichPane
+            awareness={awareness}
+            canEdit={canEdit}
+            noteId={note.id}
+            ready={ready}
+            yMarkdown={yMarkdown}
+          />
+        )}
+      </div>
+      <EditorShareDialog
+        accessDraft={accessDraft}
+        headingTitle={headingTitle}
+        isOwner={isOwner}
+        noteId={note.id}
+        onChange={onPersistAccess}
+        onClose={onCloseShare}
+        saveError={saveError}
+        shareOpen={shareOpen}
+        user={user}
+      />
+      {historyOpen && (
+        <HistoryPanel
+          canEdit={canEdit}
+          noteId={note.id}
+          onClose={onCloseHistory}
+        />
+      )}
+    </section>
+  );
+}
+
+function EditorPageView({
+  loading,
+  loadError,
+  note,
+  accessDraft,
+  workspace,
+}: {
+  loading: boolean;
+  loadError: string | null;
+  note: Note | null;
+  accessDraft: AccessDraft | null;
+  workspace: ReactNode;
+}) {
+  if (loading) {
+    return (
+      <section className="flex flex-col px-5 py-4">
+        <p>読み込み中…</p>
+      </section>
+    );
+  }
+  if (loadError) {
+    return <EditorLoadError message={loadError} />;
+  }
+  if (!(note && accessDraft)) {
+    return null;
+  }
+  return workspace;
+}
+
+function EditorHeaderEnd({
+  awareness,
+  folder,
+  folderId,
+  isOwner,
+  onFolderChange,
+  onFolderBlur,
+  onHistory,
+  onShare,
+}: {
+  awareness: YjsSession["awareness"] | undefined;
+  folder: string;
+  folderId: string | null;
+  isOwner: boolean;
+  onFolderChange: (folder: string) => void;
+  onFolderBlur: () => void;
+  onHistory: () => void;
+  onShare: () => void;
+}) {
+  return (
+    <>
+      {awareness && <PresenceBar awareness={awareness} />}
+      <FolderPopover
+        folder={folder}
+        folderId={folderId}
+        isOwner={isOwner}
+        onFolderBlur={onFolderBlur}
+        onFolderChange={onFolderChange}
+      />
+      <HeaderButton icon={<HistoryIcon />} label="履歴" onClick={onHistory} />
+      <HeaderButton
+        icon={<ShareIcon />}
+        label="共有"
+        onClick={onShare}
+        variant="accent"
+      />
+    </>
+  );
+}
+
+function ownerFlags(user: AppShellContext["user"], note: Note | null) {
   return {
-    inherit: note.access.inherit,
-    readScope: note.access.effectiveReadScope,
-    writeScope: note.access.effectiveWriteScope,
-    grants: note.access.grants,
+    canEdit: Boolean(note?.access.flags.canEdit),
+    isOwner: Boolean(user && note && user.id === note.ownerId),
   };
 }
 
-function applyLoadedNote(
-  loaded: Note,
-  setters: {
-    setNote: (note: Note) => void;
-    setMarkdown: (markdown: string) => void;
-    setFolder: (folder: string) => void;
-    setAccessDraft: (draft: AccessDraft) => void;
-  },
+function articleIssuesFor(
+  articleSource: ArticleSource | null,
+  markdown: string,
 ) {
-  setters.setNote(loaded);
-  setters.setMarkdown(loaded.markdown);
-  setters.setFolder(loaded.folder);
-  setters.setAccessDraft(draftFromNote(loaded));
+  if (!articleSource) {
+    return [];
+  }
+  return validateArticleDocument(articleSource.schema, markdown).issues;
 }
 
 export function EditorPage() {
@@ -77,105 +415,60 @@ export function EditorPage() {
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
   const [mode, setMode] = useState<EditorMode>("preview");
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
-
   const hydratedRef = useRef(false);
+  const sessionRef = useRef<YjsSession | null>(null);
+  const unbindCollabRef = useRef<(() => void) | null>(null);
+
+  const noteId = note?.id;
+  const userId = user?.id;
+  const flags = ownerFlags(user, note);
+  const viewMode: EditorMode = flags.canEdit ? mode : "preview";
+  const usesInternalScroll = viewMode !== "preview";
+  const headingTitle = titleFromMarkdown(markdown);
+  const articleSource = matchArticleSource(folder, articleSources);
+  const articleIssues = articleIssuesFor(articleSource, markdown);
+  const awareness = collab?.awareness;
+  const yMarkdown = collab?.yMarkdown;
+  const ready = Boolean(yMarkdown && awareness && collabReady);
 
   useEffect(() => {
     dismissStaleSsrPreview(id);
-    const hit = noteFromCaches(id);
-    setLoadError(null);
-    setSaveError(null);
-    setCollab(null);
-    setCollabReady(false);
-    setMode("preview");
-    setSplitScroll(0);
-
-    if (hit) {
-      applyLoadedNote(hit, {
-        setNote,
-        setMarkdown,
-        setFolder,
-        setAccessDraft,
-      });
-      hydratedRef.current = true;
-      setLoading(false);
-      void loadOgCards(hit.markdown);
-    } else {
-      hydratedRef.current = false;
-      setLoading(true);
-    }
-
+    const setters = {
+      hydratedRef,
+      setAccessDraft,
+      setCollab,
+      setCollabReady,
+      setFolder,
+      setLoadError,
+      setLoading,
+      setMarkdown,
+      setMode,
+      setNote,
+      setSaveError,
+      setSplitScroll,
+    };
+    const hit = beginEditorNoteLoad(id, setters);
     let cancelled = false;
     void loadNote(id, Boolean(hit)).then((result) => {
-      if (cancelled) return;
-      if (!result.ok) {
-        if (result.status === 401) {
-          setLoadError("このノートを表示するにはログインが必要です。");
-        } else if (result.status === 403) {
-          setLoadError("このノートを表示する権限がありません。");
-        } else if (result.status === 404) {
-          setLoadError("ノートが見つかりません。");
-        } else {
-          setLoadError(result.error);
-        }
-        if (!noteFromCaches(id)) setNote(null);
-        setLoading(false);
-        return;
-      }
-
-      if (hit) {
-        setNote(result.data);
-        setFolder(result.data.folder);
-        setAccessDraft(draftFromNote(result.data));
-      } else {
-        applyLoadedNote(result.data, {
-          setNote,
-          setMarkdown,
-          setFolder,
-          setAccessDraft,
-        });
-        hydratedRef.current = true;
-      }
-      setLoading(false);
-      void loadOgCards(result.data.markdown);
+      applyEditorNoteLoad(result, id, hit, cancelled, setters);
     });
-
     return () => {
       cancelled = true;
     };
   }, [id]);
 
-  useEffect(() => {
-    if (!user) {
-      setArticleSources([]);
-      return;
-    }
-    let cancelled = false;
-    void fetchArticleSources().then((result) => {
-      if (cancelled || !result.ok) return;
-      setArticleSources(result.data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  const noteId = note?.id;
-  const userId = user?.id;
-  const isOwner = Boolean(user && note && user.id === note.ownerId);
-  const canEdit = Boolean(note?.access.flags.canEdit);
-  const viewMode: EditorMode = canEdit ? mode : "preview";
-  const usesInternalScroll = viewMode !== "preview";
-  const sessionRef = useRef<YjsSession | null>(null);
-  const unbindCollabRef = useRef<(() => void) | null>(null);
+  useEffect(() => subscribeArticleSources(user, setArticleSources), [user]);
 
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);
-    if (!loading && markdown) removeSsrPreview();
+    if (!loading && markdown) {
+      removeSsrPreview();
+    }
   }, [id, loading, markdown]);
 
   useLayoutEffect(() => {
@@ -191,120 +484,31 @@ export function EditorPage() {
   }, [usesInternalScroll]);
 
   useEffect(() => {
+    void noteId;
+    void userId;
     return () => {
-      unbindCollabRef.current?.();
-      unbindCollabRef.current = null;
-      sessionRef.current?.destroy();
-      sessionRef.current = null;
-      setCollab(null);
-      setCollabReady(false);
+      teardownCollab(unbindCollabRef, sessionRef, setCollab, setCollabReady);
     };
   }, [noteId, userId]);
 
   useEffect(() => {
-    if (!noteId || !hydratedRef.current || userLoading) return;
-    if (viewMode === "preview") return;
-    if (sessionRef.current) return;
-
-    const session = createYjsSession(noteId, user);
-    sessionRef.current = session;
-    setCollab(session);
-    setCollabReady(false);
-
-    const onSynced = (synced: boolean) => {
-      if (!synced) return;
-      setCollabReady(true);
-      const next = session.yMarkdown.toString();
-      if (next.length > 0) setMarkdown(next);
-    };
-
-    if (session.provider.synced) {
-      onSynced(true);
-    } else {
-      session.provider.on("sync", onSynced);
-    }
-
-    const onMarkdownChange = () => {
-      setMarkdown(session.yMarkdown.toString());
-    };
-    session.yMarkdown.observe(onMarkdownChange);
-    unbindCollabRef.current = () => {
-      session.provider.off("sync", onSynced);
-      session.yMarkdown.unobserve(onMarkdownChange);
-    };
+    bindEditorCollab({
+      hydrated: hydratedRef.current,
+      noteId,
+      sessionRef,
+      setCollab,
+      setCollabReady,
+      setMarkdown,
+      unbindRef: unbindCollabRef,
+      user,
+      userLoading,
+      viewMode,
+    });
   }, [noteId, userLoading, viewMode, user]);
 
   useEffect(() => {
-    if (!collab) return;
-    collab.setUser(user);
-    applyAwarenessUser(collab.awareness, user);
+    syncCollabUser(collab, user);
   }, [collab, user]);
-
-  async function persistAccess(next: AccessDraft) {
-    const currentNote = note;
-    if (!currentNote) return;
-    setAccessDraft(next);
-    setSaveError(null);
-
-    const result = await updateNote(currentNote.id, {
-      inheritAccess: next.inherit,
-      readScope: next.inherit ? null : next.readScope,
-      writeScope: next.inherit ? null : next.writeScope,
-      grants: next.grants.map((grant) => ({
-        email: grant.email,
-        canWrite: grant.canWrite,
-      })),
-    });
-    if (!result.ok) {
-      setSaveError(result.error);
-      setAccessDraft(draftFromNote(currentNote));
-      return;
-    }
-    setNote(result.data);
-    setAccessDraft(draftFromNote(result.data));
-    seedNoteCache(result.data);
-  }
-
-  async function handleFolderBlur() {
-    const currentNote = note;
-    if (!currentNote) return;
-    const next = normalizeFolder(folder);
-    if (next === currentNote.folder) return;
-
-    const result = await updateNote(currentNote.id, { folder: next });
-    if (!result.ok) {
-      setFolder(currentNote.folder);
-      setSaveError(result.error);
-      return;
-    }
-    setNote(result.data);
-    setFolder(result.data.folder);
-    setAccessDraft(draftFromNote(result.data));
-    seedNoteCache(result.data);
-  }
-
-  const headingTitle = titleFromMarkdown(markdown);
-  const articleSource = matchArticleSource(folder, articleSources);
-  const articleIssues = articleSource
-    ? validateArticleDocument(articleSource.schema, markdown).issues
-    : [];
-
-  function handleModeChange(next: EditorMode) {
-    if (!canEdit && next !== "preview") return;
-    setMode(next);
-    writeEditorMode(next);
-  }
-
-  function handleSplitScroll(ratio: number) {
-    if (splitScrollLock.current) return;
-    splitScrollLock.current = true;
-    setSplitScroll(ratio);
-    window.requestAnimationFrame(() => {
-      splitScrollLock.current = false;
-    });
-  }
-  const awareness = collab?.awareness;
-  const yMarkdown = collab?.yMarkdown;
 
   useEffect(() => {
     const previous = document.title;
@@ -315,151 +519,129 @@ export function EditorPage() {
   }, [headingTitle]);
 
   useEffect(() => {
-    if (!note) {
-      setHeader({ layout: "editor", folder: null });
-      return () => setHeader(null);
-    }
-
-    setHeader({
-      layout: "editor",
+    bindEditorHeader({
+      awareness,
+      canEdit: flags.canEdit,
       folder,
-      actions: (
-        <EditorModeSwitch
-          value={viewMode}
-          canEdit={canEdit}
-          onChange={handleModeChange}
-        />
-      ),
-      end: (
-        <>
-          {awareness && <PresenceBar awareness={awareness} />}
-          <FolderPopover
-            folder={folder}
-            folderId={note.folderId}
-            isOwner={isOwner}
-            onFolderChange={setFolder}
-            onFolderBlur={() => void handleFolderBlur()}
-          />
-          <HeaderButton
-            variant="accent"
-            icon={<ShareIcon />}
-            label="共有"
-            onClick={() => setShareOpen(true)}
-          />
-        </>
-      ),
+      isOwner: flags.isOwner,
+      note,
+      setAccessDraft,
+      setFolder,
+      setHeader,
+      setHistoryOpen,
+      setMode,
+      setNote,
+      setSaveError,
+      setShareOpen,
+      viewMode,
     });
-
     return () => setHeader(null);
-  }, [note, viewMode, canEdit, awareness, folder, isOwner, setHeader]);
-
-  if (loading) {
-    return (
-      <section className="flex flex-col px-5 py-4">
-        <p>読み込み中…</p>
-      </section>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <section className="flex flex-col px-5 py-4">
-        <ErrorText>{loadError}</ErrorText>
-        {(loadError.includes("ログイン") || loadError.includes("権限")) && (
-          <p>
-            <Link to="/">ホームに戻る</Link>
-            {" · "}
-            <a href="/auth/login">ログイン</a>
-          </p>
-        )}
-      </section>
-    );
-  }
-
-  if (!note || !accessDraft) {
-    return null;
-  }
-
-  const ready = Boolean(yMarkdown && awareness && collabReady);
-  const showSource = viewMode === "split" || viewMode === "source";
-  const showPreview = viewMode === "split" || viewMode === "preview";
-  const showRich = viewMode === "rich";
-
-  const paneHeightClass = "h-full min-h-0";
+  }, [
+    note,
+    viewMode,
+    flags.canEdit,
+    awareness,
+    folder,
+    flags.isOwner,
+    setHeader,
+  ]);
 
   return (
-    <section
-      className={cn("flex flex-col", usesInternalScroll && paneHeightClass)}
-    >
-      {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
-      {articleSource && <ArticleFrontmatterAlert issues={articleIssues} />}
-      <div
-        className={cn(
-          "grid min-h-0 flex-1 [&>*]:min-h-0",
-          viewMode === "split" &&
-            "grid-cols-2 max-[900px]:grid-cols-1 [&>:first-child]:border-r [&>:first-child]:border-border",
-          viewMode !== "split" && "grid-cols-1",
-          viewMode === "preview" && "block",
-          usesInternalScroll && "overflow-hidden",
-        )}
-      >
-        {showSource &&
-          (ready && yMarkdown && awareness ? (
-            <MarkdownEditor
-              noteId={note.id}
-              yText={yMarkdown}
-              awareness={awareness}
-              readOnly={!canEdit}
-              lineNumbers={viewMode === "source" || viewMode === "split"}
-              scrollRatio={viewMode === "split" ? splitScroll : undefined}
-              onScrollRatio={
-                viewMode === "split" ? handleSplitScroll : undefined
-              }
-            />
-          ) : (
-            <div className={editorLoadingClass}>
-              <p>共同編集に接続中…</p>
-            </div>
-          ))}
-        {showPreview &&
-          (viewMode === "preview" ? (
-            <PreviewWithToc markdown={markdown} documentScroll />
-          ) : (
-            <MarkdownPreview
-              markdown={markdown}
-              scrollRatio={splitScroll}
-              onScrollRatio={handleSplitScroll}
-            />
-          ))}
-        {showRich &&
-          (ready && yMarkdown && awareness ? (
-            <RichMarkdownEditor
-              key={note.id}
-              noteId={note.id}
-              yText={yMarkdown}
-              awareness={awareness}
-              readOnly={!canEdit}
-            />
-          ) : (
-            <div className={editorLoadingClass}>
-              <p>共同編集に接続中…</p>
-            </div>
-          ))}
-      </div>
-      {shareOpen && (
-        <ShareModal
-          title={headingTitle}
-          linkUrl={`${window.location.origin}/n/${note.id}`}
-          ownerLabel={user?.displayName?.trim() || user?.email || "オーナー"}
-          value={accessDraft}
-          showInherit={isOwner}
-          inheritLabel="ディレクトリの設定に従う"
-          disabled={!isOwner}
-          error={saveError}
-          onChange={(next) => void persistAccess(next)}
-          onClose={() => setShareOpen(false)}
-        />
-      )}
-    </section>
+    <EditorPageView
+      accessDraft={accessDraft}
+      loadError={loadError}
+      loading={loading}
+      note={note}
+      workspace={
+        note && accessDraft ? (
+          <EditorWorkspace
+            accessDraft={accessDraft}
+            articleIssues={articleIssues}
+            articleSource={articleSource}
+            awareness={awareness}
+            canEdit={flags.canEdit}
+            headingTitle={headingTitle}
+            historyOpen={historyOpen}
+            isOwner={flags.isOwner}
+            markdown={markdown}
+            note={note}
+            onCloseHistory={() => setHistoryOpen(false)}
+            onCloseShare={() => setShareOpen(false)}
+            onPersistAccess={(next) => {
+              void persistEditorAccess(note, next, {
+                setAccessDraft,
+                setNote,
+                setSaveError,
+              });
+            }}
+            onSplitScroll={(ratio) => {
+              applySplitScroll(ratio, splitScrollLock, setSplitScroll);
+            }}
+            ready={ready}
+            saveError={saveError}
+            shareOpen={shareOpen}
+            splitScroll={splitScroll}
+            user={user}
+            usesInternalScroll={usesInternalScroll}
+            viewMode={viewMode}
+            yMarkdown={yMarkdown}
+          />
+        ) : null
+      }
+    />
   );
+}
+
+function bindEditorHeader(input: {
+  note: Note | null;
+  folder: string;
+  viewMode: EditorMode;
+  canEdit: boolean;
+  awareness: YjsSession["awareness"] | undefined;
+  isOwner: boolean;
+  setHeader: AppShellContext["setHeader"];
+  setMode: (mode: EditorMode) => void;
+  setFolder: (folder: string) => void;
+  setSaveError: (error: string | null) => void;
+  setNote: (note: Note) => void;
+  setAccessDraft: (draft: AccessDraft) => void;
+  setShareOpen: (open: boolean) => void;
+  setHistoryOpen: (open: boolean) => void;
+}) {
+  if (!input.note) {
+    input.setHeader({ folder: null, layout: "editor" });
+    return;
+  }
+  input.setHeader({
+    actions: (
+      <EditorModeSwitch
+        canEdit={input.canEdit}
+        onChange={(next) =>
+          changeEditorMode(input.canEdit, next, input.setMode)
+        }
+        value={input.viewMode}
+      />
+    ),
+    end: (
+      <EditorHeaderEnd
+        awareness={input.awareness}
+        folder={input.folder}
+        folderId={input.note.folderId}
+        isOwner={input.isOwner}
+        onFolderBlur={() => {
+          void persistEditorFolder(input.note, input.folder, normalizeFolder, {
+            setAccessDraft: input.setAccessDraft,
+            setFolder: input.setFolder,
+            setNote: input.setNote,
+            setSaveError: input.setSaveError,
+          });
+        }}
+        onFolderChange={input.setFolder}
+        onHistory={() => input.setHistoryOpen(true)}
+        onShare={() => input.setShareOpen(true)}
+      />
+    ),
+    folder: input.folder,
+    layout: "editor",
+  });
 }

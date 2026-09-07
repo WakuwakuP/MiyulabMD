@@ -86,7 +86,9 @@ async function handleNotePage(
   const cacheable = !user;
   if (cacheable) {
     const cached = await caches.default.match(notePageCacheKey(url));
-    if (cached) return cached;
+    if (cached) {
+      return cached;
+    }
   }
 
   const notes = createNoteService(env);
@@ -113,19 +115,91 @@ async function handleNotePage(
     isPublicGuestCacheable(result.note, Boolean(user)) &&
     missingOg.length === 0;
   const headers = new Headers({
-    "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": publicCache ? "public, s-maxage=30" : "private, no-store",
+    "Content-Type": "text/html; charset=utf-8",
   });
 
   if (request.method === "HEAD") {
-    return new Response(null, { status: 200, headers });
+    return new Response(null, { headers, status: 200 });
   }
 
-  const response = new Response(body, { status: 200, headers });
+  const response = new Response(body, { headers, status: 200 });
   if (publicCache) {
     ctx.waitUntil(caches.default.put(notePageCacheKey(url), response.clone()));
   }
   return response;
+}
+
+function applyWsUserHeaders(
+  headers: Headers,
+  user: { id: string; displayName: string | null; email: string },
+): void {
+  headers.set("X-User-Id", user.id);
+  headers.set("X-User-Email", user.email);
+  if (user.displayName) {
+    headers.set("X-Display-Name", user.displayName);
+  }
+}
+
+async function handleNoteWebSocket(
+  request: Request,
+  env: Env,
+  noteId: string,
+): Promise<Response> {
+  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+    return new Response("Expected WebSocket upgrade", {
+      headers: { Upgrade: "websocket" },
+      status: 426,
+    });
+  }
+
+  const user = await readSession(request, env);
+  const notes = createNoteService(env);
+  const result = await notes.get(noteId, user ?? undefined);
+
+  if (result.kind === "not_found") {
+    return new Response("Not found", { status: 404 });
+  }
+  if (result.kind === "denied") {
+    return new Response(result.status === 401 ? "Unauthorized" : "Forbidden", {
+      status: result.status,
+    });
+  }
+
+  const note = result.note;
+  const id = env.DOCUMENT_ROOM.idFromName(note.id);
+  const headers = new Headers(request.headers);
+  headers.set("X-Note-Id", note.id);
+  headers.set("X-Can-Edit", note.access.flags.canEdit ? "true" : "false");
+  if (user) {
+    applyWsUserHeaders(headers, user);
+  }
+
+  const doRequest = new Request(request.url, {
+    headers,
+    method: request.method,
+  });
+  return env.DOCUMENT_ROOM.get(id).fetch(doRequest);
+}
+
+async function handleAuthAndMeRoutes(
+  request: Request,
+  env: Env,
+  pathname: string,
+): Promise<Response | null> {
+  if (pathname === "/api/auth/establish") {
+    return handleEstablishSession(request, env);
+  }
+  if (pathname === "/api/me" && request.method === "PATCH") {
+    return handleUpdateMe(request, env);
+  }
+  if (pathname.startsWith("/auth/")) {
+    const authResponse = await handleAuthRequest(request, env);
+    if (authResponse) {
+      return authResponse;
+    }
+  }
+  return null;
 }
 
 export default {
@@ -142,62 +216,12 @@ export default {
 
     const noteId = noteIdFromWsPath(pathname);
     if (noteId) {
-      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-        return new Response("Expected WebSocket upgrade", {
-          status: 426,
-          headers: { Upgrade: "websocket" },
-        });
-      }
-
-      const user = await readSession(request, env);
-      const notes = createNoteService(env);
-      const result = await notes.get(noteId, user ?? undefined);
-
-      if (result.kind === "not_found") {
-        return new Response("Not found", { status: 404 });
-      }
-      if (result.kind === "denied") {
-        return new Response(
-          result.status === 401 ? "Unauthorized" : "Forbidden",
-          {
-            status: result.status,
-          },
-        );
-      }
-
-      const note = result.note;
-
-      const id = env.DOCUMENT_ROOM.idFromName(note.id);
-      const headers = new Headers(request.headers);
-      headers.set("X-Note-Id", note.id);
-      headers.set("X-Can-Edit", note.access.flags.canEdit ? "true" : "false");
-      if (user) {
-        headers.set("X-User-Id", user.id);
-        if (user.displayName) {
-          headers.set("X-Display-Name", user.displayName);
-        }
-      }
-
-      const doRequest = new Request(request.url, {
-        headers,
-        method: request.method,
-      });
-      return env.DOCUMENT_ROOM.get(id).fetch(doRequest);
+      return handleNoteWebSocket(request, env, noteId);
     }
 
-    if (pathname === "/api/auth/establish") {
-      return handleEstablishSession(request, env);
-    }
-
-    if (pathname === "/api/me" && request.method === "PATCH") {
-      return handleUpdateMe(request, env);
-    }
-
-    if (pathname.startsWith("/auth/")) {
-      const authResponse = await handleAuthRequest(request, env);
-      if (authResponse) {
-        return authResponse;
-      }
+    const special = await handleAuthAndMeRoutes(request, env, pathname);
+    if (special) {
+      return special;
     }
 
     if (isElysiaPath(pathname)) {

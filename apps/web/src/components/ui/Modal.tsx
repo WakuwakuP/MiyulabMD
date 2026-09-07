@@ -9,6 +9,7 @@ type ModalProps = {
   labelledBy: string;
   className?: string;
   as?: "div" | "form";
+  overflow?: "auto" | "hidden";
   onClose: () => void;
   onSubmit?: FormEventHandler<HTMLFormElement>;
 };
@@ -18,46 +19,50 @@ export function Modal({
   labelledBy,
   className,
   as = "div",
+  overflow = "auto",
   onClose,
   onSubmit,
 }: ModalProps) {
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+      }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
   const bodyClass = cn(
-    "max-h-[min(40rem,calc(var(--app-height,100dvh)*0.9))] w-[min(32rem,100%)] overflow-auto rounded-xl bg-canvas px-[1.35rem] pt-5 pb-4 shadow-modal",
+    "max-h-[min(40rem,calc(var(--app-height,100dvh)*0.9))] w-[min(32rem,100%)] rounded-xl bg-canvas px-[1.35rem] pt-5 pb-4 shadow-modal",
+    overflow === "hidden" ? "overflow-hidden" : "overflow-auto",
     className,
   );
 
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-overlay p-4"
-      role="presentation"
       onClick={onClose}
+      role="presentation"
     >
       {as === "form" ? (
         <form
-          className={bodyClass}
-          role="dialog"
-          aria-modal="true"
           aria-labelledby={labelledBy}
+          aria-modal="true"
+          className={bodyClass}
           onClick={(event) => event.stopPropagation()}
           onSubmit={onSubmit}
+          role="dialog"
         >
           {children}
         </form>
       ) : (
         <div
-          className={bodyClass}
-          role="dialog"
-          aria-modal="true"
           aria-labelledby={labelledBy}
+          aria-modal="true"
+          className={bodyClass}
           onClick={(event) => event.stopPropagation()}
+          role="dialog"
         >
           {children}
         </div>
@@ -80,13 +85,13 @@ export function ModalHeader({
   return (
     <header className="mb-4 flex justify-between gap-4">
       <div>
-        <h2 id={id} className="m-0 text-xl">
+        <h2 className="m-0 text-xl" id={id}>
           {title}
         </h2>
         {children}
       </div>
       {onClose && (
-        <IconButton variant="surface" aria-label="閉じる" onClick={onClose}>
+        <IconButton aria-label="閉じる" onClick={onClose} variant="surface">
           <CloseIcon />
         </IconButton>
       )}

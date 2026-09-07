@@ -66,24 +66,24 @@ function parseSchemaJson(raw: string): ArticleSchemaField[] {
 
 function presentSource(row: SourceRow): ArticleSource {
   return {
-    id: row.id,
-    name: row.name,
+    createdAt: row.created_at,
     folder: row.folder,
     folderId: row.folder_id,
-    schema: parseSchemaJson(row.schema_json),
-    webhookUrl: row.webhook_url,
-    webhookAuthorizationSet: Boolean(row.webhook_authorization),
+    id: row.id,
     lastDispatchedAt: row.last_dispatched_at,
-    createdAt: row.created_at,
+    name: row.name,
+    schema: parseSchemaJson(row.schema_json),
     updatedAt: row.updated_at,
+    webhookAuthorizationSet: Boolean(row.webhook_authorization),
+    webhookUrl: row.webhook_url,
   };
 }
 
 function presentCollection(row: SourceRow): ArticleCollection {
   return {
+    folder: row.folder,
     id: row.id,
     name: row.name,
-    folder: row.folder,
     schema: parseSchemaJson(row.schema_json),
   };
 }
@@ -91,7 +91,9 @@ function presentCollection(row: SourceRow): ArticleCollection {
 export function isAllowedWebhookUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol === "https:") return true;
+    if (parsed.protocol === "https:") {
+      return true;
+    }
     return (
       parsed.protocol === "http:" &&
       (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")
@@ -127,7 +129,7 @@ async function resolveFolderPath(
   return { folder, folderId };
 }
 
-async function loadSource(
+function loadSource(
   env: Env,
   ownerId: string,
   id: string,
@@ -136,6 +138,117 @@ async function loadSource(
     .prepare("SELECT * FROM article_sources WHERE id = ? AND owner_id = ?")
     .bind(id, ownerId)
     .first<SourceRow>();
+}
+
+type SourceWriteError = { error: string; status: number };
+
+function createWebhookUrl(
+  input: ArticleSourceWrite,
+): { webhookUrl: string | null } | SourceWriteError {
+  const webhookUrl =
+    input.webhookUrl === undefined || input.webhookUrl === null
+      ? null
+      : input.webhookUrl.trim();
+  if (webhookUrl && !isAllowedWebhookUrl(webhookUrl)) {
+    return {
+      error: "webhookUrl は https である必要があります",
+      status: 400,
+    };
+  }
+  return { webhookUrl };
+}
+
+async function resolveSourceFolderUpdate(
+  env: Env,
+  ownerId: string,
+  row: SourceRow,
+  input: ArticleSourceWrite,
+): Promise<{ folder: string; folderId: string | null } | SourceWriteError> {
+  if (input.folder === undefined && input.folderId === undefined) {
+    return { folder: row.folder, folderId: row.folder_id };
+  }
+  const resolved = await resolveFolderPath(env, ownerId, input);
+  if ("error" in resolved) {
+    return { error: resolved.error, status: 400 };
+  }
+  return { folder: resolved.folder, folderId: resolved.folderId };
+}
+
+function resolveSourceSchemaUpdate(
+  row: SourceRow,
+  input: ArticleSourceWrite,
+): { schemaJson: string } | SourceWriteError {
+  if (input.schema === undefined) {
+    return { schemaJson: row.schema_json };
+  }
+  const schema = parseArticleSchema(input.schema);
+  if ("error" in schema) {
+    return { error: schema.error, status: 400 };
+  }
+  return { schemaJson: JSON.stringify(schema) };
+}
+
+function resolveSourceNameUpdate(
+  row: SourceRow,
+  input: ArticleSourceWrite,
+): { name: string } | SourceWriteError {
+  const name = input.name === undefined ? row.name : input.name.trim();
+  if (!name) {
+    return { error: "name が必要です", status: 400 };
+  }
+  return { name };
+}
+
+function resolveSourceWebhookUrlUpdate(
+  row: SourceRow,
+  input: ArticleSourceWrite,
+): { webhookUrl: string | null } | SourceWriteError {
+  if (input.webhookUrl === undefined) {
+    return { webhookUrl: row.webhook_url };
+  }
+  const webhookUrl = input.webhookUrl?.trim() || null;
+  if (webhookUrl && !isAllowedWebhookUrl(webhookUrl)) {
+    return {
+      error: "webhookUrl は https である必要があります",
+      status: 400,
+    };
+  }
+  return { webhookUrl };
+}
+
+function resolveSourceWebhookAuthUpdate(
+  row: SourceRow,
+  input: ArticleSourceWrite,
+): string | null {
+  if (input.webhookAuthorization === undefined) {
+    return row.webhook_authorization;
+  }
+  return input.webhookAuthorization?.trim() || null;
+}
+
+async function sourceFolderConflict(
+  env: Env,
+  ownerId: string,
+  id: string,
+  folder: string,
+  previousFolder: string,
+): Promise<SourceWriteError | null> {
+  if (folder === previousFolder) {
+    return null;
+  }
+  const conflict = await db(env)
+    .prepare(
+      "SELECT id FROM article_sources WHERE owner_id = ? AND folder = ? AND id != ?",
+    )
+    .bind(ownerId, folder, id)
+    .first<{ id: string }>();
+  if (conflict) {
+    return {
+      error: "このディレクトリは既に登録されています",
+      status: 409,
+    };
+  }
+  return null;
 }
 
 export function escapeLikePattern(value: string): string {
@@ -151,8 +264,8 @@ export function sourceNoteFilter(folder: string): {
   binds: string[];
 } {
   return {
-    sql: "(folder = ? OR folder LIKE ? ESCAPE '\\')",
     binds: [folder, `${escapeLikePattern(folder)}/%`],
+    sql: "(folder = ? OR folder LIKE ? ESCAPE '\\')",
   };
 }
 
@@ -181,68 +294,53 @@ function toEntry(
 ): ArticleEntry {
   const frontmatter = readArticleFrontmatter(row.markdown_snapshot);
   const data = mergeArticleData({
-    schema,
     noteMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
+    schema,
     title: row.title,
   });
   const slug = articleSlug(row.alias, row.short_id);
   const entry: ArticleEntry = {
+    createdAt: row.created_at,
+    data,
+    editUrl: articleEditUrl(origin, row.short_id),
+    folder: row.folder,
     id: row.id,
     slug,
     title: typeof data.title === "string" ? data.title : row.title,
-    folder: row.folder,
-    createdAt: row.created_at,
     updatedAt: row.updated_at,
-    data,
-    editUrl: articleEditUrl(origin, row.short_id),
   };
-  if (includeMarkdown) entry.markdown = frontmatter.body;
+  if (includeMarkdown) {
+    entry.markdown = frontmatter.body;
+  }
   return entry;
 }
 
 export function createArticleService(env: Env) {
   return {
-    async listSources(ownerId: string): Promise<ArticleSource[]> {
-      const rows = await db(env)
-        .prepare(
-          "SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder",
-        )
-        .bind(ownerId)
-        .all<SourceRow>();
-      return (rows.results ?? []).map(presentSource);
-    },
-
-    async getSource(
-      ownerId: string,
-      id: string,
-    ): Promise<ArticleSource | null> {
-      const row = await loadSource(env, ownerId, id);
-      return row ? presentSource(row) : null;
-    },
-
     async createSource(
       ownerId: string,
       input: ArticleSourceWrite,
     ): Promise<ArticleSource | { error: string; status: number }> {
       const name = input.name?.trim();
-      if (!name) return { error: "name が必要です", status: 400 };
+      if (!name) {
+        return { error: "name が必要です", status: 400 };
+      }
 
       const folder = await resolveFolderPath(env, ownerId, input);
-      if ("error" in folder) return { error: folder.error, status: 400 };
+      if ("error" in folder) {
+        return { error: folder.error, status: 400 };
+      }
 
       const schema = parseArticleSchema(input.schema ?? []);
-      if ("error" in schema) return { error: schema.error, status: 400 };
-
-      const webhookUrl =
-        input.webhookUrl === undefined || input.webhookUrl === null
-          ? null
-          : input.webhookUrl.trim();
-      if (webhookUrl && !isAllowedWebhookUrl(webhookUrl)) {
-        return {
-          error: "webhookUrl は https である必要があります",
-          status: 400,
-        };
+      if ("error" in schema) {
+        return { error: schema.error, status: 400 };
       }
+
+      const webhook = createWebhookUrl(input);
+      if ("error" in webhook) {
+        return webhook;
+      }
+      const webhookUrl = webhook.webhookUrl;
       const webhookAuthorization = input.webhookAuthorization?.trim() || null;
 
       const existing = await db(env)
@@ -280,90 +378,10 @@ export function createArticleService(env: Env) {
         .run();
 
       const created = await loadSource(env, ownerId, id);
-      if (!created) throw new Error("article source insert failed");
+      if (!created) {
+        throw new Error("article source insert failed");
+      }
       return presentSource(created);
-    },
-
-    async updateSource(
-      ownerId: string,
-      id: string,
-      input: ArticleSourceWrite,
-    ): Promise<ArticleSource | { error: string; status: number } | null> {
-      const row = await loadSource(env, ownerId, id);
-      if (!row) return null;
-
-      let folder = row.folder;
-      let folderId = row.folder_id;
-      if (input.folder !== undefined || input.folderId !== undefined) {
-        const resolved = await resolveFolderPath(env, ownerId, input);
-        if ("error" in resolved) return { error: resolved.error, status: 400 };
-        folder = resolved.folder;
-        folderId = resolved.folderId;
-      }
-
-      let schemaJson = row.schema_json;
-      if (input.schema !== undefined) {
-        const schema = parseArticleSchema(input.schema);
-        if ("error" in schema) return { error: schema.error, status: 400 };
-        schemaJson = JSON.stringify(schema);
-      }
-
-      const name = input.name !== undefined ? input.name.trim() : row.name;
-      if (!name) return { error: "name が必要です", status: 400 };
-
-      let webhookUrl = row.webhook_url;
-      if (input.webhookUrl !== undefined) {
-        webhookUrl = input.webhookUrl?.trim() || null;
-        if (webhookUrl && !isAllowedWebhookUrl(webhookUrl)) {
-          return {
-            error: "webhookUrl は https である必要があります",
-            status: 400,
-          };
-        }
-      }
-
-      let webhookAuthorization = row.webhook_authorization;
-      if (input.webhookAuthorization !== undefined) {
-        webhookAuthorization = input.webhookAuthorization?.trim() || null;
-      }
-
-      if (folder !== row.folder) {
-        const conflict = await db(env)
-          .prepare(
-            "SELECT id FROM article_sources WHERE owner_id = ? AND folder = ? AND id != ?",
-          )
-          .bind(ownerId, folder, id)
-          .first<{ id: string }>();
-        if (conflict) {
-          return {
-            error: "このディレクトリは既に登録されています",
-            status: 409,
-          };
-        }
-      }
-
-      const now = Date.now();
-      await db(env)
-        .prepare(
-          `UPDATE article_sources
-           SET folder = ?, folder_id = ?, name = ?, schema_json = ?,
-               webhook_url = ?, webhook_authorization = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .bind(
-          folder,
-          folderId,
-          name,
-          schemaJson,
-          webhookUrl,
-          webhookAuthorization,
-          now,
-          id,
-        )
-        .run();
-
-      const updated = await loadSource(env, ownerId, id);
-      return updated ? presentSource(updated) : null;
     },
 
     async deleteSource(ownerId: string, id: string): Promise<boolean> {
@@ -374,41 +392,21 @@ export function createArticleService(env: Env) {
       return result.meta.changes > 0;
     },
 
-    async status(ownerId: string): Promise<ArticleSourceStatus> {
-      const sources = await db(env)
-        .prepare(
-          "SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder",
-        )
-        .bind(ownerId)
-        .all<SourceRow>();
-      const items = [];
-      for (const row of sources.results ?? []) {
-        const maxUpdated = await maxNoteUpdatedAt(env, ownerId, row.folder);
-        items.push({
-          id: row.id,
-          name: row.name,
-          dirty: isArticleSourceDirty(row.last_dispatched_at, maxUpdated),
-        });
-      }
-      return {
-        dirty: items.some((item) => item.dirty),
-        sources: items,
-      };
-    },
-
     async dispatch(
       ownerId: string,
       id: string,
     ): Promise<{ ok: true } | { error: string; status: number } | null> {
       const row = await loadSource(env, ownerId, id);
-      if (!row) return null;
+      if (!row) {
+        return null;
+      }
       if (!row.webhook_url) {
         return { error: "Webhook URL が設定されていません", status: 400 };
       }
 
       const headers: Record<string, string> = {
-        "Content-Type": "application/json",
         Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
       };
       if (row.webhook_authorization) {
         headers.Authorization = row.webhook_authorization;
@@ -417,15 +415,15 @@ export function createArticleService(env: Env) {
       let response: Response;
       try {
         response = await fetch(row.webhook_url, {
-          method: "POST",
-          headers,
           body: JSON.stringify({
-            event_type: "miyulabmd-publish",
             client_payload: {
               collectionId: row.id,
               folder: row.folder,
             },
+            event_type: "miyulabmd-publish",
           }),
+          headers,
+          method: "POST",
         });
       } catch {
         return { error: "Webhook の送信に失敗しました", status: 502 };
@@ -447,6 +445,43 @@ export function createArticleService(env: Env) {
       return { ok: true };
     },
 
+    async getEntry(
+      ownerId: string,
+      id: string,
+      slug: string,
+      origin: string,
+    ): Promise<{ collection: ArticleCollection; entry: ArticleEntry } | null> {
+      const row = await loadSource(env, ownerId, id);
+      if (!row) {
+        return null;
+      }
+      const schema = parseSchemaJson(row.schema_json);
+      const note = await db(env)
+        .prepare(
+          `SELECT id, short_id, alias, title, folder, markdown_snapshot,
+                  article_meta, created_at, updated_at
+           FROM notes
+           WHERE owner_id = ? AND (alias = ? OR short_id = ?)`,
+        )
+        .bind(ownerId, slug, slug)
+        .first<NoteArticleRow>();
+      if (!(note && folderMatchesSource(row.folder, note.folder))) {
+        return null;
+      }
+      return {
+        collection: presentCollection(row),
+        entry: toEntry(note, schema, origin, true),
+      };
+    },
+
+    async getSource(
+      ownerId: string,
+      id: string,
+    ): Promise<ArticleSource | null> {
+      const row = await loadSource(env, ownerId, id);
+      return row ? presentSource(row) : null;
+    },
+
     async listCollections(ownerId: string): Promise<ArticleCollection[]> {
       const rows = await db(env)
         .prepare(
@@ -464,7 +499,9 @@ export function createArticleService(env: Env) {
       query: { page: number; perPage: number; folder: string | null },
     ): Promise<ArticleEntryPage | { error: string; status: number } | null> {
       const row = await loadSource(env, ownerId, id);
-      if (!row) return null;
+      if (!row) {
+        return null;
+      }
       const folder = resolveArticleListFolder(row.folder, query.folder);
       if (typeof folder !== "string") {
         return { error: folder.error, status: 400 };
@@ -496,38 +533,108 @@ export function createArticleService(env: Env) {
         entries: (notes.results ?? []).map((note) =>
           toEntry(note, schema, origin, false),
         ),
+        hasMore: offset + query.perPage < total,
         page: query.page,
         perPage: query.perPage,
         total,
-        hasMore: offset + query.perPage < total,
+      };
+    },
+    async listSources(ownerId: string): Promise<ArticleSource[]> {
+      const rows = await db(env)
+        .prepare(
+          "SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder",
+        )
+        .bind(ownerId)
+        .all<SourceRow>();
+      return (rows.results ?? []).map(presentSource);
+    },
+
+    async status(ownerId: string): Promise<ArticleSourceStatus> {
+      const sources = await db(env)
+        .prepare(
+          "SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder",
+        )
+        .bind(ownerId)
+        .all<SourceRow>();
+      const items: ArticleSourceStatus["sources"] = [];
+      for (const row of sources.results ?? []) {
+        const maxUpdated = await maxNoteUpdatedAt(env, ownerId, row.folder);
+        items.push({
+          dirty: isArticleSourceDirty(row.last_dispatched_at, maxUpdated),
+          id: row.id,
+          name: row.name,
+        });
+      }
+      return {
+        dirty: items.some((item) => item.dirty),
+        sources: items,
       };
     },
 
-    async getEntry(
+    async updateSource(
       ownerId: string,
       id: string,
-      slug: string,
-      origin: string,
-    ): Promise<{ collection: ArticleCollection; entry: ArticleEntry } | null> {
+      input: ArticleSourceWrite,
+    ): Promise<ArticleSource | { error: string; status: number } | null> {
       const row = await loadSource(env, ownerId, id);
-      if (!row) return null;
-      const schema = parseSchemaJson(row.schema_json);
-      const note = await db(env)
-        .prepare(
-          `SELECT id, short_id, alias, title, folder, markdown_snapshot,
-                  article_meta, created_at, updated_at
-           FROM notes
-           WHERE owner_id = ? AND (alias = ? OR short_id = ?)`,
-        )
-        .bind(ownerId, slug, slug)
-        .first<NoteArticleRow>();
-      if (!note || !folderMatchesSource(row.folder, note.folder)) {
+      if (!row) {
         return null;
       }
-      return {
-        collection: presentCollection(row),
-        entry: toEntry(note, schema, origin, true),
-      };
+
+      const folder = await resolveSourceFolderUpdate(env, ownerId, row, input);
+      if ("error" in folder) {
+        return folder;
+      }
+
+      const schema = resolveSourceSchemaUpdate(row, input);
+      if ("error" in schema) {
+        return schema;
+      }
+
+      const name = resolveSourceNameUpdate(row, input);
+      if ("error" in name) {
+        return name;
+      }
+
+      const webhook = resolveSourceWebhookUrlUpdate(row, input);
+      if ("error" in webhook) {
+        return webhook;
+      }
+
+      const webhookAuthorization = resolveSourceWebhookAuthUpdate(row, input);
+      const conflict = await sourceFolderConflict(
+        env,
+        ownerId,
+        id,
+        folder.folder,
+        row.folder,
+      );
+      if (conflict) {
+        return conflict;
+      }
+
+      const now = Date.now();
+      await db(env)
+        .prepare(
+          `UPDATE article_sources
+           SET folder = ?, folder_id = ?, name = ?, schema_json = ?,
+               webhook_url = ?, webhook_authorization = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .bind(
+          folder.folder,
+          folder.folderId,
+          name.name,
+          schema.schemaJson,
+          webhook.webhookUrl,
+          webhookAuthorization,
+          now,
+          id,
+        )
+        .run();
+
+      const updated = await loadSource(env, ownerId, id);
+      return updated ? presentSource(updated) : null;
     },
   };
 }
@@ -544,7 +651,9 @@ export async function rewriteArticleSourceFolders(
     .all<{ id: string; folder: string }>();
   for (const row of rows.results ?? []) {
     const next = rewriteFolderPrefix(row.folder, from, to);
-    if (next === null) continue;
+    if (next === null) {
+      continue;
+    }
     const rec = await getFolderByPath(env, ownerId, next);
     await db(env)
       .prepare(
@@ -565,7 +674,9 @@ export async function deleteArticleSourcesInFolder(
     .bind(ownerId)
     .all<{ id: string; folder: string }>();
   for (const row of rows.results ?? []) {
-    if (!folderMatchesSource(folder, row.folder)) continue;
+    if (!folderMatchesSource(folder, row.folder)) {
+      continue;
+    }
     await db(env)
       .prepare("DELETE FROM article_sources WHERE id = ?")
       .bind(row.id)

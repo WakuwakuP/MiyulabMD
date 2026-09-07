@@ -5,19 +5,23 @@ const CF_API = "https://api.cloudflare.com/client/v4";
 
 export function createCloudflare({ wranglerBin, wranglerArgs, workerDir }) {
   return {
-    wranglerBin,
-    wranglerArgs,
     workerDir,
 
     async wrangler(args, options = {}) {
-      return runCommand(this.wranglerBin, [...this.wranglerArgs, ...args], {
-        cwd: this.workerDir,
-        env: options.env,
-        inherit: options.inherit,
-        input: options.input,
-        allowFail: options.allowFail,
-      });
+      return await runCommand(
+        this.wranglerBin,
+        [...this.wranglerArgs, ...args],
+        {
+          allowFail: options.allowFail,
+          cwd: this.workerDir,
+          env: options.env,
+          inherit: options.inherit,
+          input: options.input,
+        },
+      );
     },
+    wranglerArgs,
+    wranglerBin,
 
     async wranglerJson(args, options = {}) {
       const result = await this.wrangler(args, options);
@@ -38,12 +42,12 @@ export async function cfApi(token, path, options = {}) {
   }
 
   const response = await fetch(url, {
-    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    method,
   });
 
   const payload = await response.json().catch(() => null);
@@ -91,7 +95,7 @@ export async function verifyToken(token) {
 }
 
 export async function listAccounts(token) {
-  return cfList(token, "/accounts");
+  return await cfList(token, "/accounts");
 }
 
 export async function ensureD1(token, accountId, name) {
@@ -105,8 +109,8 @@ export async function ensureD1(token, accountId, name) {
     };
   }
   const payload = await cfApi(token, `/accounts/${accountId}/d1/database`, {
-    method: "POST",
     body: { name },
+    method: "POST",
   });
   return { created: true, id: payload.result.uuid, name: payload.result.name };
 }
@@ -121,7 +125,7 @@ export async function listR2Buckets(token, accountId) {
     const page = payload.result?.buckets ?? [];
     buckets.push(...page);
     const next = payload.result_info?.cursor;
-    if (!payload.result_info?.is_truncated || !next) {
+    if (!(payload.result_info?.is_truncated && next)) {
       break;
     }
     cursor = next;
@@ -143,8 +147,8 @@ export async function ensureR2(token, accountId, name) {
     return { created: false, name };
   }
   await cfApi(token, `/accounts/${accountId}/r2/buckets`, {
-    method: "POST",
     body: { name },
+    method: "POST",
   });
   return { created: true, name };
 }
@@ -168,8 +172,8 @@ export async function ensureWorkersSubdomain(token, accountId, fallback) {
     token,
     `/accounts/${accountId}/workers/subdomain`,
     {
-      method: "PUT",
       body: { subdomain: fallback },
+      method: "PUT",
     },
   );
   return payload.result.subdomain;
@@ -180,7 +184,7 @@ export async function listZones(token, accountId) {
   let page = 1;
   for (;;) {
     const payload = await cfApi(token, "/zones", {
-      query: { page, per_page: 50, "account.id": accountId },
+      query: { "account.id": accountId, page, per_page: 50 },
     });
     const batch = Array.isArray(payload.result) ? payload.result : [];
     items.push(...batch);
@@ -206,8 +210,8 @@ export async function attachCustomDomain(
     return found;
   }
   const payload = await cfApi(token, `/accounts/${accountId}/workers/domains`, {
-    method: "PUT",
     body: { hostname, service, zone_id: zoneId },
+    method: "PUT",
   });
   return payload.result;
 }
@@ -239,19 +243,19 @@ export async function createAccessOrganization(
     token,
     `/accounts/${accountId}/access/organizations`,
     {
-      method: "POST",
       body: {
-        name,
         auth_domain: authDomain,
+        name,
         session_duration: "24h",
       },
+      method: "POST",
     },
   );
   return payload.result;
 }
 
 export async function listAccessApps(token, accountId) {
-  return cfList(token, `/accounts/${accountId}/access/apps`);
+  return await cfList(token, `/accounts/${accountId}/access/apps`);
 }
 
 function destinationUri(app) {
@@ -277,20 +281,20 @@ export async function ensureAccessApp(
   );
 
   const body = {
-    name: ACCESS_APP_NAME,
-    type: "self_hosted",
-    session_duration: "24h",
     app_launcher_visible: false,
     auto_redirect_to_identity: false,
     destinations: [{ type: "public", uri: destination }],
+    name: ACCESS_APP_NAME,
     policies: [
       {
-        name: "Allow MiyulabMD login",
         decision: "allow",
-        precedence: 1,
         include: includes,
+        name: "Allow MiyulabMD login",
+        precedence: 1,
       },
     ],
+    session_duration: "24h",
+    type: "self_hosted",
   };
 
   if (existing) {
@@ -298,42 +302,42 @@ export async function ensureAccessApp(
       const payload = await cfApi(
         token,
         `/accounts/${accountId}/access/apps/${existing.id}`,
-        { method: "PUT", body },
+        { body, method: "PUT" },
       );
-      return { created: false, app: payload.result };
+      return { app: payload.result, created: false };
     } catch {
-      return { created: false, app: existing };
+      return { app: existing, created: false };
     }
   }
 
   try {
     const payload = await cfApi(token, `/accounts/${accountId}/access/apps`, {
-      method: "POST",
       body,
+      method: "POST",
     });
-    return { created: true, app: payload.result };
+    return { app: payload.result, created: true };
   } catch {
     const payload = await cfApi(token, `/accounts/${accountId}/access/apps`, {
-      method: "POST",
       body: {
-        name: ACCESS_APP_NAME,
-        type: "self_hosted",
-        session_duration: "24h",
         app_launcher_visible: false,
         destinations: [{ type: "public", uri: destination }],
+        name: ACCESS_APP_NAME,
+        session_duration: "24h",
+        type: "self_hosted",
       },
+      method: "POST",
     });
     try {
       await cfApi(
         token,
         `/accounts/${accountId}/access/apps/${payload.result.id}/policies`,
         {
-          method: "POST",
           body: {
-            name: "Allow MiyulabMD login",
             decision: "allow",
             include: includes,
+            name: "Allow MiyulabMD login",
           },
+          method: "POST",
         },
       );
     } catch (policyError) {
@@ -341,7 +345,7 @@ export async function ensureAccessApp(
         `  Access ポリシーの追加に失敗しました: ${policyError.message}`,
       );
     }
-    return { created: true, app: payload.result };
+    return { app: payload.result, created: true };
   }
 }
 

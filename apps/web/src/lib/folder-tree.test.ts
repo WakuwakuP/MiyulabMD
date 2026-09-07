@@ -14,7 +14,7 @@ function folder(
   parentId: string | null,
   path: string,
 ): FolderRecord {
-  return { id, name, parentId, folder: path };
+  return { folder: path, id, name, parentId };
 }
 
 const tree = [

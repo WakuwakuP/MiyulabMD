@@ -1,7 +1,9 @@
 const BLOCK_PREFIX = /^(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|`{3,})/;
 
 export function escapeMarkdownBlockPrefix(text: string): string {
-  if (!BLOCK_PREFIX.test(text)) return text;
+  if (!BLOCK_PREFIX.test(text)) {
+    return text;
+  }
   return text
     .replace(
       /^(#{1,6})(\s)/,

@@ -50,6 +50,7 @@ import {
   escapeLikePattern,
   rewriteArticleSourceFolders,
 } from "./articles.ts";
+import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
 
@@ -83,9 +84,9 @@ function parseStoredScope(value: string | null): AccessScope | null {
 
 function accessFields(row: NoteRow): NoteAccessFields {
   return {
+    folder: row.folder ?? "",
     id: row.id,
     ownerId: row.owner_id,
-    folder: row.folder ?? "",
     readScope: parseStoredScope(row.read_scope),
     writeScope: parseStoredScope(row.write_scope),
   };
@@ -101,24 +102,26 @@ async function toNote(
   const folder = row.folder ?? "";
   const folderId = await ensureFolderRow(env, row.owner_id, folder);
   let visibleFolderId = isOwner ? folderId : null;
-  if (!isOwner && folderId) {
-    if (await folderDiscoveryAllowed(env, row.owner_id, folder, user)) {
-      visibleFolderId = folderId;
-    }
+  if (
+    !isOwner &&
+    folderId &&
+    (await folderDiscoveryAllowed(env, row.owner_id, folder, user))
+  ) {
+    visibleFolderId = folderId;
   }
   return {
-    id: row.id,
-    shortId: row.short_id,
+    access: isOwner ? access : { ...access, grants: [], sourceFolder: null },
     alias: row.alias,
-    ownerId: row.owner_id,
-    title: row.title,
-    folder: isOwner ? folder : "",
-    folderId: visibleFolderId,
-    permission: derivedPermission(access),
-    access: isOwner ? access : { ...access, sourceFolder: null, grants: [] },
-    markdown: row.markdown_snapshot,
     articleMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
     createdAt: row.created_at,
+    folder: isOwner ? folder : "",
+    folderId: visibleFolderId,
+    id: row.id,
+    markdown: row.markdown_snapshot,
+    ownerId: row.owner_id,
+    permission: derivedPermission(access),
+    shortId: row.short_id,
+    title: row.title,
     updatedAt: row.updated_at,
   };
 }
@@ -172,10 +175,7 @@ export async function persistMarkdownSnapshot(
     .run();
 }
 
-async function findNoteRow(
-  env: Env,
-  idOrShortId: string,
-): Promise<NoteRow | null> {
+function findNoteRow(env: Env, idOrShortId: string): Promise<NoteRow | null> {
   return db(env)
     .prepare(
       `SELECT ${NOTE_COLUMNS}
@@ -199,16 +199,19 @@ function rejectPublicWrite(
   return null;
 }
 
-function scopesFromInput(
-  env: Env,
-  input: {
-    inheritAccess?: boolean;
-    permission?: PermissionPreset;
-    readScope?: AccessScope | null;
-    writeScope?: AccessScope | null;
-  },
-  current?: { readScope: AccessScope | null; writeScope: AccessScope | null },
-):
+type ScopesInput = {
+  inheritAccess?: boolean;
+  permission?: PermissionPreset;
+  readScope?: AccessScope | null;
+  writeScope?: AccessScope | null;
+};
+
+type CurrentScopes = {
+  readScope: AccessScope | null;
+  writeScope: AccessScope | null;
+};
+
+type ScopesResult =
   | {
       inherit: true;
       readScope: null;
@@ -221,22 +224,88 @@ function scopesFromInput(
       writeScope: AccessScope;
       permission: PermissionPreset;
     }
-  | { error: string } {
-  if (input.inheritAccess === true) {
-    const fallback = defaultScopes(env);
+  | { error: string };
+
+function inheritedScopes(env: Env): Extract<ScopesResult, { inherit: true }> {
+  const fallback = defaultScopes(env);
+  return {
+    inherit: true,
+    permission: presetFromScopes(fallback.readScope, fallback.writeScope),
+    readScope: null,
+    writeScope: null,
+  };
+}
+
+function scopesFromPresetInput(
+  env: Env,
+  permission: PermissionPreset,
+): ScopesResult {
+  const scopes = scopesFromPreset(permission);
+  const denied = rejectPublicWrite(env, scopes.writeScope);
+  if (denied) {
+    return { error: denied };
+  }
+  return { inherit: false, ...scopes, permission };
+}
+
+function scopesFromCurrent(
+  env: Env,
+  current: CurrentScopes,
+): ScopesResult | null {
+  if (current.readScope === null && current.writeScope === null) {
+    return inheritedScopes(env);
+  }
+  if (current.readScope && current.writeScope) {
     return {
-      inherit: true,
-      readScope: null,
-      writeScope: null,
-      permission: presetFromScopes(fallback.readScope, fallback.writeScope),
+      inherit: false,
+      permission: presetFromScopes(current.readScope, current.writeScope),
+      readScope: current.readScope,
+      writeScope: current.writeScope,
     };
+  }
+  return null;
+}
+
+function scopesFromExplicit(
+  env: Env,
+  input: ScopesInput,
+  current?: CurrentScopes,
+): ScopesResult {
+  const fallback = defaultScopes(env);
+  const readScope =
+    (input.readScope === null ? null : input.readScope) ??
+    current?.readScope ??
+    fallback.readScope;
+  if (!readScope) {
+    return inheritedScopes(env);
+  }
+  const writeScope = clampWriteScope(
+    readScope,
+    input.writeScope ?? current?.writeScope ?? fallback.writeScope,
+  );
+  const denied = rejectPublicWrite(env, writeScope);
+  if (denied) {
+    return { error: denied };
+  }
+  return {
+    inherit: false,
+    permission: presetFromScopes(readScope, writeScope),
+    readScope,
+    writeScope,
+  };
+}
+
+function scopesFromInput(
+  env: Env,
+  input: ScopesInput,
+  current?: CurrentScopes,
+): ScopesResult {
+  if (input.inheritAccess === true) {
+    return inheritedScopes(env);
   }
 
   if (input.permission && isPermissionPreset(input.permission)) {
-    const scopes = scopesFromPreset(input.permission);
-    const denied = rejectPublicWrite(env, scopes.writeScope);
-    if (denied) return { error: denied };
-    return { inherit: false, ...scopes, permission: input.permission };
+    return scopesFromPresetInput(env, input.permission);
   }
 
   const wantsExplicit =
@@ -244,61 +313,18 @@ function scopesFromInput(
     input.readScope !== undefined ||
     input.writeScope !== undefined;
 
-  if (!wantsExplicit && !current) {
-    const fallback = defaultScopes(env);
-    return {
-      inherit: true,
-      readScope: null,
-      writeScope: null,
-      permission: presetFromScopes(fallback.readScope, fallback.writeScope),
-    };
+  if (!(wantsExplicit || current)) {
+    return inheritedScopes(env);
   }
 
   if (!wantsExplicit && current) {
-    if (current.readScope === null && current.writeScope === null) {
-      const fallback = defaultScopes(env);
-      return {
-        inherit: true,
-        readScope: null,
-        writeScope: null,
-        permission: presetFromScopes(fallback.readScope, fallback.writeScope),
-      };
-    }
-    if (current.readScope && current.writeScope) {
-      return {
-        inherit: false,
-        readScope: current.readScope,
-        writeScope: current.writeScope,
-        permission: presetFromScopes(current.readScope, current.writeScope),
-      };
+    const fromCurrent = scopesFromCurrent(env, current);
+    if (fromCurrent) {
+      return fromCurrent;
     }
   }
 
-  const fallback = defaultScopes(env);
-  const readScope =
-    (input.readScope === null ? null : input.readScope) ??
-    current?.readScope ??
-    fallback.readScope;
-  if (!readScope) {
-    return {
-      inherit: true,
-      readScope: null,
-      writeScope: null,
-      permission: presetFromScopes(fallback.readScope, fallback.writeScope),
-    };
-  }
-  const writeScope = clampWriteScope(
-    readScope,
-    input.writeScope ?? current?.writeScope ?? fallback.writeScope,
-  );
-  const denied = rejectPublicWrite(env, writeScope);
-  if (denied) return { error: denied };
-  return {
-    inherit: false,
-    readScope,
-    writeScope,
-    permission: presetFromScopes(readScope, writeScope),
-  };
+  return scopesFromExplicit(env, input, current);
 }
 
 async function resolveOwnerForCreate(
@@ -320,13 +346,13 @@ async function resolveOwnerForCreate(
     "Anonymous",
   );
   return {
-    id: anonymousOwner.id,
-    email: anonymousOwner.email,
     displayName: anonymousOwner.displayName,
+    email: anonymousOwner.email,
+    id: anonymousOwner.id,
   };
 }
 
-async function mergeNoteRows(rows: NoteRow[]): Promise<NoteRow[]> {
+function mergeNoteRows(rows: NoteRow[]): NoteRow[] {
   const map = new Map<string, NoteRow>();
   for (const row of rows) {
     map.set(row.id, row);
@@ -340,7 +366,7 @@ function buildFolderPrefixCondition(folders: string[]): {
 } {
   const unique = [...new Set(folders.filter(Boolean))];
   if (unique.length === 0) {
-    return { clause: "1=0", binds: [] };
+    return { binds: [], clause: "1=0" };
   }
 
   const parts: string[] = [];
@@ -350,7 +376,7 @@ function buildFolderPrefixCondition(folders: string[]): {
     binds.push(folder, `${escapeLikePattern(folder)}/%`);
   }
 
-  return { clause: `(${parts.join(" OR ")})`, binds };
+  return { binds, clause: `(${parts.join(" OR ")})` };
 }
 
 async function listGuestInheritedRowsFromPublicFolders(
@@ -426,7 +452,7 @@ async function listAccessibleRows(
     }
   }
 
-  const candidates = await mergeNoteRows([...(owned.results ?? []), ...extra]);
+  const candidates = mergeNoteRows([...(owned.results ?? []), ...extra]);
   // 親の共有設定より狭い範囲を指定したノートは一覧・検索に漏らさない。
   const visible = await Promise.all(
     candidates.map(async (row) => {
@@ -452,7 +478,7 @@ async function listGuestRows(env: Env): Promise<NoteRow[]> {
     listGuestInheritedRowsFromPublicFolders(env),
   ]);
 
-  const candidates = await mergeNoteRows([
+  const candidates = mergeNoteRows([
     ...(publicDirect.results ?? []),
     ...inheritedFromFolder,
   ]);
@@ -502,70 +528,200 @@ export type RenameFolderResult =
   | { kind: "denied"; status: 401 | 403 }
   | { kind: "invalid"; error: string; status: number };
 
+async function resolveCreateFolder(
+  env: Env,
+  ownerId: string,
+  input: CreateNoteInput,
+): Promise<{ folder: string } | { error: string; status: number }> {
+  let folder = normalizeFolder(input.folder);
+  if (input.folderId) {
+    const rec = await getFolderById(env, input.folderId);
+    if (!rec) {
+      return { error: "フォルダが見つかりません", status: 400 };
+    }
+    folder = rec.owner_id === ownerId ? rec.folder : "";
+  }
+  return { folder };
+}
+
+async function markdownForCreate(
+  env: Env,
+  ownerId: string,
+  folder: string,
+  input: CreateNoteInput,
+): Promise<string> {
+  let markdown =
+    input.markdown ?? defaultNoteMarkdown(input.title?.trim() || "無題");
+  const sources = await createArticleService(env).listSources(ownerId);
+  const source = matchArticleSource(folder, sources);
+  if (source) {
+    markdown = ensureArticleMarkdown(
+      markdown,
+      source.schema,
+      input.title?.trim() || "無題",
+    );
+  }
+  return markdown;
+}
+
+function mutateDenied(
+  env: Env,
+  ownerId: string,
+  flags: Note["access"]["flags"],
+  user: SessionUser | undefined,
+): { kind: "denied"; status: 401 | 403 } {
+  return {
+    kind: "denied",
+    status:
+      user === undefined
+        ? viewDeniedHttpStatus({ flags, ownerId }, undefined, env)
+        : 403,
+  };
+}
+
+function hasAdminMetaFields(input: UpdateNoteMetaInput): boolean {
+  return (
+    input.permission !== undefined ||
+    input.alias !== undefined ||
+    input.folder !== undefined ||
+    input.inheritAccess !== undefined ||
+    input.readScope !== undefined ||
+    input.writeScope !== undefined ||
+    input.grants !== undefined
+  );
+}
+
+function nextMetaValues(row: NoteRow, input: UpdateNoteMetaInput) {
+  return {
+    alias: input.alias === undefined ? row.alias : input.alias,
+    folder:
+      input.folder === undefined
+        ? (row.folder ?? "")
+        : normalizeFolder(input.folder),
+    title: input.title === undefined ? row.title : input.title.trim() || "無題",
+  };
+}
+
+async function replaceNoteGrantsIfNeeded(
+  env: Env,
+  row: NoteRow,
+  grants: UpdateNoteMetaInput["grants"],
+): Promise<{ error: string } | null> {
+  if (!grants) {
+    return null;
+  }
+  const replaced = await replaceGrants(
+    env,
+    row.owner_id,
+    "note",
+    row.id,
+    grants,
+  );
+  if ("error" in replaced) {
+    return { error: replaced.error };
+  }
+  return null;
+}
+
+function folderOwnerDenied(
+  ownerId: string,
+  user: SessionUser | undefined,
+): { kind: "denied"; status: 401 | 403 } | null {
+  if (!user || user.id !== ownerId) {
+    return { kind: "denied", status: user === undefined ? 401 : 403 };
+  }
+  return null;
+}
+
+async function deleteOwnedNotesInFolder(
+  env: Env,
+  ownerId: string,
+  folder: string,
+): Promise<void> {
+  const owned = await db(env)
+    .prepare(`SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?`)
+    .bind(ownerId)
+    .all<NoteRow>();
+  const images = createImageService(env);
+  for (const row of owned.results ?? []) {
+    if (!folderContains(folder, row.folder ?? "")) {
+      continue;
+    }
+    await images.deleteAllForNote(row.id);
+    await deleteRevisionsForNote(env, row.id);
+    await db(env)
+      .prepare(
+        "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+      )
+      .bind(row.id)
+      .run();
+    await db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id).run();
+  }
+}
+
+async function rewriteOwnedNoteFolders(
+  env: Env,
+  ownerId: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  const owned = await db(env)
+    .prepare("SELECT id, folder FROM notes WHERE owner_id = ?")
+    .bind(ownerId)
+    .all<{ id: string; folder: string }>();
+  for (const row of owned.results ?? []) {
+    const next = rewriteFolderPrefix(row.folder ?? "", from, to);
+    if (next === null) {
+      continue;
+    }
+    await db(env)
+      .prepare("UPDATE notes SET folder = ? WHERE id = ?")
+      .bind(next, row.id)
+      .run();
+  }
+}
+
+type FolderRecord = NonNullable<Awaited<ReturnType<typeof getFolderById>>>;
+
+async function validateRenameFolder(
+  env: Env,
+  rec: FolderRecord,
+  name: string,
+  user: SessionUser | undefined,
+): Promise<{ nextPath: string } | RenameFolderResult> {
+  const denied = folderOwnerDenied(rec.owner_id, user);
+  if (denied) {
+    return denied;
+  }
+  if (!rec.folder) {
+    return {
+      error: "マイドライブの名前は変更できません",
+      kind: "invalid",
+      status: 400,
+    };
+  }
+  const parent = parentFolderPath(rec.folder);
+  const nextPath = parent ? `${parent}/${name}` : name;
+  if (nextPath === rec.folder) {
+    return {
+      access: await resolveFolderAccess(env, rec.owner_id, rec.folder, user),
+      kind: "ok",
+    };
+  }
+  const conflict = await getFolderByPath(env, rec.owner_id, nextPath);
+  if (conflict) {
+    return {
+      error: "同じ名前のフォルダが既にあります",
+      kind: "invalid",
+      status: 409,
+    };
+  }
+  return { nextPath };
+}
+
 /** HTTP と MCP が共有するノートドメイン。 */
 export function createNoteService(env: Env) {
   return {
-    async listForUser(user: SessionUser): Promise<NoteSummary[]> {
-      const rows = await listAccessibleRows(env, user);
-      return Promise.all(rows.map((row) => toSummary(env, row, user)));
-    },
-
-    async listForGuest(): Promise<NoteSummary[]> {
-      const rows = await listGuestRows(env);
-      return Promise.all(rows.map((row) => toSummary(env, row, undefined)));
-    },
-
-    async searchForUser(
-      user: SessionUser,
-      query: string,
-    ): Promise<NoteSearchHit[]> {
-      const needle = query.trim().toLowerCase();
-      if (!needle) {
-        return [];
-      }
-
-      const rows = await listAccessibleRows(env, user);
-      const hits: NoteSearchHit[] = [];
-      for (const row of rows) {
-        const titleHit = row.title.toLowerCase().includes(needle);
-        const markdown = row.markdown_snapshot ?? "";
-        const markdownIndex = markdown.toLowerCase().indexOf(needle);
-        if (!titleHit && markdownIndex === -1) {
-          continue;
-        }
-        const summary = await toSummary(env, row, user);
-        hits.push({
-          ...summary,
-          snippet:
-            markdownIndex >= 0
-              ? excerptSnapshot(markdown, markdownIndex, needle.length)
-              : undefined,
-        });
-      }
-      return hits;
-    },
-
-    async get(idOrShortId: string, user?: SessionUser): Promise<GetNoteResult> {
-      const row = await findNoteRow(env, idOrShortId);
-      if (!row) {
-        return { kind: "not_found" };
-      }
-
-      const note = await toNote(env, row, user);
-      if (!note.access.flags.canView) {
-        return {
-          kind: "denied",
-          status: viewDeniedHttpStatus(
-            { ownerId: row.owner_id, flags: note.access.flags },
-            user?.id,
-            env,
-          ),
-        };
-      }
-
-      return { kind: "ok", note };
-    },
-
     async create(
       user: SessionUser | undefined,
       input: CreateNoteInput,
@@ -583,26 +739,13 @@ export function createNoteService(env: Env) {
       const now = Date.now();
       const id = crypto.randomUUID();
       const shortId = await generateUniqueShortId(env);
-      let folder = normalizeFolder(input.folder);
-      if (input.folderId) {
-        const rec = await getFolderById(env, input.folderId);
-        if (!rec) {
-          return { error: "フォルダが見つかりません", status: 400 };
-        }
-        folder = rec.owner_id === owner.id ? rec.folder : "";
+      const resolved = await resolveCreateFolder(env, owner.id, input);
+      if ("error" in resolved) {
+        return resolved;
       }
+      const folder = resolved.folder;
       await ensureFolderRow(env, owner.id, folder);
-      let markdown =
-        input.markdown ?? defaultNoteMarkdown(input.title?.trim() || "無題");
-      const sources = await createArticleService(env).listSources(owner.id);
-      const source = matchArticleSource(folder, sources);
-      if (source) {
-        markdown = ensureArticleMarkdown(
-          markdown,
-          source.schema,
-          input.title?.trim() || "無題",
-        );
-      }
+      const markdown = await markdownForCreate(env, owner.id, folder, input);
       const title = titleFromMarkdown(markdown);
 
       await db(env)
@@ -636,10 +779,39 @@ export function createNoteService(env: Env) {
       return toNote(env, row, user ?? owner);
     },
 
-    async updateMeta(
+    async get(idOrShortId: string, user?: SessionUser): Promise<GetNoteResult> {
+      const row = await findNoteRow(env, idOrShortId);
+      if (!row) {
+        return { kind: "not_found" };
+      }
+
+      const note = await toNote(env, row, user);
+      if (!note.access.flags.canView) {
+        return {
+          kind: "denied",
+          status: viewDeniedHttpStatus(
+            { flags: note.access.flags, ownerId: row.owner_id },
+            user?.id,
+            env,
+          ),
+        };
+      }
+
+      return { kind: "ok", note };
+    },
+
+    async listForGuest(): Promise<NoteSummary[]> {
+      const rows = await listGuestRows(env);
+      return Promise.all(rows.map((row) => toSummary(env, row, undefined)));
+    },
+    async listForUser(user: SessionUser): Promise<NoteSummary[]> {
+      const rows = await listAccessibleRows(env, user);
+      return Promise.all(rows.map((row) => toSummary(env, row, user)));
+    },
+
+    async remove(
       idOrShortId: string,
       user: SessionUser | undefined,
-      input: UpdateNoteMetaInput,
     ): Promise<MutateNoteResult> {
       const row = await findNoteRow(env, idOrShortId);
       if (!row) {
@@ -647,40 +819,13 @@ export function createNoteService(env: Env) {
       }
 
       const current = await toNote(env, row, user);
-      const flags = current.access.flags;
-
-      if (input.title !== undefined) {
-        if (!flags.canEdit) {
-          return {
-            kind: "denied",
-            status:
-              user === undefined
-                ? viewDeniedHttpStatus(
-                    { ownerId: row.owner_id, flags },
-                    undefined,
-                    env,
-                  )
-                : 403,
-          };
-        }
-      }
-
-      const adminFields =
-        input.permission !== undefined ||
-        input.alias !== undefined ||
-        input.folder !== undefined ||
-        input.inheritAccess !== undefined ||
-        input.readScope !== undefined ||
-        input.writeScope !== undefined ||
-        input.grants !== undefined;
-
-      if (adminFields && !flags.canAdmin) {
+      if (!current.access.flags.canAdmin) {
         return {
           kind: "denied",
           status:
             user === undefined
               ? viewDeniedHttpStatus(
-                  { ownerId: row.owner_id, flags },
+                  { flags: current.access.flags, ownerId: row.owner_id },
                   undefined,
                   env,
                 )
@@ -688,61 +833,109 @@ export function createNoteService(env: Env) {
         };
       }
 
-      const scopes = scopesFromInput(env, input, {
-        readScope: parseStoredScope(row.read_scope),
-        writeScope: parseStoredScope(row.write_scope),
-      });
-      if ("error" in scopes) {
-        return { kind: "bad_request", error: scopes.error };
-      }
-
-      const nextTitle =
-        input.title !== undefined ? input.title.trim() || "無題" : row.title;
-      const nextAlias = input.alias !== undefined ? input.alias : row.alias;
-      const nextFolder =
-        input.folder !== undefined
-          ? normalizeFolder(input.folder)
-          : (row.folder ?? "");
-      await ensureFolderRow(env, row.owner_id, nextFolder);
-
-      const now = Date.now();
+      await createImageService(env).deleteAllForNote(row.id);
+      await deleteRevisionsForNote(env, row.id);
       await db(env)
         .prepare(
-          `UPDATE notes
-           SET title = ?, folder = ?, permission = ?, alias = ?,
-               read_scope = ?, write_scope = ?, updated_at = ?
-           WHERE id = ?`,
+          "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
         )
-        .bind(
-          nextTitle,
-          nextFolder,
-          scopes.permission,
-          nextAlias,
-          scopes.readScope,
-          scopes.writeScope,
-          now,
-          row.id,
-        )
+        .bind(row.id)
         .run();
+      await db(env)
+        .prepare("DELETE FROM notes WHERE id = ?")
+        .bind(row.id)
+        .run();
+      return { kind: "ok", note: current };
+    },
 
-      if (input.grants) {
-        const replaced = await replaceGrants(
+    async removeFolder(
+      folderId: string,
+      user: SessionUser | undefined,
+    ): Promise<RemoveFolderResult> {
+      const rec = await getFolderById(env, folderId);
+      if (!rec) {
+        return { kind: "not_found" };
+      }
+      const denied = folderOwnerDenied(rec.owner_id, user);
+      if (denied) {
+        return denied;
+      }
+      if (!rec.folder) {
+        return { kind: "denied", status: 403 };
+      }
+
+      await deleteOwnedNotesInFolder(env, rec.owner_id, rec.folder);
+      await deleteArticleSourcesInFolder(env, rec.owner_id, rec.folder);
+      await deleteFolderTree(env, rec.owner_id, rec.folder);
+      return { kind: "ok" };
+    },
+
+    async renameFolder(
+      folderId: string,
+      name: string,
+      user: SessionUser | undefined,
+    ): Promise<RenameFolderResult> {
+      const rec = await getFolderById(env, folderId);
+      if (!rec) {
+        return { kind: "not_found" };
+      }
+      const validated = await validateRenameFolder(env, rec, name, user);
+      if (!("nextPath" in validated)) {
+        return validated;
+      }
+
+      await rewriteOwnedNoteFolders(
+        env,
+        rec.owner_id,
+        rec.folder,
+        validated.nextPath,
+      );
+      await renameFolderTree(env, rec.owner_id, rec.folder, validated.nextPath);
+      await rewriteArticleSourceFolders(
+        env,
+        rec.owner_id,
+        rec.folder,
+        validated.nextPath,
+      );
+      return {
+        access: await resolveFolderAccess(
           env,
-          row.owner_id,
-          "note",
-          row.id,
-          input.grants,
-        );
-        if ("error" in replaced) {
-          return { kind: "bad_request", error: replaced.error };
-        }
+          rec.owner_id,
+          validated.nextPath,
+          user,
+        ),
+        kind: "ok",
+      };
+    },
+
+    async searchForUser(
+      user: SessionUser,
+      query: string,
+    ): Promise<NoteSearchHit[]> {
+      const needle = query.trim().toLowerCase();
+      if (!needle) {
+        return [];
       }
 
-      const updated = await findNoteRow(env, row.id);
-      if (!updated) {
-        throw new Error("note update failed");
+      const rows = await listAccessibleRows(env, user);
+      const hits: NoteSearchHit[] = [];
+      for (const row of rows) {
+        const titleHit = row.title.toLowerCase().includes(needle);
+        const markdown = row.markdown_snapshot ?? "";
+        const markdownIndex = markdown.toLowerCase().indexOf(needle);
+        if (!titleHit && markdownIndex === -1) {
+          continue;
+        }
+        const summary = await toSummary(env, row, user);
+        hits.push({
+          ...summary,
+          snippet:
+            markdownIndex >= 0
+              ? excerptSnapshot(markdown, markdownIndex, needle.length)
+              : undefined,
+        });
       }
-      return { kind: "ok", note: await toNote(env, updated, user) };
+      return hits;
     },
 
     async updateMarkdown(
@@ -762,7 +955,7 @@ export function createNoteService(env: Env) {
           status:
             user === undefined
               ? viewDeniedHttpStatus(
-                  { ownerId: row.owner_id, flags: current.access.flags },
+                  { flags: current.access.flags, ownerId: row.owner_id },
                   undefined,
                   env,
                 )
@@ -786,9 +979,10 @@ export function createNoteService(env: Env) {
       return { kind: "ok", note: await toNote(env, updated, user) };
     },
 
-    async remove(
+    async updateMeta(
       idOrShortId: string,
       user: SessionUser | undefined,
+      input: UpdateNoteMetaInput,
     ): Promise<MutateNoteResult> {
       const row = await findNoteRow(env, idOrShortId);
       if (!row) {
@@ -796,145 +990,61 @@ export function createNoteService(env: Env) {
       }
 
       const current = await toNote(env, row, user);
-      if (!current.access.flags.canAdmin) {
-        return {
-          kind: "denied",
-          status:
-            user === undefined
-              ? viewDeniedHttpStatus(
-                  { ownerId: row.owner_id, flags: current.access.flags },
-                  undefined,
-                  env,
-                )
-              : 403,
-        };
+      const flags = current.access.flags;
+
+      if (input.title !== undefined && !flags.canEdit) {
+        return mutateDenied(env, row.owner_id, flags, user);
       }
 
-      await createImageService(env).deleteAllForNote(row.id);
+      if (hasAdminMetaFields(input) && !flags.canAdmin) {
+        return mutateDenied(env, row.owner_id, flags, user);
+      }
+
+      const scopes = scopesFromInput(env, input, {
+        readScope: parseStoredScope(row.read_scope),
+        writeScope: parseStoredScope(row.write_scope),
+      });
+      if ("error" in scopes) {
+        return { error: scopes.error, kind: "bad_request" };
+      }
+
+      const next = nextMetaValues(row, input);
+      await ensureFolderRow(env, row.owner_id, next.folder);
+
+      const now = Date.now();
       await db(env)
         .prepare(
-          "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+          `UPDATE notes
+           SET title = ?, folder = ?, permission = ?, alias = ?,
+               read_scope = ?, write_scope = ?, updated_at = ?
+           WHERE id = ?`,
         )
-        .bind(row.id)
+        .bind(
+          next.title,
+          next.folder,
+          scopes.permission,
+          next.alias,
+          scopes.readScope,
+          scopes.writeScope,
+          now,
+          row.id,
+        )
         .run();
-      await db(env)
-        .prepare("DELETE FROM notes WHERE id = ?")
-        .bind(row.id)
-        .run();
-      return { kind: "ok", note: current };
-    },
 
-    async removeFolder(
-      folderId: string,
-      user: SessionUser | undefined,
-    ): Promise<RemoveFolderResult> {
-      const rec = await getFolderById(env, folderId);
-      if (!rec) {
-        return { kind: "not_found" };
-      }
-      if (!user || user.id !== rec.owner_id) {
-        return { kind: "denied", status: user === undefined ? 401 : 403 };
-      }
-      if (!rec.folder) {
-        return { kind: "denied", status: 403 };
-      }
-
-      const owned = await db(env)
-        .prepare(`SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?`)
-        .bind(rec.owner_id)
-        .all<NoteRow>();
-      const images = createImageService(env);
-      for (const row of owned.results ?? []) {
-        if (!folderContains(rec.folder, row.folder ?? "")) continue;
-        await images.deleteAllForNote(row.id);
-        await db(env)
-          .prepare(
-            "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
-          )
-          .bind(row.id)
-          .run();
-        await db(env)
-          .prepare("DELETE FROM notes WHERE id = ?")
-          .bind(row.id)
-          .run();
-      }
-
-      await deleteArticleSourcesInFolder(env, rec.owner_id, rec.folder);
-      await deleteFolderTree(env, rec.owner_id, rec.folder);
-      return { kind: "ok" };
-    },
-
-    async renameFolder(
-      folderId: string,
-      name: string,
-      user: SessionUser | undefined,
-    ): Promise<RenameFolderResult> {
-      const rec = await getFolderById(env, folderId);
-      if (!rec) {
-        return { kind: "not_found" };
-      }
-      if (!user || user.id !== rec.owner_id) {
-        return { kind: "denied", status: user === undefined ? 401 : 403 };
-      }
-      if (!rec.folder) {
-        return {
-          kind: "invalid",
-          error: "マイドライブの名前は変更できません",
-          status: 400,
-        };
-      }
-
-      const parent = parentFolderPath(rec.folder);
-      const nextPath = parent ? `${parent}/${name}` : name;
-      if (nextPath === rec.folder) {
-        return {
-          kind: "ok",
-          access: await resolveFolderAccess(
-            env,
-            rec.owner_id,
-            rec.folder,
-            user,
-          ),
-        };
-      }
-
-      const conflict = await getFolderByPath(env, rec.owner_id, nextPath);
-      if (conflict) {
-        return {
-          kind: "invalid",
-          error: "同じ名前のフォルダが既にあります",
-          status: 409,
-        };
-      }
-
-      const owned = await db(env)
-        .prepare("SELECT id, folder FROM notes WHERE owner_id = ?")
-        .bind(rec.owner_id)
-        .all<{ id: string; folder: string }>();
-      for (const row of owned.results ?? []) {
-        const next = rewriteFolderPrefix(
-          row.folder ?? "",
-          rec.folder,
-          nextPath,
-        );
-        if (next === null) continue;
-        await db(env)
-          .prepare("UPDATE notes SET folder = ? WHERE id = ?")
-          .bind(next, row.id)
-          .run();
-      }
-
-      await renameFolderTree(env, rec.owner_id, rec.folder, nextPath);
-      await rewriteArticleSourceFolders(
+      const grantError = await replaceNoteGrantsIfNeeded(
         env,
-        rec.owner_id,
-        rec.folder,
-        nextPath,
+        row,
+        input.grants,
       );
-      return {
-        kind: "ok",
-        access: await resolveFolderAccess(env, rec.owner_id, nextPath, user),
-      };
+      if (grantError) {
+        return { error: grantError.error, kind: "bad_request" };
+      }
+
+      const updated = await findNoteRow(env, row.id);
+      if (!updated) {
+        throw new Error("note update failed");
+      }
+      return { kind: "ok", note: await toNote(env, updated, user) };
     },
   };
 }

@@ -51,8 +51,8 @@ test("readArticleFrontmatter reports unclosed and invalid YAML", () => {
 
 test("validateArticleDocument checks required fields and types", () => {
   const schema = [
-    { key: "title", type: "string" as const, required: true },
-    { key: "count", type: "number" as const, required: true },
+    { key: "title", required: true, type: "string" as const },
+    { key: "count", required: true, type: "number" as const },
   ];
   const missing = validateArticleDocument(schema, SAMPLE);
   assert.ok(missing.issues.some((issue) => issue.key === "count"));
@@ -70,7 +70,7 @@ test("validateArticleDocument checks required fields and types", () => {
 test("articleTemplateMarkdown and ensureArticleMarkdown insert YAML", () => {
   const schema = [
     { key: "title", type: "string" as const },
-    { key: "draft", type: "boolean" as const, default: false },
+    { default: false, key: "draft", type: "boolean" as const },
   ];
   const created = articleTemplateMarkdown(schema, "無題");
   assert.match(created, /^---\n/);
@@ -100,7 +100,7 @@ test("articleValuesEqual compares string arrays by contents", () => {
   assert.equal(articleValuesEqual(["a", "b"], ["a", "b"]), true);
   assert.equal(articleValuesEqual(["a"], ["b"]), false);
   const fixed = validateArticleDocument(
-    [{ key: "tags", type: "string[]", fixed: true, default: ["news"] }],
+    [{ default: ["news"], fixed: true, key: "tags", type: "string[]" }],
     "---\ntags:\n  - news\n---\n\n# A\n",
   );
   assert.deepEqual(fixed.issues, []);

@@ -40,7 +40,7 @@ export async function readSession(
     return null;
   }
 
-  return readSessionFromToken(token, env);
+  return await readSessionFromToken(token, env);
 }
 
 function cookieFlags(secure: boolean): string {
@@ -60,9 +60,9 @@ export async function createSessionToken(
     throw new Error("SESSION_SECRET is not configured");
   }
 
-  return new SignJWT({
-    email: user.email,
+  return await new SignJWT({
     displayName: user.displayName,
+    email: user.email,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
@@ -87,18 +87,14 @@ export async function readSessionFromToken(
 
     const id = typeof payload.sub === "string" ? payload.sub : null;
     const email = typeof payload.email === "string" ? payload.email : null;
-    if (!id || !email) {
+    if (!(id && email)) {
       return null;
     }
 
     const displayName =
-      payload.displayName === null
-        ? null
-        : typeof payload.displayName === "string"
-          ? payload.displayName
-          : null;
+      typeof payload.displayName === "string" ? payload.displayName : null;
 
-    return { id, email, displayName };
+    return { displayName, email, id };
   } catch {
     return null;
   }

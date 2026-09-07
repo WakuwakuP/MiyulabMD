@@ -31,14 +31,14 @@ const TABLE_TAGS = [
 
 const schema = {
   ...defaultSchema,
-  tagNames: [
-    ...(defaultSchema.tagNames ?? []),
-    "iframe",
-    "small",
-    ...TABLE_TAGS,
-  ],
   attributes: {
     ...defaultSchema.attributes,
+    a: ["href", "target", "rel", "className"],
+    code: ["className", "dataFilename"],
+    div: ["className"],
+    h1: ["id"],
+    h2: ["id"],
+    h3: ["id"],
     iframe: [
       "src",
       "title",
@@ -48,16 +48,16 @@ const schema = {
       "width",
       "height",
     ],
-    div: ["className"],
-    a: ["href", "target", "rel", "className"],
     img: ["src", "alt"],
-    span: ["className"],
     pre: ["className"],
-    code: ["className", "dataFilename"],
-    h1: ["id"],
-    h2: ["id"],
-    h3: ["id"],
+    span: ["className"],
   },
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    "iframe",
+    "small",
+    ...TABLE_TAGS,
+  ],
 };
 
 const processor = remark()

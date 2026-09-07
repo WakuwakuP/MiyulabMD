@@ -16,30 +16,37 @@ const tildeFenceInputRegex = /^~~~(\S*)[\s\n]$/;
 function fenceAttrs(info: string) {
   const parsed = parseFenceInfo(info);
   return {
-    language: highlightLanguage(parsed) || parsed.language || null,
     filename: parsed.filename,
+    language: highlightLanguage(parsed) || parsed.language || null,
   };
 }
 
 export const HighlightedCodeBlock = CodeBlockLowlight.extend({
-  addOptions() {
-    const parent = this.parent?.();
-    const options: CodeBlockLowlightOptions = {
-      languageClassPrefix: parent?.languageClassPrefix ?? "language-",
-      exitOnTripleEnter: parent?.exitOnTripleEnter ?? true,
-      exitOnArrowDown: parent?.exitOnArrowDown ?? true,
-      exitOnArrowUp: parent?.exitOnArrowUp ?? true,
-      defaultLanguage: parent?.defaultLanguage ?? null,
-      enableTabIndentation: parent?.enableTabIndentation ?? false,
-      tabSize: parent?.tabSize ?? 4,
-      HTMLAttributes: parent?.HTMLAttributes ?? {},
-      lowlight: codeBlockLowlight,
-    };
-    return options;
-  },
-
   addAttributes() {
     return {
+      filename: {
+        default: "",
+        parseHTML: (element) => {
+          const attr =
+            element.getAttribute("data-filename") ??
+            element
+              .querySelector("[data-filename]")
+              ?.getAttribute("data-filename");
+          if (attr) {
+            return attr;
+          }
+          const prefix = this.options.languageClassPrefix ?? "language-";
+          const classNames = [
+            ...(element.querySelector("code")?.classList ?? []),
+          ];
+          const raw =
+            classNames
+              .find((name) => name.startsWith(prefix))
+              ?.slice(prefix.length) ?? "";
+          return parseFenceInfo(raw).filename;
+        },
+        rendered: false,
+      },
       language: {
         default: this.options.defaultLanguage,
         parseHTML: (element) => {
@@ -55,35 +62,59 @@ export const HighlightedCodeBlock = CodeBlockLowlight.extend({
         },
         rendered: false,
       },
-      filename: {
-        default: "",
-        parseHTML: (element) => {
-          const attr =
-            element.getAttribute("data-filename") ??
-            element
-              .querySelector("[data-filename]")
-              ?.getAttribute("data-filename");
-          if (attr) return attr;
-          const prefix = this.options.languageClassPrefix ?? "language-";
-          const classNames = [
-            ...(element.querySelector("code")?.classList ?? []),
-          ];
-          const raw =
-            classNames
-              .find((name) => name.startsWith(prefix))
-              ?.slice(prefix.length) ?? "";
-          return parseFenceInfo(raw).filename;
-        },
-        rendered: false,
-      },
     };
+  },
+
+  addInputRules() {
+    return [
+      textblockTypeInputRule({
+        find: fenceInputRegex,
+        getAttributes: (match) => fenceAttrs(match[1] ?? ""),
+        type: this.type,
+      }),
+      textblockTypeInputRule({
+        find: tildeFenceInputRegex,
+        getAttributes: (match) => fenceAttrs(match[1] ?? ""),
+        type: this.type,
+      }),
+    ];
+  },
+  addOptions() {
+    const parent = this.parent?.();
+    const options: CodeBlockLowlightOptions = {
+      defaultLanguage: parent?.defaultLanguage ?? null,
+      enableTabIndentation: parent?.enableTabIndentation ?? false,
+      exitOnArrowDown: parent?.exitOnArrowDown ?? true,
+      exitOnArrowUp: parent?.exitOnArrowUp ?? true,
+      exitOnTripleEnter: parent?.exitOnTripleEnter ?? true,
+      HTMLAttributes: parent?.HTMLAttributes ?? {},
+      languageClassPrefix: parent?.languageClassPrefix ?? "language-",
+      lowlight: codeBlockLowlight,
+      tabSize: parent?.tabSize ?? 4,
+    };
+    return options;
+  },
+
+  parseMarkdown: (token, helpers) => {
+    if (
+      token.raw?.startsWith("```") === false &&
+      token.raw?.startsWith("~~~") === false &&
+      token.codeBlockStyle !== "indented"
+    ) {
+      return [];
+    }
+    return helpers.createNode(
+      "codeBlock",
+      fenceAttrs(typeof token.lang === "string" ? token.lang : ""),
+      token.text ? [helpers.createTextNode(token.text)] : [],
+    );
   },
 
   renderHTML({ node, HTMLAttributes }) {
     const filename = String(node.attrs.filename ?? "");
     const language = highlightLanguage({
-      language: String(node.attrs.language ?? ""),
       filename,
+      language: String(node.attrs.language ?? ""),
     });
     return [
       "div",
@@ -105,46 +136,18 @@ export const HighlightedCodeBlock = CodeBlockLowlight.extend({
     ];
   },
 
-  parseMarkdown: (token, helpers) => {
-    if (
-      token.raw?.startsWith("```") === false &&
-      token.raw?.startsWith("~~~") === false &&
-      token.codeBlockStyle !== "indented"
-    ) {
-      return [];
-    }
-    return helpers.createNode(
-      "codeBlock",
-      fenceAttrs(typeof token.lang === "string" ? token.lang : ""),
-      token.text ? [helpers.createTextNode(token.text)] : [],
-    );
-  },
-
   renderMarkdown: (node, helpers) => {
     const info = serializeFenceInfo({
-      language:
-        typeof node.attrs?.language === "string" ? node.attrs.language : "",
       filename:
         typeof node.attrs?.filename === "string" ? node.attrs.filename : "",
+      language:
+        typeof node.attrs?.language === "string" ? node.attrs.language : "",
     });
-    if (!node.content) return `\`\`\`${info}\n\n\`\`\``;
+    if (!node.content) {
+      return `\`\`\`${info}\n\n\`\`\``;
+    }
     return [`\`\`\`${info}`, helpers.renderChildren(node.content), "```"].join(
       "\n",
     );
-  },
-
-  addInputRules() {
-    return [
-      textblockTypeInputRule({
-        find: fenceInputRegex,
-        type: this.type,
-        getAttributes: (match) => fenceAttrs(match[1] ?? ""),
-      }),
-      textblockTypeInputRule({
-        find: tildeFenceInputRegex,
-        type: this.type,
-        getAttributes: (match) => fenceAttrs(match[1] ?? ""),
-      }),
-    ];
   },
 });

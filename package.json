@@ -3,25 +3,29 @@
   "private": true,
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "dev": "pnpm --filter @miyulabmd/web dev",
-    "dev:worker": "pnpm --filter @miyulabmd/worker dev",
-    "db:migrate": "pnpm --filter @miyulabmd/worker db:migrate",
     "build": "pnpm -r build",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint --fix .",
-    "format": "oxfmt --write .",
-    "format:check": "oxfmt --check .",
-    "check": "pnpm lint && pnpm format:check",
-    "check:fix": "pnpm lint:fix && pnpm format",
-    "setup:deploy": "node scripts/setup-deploy.mjs",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "db:migrate": "pnpm --filter @miyulabmd/worker db:migrate",
+    "dev": "node scripts/portless.mjs proxy start && mprocs",
+    "dev:web": "node scripts/portless.mjs miyulabmd pnpm --filter @miyulabmd/web dev",
+    "dev:worker": "node scripts/portless.mjs worker.miyulabmd pnpm --filter @miyulabmd/worker dev",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
     "licenses:check": "node scripts/check-licenses.mjs",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "setup:deploy": "node scripts/setup-deploy.mjs",
+    "storybook": "pnpm --filter @miyulabmd/web storybook",
     "test": "pnpm -r --if-present test && node --test scripts/setup-deploy/*.test.mjs scripts/check-licenses/*.test.mjs",
-    "typecheck": "pnpm -r typecheck",
-    "storybook": "pnpm --filter @miyulabmd/web storybook"
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
-    "oxfmt": "^0.66.0",
-    "oxlint": "^1.81.0"
+    "@biomejs/biome": "^2.5.12",
+    "@mizchi/lsmcp": "0.10.0",
+    "mprocs": "0.9.6",
+    "portless": "0.15.6",
+    "typescript": "7.0.2"
   },
   "packageManager": "pnpm@10.14.0"
 }

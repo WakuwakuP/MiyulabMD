@@ -7,21 +7,22 @@ import { HighlightedCodeBlock } from "./extensions/code-block.ts";
 
 function editorFor(markdown: string): Editor {
   return new Editor({
+    content: markdown,
+    contentType: "markdown",
     extensions: [
       StarterKit.configure({ codeBlock: false }),
       HighlightedCodeBlock,
       Markdown,
     ],
-    content: markdown,
-    contentType: "markdown",
   });
 }
 
 function codeAttrs(editor: Editor) {
   let attrs: Record<string, unknown> | null = null;
   editor.state.doc.descendants((node) => {
-    if (node.type.name === "codeBlock")
+    if (node.type.name === "codeBlock") {
       attrs = node.attrs as Record<string, unknown>;
+    }
   });
   assert.ok(attrs, "missing code block");
   return attrs;

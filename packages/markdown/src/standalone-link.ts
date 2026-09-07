@@ -4,7 +4,9 @@ const MD_LINK = /^\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)$/;
 export function standaloneLinkUrl(line: string): string | null {
   const trimmed = line.trim();
   const bare = BARE_URL.exec(trimmed);
-  if (bare?.[1]) return bare[1];
+  if (bare?.[1]) {
+    return bare[1];
+  }
   const md = MD_LINK.exec(trimmed);
   return md?.[2] ?? null;
 }
@@ -30,7 +32,9 @@ export function collectStandaloneLinkUrls(markdown: string): string[] {
   const urls = new Set<string>();
   mapLinesOutsideFences(markdown, (line) => {
     const url = standaloneLinkUrl(line);
-    if (url) urls.add(url);
+    if (url) {
+      urls.add(url);
+    }
     return line;
   });
   return [...urls];

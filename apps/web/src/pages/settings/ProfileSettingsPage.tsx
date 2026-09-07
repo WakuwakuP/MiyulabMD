@@ -48,18 +48,18 @@ export function ProfileSettingsPage() {
       </p>
       {user ? (
         <form onSubmit={(event) => void handleSave(event)}>
-          <Field label="表示名" htmlFor="display-name">
+          <Field htmlFor="display-name" label="表示名">
             <Row className="mt-[0.35rem] max-[640px]:flex-col">
               <Input
-                id="display-name"
                 className="flex-1"
-                type="text"
-                value={displayName}
+                disabled={saving}
+                id="display-name"
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder={user.email}
-                disabled={saving}
+                type="text"
+                value={displayName}
               />
-              <Button variant="outline" type="submit" disabled={saving}>
+              <Button disabled={saving} type="submit" variant="outline">
                 {saving ? "保存中…" : "保存"}
               </Button>
             </Row>

@@ -17,9 +17,9 @@ export function HeaderButton({
 }: Props) {
   return (
     <Button
-      variant={variant}
       aria-label={label}
       className={cn("max-[900px]:min-w-9 max-[900px]:px-2", className)}
+      variant={variant}
       {...props}
     >
       {icon}

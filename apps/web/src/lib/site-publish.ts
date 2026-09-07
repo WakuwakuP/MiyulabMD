@@ -5,6 +5,8 @@ export function matchingSiteSource<T extends { folder: string }>(
   folder: string | null | undefined,
   sources: T[],
 ): T | null {
-  if (folder == null) return null;
+  if (folder == null) {
+    return null;
+  }
   return matchArticleSource(folder, sources);
 }

@@ -4,8 +4,8 @@ import { Button } from "./Button.tsx";
 import { Modal, ModalFooter, ModalHeader } from "./Modal.tsx";
 
 const meta = {
-  title: "UI/Modal",
   tags: ["autodocs"],
+  title: "UI/Modal",
 } satisfies Meta;
 
 export default meta;
@@ -21,13 +21,13 @@ export const Basic: Story = {
           <Modal labelledBy="demo-modal-title" onClose={() => setOpen(false)}>
             <ModalHeader
               id="demo-modal-title"
-              title="ノートを削除"
               onClose={() => setOpen(false)}
+              title="ノートを削除"
             />
             <p className="m-0 text-muted">この操作は取り消せません。</p>
             <ModalFooter>
               <Button onClick={() => setOpen(false)}>キャンセル</Button>
-              <Button variant="danger" onClick={() => setOpen(false)}>
+              <Button onClick={() => setOpen(false)} variant="danger">
                 削除
               </Button>
             </ModalFooter>

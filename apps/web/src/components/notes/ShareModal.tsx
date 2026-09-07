@@ -64,12 +64,13 @@ export function ShareModal({
   function handleAdd(event: FormEvent) {
     event.preventDefault();
     const nextEmail = email.trim().toLowerCase();
-    if (!nextEmail || value.grants.some((grant) => grant.email === nextEmail))
+    if (!nextEmail || value.grants.some((grant) => grant.email === nextEmail)) {
       return;
+    }
     update({
       grants: [
         ...value.grants,
-        { email: nextEmail, userId: null, canWrite: false },
+        { canWrite: false, email: nextEmail, userId: null },
       ],
     });
     setEmail("");
@@ -87,7 +88,7 @@ export function ShareModal({
 
   return (
     <Modal labelledBy="share-modal-title" onClose={onClose}>
-      <ModalHeader id="share-modal-title" title="共有" onClose={onClose}>
+      <ModalHeader id="share-modal-title" onClose={onClose} title="共有">
         <p className="mt-[0.15rem] mb-0">{title}</p>
         {subtitle && <MutedText className="mt-[0.15rem]">{subtitle}</MutedText>}
       </ModalHeader>
@@ -95,10 +96,10 @@ export function ShareModal({
       {showInherit && (
         <CheckLabel className="mb-[0.85rem]">
           <input
-            type="checkbox"
             checked={value.inherit}
             disabled={disabled}
             onChange={(event) => update({ inherit: event.target.checked })}
+            type="checkbox"
           />
           {inheritLabel ?? "親の設定に従う"}
         </CheckLabel>
@@ -107,18 +108,18 @@ export function ShareModal({
       <form className="mb-[1.1rem]" onSubmit={handleAdd}>
         <Row className="max-[520px]:flex-col">
           <Input
-            variant="pill"
+            aria-label="共有するユーザーのメールアドレス"
             className="flex-1"
-            type="email"
-            value={email}
+            disabled={disabled || value.inherit}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="ユーザーを追加"
-            disabled={disabled || value.inherit}
-            aria-label="共有するユーザーのメールアドレス"
+            type="email"
+            value={email}
+            variant="pill"
           />
           <Button
-            type="submit"
             disabled={disabled || value.inherit || !email.trim()}
+            type="submit"
           >
             送信
           </Button>
@@ -130,8 +131,8 @@ export function ShareModal({
         <ul className="mb-4 list-none p-0">
           <li className="grid grid-cols-[2rem_minmax(0,1fr)_auto_auto] items-center gap-[0.65rem] py-[0.45rem] max-[520px]:grid-cols-[2rem_minmax(0,1fr)]">
             <Avatar
-              name={ownerLabel}
               color={colorForEmail(ownerLabel)}
+              name={ownerLabel}
               variant="soft"
             />
             <div>
@@ -142,12 +143,12 @@ export function ShareModal({
           </li>
           {value.grants.map((grant: AccessGrant) => (
             <li
-              key={grant.email}
               className="grid grid-cols-[2rem_minmax(0,1fr)_auto_auto] items-center gap-[0.65rem] py-[0.45rem] max-[520px]:grid-cols-[2rem_minmax(0,1fr)]"
+              key={grant.email}
             >
               <Avatar
-                name={grant.email}
                 color={colorForEmail(grant.email)}
+                name={grant.email}
                 variant="soft"
               />
               <div>
@@ -157,9 +158,8 @@ export function ShareModal({
                 </MutedText>
               </div>
               <Select
-                value={grant.canWrite ? "write" : "read"}
-                disabled={disabled || value.inherit}
                 aria-label={`${grant.email} の役割`}
+                disabled={disabled || value.inherit}
                 onChange={(event) =>
                   update({
                     grants: value.grants.map((item) =>
@@ -169,12 +169,12 @@ export function ShareModal({
                     ),
                   })
                 }
+                value={grant.canWrite ? "write" : "read"}
               >
                 <option value="read">閲覧者</option>
                 <option value="write">編集者</option>
               </Select>
               <button
-                type="button"
                 className="cursor-pointer border-0 bg-transparent text-muted disabled:cursor-default disabled:opacity-65"
                 disabled={disabled || value.inherit}
                 onClick={() =>
@@ -184,6 +184,7 @@ export function ShareModal({
                     ),
                   })
                 }
+                type="button"
               >
                 削除
               </button>
@@ -195,23 +196,21 @@ export function ShareModal({
       <section>
         <SectionTitle>一般的なアクセス</SectionTitle>
         <div className="flex gap-3 rounded-[10px] border border-border bg-surface p-[0.85rem]">
-          <span className="text-xl" aria-hidden>
-            {value.readScope === "public"
-              ? "🌐"
-              : value.readScope === "link"
-                ? "🔗"
-                : "🔒"}
+          <span aria-hidden={true} className="text-xl">
+            {value.readScope === "public" && "🌐"}
+            {value.readScope === "link" && "🔗"}
+            {value.readScope !== "public" && value.readScope !== "link" && "🔒"}
           </span>
           <div className="grid flex-1 gap-[0.45rem]">
             <label className="flex items-center justify-between gap-3">
               閲覧
               <Select
                 className={accessScopeSelectClass}
-                value={value.readScope}
                 disabled={disabled || value.inherit}
                 onChange={(event) =>
                   update({ readScope: event.target.value as AccessScope })
                 }
+                value={value.readScope}
               >
                 {ACCESS_SCOPES.map((scope) => (
                   <option key={scope} value={scope}>
@@ -224,11 +223,11 @@ export function ShareModal({
               編集
               <Select
                 className={accessScopeSelectClass}
-                value={value.writeScope}
                 disabled={disabled || value.inherit}
                 onChange={(event) =>
                   update({ writeScope: event.target.value as AccessScope })
                 }
+                value={value.writeScope}
               >
                 {writeOptions(value.readScope).map((scope) => (
                   <option key={scope} value={scope}>
@@ -247,10 +246,10 @@ export function ShareModal({
       {error && <ErrorText>{error}</ErrorText>}
 
       <ModalFooter>
-        <Button variant="ghost" onClick={() => void copyLink()}>
+        <Button onClick={() => void copyLink()} variant="ghost">
           {copied ? "コピーしました" : "リンクをコピー"}
         </Button>
-        <Button variant="accent" onClick={onClose}>
+        <Button onClick={onClose} variant="accent">
           {saving ? "保存中…" : "完了"}
         </Button>
       </ModalFooter>

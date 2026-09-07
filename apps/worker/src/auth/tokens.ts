@@ -27,10 +27,10 @@ function rowToSummary(row: {
   last_used_at: number | null;
 }): ApiTokenSummary {
   return {
-    id: row.id,
-    name: row.name,
     createdAt: row.created_at,
+    id: row.id,
     lastUsedAt: row.last_used_at,
+    name: row.name,
   };
 }
 
@@ -88,9 +88,9 @@ export async function authenticateBearer(
     .run();
 
   return {
-    id: row.user_id,
-    email: row.email,
     displayName: row.display_name,
+    email: row.email,
+    id: row.user_id,
   };
 }
 
@@ -140,10 +140,10 @@ export async function createTokenForUser(
     .run();
 
   return {
-    id,
-    name: trimmedName,
     createdAt: now,
+    id,
     lastUsedAt: null,
+    name: trimmedName,
     token: plaintext,
   };
 }

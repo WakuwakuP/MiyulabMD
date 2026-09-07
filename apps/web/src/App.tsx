@@ -15,19 +15,22 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<AppShell />}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/shared" element={<SharedPage />} />
-          <Route path="/shared-by-me" element={<SharedByMePage />} />
-          <Route path="/f/:folderId" element={<HomePage />} />
-          <Route path="/n/:id" element={<EditorPage />} />
-          <Route path="/s/:id" element={<SharePage />} />
-          <Route path="/settings" element={<SettingsLayout />}>
-            <Route index element={<Navigate to="profile" replace />} />
-            <Route path="profile" element={<ProfileSettingsPage />} />
-            <Route path="mcp" element={<McpSettingsPage />} />
-            <Route path="site" element={<SiteSettingsPage />} />
+          <Route element={<HomePage />} path="/" />
+          <Route element={<SharedPage />} path="/shared" />
+          <Route element={<SharedByMePage />} path="/shared-by-me" />
+          <Route element={<HomePage />} path="/f/:folderId" />
+          <Route element={<EditorPage />} path="/n/:id" />
+          <Route element={<SharePage />} path="/s/:id" />
+          <Route element={<SettingsLayout />} path="/settings">
+            <Route
+              element={<Navigate replace={true} to="profile" />}
+              index={true}
+            />
+            <Route element={<ProfileSettingsPage />} path="profile" />
+            <Route element={<McpSettingsPage />} path="mcp" />
+            <Route element={<SiteSettingsPage />} path="site" />
           </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route element={<Navigate replace={true} to="/" />} path="*" />
         </Route>
       </Routes>
     </BrowserRouter>

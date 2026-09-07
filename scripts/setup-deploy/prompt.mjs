@@ -11,17 +11,6 @@ export function createPrompt() {
       return answer || defaultValue;
     },
 
-    async confirm(question, defaultYes = true) {
-      const hint = defaultYes ? "Y/n" : "y/N";
-      const answer = (await rl.question(`${question} [${hint}]: `))
-        .trim()
-        .toLowerCase();
-      if (!answer) {
-        return defaultYes;
-      }
-      return answer === "y" || answer === "yes";
-    },
-
     async choose(question, options) {
       if (options.length === 0) {
         throw new Error("選択肢がありません");
@@ -43,17 +32,63 @@ export function createPrompt() {
       }
     },
 
+    close() {
+      rl.close();
+    },
+
+    async confirm(question, defaultYes = true) {
+      const hint = defaultYes ? "Y/n" : "y/N";
+      const answer = (await rl.question(`${question} [${hint}]: `))
+        .trim()
+        .toLowerCase();
+      if (!answer) {
+        return defaultYes;
+      }
+      return answer === "y" || answer === "yes";
+    },
+
     async secret(question) {
       rl.pause();
       const value = await readHidden(question);
       rl.resume();
       return value;
     },
-
-    close() {
-      rl.close();
-    },
   };
+}
+
+function applyHiddenChar(value, ch) {
+  if (ch === "\n" || ch === "\r") {
+    return { done: true, value: value.trim() };
+  }
+  if (ch === "\u0003") {
+    return { done: true, error: new Error("中断されました"), value: "" };
+  }
+  if (ch === "\u007f" || ch === "\b") {
+    return { value: value.slice(0, -1) };
+  }
+  if (ch >= " ") {
+    return { value: value + ch };
+  }
+  return { value };
+}
+
+function finishHiddenInput(
+  stdin,
+  wasRaw,
+  onData,
+  resolve,
+  reject,
+  result,
+  error,
+) {
+  stdin.setRawMode(wasRaw);
+  stdin.off("data", onData);
+  output.write("\n");
+  if (error) {
+    reject(error);
+    return;
+  }
+  resolve(result);
 }
 
 function readHidden(question) {
@@ -71,33 +106,21 @@ function readHidden(question) {
     stdin.setEncoding("utf8");
     let value = "";
 
-    const finish = (result, error) => {
-      stdin.setRawMode(wasRaw);
-      stdin.off("data", onData);
-      output.write("\n");
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(result);
-    };
-
     const onData = (chunk) => {
       for (const ch of chunk) {
-        if (ch === "\n" || ch === "\r") {
-          finish(value.trim());
+        const next = applyHiddenChar(value, ch);
+        value = next.value;
+        if (next.done) {
+          finishHiddenInput(
+            stdin,
+            wasRaw,
+            onData,
+            resolve,
+            reject,
+            next.value,
+            next.error,
+          );
           return;
-        }
-        if (ch === "\u0003") {
-          finish("", new Error("中断されました"));
-          return;
-        }
-        if (ch === "\u007f" || ch === "\b") {
-          value = value.slice(0, -1);
-          continue;
-        }
-        if (ch >= " ") {
-          value += ch;
         }
       }
     };

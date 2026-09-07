@@ -5,6 +5,7 @@ import {
   Eye,
   FileText,
   Folder,
+  History,
   Monitor,
   Moon,
   Pencil,
@@ -21,67 +22,76 @@ type IconProps = {
 };
 
 export function EyeIcon({ className }: IconProps) {
-  return <Eye aria-hidden className={cn("size-4", className)} />;
+  return <Eye aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function SunIcon({ className }: IconProps) {
-  return <Sun aria-hidden className={cn("size-4", className)} />;
+  return <Sun aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function MoonIcon({ className }: IconProps) {
-  return <Moon aria-hidden className={cn("size-4", className)} />;
+  return <Moon aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function BlackIcon({ className }: IconProps) {
   return (
-    <Circle aria-hidden className={cn("size-4 fill-current", className)} />
+    <Circle
+      aria-hidden={true}
+      className={cn("size-4 fill-current", className)}
+    />
   );
 }
 
 export function MonitorIcon({ className }: IconProps) {
-  return <Monitor aria-hidden className={cn("size-4", className)} />;
+  return <Monitor aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function PencilIcon({ className }: IconProps) {
-  return <Pencil aria-hidden className={cn("size-4", className)} />;
+  return <Pencil aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function ChevronDownIcon({ className }: IconProps) {
-  return <ChevronDown aria-hidden className={cn("size-3", className)} />;
+  return <ChevronDown aria-hidden={true} className={cn("size-3", className)} />;
 }
 
 export function CloseIcon({ className }: IconProps) {
-  return <X aria-hidden className={cn("size-4", className)} />;
+  return <X aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function MoreIcon({ className }: IconProps) {
-  return <EllipsisVertical aria-hidden className={cn("size-5", className)} />;
+  return (
+    <EllipsisVertical aria-hidden={true} className={cn("size-5", className)} />
+  );
 }
 
 export function FolderOutlineIcon({ className }: IconProps) {
-  return <Folder aria-hidden className={cn("size-4", className)} />;
+  return <Folder aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function PlusIcon({ className }: IconProps) {
-  return <Plus aria-hidden className={cn("size-4", className)} />;
+  return <Plus aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function ShareIcon({ className }: IconProps) {
-  return <Share2 aria-hidden className={cn("size-4", className)} />;
+  return <Share2 aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function HistoryIcon({ className }: IconProps) {
+  return <History aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function RefreshIcon({ className }: IconProps) {
-  return <RefreshCw aria-hidden className={cn("size-4", className)} />;
+  return <RefreshCw aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function ArticleIcon({ className }: IconProps) {
-  return <FileText aria-hidden className={cn("size-4", className)} />;
+  return <FileText aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function FolderIcon({ className }: IconProps) {
   return (
     <Folder
-      aria-hidden
+      aria-hidden={true}
       className={cn("size-[22px] shrink-0 text-folder", className)}
     />
   );
@@ -90,7 +100,7 @@ export function FolderIcon({ className }: IconProps) {
 export function MarkdownIcon({ className }: IconProps) {
   return (
     <FileText
-      aria-hidden
+      aria-hidden={true}
       className={cn("size-[22px] shrink-0 text-note", className)}
     />
   );

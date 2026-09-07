@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ErrorText, MutedText, SectionTitle } from "./Text.tsx";
 
 const meta = {
-  title: "UI/Text",
   tags: ["autodocs"],
+  title: "UI/Text",
 } satisfies Meta;
 
 export default meta;
