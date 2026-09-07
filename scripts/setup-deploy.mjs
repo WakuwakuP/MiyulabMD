@@ -15,6 +15,7 @@ import {
   ensureWorkersSubdomain,
   getAccessOrganization,
   isNotFound,
+  isR2NotEnabled,
   listAccounts,
   listIdentityProviders,
   listZones,
@@ -112,6 +113,33 @@ async function ensureDependencies(prompt) {
       cwd: REPO_ROOT,
       inherit: true,
     });
+  }
+}
+
+async function ensureR2WithGuidance(prompt, token, accountId, name) {
+  for (;;) {
+    try {
+      return await ensureR2(token, accountId, name);
+    } catch (error) {
+      if (!isR2NotEnabled(error)) {
+        throw error;
+      }
+      const url = `https://dash.cloudflare.com/${accountId}/r2/plans`;
+      logInfo(
+        "R2 がまだ有効化されていません。ダッシュボードで一度だけ有効化が必要です（無料枠あり）。",
+      );
+      logInfo(`  ${url}`);
+      if (
+        await prompt.confirm("ブラウザでダッシュボードを開きますか？", true)
+      ) {
+        await openUrl(url);
+      }
+      if (
+        !(await prompt.confirm("R2 を有効化しましたか？再試行します", true))
+      ) {
+        throw error;
+      }
+    }
   }
 }
 
@@ -670,7 +698,7 @@ function printCompletion({ account, names, d1, hostname, teamDomain, repo }) {
 `);
 }
 
-async function provisionStorage(cfToken, account, names) {
+async function provisionStorage(prompt, cfToken, account, names) {
   logStep(3, "D1 / R2");
   const d1 = await ensureD1(cfToken, account.id, names.d1Name);
   logInfo(
@@ -680,7 +708,12 @@ async function provisionStorage(cfToken, account, names) {
       `既存の D1 を使います: ${d1.name} (${d1.id})`,
     ),
   );
-  const r2 = await ensureR2(cfToken, account.id, names.r2Name);
+  const r2 = await ensureR2WithGuidance(
+    prompt,
+    cfToken,
+    account.id,
+    names.r2Name,
+  );
   logInfo(
     createdOrExisting(
       r2.created,
@@ -734,7 +767,7 @@ async function runInteractiveSetup(prompt) {
     wranglerEnv.CLOUDFLARE_API_TOKEN = durableToken;
   }
   const cfToken = setupToken;
-  const d1 = await provisionStorage(cfToken, account, names);
+  const d1 = await provisionStorage(prompt, cfToken, account, names);
   const { hostname, customHostname, customZone } = await resolvePublicHost(
     prompt,
     cfToken,
