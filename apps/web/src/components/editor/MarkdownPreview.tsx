@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import { loadOgCards, renderMarkdownHtml } from "../../lib/markdown.ts";
+import { useTaskCheckboxes } from "../../lib/task-checkboxes.ts";
 import {
   documentPaneScrollClass,
   documentProseClass,
@@ -13,6 +14,7 @@ type Props = {
   onScrollRatio?: (ratio: number) => void;
   className?: string;
   documentScroll?: boolean;
+  taskNoteId?: string;
 };
 
 function scrollRatioFrom(el: HTMLElement): number {
@@ -26,7 +28,9 @@ export function MarkdownPreview({
   onScrollRatio,
   className,
   documentScroll = false,
+  taskNoteId,
 }: Props) {
+  const articleRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const applyingScroll = useRef(false);
   const deferredMarkdown = useDeferredValue(markdown);
@@ -59,7 +63,15 @@ export function MarkdownPreview({
   }, [markdown]);
 
   const html = enhanced?.md === markdown ? enhanced.html : rendered.html;
+  // Keep React from replacing imperatively updated checkboxes on unrelated renders.
+  const innerHtml = useMemo(() => ({ __html: html }), [html]);
   const error = rendered.error;
+  const taskUpdates = useTaskCheckboxes(
+    articleRef,
+    html,
+    deferredMarkdown,
+    taskNoteId,
+  );
 
   useEffect(() => {
     if (documentScroll) {
@@ -118,11 +130,38 @@ export function MarkdownPreview({
   }
 
   const article = (
-    <article
-      className={columnClass}
-      // HTML は rehype-sanitize 済み。
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <>
+      <article
+        className={columnClass}
+        // HTML は rehype-sanitize 済み。
+        dangerouslySetInnerHTML={innerHtml}
+        ref={articleRef}
+      />
+      {taskUpdates.error && (
+        <div
+          className="fixed right-4 bottom-4 z-50 max-w-sm rounded-lg border border-border bg-surface p-4 text-ink shadow-lg"
+          role="alert"
+        >
+          <p className="m-0 mb-3">{taskUpdates.error}</p>
+          <div className="flex justify-end gap-4">
+            <button
+              className="cursor-pointer text-muted"
+              onClick={taskUpdates.dismissError}
+              type="button"
+            >
+              閉じる
+            </button>
+            <button
+              className="cursor-pointer text-accent"
+              onClick={() => window.location.reload()}
+              type="button"
+            >
+              再読み込み
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 
   if (documentScroll) {
