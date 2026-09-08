@@ -17,6 +17,10 @@ import {
   normalizeEmbedMarkdown,
   type OgPreview,
 } from "./embeds.ts";
+import {
+  rehypeTaskCheckboxes,
+  remarkTaskCheckboxes,
+} from "./task-list-render.ts";
 
 const TABLE_TAGS = [
   "table",
@@ -63,6 +67,7 @@ const schema = {
 const processor = remark()
   .use(remarkGfm)
   .use(remarkFenceInfo)
+  .use(remarkTaskCheckboxes)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeRaw)
   .use(rehypeCodeFilename)
@@ -70,6 +75,7 @@ const processor = remark()
   .use(rehypeCodeFilenameWrap)
   .use(rehypeSlug)
   .use(rehypeSanitize, schema)
+  .use(rehypeTaskCheckboxes)
   .use(rehypeStringify);
 
 /** Sync HTML for View / Worker SSR. Does not fetch OGP. */
@@ -81,5 +87,7 @@ export function renderMarkdownHtml(
     normalizeEmbedMarkdown(markdownBody(markdown)),
     cards,
   );
-  return String(processor.processSync(expanded));
+  return String(
+    processor.processSync({ data: { taskSource: markdown }, value: expanded }),
+  );
 }

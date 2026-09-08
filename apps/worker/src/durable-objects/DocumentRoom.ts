@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import type { TaskCheckboxUpdate } from "@miyulabmd/markdown";
 import type { NoteHistoryActor } from "@miyulabmd/shared";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -46,6 +47,7 @@ import {
   planInsert,
   planReplace,
 } from "./markdown-edit.ts";
+import { applyTaskCheckbox } from "./task-checkbox.ts";
 
 /** y-websocket 互換のトップレベルメッセージ種別。 */
 const MESSAGE_SYNC = 0;
@@ -293,6 +295,35 @@ export class DocumentRoom extends DurableObject<Env> {
   async getMarkdown(noteId?: string): Promise<string> {
     await this.ensureInitialized(noteId);
     return this.requireDoc().getText("markdown").toString();
+  }
+
+  async updateTaskCheckbox(
+    noteId: string,
+    input: TaskCheckboxUpdate,
+    actor: NoteHistoryActor,
+  ) {
+    await this.ensureInitialized(noteId);
+    const doc = this.requireDoc();
+    const result = await applyTaskCheckbox(doc.getText("markdown"), input);
+    if (!result.ok) {
+      return result;
+    }
+    const markdown = doc.getText("markdown").toString();
+    // Acknowledge only after durable storage; the normal Yjs update broadcasts to editors.
+    await this.persistYjsState(doc);
+    await this.flushSnapshotToD1();
+    if (result.changed) {
+      const session = sessionFromApplyEdit(
+        actor,
+        { anchor: result.offset, head: result.offset + 1 },
+        "replace",
+        Date.now(),
+      );
+      await this.persistHistorySession(session, markdown).catch(
+        () => undefined,
+      );
+    }
+    return { checked: result.checked, ok: true as const };
   }
 
   /** 最新本文を返し、エージェントのカーソルを出す。 */

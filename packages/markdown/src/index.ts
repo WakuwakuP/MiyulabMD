@@ -25,3 +25,10 @@ export {
   mapLinesOutsideFences,
   standaloneLinkUrl,
 } from "./standalone-link.ts";
+export {
+  collectTaskCheckboxes,
+  isTaskCheckboxUpdate,
+  type TaskCheckbox,
+  type TaskCheckboxUpdate,
+  taskContextHash,
+} from "./task-list.ts";

@@ -177,6 +177,12 @@ export function bindEditorCollab(input: {
     return;
   }
   if (input.viewMode === "preview") {
+    teardownCollab(
+      input.unbindRef,
+      input.sessionRef,
+      input.setCollab,
+      input.setCollabReady,
+    );
     return;
   }
   if (input.sessionRef.current) {
