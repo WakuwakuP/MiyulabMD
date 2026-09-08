@@ -115,14 +115,22 @@ function EditorPreviewPane({
   markdown,
   splitScroll,
   onSplitScroll,
+  taskNoteId,
 }: {
   viewMode: EditorMode;
   markdown: string;
   splitScroll: number;
   onSplitScroll: (ratio: number) => void;
+  taskNoteId?: string;
 }) {
   if (viewMode === "preview") {
-    return <PreviewWithToc documentScroll={true} markdown={markdown} />;
+    return (
+      <PreviewWithToc
+        documentScroll={true}
+        markdown={markdown}
+        taskNoteId={taskNoteId}
+      />
+    );
   }
   return (
     <MarkdownPreview
@@ -278,6 +286,7 @@ function EditorWorkspace({
             markdown={markdown}
             onSplitScroll={onSplitScroll}
             splitScroll={splitScroll}
+            taskNoteId={canEdit ? note.id : undefined}
             viewMode={viewMode}
           />
         )}

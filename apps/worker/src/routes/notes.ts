@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { isTaskCheckboxUpdate } from "@miyulabmd/markdown";
 import {
   type CreateNoteInput,
   NOTE_RESTORE_MESSAGE,
@@ -217,6 +218,36 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
     }
 
     return result.note;
+  })
+  .patch("/:id/task-checkbox", async ({ request, params, set }) => {
+    const user = await readSession(request, env);
+    const result = await notes.get(params.id, user ?? undefined);
+    if (result.kind !== "ok") {
+      return mutateResultError(set, result);
+    }
+    if (!result.note.access.flags.canEdit) {
+      set.status = user ? 403 : 401;
+      return { error: user ? "Forbidden" : "Unauthorized" };
+    }
+    const body = await parseJsonBody<unknown>(request);
+    if (!isTaskCheckboxUpdate(body)) {
+      set.status = 400;
+      return { error: "Invalid task checkbox update" };
+    }
+    const applied = await documentRoom(result.note.id).updateTaskCheckbox(
+      result.note.id,
+      body,
+      actorFromSessionUser(user ?? null),
+    );
+    if (!applied.ok) {
+      set.status = 409;
+      return {
+        error:
+          "本文が変更されています。再読み込みしてからチェック状態を更新してください。",
+        ok: false,
+      };
+    }
+    return applied;
   })
   .patch("/:id", async ({ request, params, set }) => {
     const user = await readSession(request, env);

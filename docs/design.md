@@ -454,6 +454,7 @@ Cursor 側の設定例:
 | `POST`   | `/api/notes`                     | ログイン（または `ALLOW_ANONYMOUS`）          |
 | `GET`    | `/api/notes/:id`                 | `canView`                                     |
 | `PATCH`  | `/api/notes/:id`                 | メタは `canAdmin`、title は `canEdit`         |
+| `PATCH`  | `/api/notes/:id/task-checkbox`   | `canEdit`。GFM タスクのチェック文字だけ更新 |
 | `DELETE` | `/api/notes/:id`                 | `canAdmin`                                    |
 | `POST`   | `/api/notes/:id/collaborators`   | `canAdmin`                                    |
 | `POST`   | `/api/notes/:id/images`          | `canEdit`                                     |
@@ -475,7 +476,11 @@ Cursor 側の設定例:
 - `/s/:id` 読み取り専用プレビュー
 - `/settings` プロフィール表示、PAT 発行
 
-エディタは Markdown ソースを共同編集の対象にする。ソースは `y-codemirror`、リッチは Markdown 文字列の差分を同じ `Y.Text("markdown")` に適用する。プレビューはローカルの Y.Text を購読して再描画する。画像ペーストは編集権限があるときだけ upload API を呼ぶ。
+エディタは Markdown ソースを共同編集の対象にする。ソースは `y-codemirror`、リッチは Markdown 文字列の差分を同じ `Y.Text("markdown")` に適用する。Edit 内のプレビューはローカルの Y.Text を購読して再描画する。View は編集セッションへ接続せず、Edit から戻ると接続を閉じて表示内容を固定する。画像ペーストは編集権限があるときだけ upload API を呼ぶ。
+
+View の GFM タスクは `canEdit` があるときだけチェック状態を操作できる。`PATCH /api/notes/:id/task-checkbox` に `{ line, contextHash, checked }` を送り、成功時は `{ ok: true, checked }` のみを返す。`line` は frontmatter を含む元 Markdown の 1 始まりの行番号。`contextHash` は実際の GFM タスクのチェック文字を空白に揃えた全文の SHA-256 とする。チェック状態以外の本文変更（重複行の挿入も含む）があれば 409 を返し、View は表示を戻して再読み込みボタン付きのポップアップを出す。チェック状態だけの他者更新は競合扱いせず、`checked` の指定状態にするため同一リクエストの再送でも反転しない。
+
+更新は DocumentRoom の最新 Y.Text を検証し、ハッシュ計算中の変更がないことを再確認してから、待機を挟まずチェック文字 1 文字だけを置換する。既存の Yjs 更新経路で Edit 側へ配信し、Yjs と D1 の保存後に応答する。操作は編集履歴にも記録する。View は応答されたチェック状態のみ反映し、他の本文や他のチェック状態をリアルタイム購読しない。コードブロック・生 HTML・frontmatter のチェックボックス風テキストは対象外。
 
 ## 13. ディレクトリ構成
 

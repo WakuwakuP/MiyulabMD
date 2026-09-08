@@ -1,3 +1,4 @@
+import type { TaskCheckboxUpdate } from "@miyulabmd/markdown";
 import type {
   AccessGrantInput,
   AccessScope,
@@ -82,6 +83,22 @@ export async function fetchNote(id: string): Promise<ApiResult<Note>> {
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as Note, ok: true };
+}
+
+export async function updateTaskCheckbox(
+  id: string,
+  input: TaskCheckboxUpdate,
+): Promise<ApiResult<{ ok: true; checked: boolean }>> {
+  const res = await fetch(`/api/notes/${id}/task-checkbox`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: await res.json(), ok: true };
 }
 
 export async function fetchNoteHistory(

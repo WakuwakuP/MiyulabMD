@@ -18,6 +18,7 @@ type Props = {
   scrollRatio?: number;
   onScrollRatio?: (ratio: number) => void;
   documentScroll?: boolean;
+  taskNoteId?: string;
 };
 
 function TocNav({ entries }: { entries: TocEntry[] }) {
@@ -65,6 +66,7 @@ export function PreviewWithToc({
   scrollRatio,
   onScrollRatio,
   documentScroll = true,
+  taskNoteId,
 }: Props) {
   const layoutRef = useRef<HTMLDivElement>(null);
   const [showToc, setShowToc] = useState(false);
@@ -112,6 +114,7 @@ export function PreviewWithToc({
           markdown={markdown}
           onScrollRatio={onScrollRatio}
           scrollRatio={scrollRatio}
+          taskNoteId={taskNoteId}
         />
       </div>
       {showToc && entries.length > 0 && (
