@@ -17,6 +17,7 @@ import type { CollabAwareness } from "../../lib/collaboration.ts";
 import {
   canonicalizeEditorMarkdown,
   normalizeEmbedMarkdown,
+  youtubeId,
 } from "../../lib/embeds.ts";
 import {
   buildOffsetMap,
@@ -343,7 +344,12 @@ export function RichMarkdownEditor({
       }),
       Markdown,
       Image,
-      Youtube.configure({
+      Youtube.extend({
+        renderMarkdown: (node) => {
+          const src = typeof node.attrs?.src === "string" ? node.attrs.src : "";
+          return src;
+        },
+      }).configure({
         controls: true,
         height: 360,
         nocookie: true,
@@ -453,6 +459,10 @@ export function RichMarkdownEditor({
 
   async function insertStandaloneLink(url: string) {
     if (!editor) {
+      return;
+    }
+    if (youtubeId(url)) {
+      editor.chain().focus().setYoutubeVideo({ src: url }).run();
       return;
     }
     await fetchOgPreview(url);
