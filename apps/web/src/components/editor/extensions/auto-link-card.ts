@@ -2,7 +2,7 @@ import { Extension } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
-import { youtubeId } from "../../../lib/embeds.ts";
+import { youtubeId, youtubeStartSeconds } from "../../../lib/embeds.ts";
 import { standaloneLinkUrl } from "../../../lib/standalone-link.ts";
 
 const INVISIBLE = /\u200B|\u200C|\uFEFF/g;
@@ -92,7 +92,10 @@ function embedNodeForHref(state: EditorState, href: string): PMNode | null {
   if (youtubeId(href)) {
     const youtube = state.schema.nodes.youtube;
     if (youtube) {
-      return youtube.create({ src: href });
+      return youtube.create({
+        src: href,
+        start: youtubeStartSeconds(href),
+      });
     }
   }
   const ogType = state.schema.nodes.ogCard;

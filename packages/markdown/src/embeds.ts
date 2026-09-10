@@ -57,13 +57,55 @@ export function youtubeId(url: string): string | null {
   }
 }
 
+function parseYoutubeTime(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 0;
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)$/.exec(trimmed);
+  if (!match || match[0] === "") {
+    return 0;
+  }
+  return (
+    Number(match[1] ?? 0) * 3600 +
+    Number(match[2] ?? 0) * 60 +
+    Number(match[3] ?? 0)
+  );
+}
+
+export function youtubeStartSeconds(url: string): number {
+  try {
+    const parsed = new URL(url);
+    const fromQuery =
+      parsed.searchParams.get("start") ?? parsed.searchParams.get("t") ?? "";
+    if (fromQuery) {
+      return parseYoutubeTime(fromQuery);
+    }
+    const hash = /^#t=(.+)$/.exec(parsed.hash);
+    return hash?.[1] ? parseYoutubeTime(hash[1]) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function youtubeEmbedUrl(url: string): string | null {
   const id = youtubeId(url);
-  return id ? `https://www.youtube-nocookie.com/embed/${id}` : null;
+  if (!id) {
+    return null;
+  }
+  const start = youtubeStartSeconds(url);
+  const base = `https://www.youtube-nocookie.com/embed/${id}`;
+  return start > 0 ? `${base}?start=${start}` : base;
 }
 
 function youtubeBlock(url: string): string {
-  return `:::youtube {src="${url}"} :::`;
+  const start = youtubeStartSeconds(url);
+  return start > 0
+    ? `:::youtube {src="${url}" start="${start}"} :::`
+    : `:::youtube {src="${url}"} :::`;
 }
 
 function ogCardBlock(url: string): string {

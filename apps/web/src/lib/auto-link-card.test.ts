@@ -31,7 +31,7 @@ const TestOgCard = Node.create({
 
 const TestYoutube = Node.create({
   addAttributes() {
-    return { src: { default: "" } };
+    return { src: { default: "" }, start: { default: 0 } };
   },
   atom: true,
   group: "block",
@@ -163,11 +163,24 @@ test("autoLinkCardTransaction embeds a standalone YouTube URL", () => {
   editor.view.dispatch(tr);
   assert.equal(editor.state.doc.child(0).type.name, "youtube");
   assert.equal(editor.state.doc.child(0).attrs.src, href);
+  assert.equal(editor.state.doc.child(0).attrs.start, 0);
+  editor.destroy();
+});
+
+test("autoLinkCardTransaction keeps a YouTube start time", () => {
+  const href = "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=12s";
+  const editor = cardEditor(href);
+  const tr = autoLinkCardTransaction(editor.state, true);
+  assert.ok(tr);
+  editor.view.dispatch(tr);
+  assert.equal(editor.state.doc.child(0).type.name, "youtube");
+  assert.equal(editor.state.doc.child(0).attrs.src, href);
+  assert.equal(editor.state.doc.child(0).attrs.start, 12);
   editor.destroy();
 });
 
 test("youtube node reloads from a URL and serializes back to a URL", () => {
-  const href = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
+  const href = "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=12s";
   const editor = new Editor({
     content: normalizeEmbedMarkdown(href),
     contentType: "markdown",
@@ -182,6 +195,7 @@ test("youtube node reloads from a URL and serializes back to a URL", () => {
   });
   assert.equal(editor.state.doc.child(0).type.name, "youtube");
   assert.equal(editor.state.doc.child(0).attrs.src, href);
+  assert.equal(Number(editor.state.doc.child(0).attrs.start), 12);
   assert.equal(canonicalizeEditorMarkdown(editor.getMarkdown()), href);
   editor.destroy();
 });

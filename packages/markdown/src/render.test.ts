@@ -56,6 +56,13 @@ test("renderMarkdownHtml embeds a standalone YouTube URL", () => {
   assert.match(html, /youtube-nocookie\.com\/embed\/jNQXAC9IVRw/);
 });
 
+test("renderMarkdownHtml keeps a YouTube start time on the embed", () => {
+  const html = renderMarkdownHtml(
+    "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=12s\n",
+  );
+  assert.match(html, /embed\/jNQXAC9IVRw\?start=12/);
+});
+
 test("renderMarkdownHtml does not embed an inline YouTube URL", () => {
   const html = renderMarkdownHtml("see https://youtu.be/yI81_De3Hjk\n");
   assert.doesNotMatch(html, /embed-youtube/);

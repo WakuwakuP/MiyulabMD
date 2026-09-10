@@ -5,11 +5,14 @@ import {
   collectOgUrls,
   expandEmbedsForPreview,
   renderOgCardHtml,
+  youtubeEmbedUrl,
   youtubeId,
+  youtubeStartSeconds,
 } from "./embeds.ts";
 
 const WATCH = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
 const SHORT = "https://youtu.be/yI81_De3Hjk";
+const WATCH_EMBED = "https://www.youtube-nocookie.com/embed/jNQXAC9IVRw";
 
 test("canonicalizeEditorMarkdown writes og cards as a normal URL", () => {
   assert.equal(
@@ -83,6 +86,19 @@ test("youtubeId accepts watch, youtu.be, and video paths", () => {
   assert.equal(youtubeId("https://www.youtube.com/channel/UCxxxxxx"), null);
   assert.equal(youtubeId("https://www.youtube.com/"), null);
   assert.equal(youtubeId("https://example.com/watch?v=jNQXAC9IVRw"), null);
+});
+
+test("youtubeStartSeconds reads t, start, and hash times", () => {
+  assert.equal(youtubeStartSeconds(WATCH), 0);
+  assert.equal(youtubeStartSeconds(`${WATCH}&t=12s`), 12);
+  assert.equal(youtubeStartSeconds(`${WATCH}&t=1m30s`), 90);
+  assert.equal(youtubeStartSeconds(`${WATCH}&start=15`), 15);
+  assert.equal(youtubeStartSeconds(`${SHORT}?t=45`), 45);
+  assert.equal(
+    youtubeStartSeconds("https://www.youtube.com/watch?v=jNQXAC9IVRw#t=1h2s"),
+    3602,
+  );
+  assert.equal(youtubeEmbedUrl(`${WATCH}&t=12s`), `${WATCH_EMBED}?start=12`);
 });
 
 test("canonicalizeEditorMarkdown writes youtube embeds as a normal URL", () => {

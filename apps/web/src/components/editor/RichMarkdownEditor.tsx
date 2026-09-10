@@ -18,6 +18,7 @@ import {
   canonicalizeEditorMarkdown,
   normalizeEmbedMarkdown,
   youtubeId,
+  youtubeStartSeconds,
 } from "../../lib/embeds.ts";
 import {
   buildOffsetMap,
@@ -454,7 +455,11 @@ export function RichMarkdownEditor({
     if (!(url && editor)) {
       return;
     }
-    editor.chain().focus().setYoutubeVideo({ src: url }).run();
+    editor
+      .chain()
+      .focus()
+      .setYoutubeVideo({ src: url, start: youtubeStartSeconds(url) })
+      .run();
   }
 
   async function insertStandaloneLink(url: string) {
@@ -462,7 +467,11 @@ export function RichMarkdownEditor({
       return;
     }
     if (youtubeId(url)) {
-      editor.chain().focus().setYoutubeVideo({ src: url }).run();
+      editor
+        .chain()
+        .focus()
+        .setYoutubeVideo({ src: url, start: youtubeStartSeconds(url) })
+        .run();
       return;
     }
     await fetchOgPreview(url);
