@@ -46,7 +46,7 @@ export {
   withClosedFrontmatter,
 } from "./frontmatter.ts";
 export type { McpToolName } from "./mcp.ts";
-export { MCP_TOOLS } from "./mcp.ts";
+export { MCP_NOTE_URL_INSTRUCTION, MCP_TOOLS } from "./mcp.ts";
 export type {
   AccessGrantInput,
   CreateNoteInput,

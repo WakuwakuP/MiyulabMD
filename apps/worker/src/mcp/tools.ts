@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
   ACCESS_SCOPES,
+  MCP_NOTE_URL_INSTRUCTION,
   NOTE_RESTORE_MESSAGE,
   type Note,
   type SessionUser,
@@ -323,10 +324,15 @@ async function inviteCollaboratorTool(
 
 /** createMcpHandler に渡す MCP サーバーファクトリ。 */
 export function createMcpServerFactory() {
-  const server = new McpServer({
-    name: "miyulabmd",
-    version: "0.1.0",
-  });
+  const server = new McpServer(
+    {
+      name: "miyulabmd",
+      version: "0.1.0",
+    },
+    {
+      instructions: MCP_NOTE_URL_INSTRUCTION,
+    },
+  );
   const notes = createNoteService(env);
 
   server.registerTool(
