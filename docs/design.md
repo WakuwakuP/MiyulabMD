@@ -423,7 +423,7 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 | `get_revision`        | `canView`        | 指定リビジョンの Markdown                                                    |
 | `restore_revision`    | `canEdit`        | 指定リビジョンの全文を現行 Yjs に載せる                                      |
 
-ブラウザのノート URL は `{origin}/n/{id}`（UUID）。`/{shortId}` では開けない。`/n/{shortId}` は解決する。MCP はツール結果に `url` を載せず、この規則を initialize の `instructions` に1回書く。
+ブラウザのノート URL は `{origin}/n/{id}`（UUID）。`/{shortId}` では開けない。`/n/{shortId}` は解決する。MCP はツール結果に `url` を載せず、この規則を `list_notes` / `get_note` / `create_note` の description に書く。
 
 編集・`get_note` は DocumentRoom の合成 awareness に `AI(ユーザー名)` を載せる。名前は MCP トークン所有者の displayName（なければ email）。接続中のエディタは通常の共同編集者と同じ経路でカーソルを見る。スナップショットだけを D1 に書いて DO を迂回しない。オフセット直指定の API は出さない（同時編集ですぐ腐る）。
 

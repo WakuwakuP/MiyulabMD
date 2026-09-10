@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
   ACCESS_SCOPES,
-  MCP_NOTE_URL_INSTRUCTION,
+  MCP_NOTE_URL_HINT,
   NOTE_RESTORE_MESSAGE,
   type Note,
   type SessionUser,
@@ -324,21 +324,16 @@ async function inviteCollaboratorTool(
 
 /** createMcpHandler に渡す MCP サーバーファクトリ。 */
 export function createMcpServerFactory() {
-  const server = new McpServer(
-    {
-      name: "miyulabmd",
-      version: "0.1.0",
-    },
-    {
-      instructions: MCP_NOTE_URL_INSTRUCTION,
-    },
-  );
+  const server = new McpServer({
+    name: "miyulabmd",
+    version: "0.1.0",
+  });
   const notes = createNoteService(env);
 
   server.registerTool(
     "list_notes",
     {
-      description: "List notes owned by or shared with the authenticated user.",
+      description: `List notes owned by or shared with the authenticated user. ${MCP_NOTE_URL_HINT}`,
       inputSchema: {
         query: z
           .string()
@@ -366,8 +361,7 @@ export function createMcpServerFactory() {
   server.registerTool(
     "get_note",
     {
-      description:
-        "Get note metadata and the live collaborative markdown (not a stale D1 snapshot). Shows an AI(username) cursor to people editing in the browser. Includes a heading outline.",
+      description: `Get note metadata and the live collaborative markdown (not a stale D1 snapshot). Shows an AI(username) cursor to people editing in the browser. Includes a heading outline. ${MCP_NOTE_URL_HINT}`,
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
         numbered: z
@@ -410,7 +404,7 @@ export function createMcpServerFactory() {
   server.registerTool(
     "create_note",
     {
-      description: "Create a new note owned by the authenticated user.",
+      description: `Create a new note owned by the authenticated user. ${MCP_NOTE_URL_HINT}`,
       inputSchema: {
         folder: z.string().optional(),
         inheritAccess: z.boolean().optional(),
