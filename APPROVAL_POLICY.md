@@ -1,5 +1,7 @@
 # 承認ポリシー
 
+全リポジトリ共通の指示は Automations の Custom Prompt（[貼り付け用](docs/approval-agent-custom-prompt.md)）。このファイルは同じ内容のリポジトリ側上書きである。
+
 Cursor Bugbot は必須の承認シグナルである。欠落扱いでスキップしてはならない。
 
 ## 8 分ポーリング上限は使わない
