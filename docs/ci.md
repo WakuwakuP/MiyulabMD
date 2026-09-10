@@ -157,7 +157,19 @@ Account ID はダッシュボード右側、または `wrangler whoami`。
 - `maintenance`
 - `automated`
 
-## 4. このリポジトリで設定済みのもの
+## 4. Cursor Bugbot と Approval Agent
+
+PR 承認オートメーション（Pull Request Approver）は Bugbot より先に終わることがある。`gh pr checks` の初回で `Cursor Bugbot` がまだ無いと、既定プロンプトは「未実行」とみなしてスキップする。
+
+待ちの正本はリポジトリ直下の [`APPROVAL_POLICY.md`](../APPROVAL_POLICY.md)。未検出でもスキップせず、現 HEAD の check が terminal になるまで購読してターンを終える。
+
+マージを Bugbot 完了まで止めるなら、Ruleset **Default branch Status Check** に check 名 `Cursor Bugbot` を足す。いま必須なのは `test` / `lint-and-format` / `Verify Worker bundle` / `Cursor Security Agent: Security Reviewer` だけである。
+
+`Cursor Bugbot` の `success` は指摘なし。指摘・キャンセル・内部エラーは既定で `neutral` なので、必須 check にしても指摘だけでは merge を止めない。指摘をゲートにするなら Cursor 側の fail-on-unresolved と、Approval Agent の `neutral` 非承認（`APPROVAL_POLICY.md`）を併用する。
+
+オートメーションの Custom Prompt にも「初回未検出でスキップしない」を書いて、ダッシュボードとリポジトリの指示を揃える。
+
+## 5. このリポジトリで設定済みのもの
 
 | 場所                                          | 名前                                               |
 | --------------------------------------------- | -------------------------------------------------- |
