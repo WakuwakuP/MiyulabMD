@@ -33,16 +33,9 @@ check 名を `Cursor Bugbot` に絞れるなら、opened / pushed を外して�
 ```
 日本語で出力してください。
 
-Cursor Bugbot は必須の承認シグナルである。既定プロンプトの「初回ポーリングで未検出ならスキップ」「30秒ポーリング・最大8分・超過したら承認しない」はこの指示では無効である。
+現 HEAD の GitHub check「Cursor Bugbot」の結果が返るまで承認しない。未検出・pending でもスキップしない。結果が無ければ待つ。
 
-対象は現在の HEAD SHA の GitHub check「Cursor Bugbot」だけである。旧 SHA の結果では現 HEAD を承認しない。新しいコミットでキャンセルされた実行は完了ではない。新 HEAD の実行を待つ。
+待つときは sleep や 30 秒ポーリングでターンを埋めない。subscribe_github_ci（PR の head ブランチ）、subscribe_github_pr（当該 PR）、subscribe_timer（5分後・once）を張り、ターンを終える。既定の「8分で止め」は無効。起床時も未完了なら同じ待ちを繰り返す。
 
-初回の gh pr checks で未検出でもスキップしない。まだ起動していないだけとみなす。未検出、または pending / queued / in_progress のときは、sleep や 30 秒ポーリングでターンを埋めない。subscribe_github_ci を PR の head ブランチへ、subscribe_github_pr を当該 PR へ、subscribe_timer（5分後・once: true）を張り、「現 HEAD の Cursor Bugbot 完了待ち」と書いてターンを終える。アイドル待ちは 8 分に入らない。起床は別ターンである。「8分超過」を理由に承認も拒否も確定しない。タイマー起床でも未完了なら、同じ購読を張り直して再びターンを終える。
-
-結論の意味:
-- success → 指摘なし。コメントが無くてもよい。
-- neutral → 指摘あり、またはキャンセル、または内部エラー。承認しない。
-- failure / Bugbot 自体のキャンセル → 承認しない。このオートメーションの先行承認があれば DISMISS_APPROVAL。
-
-承認してよいのは、現 HEAD の Cursor Bugbot が success で、リスクが設定された最大承認閾値以下のときだけである。
+success → コメント無しでも指摘なしとしてよい。neutral / failure / キャンセル → 承認しない。承認は Bugbot が success かつリスクが閾値以下のときだけ。
 ```
