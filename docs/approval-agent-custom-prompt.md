@@ -4,6 +4,28 @@ Pull Request Approver の Custom Prompt に、次のブロックをそのまま�
 
 既存の「pass ならコメント無しでもよい」「日本語で出力」は次に含めているので、古い Custom Prompt は置き換える。
 
+## トリガー
+
+トリガーの付け外しだけでは Bugbot 待ちは代替できない。Approval Agent が使えるのは次だけである。
+
+- PR opened
+- PR pushed / updated
+- PR commented（正規表現）
+
+`CI completed` や遅延は、汎用 Automations にはあるが Approval Agent には無い。opened / pushed を外してコメントだけにすると、指摘なし（コメント無しの `success`）の PR では起動しなくなる。
+
+残す:
+
+- PR opened
+- PR pushed / updated（新 HEAD の再評価に必要）
+
+任意で足す（待ちの代わりではなく、再実行用）:
+
+- PR commented。例: `bugbot run|cursor review|BUGBOT_REVIEW`
+
+起動後の待ちは Custom Prompt（購読してターンを終える）で行う。
+
+
 ```
 日本語で出力してください。
 
