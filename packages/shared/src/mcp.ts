@@ -17,3 +17,7 @@ export const MCP_TOOLS = [
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOLS)[number];
+
+/** initialize の instructions。ツール結果に url は載せない。 */
+export const MCP_NOTE_URL_INSTRUCTION =
+  "Note page URL is /n/{id} using the UUID id. Do not use /{shortId}. Origin is the same host as this MCP endpoint.";

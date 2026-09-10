@@ -109,7 +109,9 @@ export function McpSettingsPage() {
         に接続するためのトークンです。同じトークンで記事 API（
         <code className="font-mono">/api/articles</code>、
         <code className="font-mono">/openapi.json</code>
-        ）も使えます。発行時に接続先とクライアント別の設定を一度だけ表示します。
+        ）も使えます。発行時に接続先とクライアント別の設定を一度だけ表示します。ノートのブラウザ
+        URL は <code className="font-mono">{"/n/{id}"}</code>（UUID）です。
+        <code className="font-mono">{"/{shortId}"}</code> では開けません。
       </p>
 
       {loggedIn === false && (
