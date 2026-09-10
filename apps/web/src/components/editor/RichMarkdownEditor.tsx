@@ -17,6 +17,8 @@ import type { CollabAwareness } from "../../lib/collaboration.ts";
 import {
   canonicalizeEditorMarkdown,
   normalizeEmbedMarkdown,
+  youtubeId,
+  youtubeStartSeconds,
 } from "../../lib/embeds.ts";
 import {
   buildOffsetMap,
@@ -343,7 +345,12 @@ export function RichMarkdownEditor({
       }),
       Markdown,
       Image,
-      Youtube.configure({
+      Youtube.extend({
+        renderMarkdown: (node) => {
+          const src = typeof node.attrs?.src === "string" ? node.attrs.src : "";
+          return src;
+        },
+      }).configure({
         controls: true,
         height: 360,
         nocookie: true,
@@ -448,11 +455,23 @@ export function RichMarkdownEditor({
     if (!(url && editor)) {
       return;
     }
-    editor.chain().focus().setYoutubeVideo({ src: url }).run();
+    editor
+      .chain()
+      .focus()
+      .setYoutubeVideo({ src: url, start: youtubeStartSeconds(url) })
+      .run();
   }
 
   async function insertStandaloneLink(url: string) {
     if (!editor) {
+      return;
+    }
+    if (youtubeId(url)) {
+      editor
+        .chain()
+        .focus()
+        .setYoutubeVideo({ src: url, start: youtubeStartSeconds(url) })
+        .run();
       return;
     }
     await fetchOgPreview(url);

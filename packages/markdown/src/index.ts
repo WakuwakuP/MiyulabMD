@@ -8,6 +8,7 @@ export {
   renderOgCardHtml,
   youtubeEmbedUrl,
   youtubeId,
+  youtubeStartSeconds,
 } from "./embeds.ts";
 export type { FenceInfo } from "./fence-info.ts";
 export {
