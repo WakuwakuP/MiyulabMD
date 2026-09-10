@@ -6,24 +6,28 @@ Pull Request Approver の Custom Prompt に、次のブロックをそのまま�
 
 ## トリガー
 
-トリガーの付け外しだけでは Bugbot 待ちは代替できない。Approval Agent が使えるのは次だけである。
+Checks completed は「全部終わるまで待ってから1回」ではない。GitHub の check が **1つ終わるたび** に発火する（`lint-and-format` でも `Cursor Bugbot` でも、Approval Agent 自身の check でも）。
+
+### Checks completed だけにすると
+
+- `lint-and-format` が先に終わるので、Bugbot 未登録のまま起動する（今と同じ競合）
+- Approval Agent 自身の check `Cursor Approval Agent: Pull Request Approver` 完了でも再起動し、ループしうる
+- `by Me` は check を報告した bot と照合するので、Bugbot（`cursor[bot]`）では黙って落ちる。`by Anyone` にする
+- Cursor エージェントが作った / push した PR では、Checks completed が黙って発火しない既知の制限がある
+
+check 名を `Cursor Bugbot` に絞れるなら、opened / pushed を外してこれだけにするのはあり。そのときは Custom Prompt の待ちより「現 HEAD の Bugbot が `success` でなければ何もしない」が本体になる。絞れないなら足さない。
+
+### 残す
 
 - PR opened
-- PR pushed / updated
-- PR commented（正規表現）
+- PR pushed / updated（新 HEAD の再評価。エージェント作の PR でも動く）
 
-`CI completed` や遅延は、汎用 Automations にはあるが Approval Agent には無い。opened / pushed を外してコメントだけにすると、指摘なし（コメント無しの `success`）の PR では起動しなくなる。
-
-残す:
-
-- PR opened
-- PR pushed / updated（新 HEAD の再評価に必要）
-
-任意で足す（待ちの代わりではなく、再実行用）:
+任意:
 
 - PR commented。例: `bugbot run|cursor review|BUGBOT_REVIEW`
+- Checks completed は **check 名 `Cursor Bugbot` に絞れるときだけ**。On Any Completion / On PRs / by Anyone。opened / pushed と重ねると lint 完了のたびに余分なランが走る
 
-起動後の待ちは Custom Prompt（購読してターンを終える）で行う。
+起動後の待ちは Custom Prompt（購読してターンを終える）で行う。Checks completed に絞れない限り、トリガーだけでは 8 分問題も初回スキップも消えない。
 
 
 ```

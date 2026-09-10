@@ -166,6 +166,7 @@ PR 承認オートメーション（Pull Request Approver）は Bugbot より先
 マージを Bugbot 完了まで止めるなら、Ruleset **Default branch Status Check** に check 名 `Cursor Bugbot` を足す。いま必須なのは `test` / `lint-and-format` / `Verify Worker bundle` / `Cursor Security Agent: Security Reviewer` だけである。
 
 `Cursor Bugbot` の `success` は指摘なし。指摘・キャンセル・内部エラーは既定で `neutral` なので、必須 check にしても指摘だけでは merge を止めない。指摘をゲートにするなら Cursor 側の fail-on-unresolved と、Approval Agent の `neutral` 非承認を併用する。
+
 ## 5. このリポジトリで設定済みのもの
 
 | 場所                                          | 名前                                               |
