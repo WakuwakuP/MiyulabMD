@@ -69,7 +69,7 @@ type EditorDrain = {
 | --- | --- | --- | --- |
 | アプリシェル | Cache Storage | #92 | HTML / JS / CSS シェル |
 | 取得済みデータ | IndexedDB `miyulabmd-offline` | #93 以降 | notes / lists / session |
-| 既存編集 session | y-indexeddb（別 DB） | #95 | オンライン開始済み Yjs の一時切断 |
+| 既存編集 session | y-indexeddb（別 DB） | #95 A | オンライン開始済み Yjs の一時切断 |
 | local 本文 | drafts store（同一 offline DB） | #96 | `local-*` 下書き |
 | メモリ | note-cache / list-cache | #93 以降 | hydrate 前の高速 path |
 
@@ -136,18 +136,49 @@ bridge 登録は MarkdownEditor / RichMarkdownEditor（#93 D）。persist から
 - **`loadNotes` 状態**: `getNotesLoadState()` — `unhydrated` / `hydrating` / `ready` / `error`。
 - **`loadNote` 詳細**: `loadNoteRecord()` / `getLoadedNoteMeta()` — `source` / `cachedAt` / `verifiedForSession`（強制 GET 成功時のみ `true`）。
 - **prefetch**: 一覧取得後、本文未保存を更新順最大 20 件・並列 2。`network` 失敗時は残り prefetch を abort。
-- **`evictNotesEverywhere`**: メモリ + IDB + bootstrap + `#95` hook（draft は保持）。
+- **`evictNotesEverywhere`**: メモリ + IDB + bootstrap + `#95 A` Yjs hook（draft は保持）。
 - **Home**: 未取得 / 空 / エラーを `homeListFlags` と `NoteTree` で区別。
 - **`EditorDrain` registry**: `editor-drain.ts` + Source/Rich editor 登録。
 - **フォルダ削除 ID 返却**: Worker 200 JSON + クライアント cache 失効。
 
-## 12. 未実装（後続スライス）
+## 12. Yjs persistence（#95 A）
+
+実装: `apps/web/src/lib/collaboration-persistence.ts`。EditorPage / `createYjsSession` への接続と session controller は **スライス B（#95 B）**。
+
+### 保存単位
+
+- **ノート DB**: `miyulabmd-yjs-v1:<encoded AccountScope>:<canonical noteId>`（GET UUID のみ。shortId で別 DB を作らない）
+- **カタログ DB**: `miyulabmd-yjs-catalog-v1` — 開く前に `{ scope, noteId, dbName, generation, pendingDelete }` を登録。未表示ノートも列挙・削除可能
+
+### API
+
+| 関数 | 役割 |
+| --- | --- |
+| `openNotePersistence({ scope, noteId, doc, generation })` | カタログ登録 → shadow doc で IDB 読込 → 世代一致時のみ live doc へ適用。失敗は `null` |
+| `NotePersistence.whenSynced` | IDB から doc への読込完了（remote 同期・commit ではない） |
+| `NotePersistence.checkpoint()` | `Y.encodeStateAsUpdate` を updates に追加。tx complete でのみ成功。無変更は追加しない |
+| `NotePersistence.destroy()` | 接続を閉じるだけ（内容は消さない） |
+| `clearDocument(dbName)` / `deleteNotePersistence` / `deleteScopePersistence` | 世代無効化 → pendingDelete → deleteDatabase 待ち → カタログ除去 |
+| `listCatalog()` / `retryPendingDeletes()` | 列挙と blocked 後の再試行 |
+| `installYjsPersistenceCleanup()` | `offline-session` coordinator へ hook 登録（AppShell で一度） |
+
+### チェックポイントと compaction
+
+通常の編集更新は y-indexeddb に任せる。`checkpoint()` だけ adapter が updates に直接書き、custom store に件数・byte・state vector を記録。独自 checkpoint が 64 件または 4MiB を超えたら、同一 readwrite tx 内で対象キーを merge → 1 件追加 → 読んだキーのみ delete。
+
+y-indexeddb 9.0.12 の内部 schema（`updates` / `custom`）依存は adapter に閉じる。`_dbsize` による自動 trim は checkpoint 追加分には当てない。
+
+### 失効
+
+`installYjsPersistenceCleanup()` 経由で `evictNotesEverywhere` / logout / 別 user 確定時に scope または note 単位で削除。draft store（#96）には触れない。`versionchange` で接続を閉じ、delete が blocked なら `pendingDelete` を残して次回 open / `retryPendingDeletes` で再試行。
+
+## 13. 未実装（後続スライス）
 
 | 項目 | Issue |
 | --- | --- |
 | Service Worker / PWA シェル | #92 |
 | EditorPage 状態機械 | #94 |
-| y-indexeddb 一時切断 | #95 |
+| Yjs session controller（persistence 接続） | #95 B |
 | local 下書き drafts store | #96 |
 
 ## 参照

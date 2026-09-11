@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
+import { installYjsPersistenceCleanup } from "../../lib/collaboration-persistence.ts";
 import {
   getSessionSnapshot,
   hydrateSessionFromDb,
@@ -43,6 +44,7 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
+    installYjsPersistenceCleanup();
     Promise.all([hydrateSessionFromDb(), fetchAuthConfig()])
       .then(async ([, configResult]) => {
         if (configResult.ok) {
