@@ -311,11 +311,67 @@ SharePage（`/s/:id`）も同一表。従来の「cache hit なら全エラー�
 
 - `/n/local-*` navigation は server endpoint の次・通常 app navigation より前に分類し、**即 precache `/index.html`** を返す（Worker/D1 障害でもシェル起動）。
 
-## 16. 未実装（後続スライス）
+## 16. 復帰同期 API（#97 A — サーバー）
+
+Worker が local 下書きの復帰 POST / 条件付き PATCH を受け付ける。クライアント側の journal / 自動 flush / ID 昇格は **#97 B 未実装**。
+
+### POST `/api/notes`
+
+`CreateNoteInput` に任意で `clientDraftId` / `draftOwnerId` を付ける。
+
+| 条件 | status | 意味 |
+| --- | --- | --- |
+| 両キー省略 | 201 | 従来どおり毎回新規 UUID（MCP / 現行クライアント） |
+| 片方だけ / 形式不正 | 400 | `{ error }` |
+| キーあり・未認証 | 401 | `{ error }` |
+| `draftOwnerId !== session.user.id` | 409 | `{ error, code: "owner_mismatch" }` — Cookie 切替後に別 owner として作らない |
+| 同一キー・同一 hash | 201 初回 / 200 再取得 | 同じ `note.id`。本文・権限・更新日時は書き換えない |
+| 同一キー・異なる hash | 409 | `{ error, code: "idempotency_conflict" }` |
+| mapping の `deleted_at` あり | 410 | `{ error, code: "draft_deleted" }` — 再作成しない |
+
+`clientDraftId` は `local-{uuid}`（`local-` + RFC 4122 UUID）のみ受理。
+
+要求 hash は `computeCreateRequestHash`（`@miyulabmd/shared`）で入力を正規化して計算。server 生成 ID / 日時には依存しない。
+
+mapping テーブル: `note_create_requests (owner_id, client_draft_id) → note_id, request_hash, deleted_at`。
+
+ノート削除（個別 DELETE / フォルダ削除）時、mapping 行は削除せず同一 batch で `deleted_at` を付ける。
+
+### PATCH `/api/notes/:id`
+
+任意フィールド: `markdown`, `expectedMarkdown`, `clientDraftId`, `draftOwnerId`。
+
+`expectedMarkdown` または draft キーがあるとき **条件付き更新**:
+
+| 条件 | status | code |
+| --- | --- | --- |
+| `draftOwnerId !== user.id` | 409 | `owner_mismatch` |
+| draft キーに mapping なし / 別 note を指す | 409 | `mapping_mismatch` |
+| mapping 削除済み | 410 | `draft_deleted` |
+| 現在本文 === `expectedMarkdown` | 200 | 差分を `markdown` に更新（DocumentRoom 直列処理） |
+| 現在本文 === 新 `markdown` | 200 | 再試行成功（no-op） |
+| それ以外 | 409 | `content_conflict` |
+
+DocumentRoom は比較と反映の間に await を挟まず、成功前に Yjs 永続化と D1 `markdown_snapshot` 書き込み完了を待つ（`persistYjsState` + `flushSnapshotToD1`）。
+
+`markdown` のみ（expected / draft キーなし）の PATCH は従来互換。こちらも DO 経由で persist 完了を待つ。
+
+### #97 B が使う型 / 関数（shared）
+
+| 名前 | 用途 |
+| --- | --- |
+| `CreateNoteInput.clientDraftId` / `draftOwnerId` | 復帰 POST body |
+| `UpdateNoteMarkdownInput` | 条件付き PATCH body |
+| `validateDraftKeys` | クライアント側事前検証 |
+| `computeCreateRequestHash` / `normalizedCreateInputForHash` | 要求 hash の再計算 |
+| `isConditionalMarkdownUpdate` | PATCH が条件付きか判定 |
+| `NoteCreateErrorCode` | エラー code 定数 |
+
+## 17. 未実装（#97 B）
 
 | 項目 | Issue |
 | --- | --- |
-| 復帰同期（journal / 自動 re-POST / ID 昇格 / server DELETE） | #97 |
+| journal store / draft-sync / 自動 re-POST / ID 昇格 / 復帰 DELETE 連携 | #97 B |
 
 ## 参照
 

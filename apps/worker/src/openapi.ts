@@ -1,8 +1,25 @@
 const errorSchema = {
   properties: {
+    code: { type: "string" },
     error: { type: "string" },
   },
   required: ["error"],
+  type: "object",
+} as const;
+
+const noteSchema = {
+  properties: {
+    createdAt: { type: "integer" },
+    folder: { type: "string" },
+    folderId: { nullable: true, type: "string" },
+    id: { format: "uuid", type: "string" },
+    markdown: { type: "string" },
+    ownerId: { type: "string" },
+    shortId: { type: "string" },
+    title: { type: "string" },
+    updatedAt: { type: "integer" },
+  },
+  required: ["id", "shortId", "ownerId", "title", "markdown"],
   type: "object",
 } as const;
 
@@ -78,6 +95,7 @@ export function openApiDocument() {
         ArticleEntry: entry,
         ArticleSchemaField: schemaField,
         Error: errorSchema,
+        Note: noteSchema,
       },
       securitySchemes: {
         bearerAuth: {
@@ -261,6 +279,133 @@ export function openApiDocument() {
           tags: ["Articles"],
         },
       },
+      "/api/notes": {
+        post: {
+          description:
+            "Create a note. Omit clientDraftId/draftOwnerId for a fresh UUID each time. With both draft keys, creation is idempotent for recovery sync.",
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: {
+                  properties: {
+                    clientDraftId: {
+                      description: "Offline local id (`local-{uuid}`)",
+                      type: "string",
+                    },
+                    draftOwnerId: {
+                      description: "Authenticated owner of the local draft",
+                      type: "string",
+                    },
+                    folder: { type: "string" },
+                    folderId: { format: "uuid", type: "string" },
+                    inheritAccess: { type: "boolean" },
+                    markdown: { type: "string" },
+                    permission: { type: "string" },
+                    readScope: { type: "string" },
+                    title: { type: "string" },
+                    writeScope: { type: "string" },
+                  },
+                  type: "object",
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Note" } },
+              },
+              description: "Idempotent replay of an existing mapped note",
+            },
+            "201": {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Note" } },
+              },
+              description: "New note (or first mapped create)",
+            },
+            "400": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "Invalid draft keys or scopes",
+            },
+            "401": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "Draft create requires authentication",
+            },
+            "409": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "owner_mismatch or idempotency_conflict",
+            },
+            "410": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "draft_deleted — mapping exists but note was removed",
+            },
+          },
+          summary: "Create note (optional idempotent draft keys)",
+          tags: ["Notes"],
+        },
+      },
+      "/api/notes/{id}": {
+        patch: {
+          description:
+            "Update note metadata and/or markdown. With expectedMarkdown or draft keys, markdown updates are conditional and wait for DocumentRoom persistence.",
+          parameters: [
+            {
+              in: "path",
+              name: "id",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: {
+                  properties: {
+                    clientDraftId: { type: "string" },
+                    draftOwnerId: { type: "string" },
+                    expectedMarkdown: { type: "string" },
+                    markdown: { type: "string" },
+                    title: { type: "string" },
+                  },
+                  type: "object",
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Note" } },
+              },
+              description: "Updated note",
+            },
+            "400": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "Invalid body or draft keys",
+            },
+            "401": unauthorized,
+            "403": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "Forbidden",
+            },
+            "404": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "Not found",
+            },
+            "409": {
+              content: { "application/json": { schema: errorSchema } },
+              description:
+                "owner_mismatch, mapping_mismatch, or content_conflict",
+            },
+            "410": {
+              content: { "application/json": { schema: errorSchema } },
+              description: "draft_deleted mapping",
+            },
+          },
+          summary: "Update note",
+          tags: ["Notes"],
+        },
+      },
       "/openapi.json": {
         get: {
           responses: {
@@ -281,6 +426,9 @@ export function openApiDocument() {
     },
     security: [{ bearerAuth: [] }],
     servers: [{ url: "/" }],
-    tags: [{ description: "PAT で読む公開記事", name: "Articles" }],
+    tags: [
+      { description: "PAT で読む公開記事", name: "Articles" },
+      { description: "ノート作成・復帰同期（#97 A）", name: "Notes" },
+    ],
   };
 }

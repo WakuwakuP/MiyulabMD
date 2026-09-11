@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
+import type { CreateNoteInput, SessionUser } from "@miyulabmd/shared";
 import {
   ensureFolderRow,
   listPublicSharedFolders,
@@ -23,7 +24,21 @@ const MIGRATIONS = [
   "0007_user_root_folders.sql",
   "0008_split_link_and_public_scopes.sql",
   "0009_note_history.sql",
+  "0010_note_create_requests.sql",
 ];
+
+async function createNoteOrThrow(
+  env: Env,
+  user: SessionUser,
+  input: CreateNoteInput = {},
+) {
+  const notes = createNoteService(env);
+  const result = await notes.create(user, input);
+  if (result.kind === "error") {
+    throw new Error(result.error);
+  }
+  return result.note;
+}
 
 function applyMigrations(db: DatabaseSync): void {
   for (const migration of MIGRATIONS) {
@@ -83,6 +98,20 @@ class D1DatabaseAdapter {
   prepare(query: string): BoundStatement {
     return new StatementAdapter(this.db, query);
   }
+
+  async batch(statements: BoundStatement[]): Promise<{ success: true }[]> {
+    this.db.exec("BEGIN");
+    try {
+      for (const statement of statements) {
+        await statement.run();
+      }
+      this.db.exec("COMMIT");
+      return statements.map(() => ({ success: true as const }));
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
 }
 
 async function createEnvWithSeededData() {
@@ -102,42 +131,31 @@ async function createEnvWithSeededData() {
   const owner = await upsertUserByEmail(env, "owner@example.com", "Owner");
   const viewer = await upsertUserByEmail(env, "viewer@example.com", "Viewer");
 
-  const notes = createNoteService(env);
-
-  const directSignedIn = await notes.create(owner, {
+  const directSignedIn = await createNoteOrThrow(env, owner, {
     folder: "inbox",
     markdown:
       "# Direct signed-in note\nThis markdown contains shared-token for direct-signed-in note.",
     permission: "limited",
     title: "Direct signed-in note",
   });
-  if ("error" in directSignedIn) {
-    throw new Error(directSignedIn.error);
-  }
 
-  const inheritedSignedIn = await notes.create(owner, {
+  const inheritedSignedIn = await createNoteOrThrow(env, owner, {
     folder: "shared/docs",
     inheritAccess: true,
     markdown:
       "# Inherited signed-in note\nThis markdown contains shared-token for inherited signed-in note.",
     title: "Inherited signed-in note",
   });
-  if ("error" in inheritedSignedIn) {
-    throw new Error(inheritedSignedIn.error);
-  }
 
-  const privateOverride = await notes.create(owner, {
+  const privateOverride = await createNoteOrThrow(env, owner, {
     folder: "team/private",
     markdown:
       "# Self-only override note\nThis markdown contains private-only token that must stay hidden.",
     permission: "private",
     title: "Self-only override note",
   });
-  if ("error" in privateOverride) {
-    throw new Error(privateOverride.error);
-  }
 
-  const explicitGrant = await notes.create(owner, {
+  const explicitGrant = await createNoteOrThrow(env, owner, {
     folder: "secure",
     markdown:
       "# Explicit grant note\nThis markdown contains shared-token via explicit grant to this note.",
@@ -145,20 +163,14 @@ async function createEnvWithSeededData() {
     title: "Explicit grant note",
     writeScope: "users",
   });
-  if ("error" in explicitGrant) {
-    throw new Error(explicitGrant.error);
-  }
 
-  const publicLinkOnly = await notes.create(owner, {
+  const publicLinkOnly = await createNoteOrThrow(env, owner, {
     folder: "public-link",
     markdown:
       "# Public-link-only note\nThis markdown contains public-link-only token.",
     permission: "locked",
     title: "Public-link-only note",
   });
-  if ("error" in publicLinkOnly) {
-    throw new Error(publicLinkOnly.error);
-  }
 
   const explicitGrantRow = await replaceGrants(
     env,
@@ -211,55 +223,41 @@ async function createEnvWithPublicDiscoverySeededData(
 
   const owner = await upsertUserByEmail(env, "owner@example.com", "Owner");
 
-  const notes = createNoteService(env);
-
-  const directPublic = await notes.create(owner, {
+  const directPublic = await createNoteOrThrow(env, owner, {
     folder: "public-zone",
     markdown: "# Direct public note\nThis note should be visible to guests.",
     readScope: "public",
     title: "Direct public note",
     writeScope: "public",
   });
-  if ("error" in directPublic) {
-    throw new Error(directPublic.error);
-  }
 
   await upsertFolderPolicy(env, owner.id, "shared-public", "public", "public");
 
-  const inheritedPublic = await notes.create(owner, {
+  const inheritedPublic = await createNoteOrThrow(env, owner, {
     folder: "shared-public/docs",
     inheritAccess: true,
     markdown:
       "# Inherited public note\nThis note should be visible via public folder inheritance.",
     title: "Inherited public note",
   });
-  if ("error" in inheritedPublic) {
-    throw new Error(inheritedPublic.error);
-  }
 
-  const privateOverride = await notes.create(owner, {
+  const privateOverride = await createNoteOrThrow(env, owner, {
     folder: "shared-public/hidden",
     markdown:
       "# Private override note\nThis private note should not appear for guests.",
     permission: "private",
     title: "Private override note",
   });
-  if ("error" in privateOverride) {
-    throw new Error(privateOverride.error);
-  }
 
-  const signedInOverride = await notes.create(owner, {
+  const signedInOverride = await createNoteOrThrow(env, owner, {
     folder: "shared-public/login",
     markdown:
       "# Signed-in override note\nThis signed-in only note should not appear for guests.",
     permission: "limited",
     title: "Signed-in override note",
   });
-  if ("error" in signedInOverride) {
-    throw new Error(signedInOverride.error);
-  }
 
-  const usersOverride = await notes.create(owner, {
+  const usersOverride = await createNoteOrThrow(env, owner, {
     folder: "shared-public/users",
     markdown:
       "# Users override note\nThis users-only note should not appear for anonymous users.",
@@ -267,9 +265,6 @@ async function createEnvWithPublicDiscoverySeededData(
     title: "Users override note",
     writeScope: "users",
   });
-  if ("error" in usersOverride) {
-    throw new Error(usersOverride.error);
-  }
 
   await upsertFolderPolicy(env, owner.id, "public-only", "public", "public");
 
@@ -411,7 +406,7 @@ test("link overrides stay out of discovery even below public folders", async (t)
   const notes = createNoteService(env);
   await upsertFolderPolicy(env, owner.id, "shared-public/link", "link", "self");
   for (const inheritAccess of [false, true]) {
-    const created = await notes.create(owner, {
+    const created = await createNoteOrThrow(env, owner, {
       folder: "shared-public/link",
       inheritAccess,
       ...(inheritAccess
@@ -419,9 +414,6 @@ test("link overrides stay out of discovery even below public folders", async (t)
         : ({ readScope: "link", writeScope: "self" } as const)),
       markdown: "# link-discovery-regression",
     });
-    if ("error" in created) {
-      throw new Error(created.error);
-    }
     assert.equal((await notes.get(created.id)).kind, "ok");
     assert.equal((await notes.get(created.id, viewer)).kind, "ok");
     assert.equal(
@@ -491,13 +483,10 @@ test("legacy signed-in presets require a URL or explicit sharing", async (t) => 
   t.after(() => sqlite.close());
   const notes = createNoteService(env);
   for (const permission of ["limited", "protected"] as const) {
-    const created = await notes.create(owner, {
+    const created = await createNoteOrThrow(env, owner, {
       markdown: `# legacy-unlisted-${permission}`,
       permission,
     });
-    if ("error" in created) {
-      throw new Error(created.error);
-    }
     assert.equal((await notes.get(created.id, viewer)).kind, "ok");
     assert.equal((await notes.get(created.id)).kind, "denied");
     assert.equal(
@@ -551,15 +540,12 @@ test("public children never reveal unlisted ancestor IDs or grants", async (t) =
     await replaceGrants(env, owner.id, "folder", parent, [
       { email: "collaborator@example.com" },
     ]);
-    const created = await notes.create(owner, {
+    const created = await createNoteOrThrow(env, owner, {
       folder: parent,
       markdown: `# parent-id-regression-${scope}`,
       readScope: "public",
       writeScope: "self",
     });
-    if ("error" in created) {
-      throw new Error(created.error);
-    }
 
     for (const user of [undefined, viewer]) {
       const access = await resolveFolderAccess(env, owner.id, child, user);

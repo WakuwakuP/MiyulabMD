@@ -4,6 +4,7 @@ import * as Y from "yjs";
 
 import {
   applyTextDiff,
+  evaluateConditionalMarkdownUpdate,
   excerptAround,
   markdownOutline,
   numberMarkdownLines,
@@ -93,6 +94,29 @@ test("applyTextDiff inserts without rewriting the rest", () => {
   assert.equal(text.toString(), "# 無題\n\nhello!");
   assert.deepEqual(ops, [{ retain: 11 }, { insert: "!" }]);
   doc.destroy();
+});
+
+test("evaluateConditionalMarkdownUpdate handles match, noop, and conflict", () => {
+  assert.deepEqual(
+    evaluateConditionalMarkdownUpdate("base", "base", "next"),
+    { action: "apply" },
+  );
+  assert.deepEqual(
+    evaluateConditionalMarkdownUpdate("next", "base", "next"),
+    { action: "noop" },
+  );
+  assert.deepEqual(
+    evaluateConditionalMarkdownUpdate("other", "base", "next"),
+    { action: "conflict" },
+  );
+  assert.deepEqual(
+    evaluateConditionalMarkdownUpdate("same", undefined, "same"),
+    { action: "noop" },
+  );
+  assert.deepEqual(
+    evaluateConditionalMarkdownUpdate("old", undefined, "new"),
+    { action: "apply" },
+  );
 });
 
 test("excerptAround and outline helpers", () => {
