@@ -7,14 +7,16 @@ import {
 } from "../components/notes/access-draft.ts";
 import type { ApiResult } from "../lib/api.ts";
 import { fetchArticleSources, updateNote } from "../lib/api.ts";
+import { applyAwarenessUser } from "../lib/collaboration.ts";
 import {
-  applyAwarenessUser,
-  createYjsSession,
-  type YjsSession,
-} from "../lib/collaboration.ts";
+  type CollabSessionSnapshot,
+  createNoteCollabSession,
+  type NoteCollabSession,
+} from "../lib/collaboration-session.ts";
 import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
 import { loadOgCards } from "../lib/markdown.ts";
 import { noteFromCaches, seedNoteCache } from "../lib/note-cache.ts";
+import { nextRequestGeneration } from "../lib/offline-types.ts";
 
 export type NoteSetters = {
   setNote: (note: Note | null) => void;
@@ -46,8 +48,9 @@ export function noteLoadErrorMessage(status: number, fallback: string): string {
 type EditorLoadSetters = NoteSetters & {
   setLoadError: (error: string | null) => void;
   setSaveError: (error: string | null) => void;
-  setCollab: (session: YjsSession | null) => void;
+  setCollab: (session: NoteCollabSession | null) => void;
   setCollabReady: (ready: boolean) => void;
+  setCollabSnapshot: (snapshot: CollabSessionSnapshot | null) => void;
   setMode: (mode: EditorMode) => void;
   setSplitScroll: (ratio: number) => void;
   setLoading: (loading: boolean) => void;
@@ -63,6 +66,7 @@ export function beginEditorNoteLoad(
   setters.setSaveError(null);
   setters.setCollab(null);
   setters.setCollabReady(false);
+  setters.setCollabSnapshot(null);
   setters.setMode("preview");
   setters.setSplitScroll(0);
 
@@ -133,31 +137,40 @@ export function subscribeArticleSources(
 
 export function teardownCollab(
   unbindRef: MutableRefObject<(() => void) | null>,
-  sessionRef: MutableRefObject<YjsSession | null>,
-  setCollab: (session: YjsSession | null) => void,
+  sessionRef: MutableRefObject<NoteCollabSession | null>,
+  setCollab: (session: NoteCollabSession | null) => void,
   setCollabReady: (ready: boolean) => void,
+  setCollabSnapshot: (snapshot: CollabSessionSnapshot | null) => void,
 ) {
   unbindRef.current?.();
   unbindRef.current = null;
-  sessionRef.current?.destroy();
+  const session = sessionRef.current;
   sessionRef.current = null;
+  if (session) {
+    void session.close();
+  }
   setCollab(null);
   setCollabReady(false);
+  setCollabSnapshot(null);
 }
 
-function onCollabSynced(
-  synced: boolean,
-  session: YjsSession,
+function applyCollabSnapshot(
+  snap: CollabSessionSnapshot,
+  session: NoteCollabSession,
   setCollabReady: (ready: boolean) => void,
+  setCollabSnapshot: (snapshot: CollabSessionSnapshot) => void,
   setMarkdown: (markdown: string) => void,
 ) {
-  if (!synced) {
+  setCollabSnapshot(snap);
+  setCollabReady(snap.collabReady);
+  if (snap.editDenied) {
     return;
   }
-  setCollabReady(true);
-  const next = session.yMarkdown.toString();
-  if (next.length > 0) {
-    setMarkdown(next);
+  if (snap.collabReady) {
+    const next = session.yMarkdown.toString();
+    if (next.length > 0) {
+      setMarkdown(next);
+    }
   }
 }
 
@@ -165,57 +178,71 @@ export function bindEditorCollab(input: {
   noteId: string | undefined;
   hydrated: boolean;
   userLoading: boolean;
-  viewMode: EditorMode;
+  needsSession: boolean;
+  desiredConnection: boolean;
   user: SessionUser | null;
-  sessionRef: MutableRefObject<YjsSession | null>;
+  sessionRef: MutableRefObject<NoteCollabSession | null>;
   unbindRef: MutableRefObject<(() => void) | null>;
-  setCollab: (session: YjsSession | null) => void;
+  setCollab: (session: NoteCollabSession | null) => void;
   setCollabReady: (ready: boolean) => void;
+  setCollabSnapshot: (snapshot: CollabSessionSnapshot | null) => void;
   setMarkdown: (markdown: string) => void;
 }) {
   if (!(input.noteId && input.hydrated) || input.userLoading) {
     return;
   }
-  if (input.viewMode === "preview") {
-    teardownCollab(
-      input.unbindRef,
-      input.sessionRef,
-      input.setCollab,
-      input.setCollabReady,
-    );
-    return;
-  }
+
   if (input.sessionRef.current) {
+    input.sessionRef.current.setNeedsSession(input.needsSession);
+    input.sessionRef.current.setDesiredConnection(input.desiredConnection);
     return;
   }
 
-  const session = createYjsSession(input.noteId, input.user);
+  if (!input.needsSession) {
+    return;
+  }
+
+  const generation = nextRequestGeneration();
+  const session = createNoteCollabSession({
+    generation,
+    noteId: input.noteId,
+    user: input.user,
+  });
   input.sessionRef.current = session;
   input.setCollab(session);
   input.setCollabReady(false);
-
-  const onSynced = (synced: boolean) => {
-    onCollabSynced(synced, session, input.setCollabReady, input.setMarkdown);
-  };
-
-  if (session.provider.synced) {
-    onSynced(true);
-  } else {
-    session.provider.on("sync", onSynced);
-  }
 
   const onMarkdownChange = () => {
     input.setMarkdown(session.yMarkdown.toString());
   };
   session.yMarkdown.observe(onMarkdownChange);
+
+  const unsub = session.subscribe((snap) => {
+    applyCollabSnapshot(
+      snap,
+      session,
+      input.setCollabReady,
+      input.setCollabSnapshot,
+      input.setMarkdown,
+    );
+    if (!snap.needsSession || snap.phase === "closed" || snap.denied) {
+      input.unbindRef.current?.();
+      input.unbindRef.current = null;
+      input.sessionRef.current = null;
+      input.setCollab(null);
+      input.setCollabReady(false);
+      input.setCollabSnapshot(null);
+    }
+  });
+
   input.unbindRef.current = () => {
-    session.provider.off("sync", onSynced);
     session.yMarkdown.unobserve(onMarkdownChange);
+    unsub();
   };
 }
 
 export function syncCollabUser(
-  collab: YjsSession | null,
+  collab: NoteCollabSession | null,
   user: SessionUser | null,
 ) {
   if (!collab) {

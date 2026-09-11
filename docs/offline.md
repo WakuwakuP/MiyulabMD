@@ -172,13 +172,65 @@ y-indexeddb 9.0.12 の内部 schema（`updates` / `custom`）依存は adapter �
 
 `installYjsPersistenceCleanup()` 経由で `evictNotesEverywhere` / logout / 別 user 確定時に scope または note 単位で削除。draft store（#96）には触れない。`versionchange` で接続を閉じ、delete が blocked なら `pendingDelete` を残して次回 open / `retryPendingDeletes` で再試行。
 
-## 13. 未実装（後続スライス）
+## 13. Yjs session controller（#95 B）
+
+実装: `apps/web/src/lib/collaboration-session.ts`。`collaboration-persistence.ts`（#95 A）が y-indexeddb の読込・checkpoint・失効を担当し、controller が **いつ WS に繋ぐか・切断表示・再試行・page lifecycle** を担当する。
+
+### 識別子
+
+```ts
+{ scope: AccountScope; noteId: string /* GET UUID */; sessionEpoch: SessionEpoch; generation: RequestGeneration }
+```
+
+`shortId` から別 session / DB を作らない。GET 成功の `note.id` を正本とする。
+
+### 状態（controller 内部）
+
+| フィールド | 意味 |
+| --- | --- |
+| `needsSession` | 検証済み Edit 要求または継続中の編集 session。Y.Doc 寿命 |
+| `desiredConnection` | 今ネットワークへ繋ぐ意図。hidden / leave では false でも doc を保持 |
+| `everSynced` / `collabReady` | 初回 remote `sync(true)` 完了後に true。それまでは editor 入力不可 |
+| `phase` | `initializing` → `connecting` → `syncing` → `synced`、切断時 `disconnected`、意図離脱 `suspended` 等 |
+| `disconnectedAt` / `longDisconnect` | 初回切断時刻（再試行でリセットしない）。60s 超で追加バナー |
+| `checkpointFailed` | 端末保存失敗（別表示。黙って close しない） |
+
+preview 表示や `navigator.onLine` だけでは doc を破棄しない。`needsSession === false` のときだけ `close()`（`awaitIdle` → `drainSync` → `checkpoint` 待ち）。
+
+### 接続手順（controller）
+
+1. 同 scope の session と GET `canEdit` を確認（guest は `/api/me {user:null}` + ノート権限）
+2. `createYjsSession` は `connect: false`, `disableBc: true`, `shouldReconnect: () => false`
+3. `openNotePersistence` → `whenSynced` 後に `provider.connect()`
+4. REST 本文を空 doc に insert しない
+5. provider 自動再接続は使わず、controller の指数バックオフ（1/2/4…秒、上限 30s + jitter）を一本化
+6. 各 connect 前に `verifySession` + GET 権限
+7. `network` / 5xx: doc 保持。401 / `invalid-response`: 再送と旧私有表示停止（wipe しない）。403/404: `deleteNotePersistence`
+
+### Editor 配線
+
+- `editor-page.ts` の `bindEditorCollab`: `needsSession` / `desiredConnection` を受け取り `createNoteCollabSession` を生成
+- 現行 source / split / rich: 両方 `true`。preview のみでは **即 teardown しない**（#94 が preparing-edit 中に preview のまま接続するため）
+- `page-lifecycle` は controller 内の `createSessionLifecycle` に統合（二重 leave / reconnect なし）
+- `EditorPage.tsx`: `collabBannerMessage(snapshot)` で小さなバナー。`aria-live="polite"` はメッセージ変更時のみ
+
+### #94 が使う API
+
+| 関数 / 型 | 用途 |
+| --- | --- |
+| `createNoteCollabSession({ noteId, user, generation })` | session 生成 |
+| `NoteCollabSession.setNeedsSession` / `setDesiredConnection` | View 状態機械から doc 寿命と WS 意図を制御 |
+| `NoteCollabSession.getSnapshot` / `subscribe` | `CollabSessionSnapshot`（phase / everSynced / banner 素材） |
+| `collabBannerMessage(snapshot)` | 切断・長時間切断・checkpoint 失敗の文言 |
+| `NoteCollabSession.close()` | Edit 取消・ノート遷移時の drain + checkpoint + teardown |
+| `NoteCollabSession.retryNow()` | 明示再試行 |
+
+## 14. 未実装（後続スライス）
 
 | 項目 | Issue |
 | --- | --- |
 | Service Worker / PWA シェル | #92 |
 | EditorPage 状態機械 | #94 |
-| Yjs session controller（persistence 接続） | #95 B |
 | local 下書き drafts store | #96 |
 
 ## 参照

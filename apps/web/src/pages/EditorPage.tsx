@@ -31,7 +31,11 @@ import { HistoryIcon, ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { cn } from "../lib/cn.ts";
-import type { YjsSession } from "../lib/collaboration.ts";
+import type { NoteCollabSession } from "../lib/collaboration-session.ts";
+import {
+  type CollabSessionSnapshot,
+  collabBannerMessage,
+} from "../lib/collaboration-session.ts";
 import type { EditorMode } from "../lib/editor-mode.ts";
 import {
   dismissStaleSsrPreview,
@@ -82,8 +86,8 @@ function EditorSourcePane({
   onSplitScroll,
 }: {
   ready: boolean;
-  yMarkdown: YjsSession["yMarkdown"] | undefined;
-  awareness: YjsSession["awareness"] | undefined;
+  yMarkdown: NoteCollabSession["yMarkdown"] | undefined;
+  awareness: NoteCollabSession["awareness"] | undefined;
   noteId: string;
   canEdit: boolean;
   viewMode: EditorMode;
@@ -149,8 +153,8 @@ function EditorRichPane({
   canEdit,
 }: {
   ready: boolean;
-  yMarkdown: YjsSession["yMarkdown"] | undefined;
-  awareness: YjsSession["awareness"] | undefined;
+  yMarkdown: NoteCollabSession["yMarkdown"] | undefined;
+  awareness: NoteCollabSession["awareness"] | undefined;
   noteId: string;
   canEdit: boolean;
 }) {
@@ -212,11 +216,30 @@ function EditorShareDialog({
   );
 }
 
+function CollabStatusBanner({
+  message,
+  live,
+}: {
+  message: string;
+  live: boolean;
+}) {
+  return (
+    <p
+      aria-live={live ? "polite" : undefined}
+      className="border-border border-b px-5 py-2 text-muted text-sm"
+    >
+      {message}
+    </p>
+  );
+}
+
 function EditorWorkspace({
   note,
   markdown,
   accessDraft,
   saveError,
+  collabBanner,
+  collabBannerLive,
   articleSource,
   articleIssues,
   viewMode,
@@ -240,13 +263,15 @@ function EditorWorkspace({
   markdown: string;
   accessDraft: AccessDraft;
   saveError: string | null;
+  collabBanner: string | null;
+  collabBannerLive: boolean;
   articleSource: ArticleSource | null;
   articleIssues: ReturnType<typeof validateArticleDocument>["issues"];
   viewMode: EditorMode;
   usesInternalScroll: boolean;
   ready: boolean;
-  yMarkdown: YjsSession["yMarkdown"] | undefined;
-  awareness: YjsSession["awareness"] | undefined;
+  yMarkdown: NoteCollabSession["yMarkdown"] | undefined;
+  awareness: NoteCollabSession["awareness"] | undefined;
   canEdit: boolean;
   splitScroll: number;
   shareOpen: boolean;
@@ -266,6 +291,9 @@ function EditorWorkspace({
     <section
       className={cn("flex flex-col", usesInternalScroll && "h-full min-h-0")}
     >
+      {collabBanner && (
+        <CollabStatusBanner live={collabBannerLive} message={collabBanner} />
+      )}
       {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
       {articleSource && <ArticleFrontmatterAlert issues={articleIssues} />}
       <div className={editorGridClass(viewMode, usesInternalScroll, cn)}>
@@ -361,7 +389,7 @@ function EditorHeaderEnd({
   onHistory,
   onShare,
 }: {
-  awareness: YjsSession["awareness"] | undefined;
+  awareness: NoteCollabSession["awareness"] | undefined;
   folder: string;
   folderId: string | null;
   isOwner: boolean;
@@ -421,8 +449,12 @@ export function EditorPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(() => !cached);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [collab, setCollab] = useState<YjsSession | null>(null);
+  const [collab, setCollab] = useState<NoteCollabSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
+  const [collabSnapshot, setCollabSnapshot] =
+    useState<CollabSessionSnapshot | null>(null);
+  const collabBannerRef = useRef<string | null>(null);
+  const [collabBannerLive, setCollabBannerLive] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
@@ -430,7 +462,7 @@ export function EditorPage() {
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
   const hydratedRef = useRef(false);
-  const sessionRef = useRef<YjsSession | null>(null);
+  const sessionRef = useRef<NoteCollabSession | null>(null);
   const unbindCollabRef = useRef<(() => void) | null>(null);
 
   const noteId = note?.id;
@@ -444,6 +476,21 @@ export function EditorPage() {
   const awareness = collab?.awareness;
   const yMarkdown = collab?.yMarkdown;
   const ready = Boolean(yMarkdown && awareness && collabReady);
+  const collabBanner = collabSnapshot
+    ? collabBannerMessage(collabSnapshot)
+    : null;
+
+  useEffect(() => {
+    if (collabBanner === collabBannerRef.current) {
+      return;
+    }
+    collabBannerRef.current = collabBanner;
+    if (collabBanner) {
+      setCollabBannerLive(true);
+    } else {
+      setCollabBannerLive(false);
+    }
+  }, [collabBanner]);
 
   useEffect(() => {
     dismissStaleSsrPreview(id);
@@ -452,6 +499,7 @@ export function EditorPage() {
       setAccessDraft,
       setCollab,
       setCollabReady,
+      setCollabSnapshot,
       setFolder,
       setLoadError,
       setLoading,
@@ -496,22 +544,30 @@ export function EditorPage() {
     void noteId;
     void userId;
     return () => {
-      teardownCollab(unbindCollabRef, sessionRef, setCollab, setCollabReady);
+      teardownCollab(
+        unbindCollabRef,
+        sessionRef,
+        setCollab,
+        setCollabReady,
+        setCollabSnapshot,
+      );
     };
   }, [noteId, userId]);
 
   useEffect(() => {
     bindEditorCollab({
+      desiredConnection: viewMode !== "preview",
       hydrated: hydratedRef.current,
+      needsSession: viewMode !== "preview",
       noteId,
       sessionRef,
       setCollab,
       setCollabReady,
+      setCollabSnapshot,
       setMarkdown,
       unbindRef: unbindCollabRef,
       user,
       userLoading,
-      viewMode,
     });
   }, [noteId, userLoading, viewMode, user]);
 
@@ -569,6 +625,8 @@ export function EditorPage() {
             articleSource={articleSource}
             awareness={awareness}
             canEdit={flags.canEdit}
+            collabBanner={collabBanner}
+            collabBannerLive={collabBannerLive}
             headingTitle={headingTitle}
             historyOpen={historyOpen}
             isOwner={flags.isOwner}
@@ -606,7 +664,7 @@ function bindEditorHeader(input: {
   folder: string;
   viewMode: EditorMode;
   canEdit: boolean;
-  awareness: YjsSession["awareness"] | undefined;
+  awareness: NoteCollabSession["awareness"] | undefined;
   isOwner: boolean;
   setHeader: AppShellContext["setHeader"];
   setMode: (mode: EditorMode) => void;
