@@ -10,6 +10,7 @@ import {
 } from "../lib/offline-types.ts";
 import type { LocalDraft } from "../lib/draft-store.ts";
 import {
+  allowsServerMutations,
   applyEditorForceLoadResult,
   applyEditorLoadOutcome,
   canStartEdit,
@@ -18,6 +19,7 @@ import {
   editorNeedsSession,
   isLocalDraftId,
   resolveEditorViewPhase,
+  shouldReloadEditorOnFocus,
   shouldRemoveSsrPreview,
   snapshotFromLocalDraft,
   taskNoteIdFor,
@@ -327,6 +329,32 @@ test("snapshotFromLocalDraft uses draft document model", () => {
   const snapshot = snapshotFromLocalDraft(draft, "local-editing");
   assert.equal(snapshot.document?.kind, "draft");
   assert.equal(snapshot.note?.id, "local-abc");
+});
+
+test("shouldReloadEditorOnFocus is false for local drafts", () => {
+  assert.equal(shouldReloadEditorOnFocus("local-abc"), false);
+  assert.equal(
+    shouldReloadEditorOnFocus("11111111-1111-4111-8111-111111111111"),
+    true,
+  );
+});
+
+test("allowsServerMutations is false for local-editing", () => {
+  assert.equal(allowsServerMutations("local-editing", onlineSession), false);
+  assert.equal(allowsServerMutations("local-readonly", onlineSession), false);
+  assert.equal(allowsServerMutations("server-preview", onlineSession), true);
+});
+
+test("taskNoteIdFor omits local-editing drafts", () => {
+  assert.equal(
+    taskNoteIdFor({
+      meta: null,
+      note,
+      phase: "local-editing",
+      session: onlineSession,
+    }),
+    undefined,
+  );
 });
 
 test("canStartEdit allows local-editing phase", () => {

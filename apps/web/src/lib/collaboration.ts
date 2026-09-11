@@ -1,9 +1,10 @@
 import type { SessionUser } from "@miyulabmd/shared";
+import { Awareness } from "y-protocols/awareness";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 import { colorForEmail } from "./user-style.ts";
 
-export type CollabAwareness = WebsocketProvider["awareness"];
+export type CollabAwareness = Awareness;
 
 export type AwarenessUserState = {
   userId: string;
@@ -89,25 +90,16 @@ export function applyAwarenessUser(
   });
 }
 
-/** In-memory awareness for local drafts (#96). Never connects to the server. */
+/** In-memory awareness for local drafts (#96). No WebSocket provider or room. */
 export function createOfflineAwareness(doc: Y.Doc): {
   awareness: CollabAwareness;
   destroy: () => void;
 } {
-  const provider = new WebsocketProvider(
-    collaborationWsBase(),
-    `offline-local:${crypto.randomUUID()}`,
-    doc,
-    {
-      connect: false,
-      disableBc: true,
-      shouldReconnect: () => false,
-    },
-  );
+  const awareness = new Awareness(doc);
   return {
-    awareness: provider.awareness,
+    awareness,
     destroy() {
-      provider.destroy();
+      awareness.destroy();
     },
   };
 }

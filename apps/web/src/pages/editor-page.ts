@@ -22,7 +22,7 @@ import {
 } from "../lib/draft-store.ts";
 import { canCreateLocalDraft } from "../lib/home-draft-list.ts";
 import {
-  invalidateLocalDraftEditor,
+  getLocalDraftEditor,
   openLocalDraftEditor,
 } from "../lib/local-draft-editor.ts";
 import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
@@ -114,6 +114,11 @@ const LOCAL_PHASES = new Set<EditorViewPhase>([
 
 export function isLocalDraftId(id: string): boolean {
   return id.startsWith("local-");
+}
+
+/** Server notes reload on focus/online; local drafts keep the in-memory editor. */
+export function shouldReloadEditorOnFocus(routeId: string): boolean {
+  return !isLocalDraftId(routeId);
 }
 
 export function isOfflineKnownSession(session: SessionSnapshot): boolean {
@@ -716,7 +721,6 @@ export function subscribeLocalDraftLoad(input: {
   onSnapshot: (snapshot: EditorNoteSnapshot) => void;
 }): () => void {
   let cancelled = false;
-  let lockRelease: (() => void) | null = null;
   void (async () => {
     if (!canCreateLocalDraft(input.session, input.user)) {
       if (!cancelled) {
@@ -739,6 +743,19 @@ export function subscribeLocalDraftLoad(input: {
       }
       return;
     }
+    const existing = getLocalDraftEditor(ownerId, input.routeId);
+    if (existing) {
+      if (!cancelled) {
+        const phase: EditorViewPhase = existing.readonly
+          ? "local-readonly"
+          : "local-editing";
+        const banner = existing.readonly
+          ? "別タブで編集中です。このタブは read-only です。"
+          : "端末にのみ保存された下書きです（未保存）";
+        input.onSnapshot(snapshotFromLocalDraft(existing.draft, phase, banner));
+      }
+      return;
+    }
     const draft = await getDraft(ownerId, input.routeId);
     if (cancelled) {
       return;
@@ -756,7 +773,6 @@ export function subscribeLocalDraftLoad(input: {
       lock?.release();
       return;
     }
-    lockRelease = () => lock?.release();
     const phase: EditorViewPhase = lock ? "local-editing" : "local-readonly";
     const banner = lock
       ? "端末にのみ保存された下書きです（未保存）"
@@ -774,13 +790,6 @@ export function subscribeLocalDraftLoad(input: {
   })();
   return () => {
     cancelled = true;
-    lockRelease?.();
-    if (input.user) {
-      invalidateLocalDraftEditor(
-        input.user.id,
-        input.routeId,
-      );
-    }
   };
 }
 

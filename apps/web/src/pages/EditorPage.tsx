@@ -63,6 +63,7 @@ import {
   editorNeedsSession,
   editorViewModeFor,
   handleCollabAuthStop,
+  isLocalDraftId,
   isLocalEditorPhase,
   isOfflineKnownSession,
   ownerLabelFor,
@@ -70,10 +71,12 @@ import {
   persistEditorFolder,
   resetEditorSnapshotForRoute,
   resolveEditorViewPhase,
+  shouldReloadEditorOnFocus,
   shouldRemoveSsrPreview,
   sourceLineNumbers,
   subscribeArticleSources,
   subscribeEditorNoteLoad,
+  subscribeLocalDraftLoad,
   syncCollabUser,
   taskNoteIdFor,
   teardownCollab,
@@ -81,6 +84,7 @@ import {
 } from "./editor-page.ts";
 import {
   getLocalDraftEditor,
+  invalidateLocalDraftEditor,
   type LocalDraftEditor,
 } from "../lib/local-draft-editor.ts";
 import { isDraftStorageUnavailable } from "../lib/draft-store.ts";
@@ -678,6 +682,9 @@ export function EditorPage() {
   };
 
   const triggerReload = () => {
+    if (!shouldReloadEditorOnFocus(id)) {
+      return;
+    }
     loadGenerationRef.current = nextRequestGeneration();
     loadSessionEpochRef.current = session.sessionEpoch;
     setLoadTick((value) => value + 1);
@@ -713,17 +720,42 @@ export function EditorPage() {
     loadGenerationRef.current = nextRequestGeneration();
     loadSessionEpochRef.current = session.sessionEpoch;
     applySnapshot(resetEditorSnapshotForRoute(id), snapshotSetters);
-  }, [id, session.sessionEpoch]);
+    return () => {
+      if (user?.id && isLocalDraftId(id)) {
+        void getLocalDraftEditor(user.id, id as `local-${string}`)?.flush();
+        invalidateLocalDraftEditor(user.id, id as `local-${string}`);
+      }
+    };
+  }, [id, session.sessionEpoch, user?.id]);
 
   useEffect(() => {
+    if (!isLocalDraftId(id)) {
+      return;
+    }
+    dismissStaleSsrPreview(id);
+    return subscribeLocalDraftLoad({
+      onSnapshot: (snapshot) => {
+        applySnapshot(snapshot, snapshotSetters);
+        if (user) {
+          setLocalEditor(getLocalDraftEditor(user.id, id as `local-${string}`));
+        }
+        setHydrated(true);
+      },
+      routeId: id as `local-${string}`,
+      session: getSessionSnapshot(),
+      user,
+    });
+  }, [id, user?.id, session.sessionEpoch]);
+
+  useEffect(() => {
+    if (isLocalDraftId(id)) {
+      return;
+    }
     dismissStaleSsrPreview(id);
     return subscribeEditorNoteLoad({
       generation: loadGenerationRef.current,
       onPreview: (snapshot) => {
         applySnapshot(snapshot, snapshotSetters);
-        if (user && id.startsWith("local-")) {
-          setLocalEditor(getLocalDraftEditor(user.id, id as `local-${string}`));
-        }
         setHydrated(true);
       },
       onResult: (outcome) => {
@@ -751,7 +783,7 @@ export function EditorPage() {
         triggerReload();
       }
     });
-  }, []);
+  }, [id]);
 
   useEffect(() => {
     const onFocus = () => {
@@ -761,7 +793,7 @@ export function EditorPage() {
     return () => {
       window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [id]);
 
   useEffect(() => subscribeArticleSources(user, setArticleSources), [user]);
 
@@ -880,8 +912,6 @@ export function EditorPage() {
       localEditor.yMarkdown.unobserve(syncMarkdown);
       window.clearInterval(timer);
       window.removeEventListener("pagehide", flush);
-      void localEditor.flush();
-      localEditor.destroy();
     };
   }, [localEditor?.draft.localId]);
 
