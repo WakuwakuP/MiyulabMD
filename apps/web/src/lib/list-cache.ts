@@ -57,20 +57,18 @@ export async function loadNotes(force = false): Promise<NoteSummary[]> {
   }
 
   const previous = notesCache;
-  const promise = fetchNotes()
-    .then((notes) => {
-      notesCache = notes;
-      notesInflight = null;
-      return notes;
-    })
-    .catch(() => {
-      notesInflight = null;
-      if (previous) {
-        notesCache = previous;
-        return previous;
-      }
-      return [];
-    });
+  const promise = fetchNotes().then((result) => {
+    notesInflight = null;
+    if (result.ok) {
+      notesCache = result.data;
+      return result.data;
+    }
+    if (previous) {
+      notesCache = previous;
+      return previous;
+    }
+    return [];
+  });
   notesInflight = promise;
   return await promise;
 }

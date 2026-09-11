@@ -380,7 +380,7 @@ sequenceDiagram
 - `y-websocket` 互換、または薄い独自 provider
 - `y-codemirror.next` で CodeMirror にバインド
 - リッチ（TipTap）も同じ `Y.Text("markdown")` に差分（insert/delete）で載せる。`y-prosemirror` は使わない
-- `y-indexeddb` でオフライン下書き（再接続時にマージ）
+- `y-indexeddb` は**既存ノートの Yjs session** の一時切断用のみ（#95）。local 下書き（`local-*`）は別 IndexedDB store（#96）。PWA シェルは Cache Storage（#92）。取得済み一覧・本文 cache と共通契約は [offline.md](./offline.md)
 - awareness に displayName / color / cursor（Y.RelativePosition）を載せる
 
 閲覧のみのユーザーもプレビューをリアルタイム更新するため、view 権限があれば WS 接続を許す。書き込みフレームはサーバーで落とす。
@@ -563,7 +563,7 @@ Worker が `apps/web` のビルド成果を Assets として配信する。開�
 | 2        | DocumentRoom、Yjs、同時編集、awareness                       |
 | 3        | R2 画像ペースト、権限付き配信                                |
 | 4        | MCP ツール、PAT                                              |
-| 5        | 招待、alias、Explore、オフライン IndexedDB                   |
+| 5        | 招待、alias、Explore、オフライン（View / 一時切断 / local 下書き — [offline.md](./offline.md)） |
 | 6        | 編集履歴（イベント + リビジョン）、履歴 UI、復元、MCP、保持 |
 
 ## 17. 未決事項

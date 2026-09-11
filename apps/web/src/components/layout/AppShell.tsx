@@ -26,9 +26,15 @@ export function AppShell() {
 
   useEffect(() => {
     Promise.all([fetchMe(), fetchAuthConfig()])
-      .then(([nextUser, config]) => {
-        setUser(nextUser);
-        setAuthConfig(config);
+      .then(([meResult, configResult]) => {
+        if (meResult.ok) {
+          setUser(meResult.data.user);
+        }
+        if (configResult.ok) {
+          setAuthConfig(configResult.data);
+        } else {
+          setAuthConfig({ access: false, mock: true });
+        }
       })
       .finally(() => setLoading(false));
   }, []);
