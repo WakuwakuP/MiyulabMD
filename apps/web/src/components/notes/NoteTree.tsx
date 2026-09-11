@@ -198,7 +198,11 @@ export function NoteTree({
                 }
                 name={note.title}
                 onMenu={(event) => handleRowMenu(event, target)}
-                onPointerEnter={() => prefetchNote(note.id)}
+                onPointerEnter={() => {
+                  if (!note.id.startsWith("local-")) {
+                    prefetchNote(note.id);
+                  }
+                }}
               />
             );
           })}

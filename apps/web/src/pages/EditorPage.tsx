@@ -59,9 +59,11 @@ import {
   editorDesiredConnection,
   editorGridClass,
   editorHeaderMutationsVisible,
+  editorModeSwitchVisible,
   editorNeedsSession,
   editorViewModeFor,
   handleCollabAuthStop,
+  isLocalEditorPhase,
   isOfflineKnownSession,
   ownerLabelFor,
   persistEditorAccess,
@@ -77,6 +79,11 @@ import {
   teardownCollab,
   verifiedCanEdit,
 } from "./editor-page.ts";
+import {
+  getLocalDraftEditor,
+  type LocalDraftEditor,
+} from "../lib/local-draft-editor.ts";
+import { isDraftStorageUnavailable } from "../lib/draft-store.ts";
 
 function EditorLoadError({
   message,
@@ -334,7 +341,8 @@ function EditorWorkspace({
   const showSource = viewMode === "split" || viewMode === "source";
   const showPreview = viewMode === "split" || viewMode === "preview";
   const showRich = viewMode === "rich";
-  const editorCanEdit = canEdit && viewPhase === "editing";
+  const editorCanEdit =
+    canEdit && (viewPhase === "editing" || viewPhase === "local-editing");
   return (
     <section
       className={cn("flex flex-col", usesInternalScroll && "h-full min-h-0")}
@@ -427,8 +435,7 @@ function EditorPageView({
     (viewPhase === "uncached" ||
       viewPhase === "denied" ||
       viewPhase === "not-found" ||
-      viewPhase === "load-error" ||
-      viewPhase === "local-unsupported")
+      viewPhase === "load-error")
   ) {
     return <EditorLoadError message={loadError} onRetry={onRetry} />;
   }
@@ -573,6 +580,7 @@ export function EditorPage() {
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
   const [hydrated, setHydrated] = useState(false);
+  const [localEditor, setLocalEditor] = useState<LocalDraftEditor | null>(null);
   const sessionRef = useRef<NoteCollabSession | null>(null);
   const unbindCollabRef = useRef<(() => void) | null>(null);
   const loadGenerationRef = useRef(nextRequestGeneration());
@@ -614,9 +622,21 @@ export function EditorPage() {
   const headingTitle = titleFromMarkdown(markdown);
   const articleSource = matchArticleSource(folder, articleSources);
   const articleIssues = articleIssuesFor(articleSource, markdown);
-  const awareness = collab?.awareness;
-  const yMarkdown = collab?.yMarkdown;
-  const ready = Boolean(yMarkdown && awareness && collabReady);
+  const awareness = localEditor?.awareness ?? collab?.awareness;
+  const yMarkdown = localEditor?.yMarkdown ?? collab?.yMarkdown;
+  const ready = Boolean(
+    localEditor
+      ? yMarkdown && awareness
+      : yMarkdown && awareness && collabReady,
+  );
+  const localSaveBanner =
+    localEditor?.saveState === "saving"
+      ? "端末へ保存中…"
+      : localEditor?.saveState === "error" || localEditor?.saveState === "conflict"
+        ? (localEditor.saveError ?? "端末への保存に失敗しました。")
+        : isDraftStorageUnavailable()
+          ? "端末に保存できていません。内容はこのタブ内のみ保持されます。"
+          : null;
   const collabBanner = collabSnapshot
     ? collabBannerMessage(collabSnapshot)
     : null;
@@ -630,6 +650,11 @@ export function EditorPage() {
 
   editorSnapshotRef.current = {
     accessDraft,
+    document: localEditor
+      ? { draft: localEditor.draft, kind: "draft" }
+      : note
+        ? { kind: "server", note }
+        : null,
     folder,
     loadError,
     markdown,
@@ -684,6 +709,7 @@ export function EditorPage() {
     setPendingEdit(false);
     setRevalidating(false);
     setHydrated(false);
+    setLocalEditor(null);
     loadGenerationRef.current = nextRequestGeneration();
     loadSessionEpochRef.current = session.sessionEpoch;
     applySnapshot(resetEditorSnapshotForRoute(id), snapshotSetters);
@@ -695,6 +721,9 @@ export function EditorPage() {
       generation: loadGenerationRef.current,
       onPreview: (snapshot) => {
         applySnapshot(snapshot, snapshotSetters);
+        if (user && id.startsWith("local-")) {
+          setLocalEditor(getLocalDraftEditor(user.id, id as `local-${string}`));
+        }
         setHydrated(true);
       },
       onResult: (outcome) => {
@@ -710,9 +739,11 @@ export function EditorPage() {
         setViewPhase("revalidating");
       },
       routeId: id,
+      session: getSessionSnapshot(),
       sessionEpoch: loadSessionEpochRef.current,
+      user,
     });
-  }, [id, loadTick, session.sessionEpoch]);
+  }, [id, loadTick, session.sessionEpoch, user]);
 
   useEffect(() => {
     return subscribeOnlineStatus((online) => {
@@ -771,17 +802,7 @@ export function EditorPage() {
     }
     const patch = handleCollabAuthStop({
       collabSnapshot,
-      snapshot: {
-        accessDraft,
-        folder,
-        loadError,
-        markdown,
-        meta,
-        note,
-        pendingEdit,
-        previewBanner,
-        viewPhase: resolvedPhase,
-      },
+      snapshot: editorSnapshotRef.current,
     });
     if (Object.keys(patch).length === 0) {
       return;
@@ -804,6 +825,9 @@ export function EditorPage() {
   }, [collabSnapshot]);
 
   useEffect(() => {
+    if (isLocalEditorPhase(resolvedPhase)) {
+      return;
+    }
     bindEditorCollab({
       desiredConnection: editorDesiredConnection(resolvedPhase),
       hydrated,
@@ -819,6 +843,47 @@ export function EditorPage() {
       userLoading,
     });
   }, [noteId, userLoading, resolvedPhase, hydrated, user]);
+
+  useEffect(() => {
+    if (resolvedPhase === "local-editing" && mode === "preview") {
+      setMode("rich");
+    }
+  }, [resolvedPhase, id]);
+
+  useEffect(() => {
+    if (!localEditor || !user) {
+      return;
+    }
+    const syncMarkdown = () => {
+      setMarkdown(localEditor.yMarkdown.toString());
+    };
+    localEditor.yMarkdown.observe(syncMarkdown);
+    const timer = window.setInterval(() => {
+      const current = getLocalDraftEditor(
+        user.id,
+        id as `local-${string}`,
+      );
+      if (current) {
+        setLocalEditor(current);
+      }
+    }, 500);
+    const flush = () => {
+      void localEditor.flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        flush();
+      }
+    });
+    return () => {
+      localEditor.yMarkdown.unobserve(syncMarkdown);
+      window.clearInterval(timer);
+      window.removeEventListener("pagehide", flush);
+      void localEditor.flush();
+      localEditor.destroy();
+    };
+  }, [localEditor?.draft.localId]);
 
   useEffect(() => {
     syncCollabUser(collab, user);
@@ -837,7 +902,12 @@ export function EditorPage() {
       awareness,
       canEdit: startEditAllowed,
       folder,
-      headerVisible: editorHeaderMutationsVisible(
+      headerVisible: editorModeSwitchVisible(
+        resolvedPhase,
+        session,
+        collabActive,
+      ),
+      serverMutationsVisible: editorHeaderMutationsVisible(
         resolvedPhase,
         session,
         collabActive,
@@ -850,7 +920,10 @@ export function EditorPage() {
           setMode("preview");
           return;
         }
-        if (resolvedPhase === "editing" && startEditAllowed) {
+        if (
+          (resolvedPhase === "editing" || resolvedPhase === "local-editing") &&
+          startEditAllowed
+        ) {
           changeEditorMode(true, next, setMode);
           return;
         }
@@ -929,7 +1002,11 @@ export function EditorPage() {
             onSplitScroll={(ratio) => {
               applySplitScroll(ratio, splitScrollLock, setSplitScroll);
             }}
-            previewBanner={previewBanner}
+            previewBanner={
+              localSaveBanner
+                ? [previewBanner, localSaveBanner].filter(Boolean).join(" · ")
+                : previewBanner
+            }
             ready={ready}
             saveError={saveError}
             shareOpen={shareOpen}
@@ -953,6 +1030,7 @@ function bindEditorHeader(input: {
   viewMode: EditorMode;
   canEdit: boolean;
   headerVisible: boolean;
+  serverMutationsVisible: boolean;
   awareness: NoteCollabSession["awareness"] | undefined;
   isOwner: boolean;
   session: import("../lib/offline-session.ts").SessionSnapshot;
@@ -969,16 +1047,15 @@ function bindEditorHeader(input: {
     input.setHeader({ folder: null, layout: "editor" });
     return;
   }
-  const showMutations = input.headerVisible;
   input.setHeader({
-    actions: showMutations ? (
+    actions: input.headerVisible ? (
       <EditorModeSwitch
         canEdit={input.canEdit || input.viewMode !== "preview"}
         onChange={input.onRequestEdit}
         value={input.viewMode}
       />
     ) : null,
-    end: showMutations ? (
+    end: input.serverMutationsVisible ? (
       <EditorHeaderEnd
         awareness={input.awareness}
         folder={input.folder}
@@ -995,7 +1072,7 @@ function bindEditorHeader(input: {
               setNote: input.setNote,
               setSaveError: input.setSaveError,
             },
-            () => showMutations,
+            () => input.serverMutationsVisible,
           );
         }}
         onFolderChange={input.setFolder}

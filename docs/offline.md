@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | **既存 View** | サーバー上に存在するノートを閲覧・（権限があれば）編集 | サーバー + Yjs session |
 | **一時切断編集** | オンライン編集中に通信が切れた。既存 session の Yjs / y-indexeddb が保持 | Yjs + y-indexeddb（#95） |
-| **local 下書き** | オフラインまたは未同期の新規/複製下書き。サーバー ID がない、または `local-*` | drafts store（#96） |
+| **local 下書き** | オフラインまたは未同期の新規下書き。サーバー ID がない、または `local-*` | drafts store（#96） |
 
 local 本文を複数の正本（Yjs・drafts・メモリ cache）に持たない。種別ごとに保存先を分ける。
 
@@ -87,7 +87,11 @@ DB 名: `miyulabmd-offline`。`openDb(): Promise<IDBDatabase | null>` を `offli
 
 インデックス: `[AccountScope, shortId]` unique。`shortId` が optional なレコードは index 外。`local-*` ID は notes / lists に入れない（`isPersistableRemoteId`）。
 
-drafts / journal store は #96/#97 で同一 upgrade に追加する。
+| `drafts` | `[ownerId, localId]` | local 下書き本文・フォルダ metadata・revision |
+| `draft-locks` | `[ownerId, localId]` | 非 `navigator.locks` 環境向け編集 lease |
+| `draft-tombstones` | `[ownerId, localId]` | 削除後の復活拒否 |
+
+journal store は #97 で同一 upgrade に追加する。
 
 ## 6. キャッシュ型と allowlist
 
@@ -240,7 +244,8 @@ preview 表示や `navigator.onLine` だけでは doc を破棄しない。`need
 | `preparing-edit` | 検証済み preview のまま Yjs 初期同期待ち。入力不可 |
 | `editing` | #95 session の Y.Text に bind |
 | `uncached` / `denied` / `not-found` / `load-error` | 旧本文を残さずメッセージ |
-| `local-unsupported` | `local-*` は #96 入口へ（現状は未対応案内） |
+| `local-editing` | 本人 draft。memory Y.Doc + drafts store 保存。編集 lock 取得タブのみ |
+| `local-readonly` | 別タブ編集中など lock 未取得。本文表示のみ |
 
 `loadNoteRecord` の `source` / `cachedAt` / `verifiedForSession` を meta として保持。**`verifiedForSession` が true の server GET 成功まで Edit を許可しない**（cache の `canEdit` は表示専用）。
 
@@ -270,19 +275,47 @@ SharePage（`/s/:id`）も同一表。従来の「cache hit なら全エラー�
 - オフライン preview: mode 切替・履歴・共有・folder 変更・upload を非表示。folder 名・リンク・TOC は維持
 - `taskNoteId` は verified Edit 可能時のみ。`offline-known` では task checkbox HTTP も停止
 - Home: フォルダ作成/改名・共有/権限・リモート削除を導線と handler 両方で抑止
-- オフライン新規作成不可（ボタン disable + 説明）
-- server mutation queue は設けない
+- オフラインでも **ログイン済み** なら local 下書きの新規作成可（`persistNewNote` → drafts store → `/n/local-*`）
+- フォルダ作成/改名・共有/権限・リモート削除は引き続き offline-known で停止
+- server mutation queue は設けない（local 下書きの自動 POST は #97）
 
 ### SSR 除去
 
 `removeSsrPreview()` は **`loading` 以外の確定フェーズ**（`revalidating` / terminal 含む）で呼ぶ。空本文でも旧 SSR が残らない。SharePage も同じ。
 
-## 15. 未実装（後続スライス）
+## 15. local 下書き（#96）
+
+実装: `draft-store.ts` / `draft-lock.ts` / `local-draft-editor.ts` / `home-page.ts` / `editor-page.ts`。
+
+### 作成
+
+- `online-confirmed` / `offline-known` の **non-null user** のみ。guest / `unknown` / `verification-error` / `unauthenticated` では開始しない。
+- オフラインまたは `createNote` が `network(status:0)` のとき `# 無題\n` で drafts store に保存し `/n/local-{uuid}` へ遷移。HTTP 4xx/5xx / Abort では draft を増やさない。
+- 同一 tick の二重作成は in-flight Promise で 1 件に合流。
+- #97: オンライン復帰後の自動 POST は未実装。
+
+### 一覧
+
+- Home は server 一覧 cache と `listDrafts(ownerId)` を **表示時だけ** 合成。server list cache へ書き戻さない。
+- draft 行は「未保存」。メニューは「開く」「削除」のみ。削除は server DELETE を呼ばず tombstone + editor 停止。
+
+### 編集
+
+- 表示モデル: `{ kind: 'server', note } | { kind: 'draft', draft }`。
+- `local-*` は `fetchNote` / notes cache / #95 WS に送らない。memory Y.Doc / Y.Text / Awareness に一度だけ seed。
+- 保存元は `getEditorDrain().readDraft()`。確定入力ごとに直列保存（revision 単調増加）。
+- 編集 lock: 優先 `navigator.locks`、非対応は `draft-locks` lease。未取得タブは read-only。
+- draft 編集中は共有・履歴・server フォルダ変更・画像 upload・task checkbox HTTP を停止。folder 名表示と TOC は可。
+
+### Service Worker
+
+- `/n/local-*` navigation は server endpoint の次・通常 app navigation より前に分類し、**即 precache `/index.html`** を返す（Worker/D1 障害でもシェル起動）。
+
+## 16. 未実装（後続スライス）
 
 | 項目 | Issue |
 | --- | --- |
-| local 下書き drafts store | #96 |
-| 復帰同期（サーバー契約・クライアント） | #97 |
+| 復帰同期（journal / 自動 re-POST / ID 昇格 / server DELETE） | #97 |
 
 ## 参照
 

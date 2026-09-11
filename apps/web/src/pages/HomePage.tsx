@@ -28,6 +28,7 @@ import {
   peekFolder,
   peekNotes,
 } from "../lib/list-cache.ts";
+import { canCreateLocalDraft } from "../lib/home-draft-list.ts";
 import {
   getSessionSnapshot,
   subscribeSession,
@@ -60,6 +61,7 @@ function HomeHeaderEnd({
   creating,
   showEnd,
   remoteBlocked,
+  createBlocked,
   onCreateFolder,
   onCreateNote,
 }: {
@@ -67,6 +69,7 @@ function HomeHeaderEnd({
   creating: boolean;
   showEnd: boolean;
   remoteBlocked: boolean;
+  createBlocked: boolean;
   onCreateFolder: () => void;
   onCreateNote: () => void;
 }) {
@@ -90,11 +93,11 @@ function HomeHeaderEnd({
         />
       )}
       <HeaderButton
-        disabled={creating || remoteBlocked}
+        disabled={creating || createBlocked}
         icon={<PlusIcon />}
         label={creating ? "作成中…" : "新規ノート"}
         onClick={onCreateNote}
-        title={remoteBlocked ? homeOfflineCreateMessage() : undefined}
+        title={createBlocked ? homeOfflineCreateMessage() : undefined}
         variant="accent"
       />
     </>
@@ -109,6 +112,7 @@ function useHomeHeader(
   canAdmin: boolean,
   creating: boolean,
   remoteBlocked: boolean,
+  createBlocked: boolean,
   setHeader: AppShellContext["setHeader"],
   onCreateFolder: () => void,
   onCreateNote: () => void,
@@ -121,6 +125,7 @@ function useHomeHeader(
       end: (
         <HomeHeaderEnd
           canAdmin={canAdmin}
+          createBlocked={createBlocked}
           creating={creating}
           onCreateFolder={onCreateFolder}
           onCreateNote={onCreateNote}
@@ -138,6 +143,7 @@ function useHomeHeader(
     canAdmin,
     creating,
     remoteBlocked,
+    createBlocked,
     setHeader,
     user,
     onCreateFolder,
@@ -318,6 +324,7 @@ export function HomePage() {
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
   const [session, setSession] = useState(getSessionSnapshot);
   const remoteBlocked = homeRemoteMutationsBlocked(session);
+  const createBlocked = !canCreateLocalDraft(session, user);
   const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
   const [notesLoadState, setNotesLoadState] = useState<NotesLoadState>(() =>
     getNotesLoadState(),
@@ -383,11 +390,13 @@ export function HomePage() {
     void sessionKey;
     return subscribeHomeNotes(
       userLoading,
+      user,
+      visibleFolder?.id ?? null,
       setNotes,
       setNotesLoadState,
       setNotesError,
     );
-  }, [sessionKey, userLoading]);
+  }, [sessionKey, userLoading, user, visibleFolder?.id]);
 
   useEffect(() => {
     return subscribeHomeFolder(folderId, user, userLoading, {
@@ -410,9 +419,10 @@ export function HomePage() {
       navigate,
       setCreating,
       setError,
-      remoteBlocked,
+      user,
+      session,
     );
-  }, [visibleFolder, navigate, remoteBlocked]);
+  }, [visibleFolder, navigate, user, session]);
 
   useHomeHeader(
     headerFolder,
@@ -422,6 +432,7 @@ export function HomePage() {
     flags.canAdmin,
     creating,
     remoteBlocked,
+    createBlocked,
     setHeader,
     handleCreateFolder,
     handleCreateNote,
@@ -473,6 +484,7 @@ export function HomePage() {
                 setVisibleFolder,
               },
               remoteBlocked,
+              undefined,
             );
           }}
           onCreateFolder={(name) => {

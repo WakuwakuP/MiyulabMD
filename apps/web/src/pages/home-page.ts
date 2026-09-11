@@ -30,6 +30,21 @@ import {
   updateNote,
 } from "../lib/api.ts";
 import {
+  createLocalDraftId,
+  deleteDraft,
+  insertDraft,
+  listDrafts,
+  subscribeDrafts,
+  type LocalDraft,
+} from "../lib/draft-store.ts";
+import {
+  canCreateLocalDraft,
+  draftToNoteSummary,
+  isLocalDraftSummary,
+  mergeHomeDisplayNotes,
+} from "../lib/home-draft-list.ts";
+import { invalidateLocalDraftEditor } from "../lib/local-draft-editor.ts";
+import {
   abortNoteBodyPrefetch,
   getNotesLoadState,
   invalidateFolderCache,
@@ -45,6 +60,7 @@ import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
 import { getHydratableScope } from "../lib/offline-scope.ts";
 import {
   evictNotesEverywhere,
+  getSessionSnapshot,
   type SessionSnapshot,
 } from "../lib/offline-session.ts";
 
@@ -81,13 +97,63 @@ export function homeRemoteMutationsBlocked(session: SessionSnapshot): boolean {
 }
 
 export function homeOfflineCreateMessage(): string {
-  return "オフラインでは新規ノートを作成できません。オンラインでお試しください。";
+  return "ログインしてから新規ノートを作成してください。";
+}
+
+const INITIAL_MARKDOWN = "# 無題\n";
+
+let createNoteInFlight: Promise<string | null> | null = null;
+let createNoteOwnerId: string | null = null;
+
+export function resetCreateNoteCoalescingForTests(): void {
+  createNoteInFlight = null;
+  createNoteOwnerId = null;
+}
+
+function folderTargetForDraft(
+  visibleFolder: FolderAccess | null,
+): Pick<LocalDraft, "folder" | "folderId"> {
+  if (visibleFolder?.folder !== undefined) {
+    return {
+      folder: visibleFolder.folder,
+      folderId: visibleFolder.id ?? undefined,
+    };
+  }
+  return { folder: "" };
+}
+
+async function saveLocalDraftNote(
+  ownerId: string,
+  visibleFolder: FolderAccess | null,
+): Promise<string | null> {
+  const now = Date.now();
+  const localId = createLocalDraftId();
+  const draft: LocalDraft = {
+    createdAt: now,
+    ...folderTargetForDraft(visibleFolder),
+    inheritAccess: true,
+    kind: "draft",
+    localId,
+    markdown: INITIAL_MARKDOWN,
+    ownerId,
+    revision: 1,
+    updatedAt: now,
+  };
+  const ok = await insertDraft(draft);
+  if (!ok) {
+    return null;
+  }
+  return localId;
 }
 
 export function filterHomeMenuItems(
   items: ContextMenuItem[],
   blocked: boolean,
+  localDraft = false,
 ): ContextMenuItem[] {
+  if (localDraft) {
+    return items.filter((item) => item.label === "開く" || item.label === "削除");
+  }
   if (!blocked) {
     return items;
   }
@@ -155,6 +221,8 @@ export function homeListFlags(input: {
 
 export function subscribeHomeNotes(
   userLoading: boolean,
+  user: SessionUser | null,
+  currentFolderId: string | null,
   setNotes: (notes: NoteSummary[]) => void,
   setNotesLoadState: (state: NotesLoadState) => void,
   setNotesError: (error: boolean) => void,
@@ -168,6 +236,19 @@ export function subscribeHomeNotes(
     setNotesError(false);
   }
   let cancelled = false;
+
+  const publish = async (serverNotes: NoteSummary[]) => {
+    if (cancelled) {
+      return;
+    }
+    if (!user) {
+      setNotes(serverNotes);
+      return;
+    }
+    const drafts = await listDrafts(user.id);
+    setNotes(mergeHomeDisplayNotes(serverNotes, drafts, currentFolderId));
+  };
+
   setNotesLoadState(getNotesLoadState());
   void loadNotes(true).then((noteList) => {
     if (cancelled) {
@@ -180,10 +261,20 @@ export function subscribeHomeNotes(
       return;
     }
     setNotesError(false);
-    setNotes(noteList);
+    void publish(noteList);
   });
+
+  const unsubDrafts = user
+    ? subscribeDrafts(() => {
+        void loadNotes(false).then((noteList) => {
+          void publish(noteList);
+        });
+      })
+    : undefined;
+
   return () => {
     cancelled = true;
+    unsubDrafts?.();
     abortNoteBodyPrefetch();
   };
 }
@@ -273,35 +364,81 @@ export async function persistNewNote(
   navigate: NavigateFunction,
   setCreating: (creating: boolean) => void,
   setError: (error: string | null) => void,
-  blocked = false,
+  user: SessionUser | null,
+  session: SessionSnapshot = getSessionSnapshot(),
 ) {
-  if (blocked) {
+  if (!canCreateLocalDraft(session, user)) {
     setError(homeOfflineCreateMessage());
     return;
   }
-  setCreating(true);
-  setError(null);
-
-  const result = await createNote({
-    folder: visibleFolder?.folder,
-    folderId: visibleFolder?.id ?? undefined,
-    inheritAccess: true,
-    markdown: "# 無題\n",
-  });
-  if (!result.ok) {
-    setError(
-      result.status === 401
-        ? "ノートを作成するにはログインが必要です。"
-        : result.error,
-    );
-    setCreating(false);
+  const ownerId = user?.id;
+  if (!ownerId) {
+    setError(homeOfflineCreateMessage());
     return;
   }
 
-  const { markdown: _markdown, ...summary } = result.data;
-  upsertNoteSummary(summary);
-  seedNoteCache(result.data);
-  navigate(`/n/${result.data.id}`);
+  if (createNoteInFlight && createNoteOwnerId === ownerId) {
+    setCreating(true);
+    setError(null);
+    const localId = await createNoteInFlight;
+    setCreating(false);
+    if (localId) {
+      navigate(`/n/${localId}`);
+    }
+    return;
+  }
+
+  setCreating(true);
+  setError(null);
+  createNoteOwnerId = ownerId;
+  createNoteInFlight = (async () => {
+    try {
+      const offline =
+        session.status === "offline-known" ||
+        (typeof navigator !== "undefined" && navigator.onLine === false);
+      if (offline) {
+        return await saveLocalDraftNote(ownerId, visibleFolder);
+      }
+
+      const result = await createNote({
+        folder: visibleFolder?.folder,
+        folderId: visibleFolder?.id ?? undefined,
+        inheritAccess: true,
+        markdown: INITIAL_MARKDOWN,
+      });
+      if (result.ok) {
+        const { markdown: _markdown, ...summary } = result.data;
+        upsertNoteSummary(summary);
+        seedNoteCache(result.data);
+        return result.data.id;
+      }
+      if (result.kind === "network") {
+        // #97: auto re-POST when back online.
+        return await saveLocalDraftNote(ownerId, visibleFolder);
+      }
+      setError(
+        result.status === 401
+          ? "ノートを作成するにはログインが必要です。"
+          : result.error,
+      );
+      return null;
+    } finally {
+      if (createNoteOwnerId === ownerId) {
+        createNoteInFlight = null;
+        createNoteOwnerId = null;
+      }
+      setCreating(false);
+    }
+  })();
+
+  const id = await createNoteInFlight;
+  if (id) {
+    if (id.startsWith("local-")) {
+      navigate(`/n/${id}`);
+      return;
+    }
+    navigate(`/n/${id}`);
+  }
 }
 
 export async function persistNewFolder(
@@ -514,6 +651,16 @@ function noteMenuItems(
   onShare: (note: NoteSummary) => void,
   onDelete: (id: string, name: string) => void,
 ): ContextMenuItem[] {
+  if (isLocalDraftSummary(note)) {
+    return [
+      { label: "開く", onSelect: () => navigate(`/n/${note.id}`) },
+      {
+        danger: true,
+        label: "削除",
+        onSelect: () => onDelete(note.id, note.title),
+      },
+    ];
+  }
   const items: ContextMenuItem[] = [
     { label: "開く", onSelect: () => navigate(`/n/${note.id}`) },
     { label: "共有", onSelect: () => onShare(note) },
@@ -560,6 +707,7 @@ export function handleItemMenu(
     });
     return;
   }
+  const localDraft = isLocalDraftSummary(target.note);
   setMenu({
     id: target.note.id,
     ...position,
@@ -568,6 +716,7 @@ export function handleItemMenu(
         onDelete("note", id, name),
       ),
       blocked,
+      localDraft,
     ),
   });
 }
@@ -652,6 +801,35 @@ export async function persistRenameFolder(
   );
 }
 
+export async function persistDraftDelete(
+  confirm: Extract<ConfirmState, { kind: "note" }>,
+  user: SessionUser | null,
+  navigate: NavigateFunction,
+  setters: {
+    setConfirmBusy: (busy: boolean) => void;
+    setConfirmError: (error: string | null) => void;
+    setConfirm: (value: ConfirmState | null) => void;
+    setNotes: (notes: NoteSummary[]) => void;
+  },
+  openDraftId?: string,
+) {
+  if (!user) {
+    return;
+  }
+  setters.setConfirmBusy(true);
+  setters.setConfirmError(null);
+  invalidateLocalDraftEditor(user.id, confirm.id as import("../lib/draft-store.ts").LocalDraftId);
+  await deleteDraft(user.id, confirm.id as import("../lib/draft-store.ts").LocalDraftId);
+  setters.setConfirm(null);
+  setters.setConfirmBusy(false);
+  if (openDraftId === confirm.id) {
+    navigate("/");
+  }
+  const serverNotes = await loadNotes(false);
+  const drafts = await listDrafts(user.id);
+  setters.setNotes(mergeHomeDisplayNotes(serverNotes, drafts, null));
+}
+
 export async function persistHomeDelete(
   confirm: ConfirmState | null,
   folderId: string | undefined,
@@ -666,8 +844,16 @@ export async function persistHomeDelete(
     setVisibleFolder: (folder: FolderAccess | null) => void;
   },
   blocked = false,
+  openDraftId?: string,
 ) {
-  if (!confirm || blocked) {
+  if (!confirm) {
+    return;
+  }
+  if (confirm.kind === "note" && confirm.id.startsWith("local-")) {
+    await persistDraftDelete(confirm, user, navigate, setters, openDraftId);
+    return;
+  }
+  if (blocked) {
     return;
   }
   setters.setConfirmBusy(true);

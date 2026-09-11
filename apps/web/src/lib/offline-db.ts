@@ -1,12 +1,15 @@
 import type { AccountScope, SessionEpoch } from "./offline-types.ts";
 
 export const OFFLINE_DB_NAME = "miyulabmd-offline";
-export const OFFLINE_DB_VERSION = 1;
+export const OFFLINE_DB_VERSION = 2;
 
 export const SESSION_STORE = "session";
 export const SESSION_RECORD_KEY = "current";
 export const NOTES_STORE = "notes";
 export const LISTS_STORE = "lists";
+export const DRAFTS_STORE = "drafts";
+export const DRAFT_LOCKS_STORE = "draft-locks";
+export const DRAFT_TOMBSTONES_STORE = "draft-tombstones";
 
 /** Persisted session metadata for offline-known and coordinator teardown. */
 export type OfflineSessionRecord = {
@@ -92,7 +95,23 @@ function createStores(db: IDBDatabase): void {
   if (!db.objectStoreNames.contains(SESSION_STORE)) {
     db.createObjectStore(SESSION_STORE);
   }
-  // #96/#97: add drafts / journal stores in the same upgrade path.
+  if (!db.objectStoreNames.contains(DRAFTS_STORE)) {
+    const drafts = db.createObjectStore(DRAFTS_STORE, {
+      keyPath: ["ownerId", "localId"],
+    });
+    drafts.createIndex("ownerId", "ownerId", { unique: false });
+  }
+  if (!db.objectStoreNames.contains(DRAFT_LOCKS_STORE)) {
+    db.createObjectStore(DRAFT_LOCKS_STORE, {
+      keyPath: ["ownerId", "localId"],
+    });
+  }
+  if (!db.objectStoreNames.contains(DRAFT_TOMBSTONES_STORE)) {
+    db.createObjectStore(DRAFT_TOMBSTONES_STORE, {
+      keyPath: ["ownerId", "localId"],
+    });
+  }
+  // #97: add journal store in the same upgrade path.
 }
 
 function attachVersionChangeHandler(db: IDBDatabase): void {

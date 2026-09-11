@@ -7,6 +7,7 @@ import {
   readCachedNote,
   writeCachedNote,
 } from "./offline-cache.ts";
+import { isPersistableRemoteId } from "./offline-db.ts";
 import { cachedToNote } from "./offline-cache-types.ts";
 import { getHydratableScope } from "./offline-scope.ts";
 import { getSessionSnapshot } from "./offline-session.ts";
@@ -91,6 +92,9 @@ export function noteFromCaches(id: string): Note | undefined {
 }
 
 export function seedNoteCache(note: Note): void {
+  if (!isPersistableRemoteId(note.id)) {
+    return;
+  }
   noteCache.set(note.id, note);
   if (note.shortId) {
     noteCache.set(note.shortId, note);
@@ -232,6 +236,14 @@ export async function loadNote(
   id: string,
   force = false,
 ): Promise<ApiResult<Note>> {
+  if (!isPersistableRemoteId(id)) {
+    return {
+      error: "local draft",
+      kind: "http",
+      ok: false,
+      status: 404,
+    };
+  }
   const generation = nextRequestGeneration();
   noteGenerations.set(id, generation);
   const ctx: NoteLoadContext = {
@@ -275,7 +287,7 @@ export async function loadNote(
 }
 
 export function prefetchNote(id: string, signal?: AbortSignal): void {
-  if (signal?.aborted) {
+  if (signal?.aborted || !isPersistableRemoteId(id)) {
     return;
   }
   void loadNote(id).then((result) => {

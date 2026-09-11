@@ -8,6 +8,7 @@ import {
   nextRequestGeneration,
   nextSessionEpoch,
 } from "../lib/offline-types.ts";
+import type { LocalDraft } from "../lib/draft-store.ts";
 import {
   applyEditorForceLoadResult,
   applyEditorLoadOutcome,
@@ -18,6 +19,7 @@ import {
   isLocalDraftId,
   resolveEditorViewPhase,
   shouldRemoveSsrPreview,
+  snapshotFromLocalDraft,
   taskNoteIdFor,
   verifiedCanEdit,
 } from "./editor-page.ts";
@@ -237,6 +239,7 @@ test("applyEditorLoadOutcome keeps pendingEdit on successful revalidation", () =
   const sessionEpoch = nextSessionEpoch();
   const current = {
     accessDraft: null,
+    document: { kind: "server" as const, note },
     folder: "docs",
     loadError: null,
     markdown: "# Cached",
@@ -273,6 +276,7 @@ test("applyEditorLoadOutcome keeps pendingEdit on successful revalidation", () =
 test("applyEditorLoadOutcome clears pendingEdit on terminal denied", () => {
   const current = {
     accessDraft: null,
+    document: null,
     folder: "",
     loadError: null,
     markdown: "",
@@ -304,6 +308,38 @@ test("editorHeaderMutationsVisible hides controls for offline preview", () => {
   );
   assert.equal(
     editorHeaderMutationsVisible("server-preview", onlineSession, false),
+    true,
+  );
+});
+
+test("snapshotFromLocalDraft uses draft document model", () => {
+  const draft: LocalDraft = {
+    createdAt: 1,
+    folder: "docs",
+    inheritAccess: true,
+    kind: "draft",
+    localId: "local-abc",
+    markdown: "# Local\n",
+    ownerId: "me",
+    revision: 1,
+    updatedAt: 1,
+  };
+  const snapshot = snapshotFromLocalDraft(draft, "local-editing");
+  assert.equal(snapshot.document?.kind, "draft");
+  assert.equal(snapshot.note?.id, "local-abc");
+});
+
+test("canStartEdit allows local-editing phase", () => {
+  assert.equal(
+    canStartEdit({
+      collabActive: false,
+      meta: null,
+      note: null,
+      pendingEdit: true,
+      phase: "local-editing",
+      routeId: "local-abc",
+      session: onlineSession,
+    }),
     true,
   );
 });

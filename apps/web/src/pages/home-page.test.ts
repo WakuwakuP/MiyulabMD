@@ -161,6 +161,8 @@ test("subscribeHomeNotes keeps the list cache while refetching after a remount",
   const setNotesError = mock.fn();
   const unsubscribe = subscribeHomeNotes(
     false,
+    user,
+    null,
     setNotes,
     setNotesLoadState,
     setNotesError,

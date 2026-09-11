@@ -2,6 +2,7 @@ const SERVER_PREFIXES = ["/api", "/auth", "/ws", "/mcp"] as const;
 
 export type SwRouteClass =
   | "server-endpoint"
+  | "local-navigation"
   | "app-navigation"
   | "precache-candidate";
 
@@ -29,7 +30,16 @@ export function isServerEndpointRequest(
   );
 }
 
-// #96: add local-only navigation (/n/local-*) route matching here.
+export function isLocalNavigationPathname(pathname: string): boolean {
+  return /^\/n\/local-[^/]+(?:\/.*)?$/.test(pathname);
+}
+
+export function isLocalNavigationRequest(
+  pathname: string,
+  method: string,
+): boolean {
+  return method === "GET" && isLocalNavigationPathname(pathname);
+}
 
 export function isAppNavigationPathname(pathname: string): boolean {
   if (pathname === "/") {
@@ -45,6 +55,9 @@ export function isAppNavigationPathname(pathname: string): boolean {
   }
   if (pathname === "/settings" || pathname.startsWith("/settings/")) {
     return true;
+  }
+  if (isLocalNavigationPathname(pathname)) {
+    return false;
   }
   if (/^\/n\/[^/]+(?:\/.*)?$/.test(pathname)) {
     return true;
@@ -82,6 +95,12 @@ export function classifySwRoute(input: {
   }
   if (isServerEndpointRequest(input.pathname, input.method)) {
     return "server-endpoint";
+  }
+  if (
+    input.mode === "navigate" &&
+    isLocalNavigationRequest(input.pathname, input.method)
+  ) {
+    return "local-navigation";
   }
   if (
     input.mode === "navigate" &&

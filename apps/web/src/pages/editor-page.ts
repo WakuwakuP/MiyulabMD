@@ -1,4 +1,5 @@
 import type { Note, SessionUser } from "@miyulabmd/shared";
+import { titleFromMarkdown } from "@miyulabmd/shared";
 import type { MutableRefObject } from "react";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import {
@@ -13,6 +14,17 @@ import {
   createNoteCollabSession,
   type NoteCollabSession,
 } from "../lib/collaboration-session.ts";
+import { acquireDraftLock } from "../lib/draft-lock.ts";
+import {
+  getDraft,
+  type LocalDraft,
+  type LocalDraftId,
+} from "../lib/draft-store.ts";
+import { canCreateLocalDraft } from "../lib/home-draft-list.ts";
+import {
+  invalidateLocalDraftEditor,
+  openLocalDraftEditor,
+} from "../lib/local-draft-editor.ts";
 import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
 import { loadOgCards } from "../lib/markdown.ts";
 import { readNoteBootstrap } from "../lib/note-bootstrap.ts";
@@ -43,7 +55,8 @@ export type EditorViewPhase =
   | "denied"
   | "not-found"
   | "load-error"
-  | "local-unsupported";
+  | "local-editing"
+  | "local-readonly";
 
 export type EditorPreviewMeta = {
   source: "memory" | "idb" | "server" | "ssr";
@@ -57,7 +70,12 @@ export type EditorLoadContext = {
   sessionEpoch: SessionEpoch;
 };
 
+export type EditorDocumentModel =
+  | { kind: "server"; note: Note }
+  | { kind: "draft"; draft: LocalDraft };
+
 export type EditorNoteSnapshot = {
+  document: EditorDocumentModel | null;
   note: Note | null;
   markdown: string;
   folder: string;
@@ -87,7 +105,11 @@ const TERMINAL_PHASES = new Set<EditorViewPhase>([
   "denied",
   "not-found",
   "load-error",
-  "local-unsupported",
+]);
+
+const LOCAL_PHASES = new Set<EditorViewPhase>([
+  "local-editing",
+  "local-readonly",
 ]);
 
 export function isLocalDraftId(id: string): boolean {
@@ -124,7 +146,7 @@ export function canStartEdit(input: {
   collabActive: boolean;
 }): boolean {
   if (input.routeId && isLocalDraftId(input.routeId)) {
-    return false;
+    return input.phase === "local-editing";
   }
   if (isOfflineKnownSession(input.session)) {
     return input.phase === "editing" && input.collabActive;
@@ -151,6 +173,9 @@ export function allowsServerMutations(
   phase: EditorViewPhase,
   session: SessionSnapshot,
 ): boolean {
+  if (LOCAL_PHASES.has(phase)) {
+    return false;
+  }
   if (isOfflineKnownSession(session)) {
     return false;
   }
@@ -205,13 +230,23 @@ export function editorDesiredConnection(phase: EditorViewPhase): boolean {
   return phase === "preparing-edit" || phase === "editing";
 }
 
+export function isLocalEditorPhase(phase: EditorViewPhase): boolean {
+  return LOCAL_PHASES.has(phase);
+}
+
 export function editorViewModeFor(input: {
   requestedMode: EditorMode;
   phase: EditorViewPhase;
   canStartEdit: boolean;
 }): EditorMode {
-  if (input.phase === "editing" && input.canStartEdit) {
+  if (
+    (input.phase === "editing" || input.phase === "local-editing") &&
+    input.canStartEdit
+  ) {
     return input.requestedMode;
+  }
+  if (input.phase === "local-readonly") {
+    return "preview";
   }
   return "preview";
 }
@@ -251,6 +286,7 @@ export function previewBannerFor(
 export function emptyEditorSnapshot(): EditorNoteSnapshot {
   return {
     accessDraft: null,
+    document: null,
     folder: "",
     loadError: null,
     markdown: "",
@@ -266,13 +302,57 @@ export function resetEditorSnapshotForRoute(
   routeId: string,
 ): EditorNoteSnapshot {
   if (isLocalDraftId(routeId)) {
-    return {
-      ...emptyEditorSnapshot(),
-      loadError: "オフライン下書きはこの画面では未対応です（#96）。",
-      viewPhase: "local-unsupported",
-    };
+    return emptyEditorSnapshot();
   }
   return emptyEditorSnapshot();
+}
+
+export function noteViewFromLocalDraft(draft: LocalDraft): Note {
+  return {
+    access: {
+      effectiveReadScope: "self",
+      effectiveWriteScope: "self",
+      flags: { canAdmin: true, canEdit: true, canView: true },
+      grants: [],
+      inherit: true,
+      readScope: null,
+      source: "default",
+      sourceFolder: null,
+      writeScope: null,
+    },
+    alias: null,
+    articleMeta: {},
+    createdAt: draft.createdAt,
+    folder: draft.folder,
+    folderId: draft.folderId ?? null,
+    id: draft.localId,
+    markdown: draft.markdown,
+    ownerId: draft.ownerId,
+    permission: "private",
+    shortId: draft.localId,
+    title: titleFromMarkdown(draft.markdown) || "無題",
+    updatedAt: draft.updatedAt,
+  };
+}
+
+export function snapshotFromLocalDraft(
+  draft: LocalDraft,
+  phase: EditorViewPhase,
+  banner: string | null = null,
+): EditorNoteSnapshot {
+  const note = noteViewFromLocalDraft(draft);
+  return {
+    accessDraft: draftFromNote(note),
+    document: { draft, kind: "draft" },
+    folder: draft.folder,
+    loadError: null,
+    markdown: draft.markdown,
+    meta: null,
+    note,
+    pendingEdit: phase === "local-editing",
+    previewBanner: banner,
+    viewPhase: phase,
+  };
 }
 
 function metaFromLoaded(
@@ -321,7 +401,7 @@ export function beginEditorPreviewHydrate(routeId: string): {
   phase: EditorViewPhase;
 } {
   if (isLocalDraftId(routeId)) {
-    return { phase: "local-unsupported", preview: null };
+    return { phase: "loading", preview: null };
   }
   const preview = readAllowedPreview(routeId);
   if (!preview) {
@@ -336,6 +416,7 @@ export function snapshotFromPreview(
 ): Omit<EditorNoteSnapshot, "pendingEdit"> {
   return {
     accessDraft: draftFromNote(preview.note),
+    document: { kind: "server", note: preview.note },
     folder: preview.note.folder,
     loadError: null,
     markdown: preview.note.markdown,
@@ -360,7 +441,13 @@ export function resolveEditorViewPhase(input: {
   explicitPhase?: EditorViewPhase | null;
 }): EditorViewPhase {
   if (isLocalDraftId(input.routeId)) {
-    return "local-unsupported";
+    if (input.explicitPhase && LOCAL_PHASES.has(input.explicitPhase)) {
+      return input.explicitPhase;
+    }
+    if (input.loadError && !input.hasPreview) {
+      return "load-error";
+    }
+    return input.explicitPhase ?? "local-editing";
   }
   if (input.explicitPhase && TERMINAL_PHASES.has(input.explicitPhase)) {
     return input.explicitPhase;
@@ -584,13 +671,16 @@ export function requestEditorEdit(input: {
   });
 }
 
-export function editorHeaderMutationsVisible(
+export function editorModeSwitchVisible(
   phase: EditorViewPhase,
   session: SessionSnapshot,
   collabActive: boolean,
 ): boolean {
   if (TERMINAL_PHASES.has(phase)) {
     return false;
+  }
+  if (phase === "local-editing" || phase === "local-readonly") {
+    return phase === "local-editing";
   }
   if (phase === "offline-preview" || phase === "cached-preview") {
     return false;
@@ -608,19 +698,116 @@ export function editorHeaderMutationsVisible(
   );
 }
 
+export function editorHeaderMutationsVisible(
+  phase: EditorViewPhase,
+  session: SessionSnapshot,
+  collabActive: boolean,
+): boolean {
+  if (LOCAL_PHASES.has(phase)) {
+    return false;
+  }
+  return editorModeSwitchVisible(phase, session, collabActive);
+}
+
+export function subscribeLocalDraftLoad(input: {
+  routeId: LocalDraftId;
+  user: SessionUser | null;
+  session: SessionSnapshot;
+  onSnapshot: (snapshot: EditorNoteSnapshot) => void;
+}): () => void {
+  let cancelled = false;
+  let lockRelease: (() => void) | null = null;
+  void (async () => {
+    if (!canCreateLocalDraft(input.session, input.user)) {
+      if (!cancelled) {
+        input.onSnapshot({
+          ...emptyEditorSnapshot(),
+          loadError: "ログインしてから下書きを開いてください。",
+          viewPhase: "denied",
+        });
+      }
+      return;
+    }
+    const ownerId = input.user?.id;
+    if (!ownerId) {
+      if (!cancelled) {
+        input.onSnapshot({
+          ...emptyEditorSnapshot(),
+          loadError: "ログインしてから下書きを開いてください。",
+          viewPhase: "denied",
+        });
+      }
+      return;
+    }
+    const draft = await getDraft(ownerId, input.routeId);
+    if (cancelled) {
+      return;
+    }
+    if (!draft || draft.ownerId !== ownerId) {
+      input.onSnapshot({
+        ...emptyEditorSnapshot(),
+        loadError: "下書きが見つからないか、別アカウントの下書きです。",
+        viewPhase: "not-found",
+      });
+      return;
+    }
+    const lock = await acquireDraftLock(ownerId, input.routeId);
+    if (cancelled) {
+      lock?.release();
+      return;
+    }
+    lockRelease = () => lock?.release();
+    const phase: EditorViewPhase = lock ? "local-editing" : "local-readonly";
+    const banner = lock
+      ? "端末にのみ保存された下書きです（未保存）"
+      : "別タブで編集中です。このタブは read-only です。";
+    const snapshot = snapshotFromLocalDraft(draft, phase, banner);
+    if (lock && input.user) {
+      openLocalDraftEditor({
+        draft,
+        lock,
+        sessionEpoch: input.session.sessionEpoch,
+        user: input.user,
+      });
+    }
+    input.onSnapshot(snapshot);
+  })();
+  return () => {
+    cancelled = true;
+    lockRelease?.();
+    if (input.user) {
+      invalidateLocalDraftEditor(
+        input.user.id,
+        input.routeId,
+      );
+    }
+  };
+}
+
 export function subscribeEditorNoteLoad(input: {
   routeId: string;
   generation: RequestGeneration;
   sessionEpoch: SessionEpoch;
+  user: SessionUser | null;
+  session: SessionSnapshot;
   onPreview: (snapshot: Partial<EditorNoteSnapshot>) => void;
   onRevalidating: () => void;
   onResult: (outcome: ApplyEditorLoadOutcome) => void;
 }): () => void {
+  if (isLocalDraftId(input.routeId)) {
+    return subscribeLocalDraftLoad({
+      onSnapshot: (snapshot) => {
+        input.onPreview(snapshot);
+      },
+      routeId: input.routeId as LocalDraftId,
+      session: input.session,
+      user: input.user,
+    });
+  }
+
   const hydrate = beginEditorPreviewHydrate(input.routeId);
   if (hydrate.preview) {
     input.onPreview(snapshotFromPreview(hydrate.preview, hydrate.phase));
-  } else if (hydrate.phase === "local-unsupported") {
-    input.onPreview(resetEditorSnapshotForRoute(input.routeId));
   }
 
   let cancelled = false;

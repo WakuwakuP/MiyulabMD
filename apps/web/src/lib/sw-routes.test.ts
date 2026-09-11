@@ -4,6 +4,8 @@ import {
   classifySwRoute,
   isAppNavigationPathname,
   isAppNavigationRequest,
+  isLocalNavigationPathname,
+  isLocalNavigationRequest,
   isOpenApiJsonGet,
   isServerEndpointPathname,
   isServerEndpointRequest,
@@ -72,6 +74,21 @@ test("app navigation ignores non-GET methods", () => {
 test("app navigation rejects API-like paths", () => {
   assert.equal(isAppNavigationPathname("/api/notes/x"), false);
   assert.equal(isAppNavigationRequest("/api/notes/x/images/y", "GET"), false);
+});
+
+test("local navigation matches /n/local-* before app navigation", () => {
+  assert.equal(isLocalNavigationPathname("/n/local-abc"), true);
+  assert.equal(isLocalNavigationRequest("/n/local-abc", "GET"), true);
+  assert.equal(isAppNavigationPathname("/n/local-abc"), false);
+  assert.equal(
+    classifySwRoute({
+      method: "GET",
+      mode: "navigate",
+      pathname: "/n/local-abc",
+      sameOrigin: true,
+    }),
+    "local-navigation",
+  );
 });
 
 test("classifySwRoute respects same-origin and mode", () => {

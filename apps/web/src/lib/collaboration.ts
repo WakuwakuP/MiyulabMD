@@ -89,6 +89,29 @@ export function applyAwarenessUser(
   });
 }
 
+/** In-memory awareness for local drafts (#96). Never connects to the server. */
+export function createOfflineAwareness(doc: Y.Doc): {
+  awareness: CollabAwareness;
+  destroy: () => void;
+} {
+  const provider = new WebsocketProvider(
+    collaborationWsBase(),
+    `offline-local:${crypto.randomUUID()}`,
+    doc,
+    {
+      connect: false,
+      disableBc: true,
+      shouldReconnect: () => false,
+    },
+  );
+  return {
+    awareness: provider.awareness,
+    destroy() {
+      provider.destroy();
+    },
+  };
+}
+
 /** Yjs ドキュメントと WebSocket プロバイダを初期化し、awareness にローカル状態を設定する。 */
 export function createYjsSession(
   noteId: string,

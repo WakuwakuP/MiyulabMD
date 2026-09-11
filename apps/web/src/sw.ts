@@ -4,6 +4,7 @@ import { registerRoute } from "workbox-routing";
 import { NetworkOnly } from "workbox-strategies";
 import {
   isAppNavigationRequest,
+  isLocalNavigationRequest,
   isServerEndpointRequest,
 } from "./lib/sw-routes.ts";
 
@@ -23,7 +24,17 @@ registerRoute(
   new NetworkOnly(),
 );
 
-// 2. #96: register local-only navigation (/n/local-*) here.
+// 2. Local draft navigation: serve precached shell immediately (no network wait).
+registerRoute(
+  ({ url, request, sameOrigin }) =>
+    sameOrigin &&
+    request.mode === "navigate" &&
+    isLocalNavigationRequest(url.pathname, request.method),
+  async () => {
+    const shell = await matchPrecache("/index.html");
+    return shell ?? Response.error();
+  },
+);
 
 // 3. App navigation: NetworkOnly with shell fallback on network failure only.
 registerRoute(
