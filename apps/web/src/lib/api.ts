@@ -652,14 +652,38 @@ export async function uploadImage(
   );
 }
 
-export async function deleteFolder(id: string): Promise<ApiResult<void>> {
+export type FolderDeletePayload = {
+  deletedFolderIds: string[];
+  deletedNoteIds: string[];
+};
+
+export async function deleteFolder(
+  id: string,
+): Promise<ApiResult<FolderDeletePayload>> {
   return await apiRequest(
     `/api/folders/${id}`,
     {
       ...fetchOpts,
       method: "DELETE",
     },
-    { kind: "empty" },
+    {
+      kind: "json",
+      parse: (body) => {
+        if (
+          typeof body === "object" &&
+          body !== null &&
+          "deletedNoteIds" in body &&
+          "deletedFolderIds" in body &&
+          Array.isArray(body.deletedNoteIds) &&
+          Array.isArray(body.deletedFolderIds) &&
+          body.deletedNoteIds.every((item) => typeof item === "string") &&
+          body.deletedFolderIds.every((item) => typeof item === "string")
+        ) {
+          return body as FolderDeletePayload;
+        }
+        return null;
+      },
+    },
   );
 }
 

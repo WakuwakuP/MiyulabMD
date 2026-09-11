@@ -170,6 +170,9 @@ async function prefetchOneBody(
   }
   const result = await loadNote(summary.id);
   if (signal.aborted || !result.ok) {
+    if (!result.ok && result.kind === "network") {
+      abortNoteBodyPrefetch();
+    }
     return;
   }
   void loadOgCards(result.data.markdown);

@@ -36,7 +36,7 @@ type EditorDrain = {
 - **`SessionEpoch`**: アカウント / 認証状態の世代。
 - **`RequestGeneration`**: ノート読込・session 生成の世代。
 - **`LockEpoch`**: draft 編集 / 同期 lease 所有の世代。
-- **`EditorDrain`**: 表示 editor から最新確定 Markdown を読む bridge。**型のみ**（#93 スライス A）。実装は #95/#96。
+- **`EditorDrain`**: 表示 editor から最新確定 Markdown を読む bridge。`editor-drain.ts` registry と MarkdownEditor / RichMarkdownEditor 登録（#93 D）。#95/#96 が persist から利用。
 
 ヘルパ: `GUEST_SCOPE`, `accountScopeFromUserId`, `accountScopeFromOwnerId`, `nextSessionEpoch`, `nextRequestGeneration`, `nextLockEpoch`。
 
@@ -115,7 +115,7 @@ wipe は「確定した別 non-null user / 明示 logout」に限る。guest で
 
 - **`invalidate*`**（note / list / folder cache）: メモリ無効化のみ。
 - **`evictNotesEverywhere(ids, reason)`**: 正規 ID / shortId、本文・summary・フォルダ子一覧、inflight、bootstrap、表示 state を失効。#95 の y-indexeddb adapter へ hook 登録。**draft は消さない**。
-- フォルダ削除成功時は Worker が `{ deletedNoteIds, deletedFolderIds }` を返す（次スライス）。
+- フォルダ削除成功時は Worker が `DELETE /api/folders/:id` で **200 JSON** `{ deletedNoteIds, deletedFolderIds }` を返す。クライアントは `evictNotesEverywhere(deletedNoteIds)` と対象フォルダ cache 失効。
 
 ## 9. logout coordinator
 
@@ -127,24 +127,28 @@ wipe は「確定した別 non-null user / 明示 logout」に限る。guest で
 2. `pagehide` 等: 同期 `drainSync()` 後に保存開始
 3. 終了イベントの非同期完了に無損失を依存しない
 
-bridge 実装は MarkdownEditor / RichMarkdownEditor（#95/#96）。
+bridge 登録は MarkdownEditor / RichMarkdownEditor（#93 D）。persist からの利用は #95/#96。
 
-## 11. 実装済み（#93 スライス C）
+## 11. 実装済み（#93）
 
 - **`CachedNote` / `CachedSummary` / `CachedFolder`**: `offline-cache-types.ts`。`access.grants`・共有先メール・認証情報は保存しない。権限フラグは表示専用。
-- **IDB persist / hydrate**: `offline-cache.ts` + `note-cache.ts` / `list-cache.ts`。`SessionEpoch` 一致時のみ書込。
+- **IDB persist / hydrate**: `offline-cache.ts` + `note-cache.ts` / `list-cache.ts`。`SessionEpoch` 一致時のみ書込。一覧 persist は `local-*` を除外。
 - **`loadNotes` 状態**: `getNotesLoadState()` — `unhydrated` / `hydrating` / `ready` / `error`。
 - **`loadNote` 詳細**: `loadNoteRecord()` / `getLoadedNoteMeta()` — `source` / `cachedAt` / `verifiedForSession`（強制 GET 成功時のみ `true`）。
-- **prefetch**: 一覧取得後、本文未保存を更新順最大 20 件・並列 2。
+- **prefetch**: 一覧取得後、本文未保存を更新順最大 20 件・並列 2。`network` 失敗時は残り prefetch を abort。
 - **`evictNotesEverywhere`**: メモリ + IDB + bootstrap + `#95` hook（draft は保持）。
 - **Home**: 未取得 / 空 / エラーを `homeListFlags` と `NoteTree` で区別。
+- **`EditorDrain` registry**: `editor-drain.ts` + Source/Rich editor 登録。
+- **フォルダ削除 ID 返却**: Worker 200 JSON + クライアント cache 失効。
 
 ## 12. 未実装（後続スライス）
 
 | 項目 | Issue |
 | --- | --- |
-| EditorDrain bridge | #95/#96 |
 | Service Worker / PWA シェル | #92 |
+| EditorPage 状態機械 | #94 |
+| y-indexeddb 一時切断 | #95 |
+| local 下書き drafts store | #96 |
 
 ## 参照
 

@@ -169,7 +169,11 @@ export async function writeCachedNotesList(
     if (!(await assertSessionEpoch(tx, sessionEpoch))) {
       return false;
     }
-    const record = summariesToListRecord(summaries, scope, sessionEpoch);
+    const record = summariesToListRecord(
+      summaries.filter((summary) => isPersistableRemoteId(summary.id)),
+      scope,
+      sessionEpoch,
+    );
     tx.objectStore(LISTS_STORE).put(record);
     await awaitTx(tx);
     return true;

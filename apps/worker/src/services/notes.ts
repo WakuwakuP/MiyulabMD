@@ -6,7 +6,6 @@ import {
   defaultNoteMarkdown,
   ensureArticleMarkdown,
   type FolderAccess,
-  folderContains,
   isAccessScope,
   isPermissionPreset,
   matchArticleSource,
@@ -50,6 +49,10 @@ import {
   escapeLikePattern,
   rewriteArticleSourceFolders,
 } from "./articles.ts";
+import {
+  listNotesInFolderSubtree,
+  noteEvictionIds,
+} from "./folder-deletion.ts";
 import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
@@ -518,7 +521,7 @@ export type MutateNoteResult =
   | { kind: "bad_request"; error: string };
 
 export type RemoveFolderResult =
-  | { kind: "ok" }
+  | { kind: "ok"; deletedNoteIds: string[]; deletedFolderIds: string[] }
   | { kind: "not_found" }
   | { kind: "denied"; status: 401 | 403 };
 
@@ -637,26 +640,41 @@ async function deleteOwnedNotesInFolder(
   env: Env,
   ownerId: string,
   folder: string,
-): Promise<void> {
+): Promise<string[]> {
   const owned = await db(env)
     .prepare(`SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?`)
     .bind(ownerId)
     .all<NoteRow>();
+  const targets = listNotesInFolderSubtree(
+    (owned.results ?? []).map((row) => ({
+      folder: row.folder ?? "",
+      id: row.id,
+      shortId: row.short_id,
+    })),
+    folder,
+  );
   const images = createImageService(env);
-  for (const row of owned.results ?? []) {
-    if (!folderContains(folder, row.folder ?? "")) {
-      continue;
+  const deleted: string[] = [];
+  for (const target of targets) {
+    try {
+      await images.deleteAllForNote(target.id);
+      await deleteRevisionsForNote(env, target.id);
+      await db(env)
+        .prepare(
+          "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+        )
+        .bind(target.id)
+        .run();
+      await db(env)
+        .prepare("DELETE FROM notes WHERE id = ?")
+        .bind(target.id)
+        .run();
+      deleted.push(...noteEvictionIds(target));
+    } catch {
+      // Keep confirmed deletions only when a later row fails.
     }
-    await images.deleteAllForNote(row.id);
-    await deleteRevisionsForNote(env, row.id);
-    await db(env)
-      .prepare(
-        "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
-      )
-      .bind(row.id)
-      .run();
-    await db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id).run();
   }
+  return deleted;
 }
 
 async function rewriteOwnedNoteFolders(
@@ -864,10 +882,18 @@ export function createNoteService(env: Env) {
         return { kind: "denied", status: 403 };
       }
 
-      await deleteOwnedNotesInFolder(env, rec.owner_id, rec.folder);
+      const deletedNoteIds = await deleteOwnedNotesInFolder(
+        env,
+        rec.owner_id,
+        rec.folder,
+      );
       await deleteArticleSourcesInFolder(env, rec.owner_id, rec.folder);
-      await deleteFolderTree(env, rec.owner_id, rec.folder);
-      return { kind: "ok" };
+      const deletedFolderIds = await deleteFolderTree(
+        env,
+        rec.owner_id,
+        rec.folder,
+      );
+      return { deletedFolderIds, deletedNoteIds, kind: "ok" };
     },
 
     async renameFolder(

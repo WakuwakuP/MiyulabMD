@@ -43,6 +43,7 @@ import {
 } from "../lib/list-cache.ts";
 import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
 import { getHydratableScope } from "../lib/offline-scope.ts";
+import { evictNotesEverywhere } from "../lib/offline-session.ts";
 
 export type ShareState =
   | { kind: "folder"; folderId: string; name: string; draft: AccessDraft }
@@ -620,16 +621,31 @@ export async function persistHomeDelete(
   }
   setters.setConfirmBusy(true);
   setters.setConfirmError(null);
-  const result = await deleteConfirmTarget(confirm);
-  if (!result.ok) {
-    setters.setConfirmError(result.error);
+  if (confirm.kind === "folder") {
+    const result = await deleteFolder(confirm.id);
+    if (!result.ok) {
+      setters.setConfirmError(result.error);
+      setters.setConfirmBusy(false);
+      return;
+    }
+    setters.setConfirm(null);
     setters.setConfirmBusy(false);
-    return;
-  }
-  setters.setConfirm(null);
-  setters.setConfirmBusy(false);
-  if (confirm.kind === "note") {
+    evictNotesEverywhere(result.data.deletedNoteIds, "folder-deleted");
+    for (const deletedFolderId of result.data.deletedFolderIds) {
+      invalidateFolderCache(deletedFolderId);
+    }
+    invalidateFolderCache(parentId);
+  } else {
+    const result = await deleteNote(confirm.id);
+    if (!result.ok) {
+      setters.setConfirmError(result.error);
+      setters.setConfirmBusy(false);
+      return;
+    }
+    setters.setConfirm(null);
+    setters.setConfirmBusy(false);
     invalidateNoteCache(confirm.id);
+    evictNotesEverywhere([confirm.id], "note-deleted");
   }
   if (confirm.kind === "folder" && folderId === confirm.id) {
     navigate(folderUrl(parentId));
@@ -641,13 +657,6 @@ export async function persistHomeDelete(
     setters.setNotes,
     setters.setVisibleFolder,
   );
-}
-
-function deleteConfirmTarget(confirm: ConfirmState) {
-  if (confirm.kind === "folder") {
-    return deleteFolder(confirm.id);
-  }
-  return deleteNote(confirm.id);
 }
 
 export function inheritLabelFor(kind: ShareState["kind"]): string {
