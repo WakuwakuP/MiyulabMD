@@ -675,7 +675,7 @@ export async function deleteNote(id: string): Promise<ApiResult<void>> {
 }
 
 export async function logout(): Promise<void> {
-  // Best-effort cookie clear; full teardown moves to offline-session coordinator (#94).
+  // Best-effort cookie clear; full teardown is offline-session coordinator (#93).
   await apiRequest(
     "/auth/logout",
     { ...fetchOpts, method: "POST" },

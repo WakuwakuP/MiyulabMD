@@ -55,7 +55,7 @@ type EditorDrain = {
 
 成功形式は endpoint ごとに `json | empty | raw` を指定する。DELETE の 204 や画像 upload は JSON 必須にしない。
 
-`navigator.onLine` は `online-status.ts` の単一購読値から読み、再試行ヒントにのみ使う。session 状態機械は #94。
+`navigator.onLine` は `online-status.ts` の単一購読値から読み、再試行ヒントにのみ使う。session 状態機械は #93（`offline-session.ts`）。
 
 ### 主要 endpoint
 
@@ -75,17 +75,19 @@ type EditorDrain = {
 
 PWA シェルとデータ cache は分離する。詳細は [design.md §8](./design.md#8-リアルタイム同期yjs)。
 
-## 5. IndexedDB ストア案（未実装）
+## 5. IndexedDB ストア
 
-DB 名: `miyulabmd-offline`。`openDb(): Promise<IDBDatabase | null>` を一箇所に集約（#93 次スライス）。
+DB 名: `miyulabmd-offline`。`openDb(): Promise<IDBDatabase | null>` を `offline-db.ts` に集約（#93）。
 
 | ストア | キー | 内容 |
 | --- | --- | --- |
 | `notes` | `[AccountScope, id]` | 本文・タイトル・表示 metadata・保存日時 |
 | `lists` | `[AccountScope, kind, key]` | 一覧 summary、フォルダ子一覧。ルートキー `__root__` |
-| `session` | 単一レコード | active scope、最後の確認済み user、確認時刻、`offlineReadable`、`SessionEpoch` |
+| `session` | 単一レコード（キー `current`） | active scope、最後の確認済み user、確認時刻、`offlineReadable`、`SessionEpoch` |
 
-インデックス: `[AccountScope, shortId]` unique。`shortId` が optional なレコードは index 外。`local-*` ID は notes / lists に入れない。
+インデックス: `[AccountScope, shortId]` unique。`shortId` が optional なレコードは index 外。`local-*` ID は notes / lists に入れない（`isPersistableRemoteId`）。
+
+drafts / journal store は #96/#97 で同一 upgrade に追加する。
 
 ## 6. キャッシュ型と allowlist
 
@@ -115,9 +117,9 @@ wipe は「確定した別 non-null user / 明示 logout」に限る。guest で
 - **`evictNotesEverywhere(ids, reason)`**: 正規 ID / shortId、本文・summary・フォルダ子一覧、inflight、bootstrap、表示 state を失効。#95 の y-indexeddb adapter へ hook 登録。**draft は消さない**。
 - フォルダ削除成功時は Worker が `{ deletedNoteIds, deletedFolderIds }` を返す（次スライス）。
 
-## 9. logout coordinator（未実装）
+## 9. logout coordinator
 
-`offline-session.ts` に coordinator を一つ置く。AccountMenu の GET `/auth/logout` は coordinator 経由。#95 が cleanup hook を登録。他タブ block 時も認証終了を無期限に待たせず pending cleanup を記録。
+`offline-session.ts` に coordinator を一つ置く（#93）。AccountMenu の logout は `beginLogout()` 経由で世代更新・cache 失効後 `/auth/logout` GET へ遷移。#95 が `registerPersistenceCleanup` で cleanup hook を登録。他タブ block 時も認証終了を無期限に待たせず `pendingCleanup` を記録。
 
 ## 10. EditorDrain の利用順
 
@@ -131,12 +133,9 @@ bridge 実装は MarkdownEditor / RichMarkdownEditor（#95/#96）。
 
 | 項目 | Issue |
 | --- | --- |
-| `offline-db.ts` / IDB open | #93 次 |
-| `offline-session.ts` 実装 | #94 |
 | note-cache / list-cache の IDB persist | #93 次 |
 | 本文 prefetch 20 件 | #93 次 |
 | EditorDrain bridge | #95/#96 |
-| AccountMenu logout 配線 | #94 |
 | Home 空/未取得 UI 区別 | #93 次 |
 | Service Worker / PWA シェル | #92 |
 

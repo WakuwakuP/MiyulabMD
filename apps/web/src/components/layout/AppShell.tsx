@@ -2,8 +2,13 @@ import type { SessionUser } from "@miyulabmd/shared";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router";
-import { type AuthConfig, fetchAuthConfig, fetchMe } from "../../lib/api.ts";
+import { type AuthConfig, fetchAuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
+import {
+  getSessionSnapshot,
+  hydrateSessionFromDb,
+  verifySession,
+} from "../../lib/offline-session.ts";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext } from "./AppShellContext.ts";
 
@@ -19,21 +24,24 @@ export function AppShell() {
     mock: true,
   });
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(getSessionSnapshot);
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
   const editor = isEditorPath(pathname);
 
   useEffect(() => {
-    Promise.all([fetchMe(), fetchAuthConfig()])
-      .then(([meResult, configResult]) => {
-        if (meResult.ok) {
-          setUser(meResult.data.user);
-        }
+    Promise.all([hydrateSessionFromDb(), fetchAuthConfig()])
+      .then(async ([, configResult]) => {
         if (configResult.ok) {
           setAuthConfig(configResult.data);
         } else {
           setAuthConfig({ access: false, mock: true });
+        }
+        const verified = await verifySession();
+        setSession(verified);
+        if (verified.status === "online-confirmed" && verified.user) {
+          setUser(verified.user);
         }
       })
       .finally(() => setLoading(false));
@@ -49,6 +57,7 @@ export function AppShell() {
   );
 
   const context: AppShellContext = {
+    session,
     setHeader,
     setUser,
     user,
