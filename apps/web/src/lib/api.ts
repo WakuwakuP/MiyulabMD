@@ -71,7 +71,7 @@ export async function fetchMe(): Promise<SessionUser | null> {
 export async function fetchNotes(): Promise<NoteSummary[]> {
   const res = await fetch("/api/notes", fetchOpts);
   if (!res.ok) {
-    return [];
+    throw new Error(await parseError(res));
   }
   const body = (await res.json()) as { notes: NoteSummary[] };
   return body.notes;

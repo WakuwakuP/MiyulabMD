@@ -39,6 +39,15 @@ export function seedFolderCache(data: FolderAccess): void {
   folderCache.set(folderCacheKey(data.id), data);
 }
 
+export function upsertNoteSummary(note: NoteSummary): void {
+  const current = notesCache ?? [];
+  const index = current.findIndex((item) => item.id === note.id);
+  notesCache =
+    index === -1
+      ? [note, ...current]
+      : current.map((item, itemIndex) => (itemIndex === index ? note : item));
+}
+
 export async function loadNotes(force = false): Promise<NoteSummary[]> {
   if (!force && notesCache) {
     return notesCache;
@@ -47,11 +56,21 @@ export async function loadNotes(force = false): Promise<NoteSummary[]> {
     return notesInflight;
   }
 
-  const promise = fetchNotes().then((notes) => {
-    notesCache = notes;
-    notesInflight = null;
-    return notes;
-  });
+  const previous = notesCache;
+  const promise = fetchNotes()
+    .then((notes) => {
+      notesCache = notes;
+      notesInflight = null;
+      return notes;
+    })
+    .catch(() => {
+      notesInflight = null;
+      if (previous) {
+        notesCache = previous;
+        return previous;
+      }
+      return [];
+    });
   notesInflight = promise;
   return await promise;
 }

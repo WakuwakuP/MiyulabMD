@@ -36,6 +36,7 @@ import {
   loadNotes,
   peekFolder,
   seedFolderCache,
+  upsertNoteSummary,
 } from "../lib/list-cache.ts";
 import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
 
@@ -97,8 +98,9 @@ export function homeListFlags(input: {
   error: string | null;
 }) {
   const needsFolder = Boolean(input.folderId || input.user);
+  const waitingForFolder = needsFolder && !input.visibleFolder && !input.error;
   const showPlaceholder =
-    (input.userLoading || (needsFolder && input.folderPending)) &&
+    (input.userLoading || input.folderPending || waitingForFolder) &&
     !input.visibleFolder;
   return {
     canAdmin: Boolean(input.visibleFolder?.flags.canAdmin),
@@ -120,7 +122,6 @@ export function subscribeHomeNotes(
     return undefined;
   }
   let cancelled = false;
-  invalidateNotesCache();
   void loadNotes(true).then((noteList) => {
     if (!cancelled) {
       setNotes(noteList);
@@ -158,14 +159,16 @@ function applyFolderLoadResult(
   }
   setters.setFolderPending(false);
   if (!result.ok) {
-    if (!peekFolder(folderId)) {
-      setters.setVisibleFolder(null);
+    if (peekFolder(folderId)) {
+      return;
     }
+    setters.setVisibleFolder(null);
     setters.setError(
       result.status === 404 ? "フォルダが見つかりません。" : result.error,
     );
     return;
   }
+  setters.setError(null);
   setters.setVisibleFolder(result.data);
 }
 
@@ -197,11 +200,11 @@ export function subscribeHomeFolder(
   if (cached) {
     setters.setVisibleFolder(cached);
     setters.setFolderPending(false);
-    return undefined;
+  } else {
+    setters.setFolderPending(true);
   }
 
-  setters.setFolderPending(true);
-  void loadFolder(folderId).then((result) => {
+  void loadFolder(folderId, true).then((result) => {
     applyFolderLoadResult(result, folderId, cancelled, setters);
   });
   return () => {
@@ -234,6 +237,8 @@ export async function persistNewNote(
     return;
   }
 
+  const { markdown: _markdown, ...summary } = result.data;
+  upsertNoteSummary(summary);
   seedNoteCache(result.data);
   navigate(`/n/${result.data.id}`);
 }
