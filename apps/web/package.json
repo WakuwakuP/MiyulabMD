@@ -9,7 +9,7 @@
     "build-storybook": "storybook build",
     "dev": "vite",
     "storybook": "storybook dev -p 6006",
-    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/components/editor/*.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts src/pages/*.test.ts src/components/editor/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -5,7 +5,7 @@ import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig, fetchMe } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import { AppHeader } from "./AppHeader.tsx";
-import type { AppShellContext, HeaderLayout } from "./AppShellContext.ts";
+import type { AppShellContext } from "./AppShellContext.ts";
 
 function isEditorPath(pathname: string): boolean {
   return pathname.startsWith("/n/") || pathname.startsWith("/s/");
@@ -22,8 +22,7 @@ export function AppShell() {
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
-  const [layout, setLayout] = useState<HeaderLayout>("page");
-  const editor = isEditorPath(pathname) || layout === "editor";
+  const editor = isEditorPath(pathname);
 
   useEffect(() => {
     Promise.all([fetchMe(), fetchAuthConfig()])
@@ -39,7 +38,6 @@ export function AppShell() {
       setHeaderActions(next?.actions ?? null);
       setHeaderEnd(next?.end ?? null);
       setHeaderFolder(next?.folder ?? null);
-      setLayout(next?.layout ?? "page");
     },
     [],
   );
