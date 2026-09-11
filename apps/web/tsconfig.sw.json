@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "noEmit": true,
+    "types": ["vite-plugin-pwa/client"]
+  },
+  "extends": "../../tsconfig.base.json",
+  "include": ["src/sw.ts", "src/lib/sw-routes.ts"]
+}

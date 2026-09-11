@@ -380,7 +380,10 @@ sequenceDiagram
 - `y-websocket` 互換、または薄い独自 provider
 - `y-codemirror.next` で CodeMirror にバインド
 - リッチ（TipTap）も同じ `Y.Text("markdown")` に差分（insert/delete）で載せる。`y-prosemirror` は使わない
-- `y-indexeddb` でオフライン下書き（再接続時にマージ）
+- Service Worker は静的アプリシェル（ビルド成果の `index.html` と JS/CSS/chunk、manifest、アイコン）のみを precache する。API・認証・権限付き画像・本文入り SSR HTML は保存しない
+- SW ルーティング順序: (1) `/api` `/auth` `/ws` `/mcp` 配下と `GET /openapi.json` は `NetworkOnly`、(2) local 専用 navigation（`/n/local-*`）は #96 で追加、(3) 通常アプリ navigation（`/` `/n/:id` `/s/:id` `/f/:folderId` `/shared` `/shared-by-me` `/settings` 配下）は `NetworkOnly` で通信失敗時のみ precache の `/index.html` にフォールバック、(4) 最後に静的 precache
+- SW 更新は `registerType: 'prompt'`。`skipWaiting` / `clientsClaim` / 編集中タブの自動リロードは行わない
+- オフライン下書き・ノート一覧・セッションの端末保存は [`docs/offline.md`](offline.md)（#93）の IndexedDB 契約に従う
 - awareness に displayName / color / cursor（Y.RelativePosition）を載せる
 
 閲覧のみのユーザーもプレビューをリアルタイム更新するため、view 権限があれば WS 接続を許す。書き込みフレームはサーバーで落とす。
