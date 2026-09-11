@@ -12,8 +12,10 @@ import {
 import {
   type AccountScope,
   accountScopeFromUserId,
+  adoptSessionEpoch,
   GUEST_SCOPE,
   nextSessionEpoch,
+  resetEpochCountersForTests,
   type SessionEpoch,
 } from "./offline-types.ts";
 
@@ -320,6 +322,14 @@ async function handleVerificationError(): Promise<void> {
   broadcastSnapshot();
 }
 
+function canUseOfflineKnownFromNetwork(): boolean {
+  return (
+    snapshot.status === "unknown" ||
+    snapshot.status === "online-confirmed" ||
+    snapshot.status === "offline-known"
+  );
+}
+
 export function getSessionSnapshot(): SessionSnapshot {
   return snapshot;
 }
@@ -363,6 +373,7 @@ export async function hydrateSessionFromDb(): Promise<void> {
   }
   lastConfirmedUser = record.lastConfirmedUser;
   lastConfirmedAt = record.confirmedAt;
+  adoptSessionEpoch(record.sessionEpoch);
   setSnapshot({
     ...snapshot,
     offlineReadable: record.offlineReadable,
@@ -411,6 +422,7 @@ export async function verifySession(): Promise<SessionSnapshot> {
   if (
     (result.kind === "network" ||
       (result.kind === "http" && result.status >= 500)) &&
+    canUseOfflineKnownFromNetwork() &&
     snapshot.scope &&
     lastConfirmedUser
   ) {
@@ -443,18 +455,21 @@ export async function beginLogout(): Promise<void> {
     user: null,
   });
 
-  if (scopeToWipe) {
-    const cleaned = await wipeScopeFully(scopeToWipe, "logout");
-    if (!cleaned) {
-      setSnapshot({ ...snapshot, pendingCleanup: true });
-    }
-  }
-
-  await persistCurrentSession(snapshot.pendingCleanup);
+  void persistCurrentSession(snapshot.pendingCleanup);
   broadcastSnapshot();
 
   if (typeof window !== "undefined") {
     window.location.href = "/auth/logout";
+  }
+
+  if (scopeToWipe) {
+    void wipeScopeFully(scopeToWipe, "logout").then((cleaned) => {
+      if (!cleaned) {
+        setSnapshot({ ...snapshot, pendingCleanup: true });
+        void persistCurrentSession(true);
+        broadcastSnapshot();
+      }
+    });
   }
 }
 
@@ -466,6 +481,7 @@ export function resetOfflineSessionForTests(): void {
   lastConfirmedAt = null;
   cleanupHandlers.clear();
   listeners.clear();
+  resetEpochCountersForTests();
   if (broadcastChannel) {
     broadcastChannel.close();
     broadcastChannel = null;
@@ -495,6 +511,9 @@ export function __testSetSessionState(
     lastConfirmedAt = partial.lastConfirmedAt ?? null;
   }
   const { lastConfirmedUser: _u, lastConfirmedAt: _t, ...rest } = partial;
+  if (rest.sessionEpoch !== undefined) {
+    adoptSessionEpoch(rest.sessionEpoch);
+  }
   setSnapshot({ ...snapshot, ...rest });
 }
 

@@ -8,18 +8,23 @@ import {
   upsertNoteSummary,
 } from "./list-cache.ts";
 import { peekNote } from "./note-cache.ts";
-import { configureOfflineDb, resetOfflineDbForTests } from "./offline-db.ts";
+import {
+  configureOfflineDb,
+  resetOfflineDbForTests,
+  writeSessionRecord,
+} from "./offline-db.ts";
 import {
   __testGetVerifyGeneration,
   __testSeedNoteCache,
   __testSetSessionState,
   beginLogout,
   getSessionSnapshot,
+  hydrateSessionFromDb,
   registerPersistenceCleanup,
   resetOfflineSessionForTests,
   verifySession,
 } from "./offline-session.ts";
-import { accountScopeFromUserId } from "./offline-types.ts";
+import { accountScopeFromUserId, type SessionEpoch } from "./offline-types.ts";
 
 const userA: SessionUser = {
   displayName: "Alice",
@@ -148,6 +153,58 @@ test("verifySession invalid-response becomes verification-error without auto sco
   assert.equal(snap.scope, null);
 });
 
+test("hydrateSessionFromDb adopts persisted epoch so next bump exceeds it", async () => {
+  configureOfflineDb({ indexedDB });
+  const persistedEpoch = 10 as SessionEpoch;
+  await writeSessionRecord({
+    confirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    offlineReadable: true,
+    scope: null,
+    sessionEpoch: persistedEpoch,
+  });
+
+  await hydrateSessionFromDb();
+  assert.equal(getSessionSnapshot().sessionEpoch, persistedEpoch);
+
+  const previousLocation = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { href: "" } },
+  });
+  await beginLogout();
+  assert.ok(getSessionSnapshot().sessionEpoch > persistedEpoch);
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: previousLocation,
+  });
+});
+
+test("hydrateSessionFromDb different user bumps epoch above persisted value", async () => {
+  configureOfflineDb({ indexedDB });
+  const persistedEpoch = 10 as SessionEpoch;
+  await writeSessionRecord({
+    confirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    offlineReadable: true,
+    scope: accountScopeFromUserId(userA.id),
+    sessionEpoch: persistedEpoch,
+  });
+
+  await hydrateSessionFromDb();
+  mockFetchMe(jsonResponse({ user: userB }));
+  const snap = await verifySession();
+  assert.ok(snap.sessionEpoch > persistedEpoch);
+});
+
 test("verifySession network with past scope becomes offline-known", async () => {
   configureOfflineDb({ indexedDB });
   __testSetSessionState({
@@ -166,6 +223,82 @@ test("verifySession network with past scope becomes offline-known", async () => 
   assert.equal(snap.status, "offline-known");
   assert.equal(snap.scope, accountScopeFromUserId(userA.id));
   assert.equal(snap.offlineReadable, true);
+});
+
+test("verifySession 401 then network stays unauthenticated without offline-known", async () => {
+  configureOfflineDb({ indexedDB });
+  __testSetSessionState({
+    lastConfirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    scope: accountScopeFromUserId(userA.id),
+    status: "online-confirmed",
+    user: userA,
+  });
+
+  let call = 0;
+  mock.method(globalThis, "fetch", (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (!url.endsWith("/api/me")) {
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    }
+    call += 1;
+    if (call === 1) {
+      return Promise.resolve(jsonResponse({ error: "Unauthorized" }, 401));
+    }
+    return Promise.reject(new TypeError("Failed to fetch"));
+  });
+
+  const after401 = await verifySession();
+  assert.equal(after401.status, "unauthenticated");
+  assert.equal(after401.offlineReadable, false);
+
+  const afterNetwork = await verifySession();
+  assert.equal(afterNetwork.status, "unauthenticated");
+  assert.equal(afterNetwork.offlineReadable, false);
+});
+
+test("verifySession verification-error then network stays verification-error", async () => {
+  configureOfflineDb({ indexedDB });
+  __testSetSessionState({
+    lastConfirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    scope: accountScopeFromUserId(userA.id),
+  });
+
+  let call = 0;
+  mock.method(globalThis, "fetch", (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (!url.endsWith("/api/me")) {
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    }
+    call += 1;
+    if (call === 1) {
+      return Promise.resolve(
+        new Response("<!doctype html><html></html>", {
+          headers: { "Content-Type": "text/html" },
+          status: 200,
+        }),
+      );
+    }
+    return Promise.reject(new TypeError("Failed to fetch"));
+  });
+
+  const afterInvalid = await verifySession();
+  assert.equal(afterInvalid.status, "verification-error");
+  assert.equal(afterInvalid.scope, null);
+
+  const afterNetwork = await verifySession();
+  assert.equal(afterNetwork.status, "verification-error");
+  assert.equal(afterNetwork.scope, null);
+  assert.equal(afterNetwork.offlineReadable, false);
 });
 
 test("verifySession different user bumps epoch and wipes memory cache", async () => {
@@ -254,6 +387,9 @@ test("beginLogout bumps epoch, calls cleanup hook, sets pending cleanup when db 
   });
 
   await beginLogout();
+  assert.equal(globalThis.window.location.href, "/auth/logout");
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
   const snap = getSessionSnapshot();
   assert.ok(snap.sessionEpoch > 2);
   assert.equal(snap.status, "unauthenticated");

@@ -7,6 +7,7 @@ import { cn } from "../../lib/cn.ts";
 import {
   getSessionSnapshot,
   hydrateSessionFromDb,
+  subscribeSession,
   verifySession,
 } from "../../lib/offline-session.ts";
 import { AppHeader } from "./AppHeader.tsx";
@@ -31,6 +32,17 @@ export function AppShell() {
   const editor = isEditorPath(pathname);
 
   useEffect(() => {
+    return subscribeSession((next) => {
+      setSession(next);
+      if (next.status === "online-confirmed" && next.user) {
+        setUser(next.user);
+      } else {
+        setUser(null);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     Promise.all([hydrateSessionFromDb(), fetchAuthConfig()])
       .then(async ([, configResult]) => {
         if (configResult.ok) {
@@ -38,11 +50,7 @@ export function AppShell() {
         } else {
           setAuthConfig({ access: false, mock: true });
         }
-        const verified = await verifySession();
-        setSession(verified);
-        if (verified.status === "online-confirmed" && verified.user) {
-          setUser(verified.user);
-        }
+        await verifySession();
       })
       .finally(() => setLoading(false));
   }, []);

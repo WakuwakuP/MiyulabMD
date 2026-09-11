@@ -25,9 +25,23 @@ let sessionEpochSeq = 0;
 let requestGenerationSeq = 0;
 let lockEpochSeq = 0;
 
+/** Align the in-process counter with a persisted epoch (e.g. after IDB hydrate). */
+export function adoptSessionEpoch(value: SessionEpoch): void {
+  if (value > sessionEpochSeq) {
+    sessionEpochSeq = value;
+  }
+}
+
 export function nextSessionEpoch(): SessionEpoch {
   sessionEpochSeq += 1;
   return sessionEpochSeq as SessionEpoch;
+}
+
+/** Test-only reset for epoch counters. */
+export function resetEpochCountersForTests(): void {
+  sessionEpochSeq = 0;
+  requestGenerationSeq = 0;
+  lockEpochSeq = 0;
 }
 
 export function nextRequestGeneration(): RequestGeneration {
