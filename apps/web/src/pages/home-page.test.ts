@@ -15,11 +15,13 @@ import {
 } from "../lib/offline-db.ts";
 import {
   __testSetSessionState,
+  getSessionSnapshot,
   resetOfflineSessionForTests,
 } from "../lib/offline-session.ts";
 import { accountScopeFromUserId } from "../lib/offline-types.ts";
 import {
   homeListFlags,
+  homeRemoteMutationsBlocked,
   subscribeHomeFolder,
   subscribeHomeNotes,
 } from "./home-page.ts";
@@ -94,6 +96,16 @@ async function waitFor(check: () => boolean) {
   }
   throw new Error("timed out");
 }
+
+test("homeRemoteMutationsBlocked is true for offline-known session", () => {
+  __testSetSessionState({
+    offlineReadable: true,
+    scope: accountScopeFromUserId(user.id),
+    status: "offline-known",
+    user,
+  });
+  assert.equal(homeRemoteMutationsBlocked(getSessionSnapshot()), true);
+});
 
 test("homeListFlags keeps the tree visible while a folder is still loading", () => {
   const flags = homeListFlags({

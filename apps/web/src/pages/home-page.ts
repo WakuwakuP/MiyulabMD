@@ -43,7 +43,10 @@ import {
 } from "../lib/list-cache.ts";
 import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
 import { getHydratableScope } from "../lib/offline-scope.ts";
-import { evictNotesEverywhere } from "../lib/offline-session.ts";
+import {
+  evictNotesEverywhere,
+  type SessionSnapshot,
+} from "../lib/offline-session.ts";
 
 export type ShareState =
   | { kind: "folder"; folderId: string; name: string; draft: AccessDraft }
@@ -72,6 +75,24 @@ type ShareSetters = {
   setShareError: (error: string | null) => void;
   setNotes: (notes: NoteSummary[]) => void;
 };
+
+export function homeRemoteMutationsBlocked(session: SessionSnapshot): boolean {
+  return session.status === "offline-known";
+}
+
+export function homeOfflineCreateMessage(): string {
+  return "オフラインでは新規ノートを作成できません。オンラインでお試しください。";
+}
+
+export function filterHomeMenuItems(
+  items: ContextMenuItem[],
+  blocked: boolean,
+): ContextMenuItem[] {
+  if (!blocked) {
+    return items;
+  }
+  return items.filter((item) => item.label === "開く");
+}
 
 export function shareLinkFor(share: ShareState | null): string {
   if (share?.kind === "folder") {
@@ -252,7 +273,12 @@ export async function persistNewNote(
   navigate: NavigateFunction,
   setCreating: (creating: boolean) => void,
   setError: (error: string | null) => void,
+  blocked = false,
 ) {
+  if (blocked) {
+    setError(homeOfflineCreateMessage());
+    return;
+  }
   setCreating(true);
   setError(null);
 
@@ -289,7 +315,14 @@ export async function persistNewFolder(
     setShare: (share: ShareState) => void;
     setShareError: (error: string | null) => void;
   },
+  blocked = false,
 ) {
+  if (blocked) {
+    setters.setFolderCreateError(
+      "オフラインではフォルダを作成できません。オンラインでお試しください。",
+    );
+    return;
+  }
   setters.setFolderCreating(true);
   setters.setFolderCreateError(null);
 
@@ -325,7 +358,11 @@ export async function openFolderShare(
   setError: (error: string | null) => void,
   setShare: (share: ShareState) => void,
   setShareError: (error: string | null) => void,
+  blocked = false,
 ) {
+  if (blocked) {
+    return;
+  }
   const result = await fetchFolder(id);
   if (!result.ok) {
     setError(result.error);
@@ -349,7 +386,11 @@ export async function openNoteShare(
   setError: (error: string | null) => void,
   setShare: (share: ShareState) => void,
   setShareError: (error: string | null) => void,
+  blocked = false,
 ) {
+  if (blocked) {
+    return;
+  }
   const result = await fetchNote(note.id);
   if (!result.ok) {
     setError(result.error);
@@ -411,8 +452,9 @@ export async function persistHomeShare(
   next: AccessDraft,
   visibleFolderId: string | null | undefined,
   setters: ShareSetters & { setVisibleFolder: (folder: FolderAccess) => void },
+  blocked = false,
 ) {
-  if (!share) {
+  if (!share || blocked) {
     return;
   }
   setters.setShare({ ...share, draft: next });
@@ -497,19 +539,23 @@ export function handleItemMenu(
   onNoteShare: (note: NoteSummary) => void,
   onRename: (id: string, name: string) => void,
   onDelete: (kind: ConfirmState["kind"], id: string, name: string) => void,
+  blocked = false,
 ) {
   const position = menuPosition(event);
   if (target.kind === "folder") {
     setMenu({
       id: target.id,
       ...position,
-      items: folderMenuItems(
-        target,
-        canAdmin,
-        navigate,
-        onFolderShare,
-        onRename,
-        (id, name) => onDelete("folder", id, name),
+      items: filterHomeMenuItems(
+        folderMenuItems(
+          target,
+          canAdmin,
+          navigate,
+          onFolderShare,
+          onRename,
+          (id, name) => onDelete("folder", id, name),
+        ),
+        blocked,
       ),
     });
     return;
@@ -517,8 +563,11 @@ export function handleItemMenu(
   setMenu({
     id: target.note.id,
     ...position,
-    items: noteMenuItems(target.note, navigate, onNoteShare, (id, name) =>
-      onDelete("note", id, name),
+    items: filterHomeMenuItems(
+      noteMenuItems(target.note, navigate, onNoteShare, (id, name) =>
+        onDelete("note", id, name),
+      ),
+      blocked,
     ),
   });
 }
@@ -568,8 +617,9 @@ export async function persistRenameFolder(
     setVisibleFolder: (folder: FolderAccess | null) => void;
     setNotes: (notes: NoteSummary[]) => void;
   },
+  blocked = false,
 ) {
-  if (!folderRename) {
+  if (!folderRename || blocked) {
     return;
   }
   if (name === folderRename.name) {
@@ -615,8 +665,9 @@ export async function persistHomeDelete(
     setNotes: (notes: NoteSummary[]) => void;
     setVisibleFolder: (folder: FolderAccess | null) => void;
   },
+  blocked = false,
 ) {
-  if (!confirm) {
+  if (!confirm || blocked) {
     return;
   }
   setters.setConfirmBusy(true);

@@ -225,12 +225,63 @@ preview 表示や `navigator.onLine` だけでは doc を破棄しない。`need
 | `NoteCollabSession.close()` | Edit 取消・ノート遷移時の drain + checkpoint + teardown |
 | `NoteCollabSession.retryNow()` | 明示再試行 |
 
-## 14. 未実装（後続スライス）
+## 14. 既存 View 状態機械（#94）
+
+実装: `apps/web/src/pages/editor-page.ts`（純関数）+ `EditorPage.tsx` / `SharePage.tsx` / `home-page.ts`。
+
+### 表示フェーズ
+
+| フェーズ | 意味 |
+| --- | --- |
+| `loading` | URL 読込中。server 操作なし |
+| `cached-preview` / `revalidating` | 保存済み preview。新規 Edit 不可 |
+| `offline-preview` | cache 本文 View のみ。server 操作不可 |
+| `server-preview` | force GET 成功。権限に応じた操作可。自動 Edit なし |
+| `preparing-edit` | 検証済み preview のまま Yjs 初期同期待ち。入力不可 |
+| `editing` | #95 session の Y.Text に bind |
+| `uncached` / `denied` / `not-found` / `load-error` | 旧本文を残さずメッセージ |
+| `local-unsupported` | `local-*` は #96 入口へ（現状は未対応案内） |
+
+`loadNoteRecord` の `source` / `cachedAt` / `verifiedForSession` を meta として保持。**`verifiedForSession` が true の server GET 成功まで Edit を許可しない**（cache の `canEdit` は表示専用）。
+
+### Edit 開始
+
+- **`canEdit`（権限）** と **`canStartEdit`（session 確認 + force GET 成功 + 到達性）** を分離
+- 流れ: `server-preview` → 明示的 Edit 要求 → `preparing-edit`（`needsSession=true`, preview 表示）→ bind 完了 → `editing`
+- オフライン新規 Edit 不可。bind 済み session の継続編集は #95 が担当
+- `collabSnapshot.editDenied` で preview へ戻す。`authStopped` / `denied` で本文・Edit 停止
+
+### エラー（force GET）
+
+| 結果 | 扱い |
+| --- | --- |
+| network + cache | 本文残し offline banner。server 操作不可 |
+| network + miss | uncached メッセージ |
+| 5xx + cache | read-only + 障害表示 |
+| 401 | 旧私有を隠し login 案内 |
+| 403/404 | 本文消去 + `evictNotesEverywhere` |
+| invalid-response | load-error。session verification-error 時は旧私有非表示 |
+| aborted / 古い世代 | 画面を変えない |
+
+SharePage（`/s/:id`）も同一表。従来の「cache hit なら全エラー無視」は廃止。
+
+### UI / mutation 抑制
+
+- オフライン preview: mode 切替・履歴・共有・folder 変更・upload を非表示。folder 名・リンク・TOC は維持
+- `taskNoteId` は verified Edit 可能時のみ。`offline-known` では task checkbox HTTP も停止
+- Home: フォルダ作成/改名・共有/権限・リモート削除を導線と handler 両方で抑止
+- オフライン新規作成不可（ボタン disable + 説明）
+- server mutation queue は設けない
+
+### SSR 除去
+
+`removeSsrPreview()` は **読み込み確定フェーズ**（preview / server-preview / editing 等）でのみ呼ぶ。空本文でも旧 SSR が残らない。
+
+## 15. 未実装（後続スライス）
 
 | 項目 | Issue |
 | --- | --- |
 | Service Worker / PWA シェル | #92 |
-| EditorPage 状態機械 | #94 |
 | local 下書き drafts store | #96 |
 
 ## 参照

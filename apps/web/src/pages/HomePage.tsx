@@ -29,11 +29,17 @@ import {
   peekNotes,
 } from "../lib/list-cache.ts";
 import {
+  getSessionSnapshot,
+  subscribeSession,
+} from "../lib/offline-session.ts";
+import {
   type ConfirmState,
   confirmCopy,
   handleItemMenu,
   headerFolderFor,
   homeListFlags,
+  homeOfflineCreateMessage,
+  homeRemoteMutationsBlocked,
   inheritLabelFor,
   type MenuState,
   openFolderShare,
@@ -53,12 +59,14 @@ function HomeHeaderEnd({
   canAdmin,
   creating,
   showEnd,
+  remoteBlocked,
   onCreateFolder,
   onCreateNote,
 }: {
   canAdmin: boolean;
   creating: boolean;
   showEnd: boolean;
+  remoteBlocked: boolean;
   onCreateFolder: () => void;
   onCreateNote: () => void;
 }) {
@@ -69,17 +77,24 @@ function HomeHeaderEnd({
     <>
       {canAdmin && (
         <HeaderButton
+          disabled={remoteBlocked}
           icon={<FolderOutlineIcon />}
           label="フォルダ"
           onClick={onCreateFolder}
+          title={
+            remoteBlocked
+              ? "オフラインではフォルダを作成できません。"
+              : undefined
+          }
           variant="outline"
         />
       )}
       <HeaderButton
-        disabled={creating}
+        disabled={creating || remoteBlocked}
         icon={<PlusIcon />}
         label={creating ? "作成中…" : "新規ノート"}
         onClick={onCreateNote}
+        title={remoteBlocked ? homeOfflineCreateMessage() : undefined}
         variant="accent"
       />
     </>
@@ -93,6 +108,7 @@ function useHomeHeader(
   visibleFolder: FolderAccess | null,
   canAdmin: boolean,
   creating: boolean,
+  remoteBlocked: boolean,
   setHeader: AppShellContext["setHeader"],
   onCreateFolder: () => void,
   onCreateNote: () => void,
@@ -108,6 +124,7 @@ function useHomeHeader(
           creating={creating}
           onCreateFolder={onCreateFolder}
           onCreateNote={onCreateNote}
+          remoteBlocked={remoteBlocked}
           showEnd={Boolean(visibleFolder || !folderId)}
         />
       ),
@@ -120,6 +137,7 @@ function useHomeHeader(
     folderId,
     canAdmin,
     creating,
+    remoteBlocked,
     setHeader,
     user,
     onCreateFolder,
@@ -298,6 +316,8 @@ export function HomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
+  const [session, setSession] = useState(getSessionSnapshot);
+  const remoteBlocked = homeRemoteMutationsBlocked(session);
   const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
   const [notesLoadState, setNotesLoadState] = useState<NotesLoadState>(() =>
     getNotesLoadState(),
@@ -346,6 +366,19 @@ export function HomePage() {
   const headerFolder = headerFolderFor(visibleFolder, folderId);
   const shareLink = shareLinkFor(share);
 
+  useEffect(() => subscribeSession(setSession), []);
+
+  useEffect(() => {
+    if (!remoteBlocked) {
+      return;
+    }
+    setShare(null);
+    setConfirm(null);
+    setFolderCreateOpen(false);
+    setFolderRename(null);
+    setMenu(null);
+  }, [remoteBlocked]);
+
   useEffect(() => {
     void sessionKey;
     return subscribeHomeNotes(
@@ -372,8 +405,14 @@ export function HomePage() {
     setFolderCreateOpen(true);
   }, []);
   const handleCreateNote = useCallback(() => {
-    void persistNewNote(visibleFolder, navigate, setCreating, setError);
-  }, [visibleFolder, navigate]);
+    void persistNewNote(
+      visibleFolder,
+      navigate,
+      setCreating,
+      setError,
+      remoteBlocked,
+    );
+  }, [visibleFolder, navigate, remoteBlocked]);
 
   useHomeHeader(
     headerFolder,
@@ -382,6 +421,7 @@ export function HomePage() {
     visibleFolder,
     flags.canAdmin,
     creating,
+    remoteBlocked,
     setHeader,
     handleCreateFolder,
     handleCreateNote,
@@ -432,24 +472,37 @@ export function HomePage() {
                 setNotes,
                 setVisibleFolder,
               },
+              remoteBlocked,
             );
           }}
           onCreateFolder={(name) => {
-            void persistNewFolder(name, visibleFolder, navigate, {
-              setFolderCreateError,
-              setFolderCreateOpen,
-              setFolderCreating,
-              setShare,
-              setShareError,
-            });
+            void persistNewFolder(
+              name,
+              visibleFolder,
+              navigate,
+              {
+                setFolderCreateError,
+                setFolderCreateOpen,
+                setFolderCreating,
+                setShare,
+                setShareError,
+              },
+              remoteBlocked,
+            );
           }}
           onPersistShare={(next) => {
-            void persistHomeShare(share, next, visibleFolder?.id, {
-              setNotes,
-              setShare,
-              setShareError,
-              setVisibleFolder,
-            });
+            void persistHomeShare(
+              share,
+              next,
+              visibleFolder?.id,
+              {
+                setNotes,
+                setShare,
+                setShareError,
+                setVisibleFolder,
+              },
+              remoteBlocked,
+            );
           }}
           onRenameFolder={(name) => {
             void persistRenameFolder(
@@ -466,6 +519,7 @@ export function HomePage() {
                 setNotes,
                 setVisibleFolder,
               },
+              remoteBlocked,
             );
           }}
           share={share}
@@ -488,10 +542,23 @@ export function HomePage() {
           navigate,
           setMenu,
           (id, name) => {
-            void openFolderShare(id, name, setError, setShare, setShareError);
+            void openFolderShare(
+              id,
+              name,
+              setError,
+              setShare,
+              setShareError,
+              remoteBlocked,
+            );
           },
           (note) => {
-            void openNoteShare(note, setError, setShare, setShareError);
+            void openNoteShare(
+              note,
+              setError,
+              setShare,
+              setShareError,
+              remoteBlocked,
+            );
           },
           (id, name) => {
             setFolderRename({ id, name });
@@ -501,6 +568,7 @@ export function HomePage() {
             setConfirm({ id, kind, name });
             setConfirmError(null);
           },
+          remoteBlocked,
         );
       }}
       publicFolders={publicFolders}

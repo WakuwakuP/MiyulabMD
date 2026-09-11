@@ -5,7 +5,7 @@ import {
   draftFromNote,
   noteAccessPatch,
 } from "../components/notes/access-draft.ts";
-import type { ApiResult } from "../lib/api.ts";
+import type { ApiFailure, ApiResult } from "../lib/api.ts";
 import { fetchArticleSources, updateNote } from "../lib/api.ts";
 import { applyAwarenessUser } from "../lib/collaboration.ts";
 import {
@@ -15,8 +15,65 @@ import {
 } from "../lib/collaboration-session.ts";
 import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
 import { loadOgCards } from "../lib/markdown.ts";
-import { noteFromCaches, seedNoteCache } from "../lib/note-cache.ts";
-import { nextRequestGeneration } from "../lib/offline-types.ts";
+import { readNoteBootstrap } from "../lib/note-bootstrap.ts";
+import {
+  getLoadedNoteMeta,
+  loadNoteRecord,
+  noteFromCaches,
+  seedNoteCache,
+} from "../lib/note-cache.ts";
+import { getHydratableScope } from "../lib/offline-scope.ts";
+import type { SessionSnapshot } from "../lib/offline-session.ts";
+import { evictNotesEverywhere } from "../lib/offline-session.ts";
+import {
+  nextRequestGeneration,
+  type RequestGeneration,
+  type SessionEpoch,
+} from "../lib/offline-types.ts";
+
+export type EditorViewPhase =
+  | "loading"
+  | "cached-preview"
+  | "revalidating"
+  | "offline-preview"
+  | "server-preview"
+  | "preparing-edit"
+  | "editing"
+  | "uncached"
+  | "denied"
+  | "not-found"
+  | "load-error"
+  | "local-unsupported";
+
+export type EditorPreviewMeta = {
+  source: "memory" | "idb" | "server" | "ssr";
+  cachedAt: number | null;
+  verifiedForSession: boolean;
+};
+
+export type EditorLoadContext = {
+  routeId: string;
+  generation: RequestGeneration;
+  sessionEpoch: SessionEpoch;
+};
+
+export type EditorNoteSnapshot = {
+  note: Note | null;
+  markdown: string;
+  folder: string;
+  accessDraft: AccessDraft | null;
+  loadError: string | null;
+  previewBanner: string | null;
+  meta: EditorPreviewMeta | null;
+  pendingEdit: boolean;
+  viewPhase: EditorViewPhase;
+};
+
+export type ApplyEditorLoadOutcome = {
+  stale: boolean;
+  snapshot: Partial<EditorNoteSnapshot>;
+  evictIds?: string[];
+};
 
 export type NoteSetters = {
   setNote: (note: Note | null) => void;
@@ -25,11 +82,333 @@ export type NoteSetters = {
   setAccessDraft: (draft: AccessDraft | null) => void;
 };
 
-export function applyLoadedNote(loaded: Note, setters: NoteSetters) {
-  setters.setNote(loaded);
-  setters.setMarkdown(loaded.markdown);
-  setters.setFolder(loaded.folder);
-  setters.setAccessDraft(draftFromNote(loaded));
+const TERMINAL_PHASES = new Set<EditorViewPhase>([
+  "uncached",
+  "denied",
+  "not-found",
+  "load-error",
+  "local-unsupported",
+]);
+
+export function isLocalDraftId(id: string): boolean {
+  return id.startsWith("local-");
+}
+
+export function isOfflineKnownSession(session: SessionSnapshot): boolean {
+  return session.status === "offline-known";
+}
+
+export function isSessionHydratable(_session: SessionSnapshot): boolean {
+  return getHydratableScope() !== null;
+}
+
+export function noteAllowsEdit(note: Note | null): boolean {
+  return Boolean(note?.access.flags.canEdit);
+}
+
+/** Cache metadata must not authorize Edit. Server GET + verifiedForSession only. */
+export function verifiedCanEdit(
+  note: Note | null,
+  meta: EditorPreviewMeta | null,
+): boolean {
+  return Boolean(note && meta?.verifiedForSession && note.access.flags.canEdit);
+}
+
+export function canStartEdit(input: {
+  routeId?: string;
+  phase: EditorViewPhase;
+  note: Note | null;
+  meta: EditorPreviewMeta | null;
+  session: SessionSnapshot;
+  pendingEdit: boolean;
+  collabActive: boolean;
+}): boolean {
+  if (input.routeId && isLocalDraftId(input.routeId)) {
+    return false;
+  }
+  if (isOfflineKnownSession(input.session)) {
+    return input.phase === "editing" && input.collabActive;
+  }
+  if (input.session.status === "unknown") {
+    return false;
+  }
+  if (input.session.status === "verification-error") {
+    return false;
+  }
+  if (input.session.status === "unauthenticated") {
+    return false;
+  }
+  if (!verifiedCanEdit(input.note, input.meta)) {
+    return false;
+  }
+  if (input.phase === "preparing-edit" || input.phase === "editing") {
+    return input.pendingEdit || input.collabActive;
+  }
+  return input.phase === "server-preview";
+}
+
+export function allowsServerMutations(
+  phase: EditorViewPhase,
+  session: SessionSnapshot,
+): boolean {
+  if (isOfflineKnownSession(session)) {
+    return false;
+  }
+  if (TERMINAL_PHASES.has(phase)) {
+    return false;
+  }
+  return phase === "server-preview" || phase === "editing";
+}
+
+export function allowsTaskCheckboxMutations(
+  phase: EditorViewPhase,
+  session: SessionSnapshot,
+  note: Note | null,
+  meta: EditorPreviewMeta | null,
+): boolean {
+  if (isOfflineKnownSession(session)) {
+    return false;
+  }
+  if (!verifiedCanEdit(note, meta)) {
+    return false;
+  }
+  return phase === "editing" || phase === "server-preview";
+}
+
+export function taskNoteIdFor(input: {
+  phase: EditorViewPhase;
+  note: Note | null;
+  meta: EditorPreviewMeta | null;
+  session: SessionSnapshot;
+}): string | undefined {
+  if (
+    !(
+      input.note &&
+      allowsTaskCheckboxMutations(
+        input.phase,
+        input.session,
+        input.note,
+        input.meta,
+      )
+    )
+  ) {
+    return undefined;
+  }
+  return input.note.id;
+}
+
+export function editorNeedsSession(phase: EditorViewPhase): boolean {
+  return phase === "preparing-edit" || phase === "editing";
+}
+
+export function editorDesiredConnection(
+  phase: EditorViewPhase,
+  collabReady: boolean,
+): boolean {
+  return phase === "editing" && collabReady;
+}
+
+export function editorViewModeFor(input: {
+  requestedMode: EditorMode;
+  phase: EditorViewPhase;
+  canStartEdit: boolean;
+}): EditorMode {
+  if (input.phase === "editing" && input.canStartEdit) {
+    return input.requestedMode;
+  }
+  return "preview";
+}
+
+export function shouldRemoveSsrPreview(phase: EditorViewPhase): boolean {
+  return !(
+    phase === "loading" ||
+    phase === "revalidating" ||
+    TERMINAL_PHASES.has(phase)
+  );
+}
+
+export function formatCachedAt(cachedAt: number | null): string | null {
+  if (cachedAt === null) {
+    return null;
+  }
+  return new Date(cachedAt).toLocaleString();
+}
+
+export function previewBannerFor(
+  phase: EditorViewPhase,
+  meta: EditorPreviewMeta | null,
+): string | null {
+  if (phase === "offline-preview") {
+    return "オフライン: 端末に保存された内容を表示しています";
+  }
+  if (phase === "cached-preview" || phase === "revalidating") {
+    const when = formatCachedAt(meta?.cachedAt ?? null);
+    if (when) {
+      return phase === "revalidating"
+        ? `保存済み (${when}) · 再確認中…`
+        : `保存済み (${when}) · 再確認中…`;
+    }
+    return phase === "revalidating"
+      ? "再確認中…"
+      : "保存済みの内容を表示しています";
+  }
+  return null;
+}
+
+export function emptyEditorSnapshot(): EditorNoteSnapshot {
+  return {
+    accessDraft: null,
+    folder: "",
+    loadError: null,
+    markdown: "",
+    meta: null,
+    note: null,
+    pendingEdit: false,
+    previewBanner: null,
+    viewPhase: "loading",
+  };
+}
+
+export function resetEditorSnapshotForRoute(
+  routeId: string,
+): EditorNoteSnapshot {
+  if (isLocalDraftId(routeId)) {
+    return {
+      ...emptyEditorSnapshot(),
+      loadError: "オフライン下書きはこの画面では未対応です（#96）。",
+      viewPhase: "local-unsupported",
+    };
+  }
+  return emptyEditorSnapshot();
+}
+
+function metaFromLoaded(
+  source: EditorPreviewMeta["source"],
+  cachedAt: number | null,
+  verifiedForSession: boolean,
+): EditorPreviewMeta {
+  return { cachedAt, source, verifiedForSession };
+}
+
+function readAllowedPreview(routeId: string): {
+  note: Note;
+  meta: EditorPreviewMeta;
+} | null {
+  const boot = readNoteBootstrap(routeId);
+  if (boot) {
+    seedNoteCache(boot);
+    return {
+      meta: metaFromLoaded("ssr", null, false),
+      note: boot,
+    };
+  }
+  const scope = getHydratableScope();
+  if (!scope) {
+    return null;
+  }
+  const hit = noteFromCaches(routeId);
+  if (!hit) {
+    return null;
+  }
+  const loaded = getLoadedNoteMeta(routeId);
+  return {
+    meta: loaded
+      ? {
+          cachedAt: loaded.cachedAt,
+          source: loaded.source,
+          verifiedForSession: loaded.verifiedForSession,
+        }
+      : metaFromLoaded("memory", null, false),
+    note: hit,
+  };
+}
+
+export function beginEditorPreviewHydrate(routeId: string): {
+  preview: { note: Note; meta: EditorPreviewMeta } | null;
+  phase: EditorViewPhase;
+} {
+  if (isLocalDraftId(routeId)) {
+    return { phase: "local-unsupported", preview: null };
+  }
+  const preview = readAllowedPreview(routeId);
+  if (!preview) {
+    return { phase: "loading", preview: null };
+  }
+  return { phase: "cached-preview", preview };
+}
+
+export function snapshotFromPreview(
+  preview: { note: Note; meta: EditorPreviewMeta },
+  phase: EditorViewPhase = "cached-preview",
+): EditorNoteSnapshot {
+  return {
+    accessDraft: draftFromNote(preview.note),
+    folder: preview.note.folder,
+    loadError: null,
+    markdown: preview.note.markdown,
+    meta: preview.meta,
+    note: preview.note,
+    pendingEdit: false,
+    previewBanner: previewBannerFor(phase, preview.meta),
+    viewPhase: phase,
+  };
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: view phase state machine
+export function resolveEditorViewPhase(input: {
+  routeId: string;
+  pendingEdit: boolean;
+  hasPreview: boolean;
+  loadError: string | null;
+  note: Note | null;
+  meta: EditorPreviewMeta | null;
+  revalidating: boolean;
+  collabReady: boolean;
+  collabActive: boolean;
+  explicitPhase?: EditorViewPhase | null;
+}): EditorViewPhase {
+  if (isLocalDraftId(input.routeId)) {
+    return "local-unsupported";
+  }
+  if (input.explicitPhase && TERMINAL_PHASES.has(input.explicitPhase)) {
+    return input.explicitPhase;
+  }
+  if (input.loadError && !input.hasPreview) {
+    if (input.explicitPhase === "denied") {
+      return "denied";
+    }
+    if (input.explicitPhase === "not-found") {
+      return "not-found";
+    }
+    if (input.explicitPhase === "uncached") {
+      return "uncached";
+    }
+    return "load-error";
+  }
+  if (input.pendingEdit) {
+    if (input.collabReady && input.collabActive) {
+      return "editing";
+    }
+    if (input.hasPreview && verifiedCanEdit(input.note, input.meta)) {
+      return "preparing-edit";
+    }
+  }
+  if (input.explicitPhase === "offline-preview") {
+    return "offline-preview";
+  }
+  if (input.revalidating && input.hasPreview) {
+    return "revalidating";
+  }
+  if (input.meta?.verifiedForSession && input.note) {
+    return "server-preview";
+  }
+  if (input.hasPreview) {
+    return "cached-preview";
+  }
+  if (input.revalidating) {
+    return "loading";
+  }
+  return "loading";
 }
 
 export function noteLoadErrorMessage(status: number, fallback: string): string {
@@ -45,41 +424,250 @@ export function noteLoadErrorMessage(status: number, fallback: string): string {
   return fallback;
 }
 
-type EditorLoadSetters = NoteSetters & {
-  setLoadError: (error: string | null) => void;
-  setSaveError: (error: string | null) => void;
-  setCollab: (session: NoteCollabSession | null) => void;
-  setCollabReady: (ready: boolean) => void;
-  setCollabSnapshot: (snapshot: CollabSessionSnapshot | null) => void;
-  setMode: (mode: EditorMode) => void;
-  setSplitScroll: (ratio: number) => void;
-  setLoading: (loading: boolean) => void;
-  hydratedRef: MutableRefObject<boolean>;
-};
+function serverFailureRequiresEviction(result: ApiFailure): boolean {
+  return (
+    result.kind === "http" && (result.status === 403 || result.status === 404)
+  );
+}
 
-export function beginEditorNoteLoad(
-  id: string,
-  setters: EditorLoadSetters,
-): Note | undefined {
-  const hit = noteFromCaches(id);
-  setters.setLoadError(null);
-  setters.setSaveError(null);
-  setters.setCollab(null);
-  setters.setCollabReady(false);
-  setters.setCollabSnapshot(null);
-  setters.setMode("preview");
-  setters.setSplitScroll(0);
+function isServerOutage(result: ApiFailure): boolean {
+  return result.kind === "http" && result.status >= 500;
+}
 
-  if (hit) {
-    applyLoadedNote(hit, setters);
-    setters.hydratedRef.current = true;
-    setters.setLoading(false);
-    void loadOgCards(hit.markdown);
-    return hit;
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: force GET error table
+export function applyEditorForceLoadResult(input: {
+  ctx: EditorLoadContext;
+  result: ApiResult<{ note: Note } & EditorPreviewMeta>;
+  hadPreview: boolean;
+  currentGeneration: RequestGeneration;
+  currentSessionEpoch: SessionEpoch;
+}): ApplyEditorLoadOutcome {
+  const { ctx, result, hadPreview } = input;
+  if (
+    input.currentGeneration !== ctx.generation ||
+    input.currentSessionEpoch !== ctx.sessionEpoch
+  ) {
+    return { snapshot: {}, stale: true };
   }
-  setters.hydratedRef.current = false;
-  setters.setLoading(true);
-  return undefined;
+
+  if (result.ok) {
+    const note = result.data.note ?? (result.data as unknown as Note);
+    const meta: EditorPreviewMeta = {
+      cachedAt: result.data.cachedAt ?? Date.now(),
+      source: result.data.source ?? "server",
+      verifiedForSession: result.data.verifiedForSession,
+    };
+    void loadOgCards(note.markdown);
+    return {
+      snapshot: {
+        ...snapshotFromPreview({ meta, note }, "server-preview"),
+        previewBanner: previewBannerFor("server-preview", meta),
+        viewPhase: "server-preview",
+      },
+      stale: false,
+    };
+  }
+
+  if (result.kind === "aborted") {
+    return { snapshot: {}, stale: true };
+  }
+
+  if (result.kind === "network") {
+    if (hadPreview) {
+      const phase: EditorViewPhase = "offline-preview";
+      return {
+        snapshot: {
+          loadError: null,
+          previewBanner: previewBannerFor(phase, null),
+          viewPhase: phase,
+        },
+        stale: false,
+      };
+    }
+    return {
+      snapshot: {
+        ...emptyEditorSnapshot(),
+        loadError:
+          "まだキャッシュされていません。オンラインで一度開いてください。",
+        viewPhase: "uncached",
+      },
+      stale: false,
+    };
+  }
+
+  if (isServerOutage(result)) {
+    if (hadPreview) {
+      const phase: EditorViewPhase = "offline-preview";
+      return {
+        snapshot: {
+          loadError: null,
+          previewBanner:
+            `${previewBannerFor(phase, null) ?? ""}（サーバー障害のため read-only）`.trim(),
+          viewPhase: phase,
+        },
+        stale: false,
+      };
+    }
+    return {
+      snapshot: {
+        ...emptyEditorSnapshot(),
+        loadError: result.error,
+        viewPhase: "load-error",
+      },
+      stale: false,
+    };
+  }
+
+  if (result.kind === "http" && result.status === 401) {
+    return {
+      snapshot: {
+        ...emptyEditorSnapshot(),
+        loadError: noteLoadErrorMessage(401, result.error),
+        viewPhase: "denied",
+      },
+      stale: false,
+    };
+  }
+
+  if (serverFailureRequiresEviction(result)) {
+    const phase: EditorViewPhase =
+      result.status === 404 ? "not-found" : "denied";
+    return {
+      evictIds: [ctx.routeId],
+      snapshot: {
+        ...emptyEditorSnapshot(),
+        loadError: noteLoadErrorMessage(result.status, result.error),
+        viewPhase: phase,
+      },
+      stale: false,
+    };
+  }
+
+  if (result.kind === "invalid-response") {
+    return {
+      snapshot: {
+        ...(hadPreview
+          ? {}
+          : {
+              ...emptyEditorSnapshot(),
+            }),
+        loadError: result.error,
+        viewPhase: "load-error",
+      },
+      stale: false,
+    };
+  }
+
+  return {
+    snapshot: {
+      ...emptyEditorSnapshot(),
+      loadError: result.error,
+      viewPhase: "load-error",
+    },
+    stale: false,
+  };
+}
+
+export function applyLoadedNote(loaded: Note, setters: NoteSetters) {
+  setters.setNote(loaded);
+  setters.setMarkdown(loaded.markdown);
+  setters.setFolder(loaded.folder);
+  setters.setAccessDraft(draftFromNote(loaded));
+}
+
+export function requestEditorEdit(input: {
+  phase: EditorViewPhase;
+  note: Note | null;
+  meta: EditorPreviewMeta | null;
+  session: SessionSnapshot;
+}): boolean {
+  return canStartEdit({
+    collabActive: false,
+    meta: input.meta,
+    note: input.note,
+    pendingEdit: false,
+    phase: input.phase,
+    routeId: "",
+    session: input.session,
+  });
+}
+
+export function editorHeaderMutationsVisible(
+  phase: EditorViewPhase,
+  session: SessionSnapshot,
+  collabActive: boolean,
+): boolean {
+  if (TERMINAL_PHASES.has(phase)) {
+    return false;
+  }
+  if (phase === "offline-preview" || phase === "cached-preview") {
+    return false;
+  }
+  if (phase === "revalidating") {
+    return false;
+  }
+  if (isOfflineKnownSession(session)) {
+    return phase === "editing" && collabActive;
+  }
+  return (
+    phase === "server-preview" ||
+    phase === "preparing-edit" ||
+    phase === "editing"
+  );
+}
+
+export function subscribeEditorNoteLoad(input: {
+  routeId: string;
+  generation: RequestGeneration;
+  sessionEpoch: SessionEpoch;
+  onPreview: (snapshot: EditorNoteSnapshot) => void;
+  onRevalidating: () => void;
+  onResult: (outcome: ApplyEditorLoadOutcome) => void;
+}): () => void {
+  const hydrate = beginEditorPreviewHydrate(input.routeId);
+  if (hydrate.preview) {
+    input.onPreview(snapshotFromPreview(hydrate.preview, hydrate.phase));
+  } else if (hydrate.phase === "local-unsupported") {
+    input.onPreview(resetEditorSnapshotForRoute(input.routeId));
+  }
+
+  let cancelled = false;
+  const hadPreview = Boolean(hydrate.preview);
+  input.onRevalidating();
+
+  void loadNoteRecord(input.routeId, true).then((result) => {
+    if (cancelled) {
+      return;
+    }
+    const normalized = result.ok
+      ? {
+          data: {
+            cachedAt: result.data.cachedAt,
+            note: result.data.note,
+            source: result.data.source,
+            verifiedForSession: result.data.verifiedForSession,
+          },
+          ok: true as const,
+        }
+      : result;
+    input.onResult(
+      applyEditorForceLoadResult({
+        ctx: {
+          generation: input.generation,
+          routeId: input.routeId,
+          sessionEpoch: input.sessionEpoch,
+        },
+        currentGeneration: input.generation,
+        currentSessionEpoch: input.sessionEpoch,
+        hadPreview,
+        result: normalized,
+      }),
+    );
+  });
+
+  return () => {
+    cancelled = true;
+  };
 }
 
 export function applyEditorNoteLoad(
@@ -87,7 +675,10 @@ export function applyEditorNoteLoad(
   id: string,
   hit: Note | undefined,
   cancelled: boolean,
-  setters: EditorLoadSetters,
+  setters: NoteSetters & {
+    setLoadError: (error: string | null) => void;
+    setLoading: (loading: boolean) => void;
+  },
 ) {
   if (cancelled) {
     return;
@@ -107,7 +698,6 @@ export function applyEditorNoteLoad(
     setters.setAccessDraft(draftFromNote(result.data));
   } else {
     applyLoadedNote(result.data, setters);
-    setters.hydratedRef.current = true;
   }
   setters.setLoading(false);
   void loadOgCards(result.data.markdown);
@@ -260,8 +850,9 @@ export async function persistEditorAccess(
     setSaveError: (error: string | null) => void;
     setNote: (note: Note) => void;
   },
+  guard?: () => boolean,
 ) {
-  if (!note) {
+  if (!note || guard?.() === false) {
     return;
   }
   setters.setAccessDraft(next);
@@ -288,8 +879,9 @@ export async function persistEditorFolder(
     setNote: (note: Note) => void;
     setAccessDraft: (draft: AccessDraft) => void;
   },
+  guard?: () => boolean,
 ) {
-  if (!note) {
+  if (!note || guard?.() === false) {
     return;
   }
   const next = normalizeFolder(folder);
@@ -357,4 +949,40 @@ export function sourceLineNumbers(viewMode: EditorMode): boolean {
 
 export function ownerLabelFor(user: SessionUser | null): string {
   return user?.displayName?.trim() || user?.email || "オーナー";
+}
+
+export function handleCollabAuthStop(input: {
+  snapshot: EditorNoteSnapshot;
+  collabSnapshot: CollabSessionSnapshot;
+}): Partial<EditorNoteSnapshot> {
+  if (input.collabSnapshot.denied || input.collabSnapshot.authStopped) {
+    return {
+      ...emptyEditorSnapshot(),
+      loadError: input.collabSnapshot.denied
+        ? "このノートを表示する権限がありません。"
+        : "このノートを表示するにはログインが必要です。",
+      pendingEdit: false,
+      viewPhase: "denied",
+    };
+  }
+  if (input.collabSnapshot.editDenied) {
+    return {
+      pendingEdit: false,
+      viewPhase: "server-preview",
+    };
+  }
+  return {};
+}
+
+export function applyEditorLoadOutcome(
+  outcome: ApplyEditorLoadOutcome,
+  current: EditorNoteSnapshot,
+): EditorNoteSnapshot {
+  if (outcome.stale) {
+    return current;
+  }
+  if (outcome.evictIds?.length) {
+    evictNotesEverywhere(outcome.evictIds, "editor-load-denied");
+  }
+  return { ...current, ...outcome.snapshot };
 }

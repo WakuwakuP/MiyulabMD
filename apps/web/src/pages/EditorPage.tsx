@@ -24,7 +24,6 @@ import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx"
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterAlert.tsx";
-import { draftFromNote } from "../components/notes/access-draft.ts";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { HistoryIcon, ShareIcon } from "../components/ui/icons.tsx";
@@ -41,29 +40,63 @@ import {
   dismissStaleSsrPreview,
   removeSsrPreview,
 } from "../lib/note-bootstrap.ts";
-import { loadNote, noteFromCaches } from "../lib/note-cache.ts";
 import {
-  applyEditorNoteLoad,
+  getSessionSnapshot,
+  subscribeSession,
+} from "../lib/offline-session.ts";
+import { nextRequestGeneration } from "../lib/offline-types.ts";
+import { subscribeOnlineStatus } from "../lib/online-status.ts";
+import {
+  allowsServerMutations,
+  applyEditorLoadOutcome,
   applySplitScroll,
-  beginEditorNoteLoad,
   bindEditorCollab,
+  canStartEdit,
   changeEditorMode,
+  type EditorNoteSnapshot,
+  type EditorPreviewMeta,
+  type EditorViewPhase,
+  editorDesiredConnection,
   editorGridClass,
+  editorHeaderMutationsVisible,
+  editorNeedsSession,
+  editorViewModeFor,
+  handleCollabAuthStop,
+  isOfflineKnownSession,
   ownerLabelFor,
   persistEditorAccess,
   persistEditorFolder,
+  resetEditorSnapshotForRoute,
+  resolveEditorViewPhase,
+  shouldRemoveSsrPreview,
   sourceLineNumbers,
   subscribeArticleSources,
+  subscribeEditorNoteLoad,
   syncCollabUser,
+  taskNoteIdFor,
   teardownCollab,
+  verifiedCanEdit,
 } from "./editor-page.ts";
 
-function EditorLoadError({ message }: { message: string }) {
+function EditorLoadError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
   const showAuthLinks =
     message.includes("ログイン") || message.includes("権限");
   return (
     <section className="flex flex-col px-5 py-4">
       <ErrorText>{message}</ErrorText>
+      {onRetry && (
+        <p>
+          <button onClick={onRetry} type="button">
+            再試行
+          </button>
+        </p>
+      )}
       {showAuthLinks && (
         <p>
           <Link to="/">ホームに戻る</Link>
@@ -72,6 +105,14 @@ function EditorLoadError({ message }: { message: string }) {
         </p>
       )}
     </section>
+  );
+}
+
+function EditorPreviewBanner({ message }: { message: string }) {
+  return (
+    <p className="border-border border-b px-5 py-2 text-muted text-sm">
+      {message}
+    </p>
   );
 }
 
@@ -238,11 +279,13 @@ function EditorWorkspace({
   markdown,
   accessDraft,
   saveError,
+  previewBanner,
   collabBanner,
   collabBannerLive,
   articleSource,
   articleIssues,
   viewMode,
+  viewPhase,
   usesInternalScroll,
   ready,
   yMarkdown,
@@ -254,6 +297,7 @@ function EditorWorkspace({
   headingTitle,
   user,
   isOwner,
+  taskNoteId,
   onSplitScroll,
   onPersistAccess,
   onCloseShare,
@@ -263,11 +307,13 @@ function EditorWorkspace({
   markdown: string;
   accessDraft: AccessDraft;
   saveError: string | null;
+  previewBanner: string | null;
   collabBanner: string | null;
   collabBannerLive: boolean;
   articleSource: ArticleSource | null;
   articleIssues: ReturnType<typeof validateArticleDocument>["issues"];
   viewMode: EditorMode;
+  viewPhase: EditorViewPhase;
   usesInternalScroll: boolean;
   ready: boolean;
   yMarkdown: NoteCollabSession["yMarkdown"] | undefined;
@@ -279,6 +325,7 @@ function EditorWorkspace({
   headingTitle: string;
   user: AppShellContext["user"];
   isOwner: boolean;
+  taskNoteId?: string;
   onSplitScroll: (ratio: number) => void;
   onPersistAccess: (next: AccessDraft) => void;
   onCloseShare: () => void;
@@ -287,10 +334,12 @@ function EditorWorkspace({
   const showSource = viewMode === "split" || viewMode === "source";
   const showPreview = viewMode === "split" || viewMode === "preview";
   const showRich = viewMode === "rich";
+  const editorCanEdit = canEdit && viewPhase === "editing";
   return (
     <section
       className={cn("flex flex-col", usesInternalScroll && "h-full min-h-0")}
     >
+      {previewBanner && <EditorPreviewBanner message={previewBanner} />}
       {collabBanner && (
         <CollabStatusBanner live={collabBannerLive} message={collabBanner} />
       )}
@@ -300,7 +349,7 @@ function EditorWorkspace({
         {showSource && (
           <EditorSourcePane
             awareness={awareness}
-            canEdit={canEdit}
+            canEdit={editorCanEdit}
             noteId={note.id}
             onSplitScroll={onSplitScroll}
             ready={ready}
@@ -314,14 +363,14 @@ function EditorWorkspace({
             markdown={markdown}
             onSplitScroll={onSplitScroll}
             splitScroll={splitScroll}
-            taskNoteId={canEdit ? note.id : undefined}
+            taskNoteId={taskNoteId}
             viewMode={viewMode}
           />
         )}
         {showRich && (
           <EditorRichPane
             awareness={awareness}
-            canEdit={canEdit}
+            canEdit={editorCanEdit}
             noteId={note.id}
             ready={ready}
             yMarkdown={yMarkdown}
@@ -341,7 +390,7 @@ function EditorWorkspace({
       />
       {historyOpen && (
         <HistoryPanel
-          canEdit={canEdit}
+          canEdit={editorCanEdit}
           noteId={note.id}
           onClose={onCloseHistory}
         />
@@ -351,27 +400,37 @@ function EditorWorkspace({
 }
 
 function EditorPageView({
-  loading,
+  viewPhase,
   loadError,
   note,
   accessDraft,
   workspace,
+  onRetry,
 }: {
-  loading: boolean;
+  viewPhase: EditorViewPhase;
   loadError: string | null;
   note: Note | null;
   accessDraft: AccessDraft | null;
   workspace: ReactNode;
+  onRetry?: () => void;
 }) {
-  if (loading) {
+  if (viewPhase === "loading" && !(note && accessDraft)) {
     return (
       <section className="flex flex-col px-5 py-4">
         <p>読み込み中…</p>
       </section>
     );
   }
-  if (loadError) {
-    return <EditorLoadError message={loadError} />;
+  if (
+    loadError &&
+    !(note && accessDraft) &&
+    (viewPhase === "uncached" ||
+      viewPhase === "denied" ||
+      viewPhase === "not-found" ||
+      viewPhase === "load-error" ||
+      viewPhase === "local-unsupported")
+  ) {
+    return <EditorLoadError message={loadError} onRetry={onRetry} />;
   }
   if (!(note && accessDraft)) {
     return null;
@@ -436,18 +495,52 @@ function articleIssuesFor(
   return validateArticleDocument(articleSource.schema, markdown).issues;
 }
 
+function applySnapshot(
+  snapshot: EditorNoteSnapshot,
+  setters: {
+    setNote: (note: Note | null) => void;
+    setMarkdown: (markdown: string) => void;
+    setFolder: (folder: string) => void;
+    setAccessDraft: (draft: AccessDraft | null) => void;
+    setLoadError: (error: string | null) => void;
+    setPreviewBanner: (banner: string | null) => void;
+    setMeta: (meta: EditorPreviewMeta | null) => void;
+    setPendingEdit: (pending: boolean) => void;
+    setViewPhase: (phase: EditorViewPhase) => void;
+  },
+) {
+  setters.setNote(snapshot.note);
+  setters.setMarkdown(snapshot.markdown);
+  setters.setFolder(snapshot.folder);
+  setters.setAccessDraft(snapshot.accessDraft);
+  setters.setLoadError(snapshot.loadError);
+  setters.setPreviewBanner(snapshot.previewBanner);
+  setters.setMeta(snapshot.meta);
+  setters.setPendingEdit(snapshot.pendingEdit);
+  setters.setViewPhase(snapshot.viewPhase);
+}
+
 export function EditorPage() {
   const { id = "" } = useParams();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
-  const cached = noteFromCaches(id);
-  const [note, setNote] = useState<Note | null>(() => cached ?? null);
-  const [markdown, setMarkdown] = useState(() => cached?.markdown ?? "");
-  const [folder, setFolder] = useState(() => cached?.folder ?? "");
-  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(() =>
-    cached ? draftFromNote(cached) : null,
+  const [session, setSession] = useState(getSessionSnapshot);
+  const initial = resetEditorSnapshotForRoute(id);
+  const [note, setNote] = useState<Note | null>(initial.note);
+  const [markdown, setMarkdown] = useState(initial.markdown);
+  const [folder, setFolder] = useState(initial.folder);
+  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(
+    initial.accessDraft,
   );
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(() => !cached);
+  const [loadError, setLoadError] = useState<string | null>(initial.loadError);
+  const [previewBanner, setPreviewBanner] = useState<string | null>(
+    initial.previewBanner,
+  );
+  const [meta, setMeta] = useState<EditorPreviewMeta | null>(initial.meta);
+  const [pendingEdit, setPendingEdit] = useState(initial.pendingEdit);
+  const [viewPhase, setViewPhase] = useState<EditorViewPhase>(
+    initial.viewPhase,
+  );
+  const [revalidating, setRevalidating] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [collab, setCollab] = useState<NoteCollabSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
@@ -461,14 +554,44 @@ export function EditorPage() {
   const [mode, setMode] = useState<EditorMode>("preview");
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
-  const hydratedRef = useRef(false);
+  const [hydrated, setHydrated] = useState(false);
   const sessionRef = useRef<NoteCollabSession | null>(null);
   const unbindCollabRef = useRef<(() => void) | null>(null);
+  const loadGenerationRef = useRef(nextRequestGeneration());
+  const loadSessionEpochRef = useRef(session.sessionEpoch);
+  const editorSnapshotRef = useRef<EditorNoteSnapshot>(initial);
+  const [loadTick, setLoadTick] = useState(0);
 
   const noteId = note?.id;
   const userId = user?.id;
   const flags = ownerFlags(user, note);
-  const viewMode: EditorMode = flags.canEdit ? mode : "preview";
+  const collabActive = Boolean(collab);
+  const resolvedPhase = resolveEditorViewPhase({
+    collabActive,
+    collabReady,
+    explicitPhase: viewPhase,
+    hasPreview: Boolean(note && accessDraft),
+    loadError,
+    meta,
+    note,
+    pendingEdit,
+    revalidating,
+    routeId: id,
+  });
+  const startEditAllowed = canStartEdit({
+    collabActive,
+    meta,
+    note,
+    pendingEdit,
+    phase: resolvedPhase,
+    routeId: id,
+    session,
+  });
+  const viewMode = editorViewModeFor({
+    canStartEdit: startEditAllowed,
+    phase: resolvedPhase,
+    requestedMode: mode,
+  });
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
   const articleSource = matchArticleSource(folder, articleSources);
@@ -479,54 +602,126 @@ export function EditorPage() {
   const collabBanner = collabSnapshot
     ? collabBannerMessage(collabSnapshot)
     : null;
+  const taskNoteId = taskNoteIdFor({
+    meta,
+    note,
+    phase: resolvedPhase,
+    session,
+  });
+  const mutationGuard = () => allowsServerMutations(resolvedPhase, session);
+
+  editorSnapshotRef.current = {
+    accessDraft,
+    folder,
+    loadError,
+    markdown,
+    meta,
+    note,
+    pendingEdit,
+    previewBanner,
+    viewPhase: resolvedPhase,
+  };
+
+  const snapshotSetters = {
+    setAccessDraft,
+    setFolder,
+    setLoadError,
+    setMarkdown,
+    setMeta,
+    setNote,
+    setPendingEdit,
+    setPreviewBanner,
+    setViewPhase,
+  };
+
+  const triggerReload = () => {
+    loadGenerationRef.current = nextRequestGeneration();
+    loadSessionEpochRef.current = session.sessionEpoch;
+    setLoadTick((value) => value + 1);
+  };
+
+  useEffect(() => subscribeSession(setSession), []);
 
   useEffect(() => {
     if (collabBanner === collabBannerRef.current) {
       return;
     }
     collabBannerRef.current = collabBanner;
-    if (collabBanner) {
-      setCollabBannerLive(true);
-    } else {
-      setCollabBannerLive(false);
-    }
+    setCollabBannerLive(Boolean(collabBanner));
   }, [collabBanner]);
 
   useEffect(() => {
     dismissStaleSsrPreview(id);
-    const setters = {
-      hydratedRef,
-      setAccessDraft,
+    teardownCollab(
+      unbindCollabRef,
+      sessionRef,
       setCollab,
       setCollabReady,
       setCollabSnapshot,
-      setFolder,
-      setLoadError,
-      setLoading,
-      setMarkdown,
-      setMode,
-      setNote,
-      setSaveError,
-      setSplitScroll,
-    };
-    const hit = beginEditorNoteLoad(id, setters);
-    let cancelled = false;
-    void loadNote(id, Boolean(hit)).then((result) => {
-      applyEditorNoteLoad(result, id, hit, cancelled, setters);
+    );
+    setShareOpen(false);
+    setHistoryOpen(false);
+    setSaveError(null);
+    setMode("preview");
+    setPendingEdit(false);
+    setRevalidating(false);
+    setHydrated(false);
+    loadGenerationRef.current = nextRequestGeneration();
+    loadSessionEpochRef.current = session.sessionEpoch;
+    applySnapshot(resetEditorSnapshotForRoute(id), snapshotSetters);
+  }, [id, session.sessionEpoch]);
+
+  useEffect(() => {
+    dismissStaleSsrPreview(id);
+    return subscribeEditorNoteLoad({
+      generation: loadGenerationRef.current,
+      onPreview: (snapshot) => {
+        applySnapshot(snapshot, snapshotSetters);
+        setHydrated(true);
+      },
+      onResult: (outcome) => {
+        setRevalidating(false);
+        applySnapshot(
+          applyEditorLoadOutcome(outcome, editorSnapshotRef.current),
+          snapshotSetters,
+        );
+        setHydrated(true);
+      },
+      onRevalidating: () => {
+        setRevalidating(true);
+        setViewPhase("revalidating");
+      },
+      routeId: id,
+      sessionEpoch: loadSessionEpochRef.current,
     });
-    return () => {
-      cancelled = true;
+  }, [id, loadTick, session.sessionEpoch]);
+
+  useEffect(() => {
+    return subscribeOnlineStatus((online) => {
+      if (online) {
+        triggerReload();
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const onFocus = () => {
+      triggerReload();
     };
-  }, [id]);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   useEffect(() => subscribeArticleSources(user, setArticleSources), [user]);
 
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);
-    if (!loading && markdown) {
+    if (shouldRemoveSsrPreview(resolvedPhase)) {
       removeSsrPreview();
     }
-  }, [id, loading, markdown]);
+  }, [id, resolvedPhase]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -541,8 +736,6 @@ export function EditorPage() {
   }, [usesInternalScroll]);
 
   useEffect(() => {
-    void noteId;
-    void userId;
     return () => {
       teardownCollab(
         unbindCollabRef,
@@ -555,10 +748,48 @@ export function EditorPage() {
   }, [noteId, userId]);
 
   useEffect(() => {
+    if (!collabSnapshot) {
+      return;
+    }
+    const patch = handleCollabAuthStop({
+      collabSnapshot,
+      snapshot: {
+        accessDraft,
+        folder,
+        loadError,
+        markdown,
+        meta,
+        note,
+        pendingEdit,
+        previewBanner,
+        viewPhase: resolvedPhase,
+      },
+    });
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+    if (patch.pendingEdit === false) {
+      setPendingEdit(false);
+      setMode("preview");
+    }
+    if (patch.viewPhase) {
+      setViewPhase(patch.viewPhase);
+    }
+    if (patch.loadError !== undefined) {
+      setLoadError(patch.loadError);
+    }
+    if (patch.viewPhase === "denied") {
+      setNote(null);
+      setMarkdown("");
+      setAccessDraft(null);
+    }
+  }, [collabSnapshot]);
+
+  useEffect(() => {
     bindEditorCollab({
-      desiredConnection: viewMode !== "preview",
-      hydrated: hydratedRef.current,
-      needsSession: viewMode !== "preview",
+      desiredConnection: editorDesiredConnection(resolvedPhase, collabReady),
+      hydrated,
+      needsSession: editorNeedsSession(resolvedPhase),
       noteId,
       sessionRef,
       setCollab,
@@ -569,7 +800,7 @@ export function EditorPage() {
       user,
       userLoading,
     });
-  }, [noteId, userLoading, viewMode, user]);
+  }, [noteId, userLoading, resolvedPhase, collabReady, hydrated, user]);
 
   useEffect(() => {
     syncCollabUser(collab, user);
@@ -586,15 +817,39 @@ export function EditorPage() {
   useEffect(() => {
     bindEditorHeader({
       awareness,
-      canEdit: flags.canEdit,
+      canEdit: startEditAllowed,
       folder,
+      headerVisible: editorHeaderMutationsVisible(
+        resolvedPhase,
+        session,
+        collabActive,
+      ),
       isOwner: flags.isOwner,
       note,
+      onRequestEdit: (next) => {
+        if (next === "preview") {
+          setPendingEdit(false);
+          setMode("preview");
+          return;
+        }
+        if (resolvedPhase === "editing" && startEditAllowed) {
+          changeEditorMode(true, next, setMode);
+          return;
+        }
+        if (
+          verifiedCanEdit(note, meta) &&
+          resolvedPhase === "server-preview" &&
+          !isOfflineKnownSession(session)
+        ) {
+          setPendingEdit(true);
+          setMode(next);
+        }
+      },
+      session,
       setAccessDraft,
       setFolder,
       setHeader,
       setHistoryOpen,
-      setMode,
       setNote,
       setSaveError,
       setShareOpen,
@@ -604,19 +859,26 @@ export function EditorPage() {
   }, [
     note,
     viewMode,
-    flags.canEdit,
+    startEditAllowed,
     awareness,
     folder,
     flags.isOwner,
     setHeader,
+    resolvedPhase,
+    session,
   ]);
 
   return (
     <EditorPageView
       accessDraft={accessDraft}
       loadError={loadError}
-      loading={loading}
       note={note}
+      onRetry={
+        viewPhase === "load-error" || viewPhase === "uncached"
+          ? triggerReload
+          : undefined
+      }
+      viewPhase={resolvedPhase}
       workspace={
         note && accessDraft ? (
           <EditorWorkspace
@@ -624,7 +886,7 @@ export function EditorPage() {
             articleIssues={articleIssues}
             articleSource={articleSource}
             awareness={awareness}
-            canEdit={flags.canEdit}
+            canEdit={startEditAllowed}
             collabBanner={collabBanner}
             collabBannerLive={collabBannerLive}
             headingTitle={headingTitle}
@@ -635,22 +897,30 @@ export function EditorPage() {
             onCloseHistory={() => setHistoryOpen(false)}
             onCloseShare={() => setShareOpen(false)}
             onPersistAccess={(next) => {
-              void persistEditorAccess(note, next, {
-                setAccessDraft,
-                setNote,
-                setSaveError,
-              });
+              void persistEditorAccess(
+                note,
+                next,
+                {
+                  setAccessDraft,
+                  setNote,
+                  setSaveError,
+                },
+                mutationGuard,
+              );
             }}
             onSplitScroll={(ratio) => {
               applySplitScroll(ratio, splitScrollLock, setSplitScroll);
             }}
+            previewBanner={previewBanner}
             ready={ready}
             saveError={saveError}
             shareOpen={shareOpen}
             splitScroll={splitScroll}
+            taskNoteId={taskNoteId}
             user={user}
             usesInternalScroll={usesInternalScroll}
             viewMode={viewMode}
+            viewPhase={resolvedPhase}
             yMarkdown={yMarkdown}
           />
         ) : null
@@ -664,10 +934,12 @@ function bindEditorHeader(input: {
   folder: string;
   viewMode: EditorMode;
   canEdit: boolean;
+  headerVisible: boolean;
   awareness: NoteCollabSession["awareness"] | undefined;
   isOwner: boolean;
+  session: import("../lib/offline-session.ts").SessionSnapshot;
   setHeader: AppShellContext["setHeader"];
-  setMode: (mode: EditorMode) => void;
+  onRequestEdit: (mode: EditorMode) => void;
   setFolder: (folder: string) => void;
   setSaveError: (error: string | null) => void;
   setNote: (note: Note) => void;
@@ -679,33 +951,46 @@ function bindEditorHeader(input: {
     input.setHeader({ folder: null, layout: "editor" });
     return;
   }
+  const showMutations = input.headerVisible;
   input.setHeader({
-    actions: (
+    actions: showMutations ? (
       <EditorModeSwitch
-        canEdit={input.canEdit}
-        onChange={(next) =>
-          changeEditorMode(input.canEdit, next, input.setMode)
-        }
+        canEdit={input.canEdit || input.viewMode !== "preview"}
+        onChange={input.onRequestEdit}
         value={input.viewMode}
       />
-    ),
-    end: (
+    ) : null,
+    end: showMutations ? (
       <EditorHeaderEnd
         awareness={input.awareness}
         folder={input.folder}
         folderId={input.note.folderId}
         isOwner={input.isOwner}
         onFolderBlur={() => {
-          void persistEditorFolder(input.note, input.folder, normalizeFolder, {
-            setAccessDraft: input.setAccessDraft,
-            setFolder: input.setFolder,
-            setNote: input.setNote,
-            setSaveError: input.setSaveError,
-          });
+          void persistEditorFolder(
+            input.note,
+            input.folder,
+            normalizeFolder,
+            {
+              setAccessDraft: input.setAccessDraft,
+              setFolder: input.setFolder,
+              setNote: input.setNote,
+              setSaveError: input.setSaveError,
+            },
+            () => showMutations,
+          );
         }}
         onFolderChange={input.setFolder}
         onHistory={() => input.setHistoryOpen(true)}
         onShare={() => input.setShareOpen(true)}
+      />
+    ) : (
+      <FolderPopover
+        folder={input.folder}
+        folderId={input.note.folderId}
+        isOwner={false}
+        onFolderBlur={() => undefined}
+        onFolderChange={() => undefined}
       />
     ),
     folder: input.folder,
