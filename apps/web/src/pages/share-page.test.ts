@@ -66,7 +66,10 @@ test("applyShareForceLoadResult evicts and clears on 404", () => {
 
 test("shouldRemoveShareSsrPreview mirrors editor settled-state rule", () => {
   assert.equal(shouldRemoveShareSsrPreview("loading"), false);
+  assert.equal(shouldRemoveShareSsrPreview("revalidating"), true);
   assert.equal(shouldRemoveShareSsrPreview("server-preview"), true);
+  assert.equal(shouldRemoveShareSsrPreview("uncached"), true);
+  assert.equal(shouldRemoveShareSsrPreview("denied"), true);
 });
 
 test("filterHomeMenuItems keeps only open action when offline", () => {

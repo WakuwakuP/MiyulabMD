@@ -255,14 +255,7 @@ export function mergeShareLoadOutcome(
 }
 
 export function shouldRemoveShareSsrPreview(phase: ShareViewPhase): boolean {
-  return !(
-    phase === "loading" ||
-    phase === "revalidating" ||
-    phase === "uncached" ||
-    phase === "denied" ||
-    phase === "not-found" ||
-    phase === "load-error"
-  );
+  return phase !== "loading";
 }
 
 export function subscribeShareNote(id: string, setters: ShareLoadSetters) {

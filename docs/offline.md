@@ -275,14 +275,14 @@ SharePage（`/s/:id`）も同一表。従来の「cache hit なら全エラー�
 
 ### SSR 除去
 
-`removeSsrPreview()` は **読み込み確定フェーズ**（preview / server-preview / editing 等）でのみ呼ぶ。空本文でも旧 SSR が残らない。
+`removeSsrPreview()` は **`loading` 以外の確定フェーズ**（`revalidating` / terminal 含む）で呼ぶ。空本文でも旧 SSR が残らない。SharePage も同じ。
 
 ## 15. 未実装（後続スライス）
 
 | 項目 | Issue |
 | --- | --- |
-| Service Worker / PWA シェル | #92 |
 | local 下書き drafts store | #96 |
+| 復帰同期（サーバー契約・クライアント） | #97 |
 
 ## 参照
 

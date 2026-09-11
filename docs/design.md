@@ -381,6 +381,9 @@ sequenceDiagram
 - `y-codemirror.next` で CodeMirror にバインド
 - リッチ（TipTap）も同じ `Y.Text("markdown")` に差分（insert/delete）で載せる。`y-prosemirror` は使わない
 - `y-indexeddb` は**既存ノートの Yjs session** の一時切断用のみ（#95）。local 下書き（`local-*`）は別 IndexedDB store（#96）。PWA シェルは Cache Storage（#92）。取得済み一覧・本文 cache と共通契約は [offline.md](./offline.md)
+- Service Worker は静的アプリシェル（ビルド成果の `index.html` と JS/CSS/chunk、manifest、アイコン）のみを precache する。API・認証・権限付き画像・本文入り SSR HTML は保存しない
+- SW ルーティング順序: (1) `/api` `/auth` `/ws` `/mcp` 配下と `GET /openapi.json` は `NetworkOnly`、(2) local 専用 navigation（`/n/local-*`）は #96 で追加、(3) 通常アプリ navigation（`/` `/n/:id` `/s/:id` `/f/:folderId` `/shared` `/shared-by-me` `/settings` 配下）は `NetworkOnly` で通信失敗時のみ precache の `/index.html` にフォールバック、(4) 最後に静的 precache
+- SW 更新は `registerType: 'prompt'`。`skipWaiting` / `clientsClaim` / 編集中タブの自動リロードは行わない
 - awareness に displayName / color / cursor（Y.RelativePosition）を載せる
 
 閲覧のみのユーザーもプレビューをリアルタイム更新するため、view 権限があれば WS 接続を許す。書き込みフレームはサーバーで落とす。
