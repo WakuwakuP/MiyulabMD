@@ -1,5 +1,6 @@
 import type { NoteSummary, SessionUser } from "@miyulabmd/shared";
 import { titleFromMarkdown } from "@miyulabmd/shared";
+import type { DraftPromotionRecord } from "./draft-journal.ts";
 import type { LocalDraft } from "./draft-store.ts";
 import type { SessionSnapshot } from "./offline-session.ts";
 
@@ -49,13 +50,27 @@ export function mergeHomeDisplayNotes(
   serverNotes: NoteSummary[],
   drafts: LocalDraft[],
   currentFolderId: string | null,
+  promotions: DraftPromotionRecord[] = [],
 ): HomeListItem[] {
+  const promotedLocalIds = new Set(promotions.map((entry) => entry.localId));
   const draftItems = drafts
-    .filter((draft) => (draft.folderId ?? null) === currentFolderId)
+    .filter(
+      (draft) =>
+        !promotedLocalIds.has(draft.localId) &&
+        (draft.folderId ?? null) === currentFolderId,
+    )
     .map(draftToNoteSummary);
-  return [...draftItems, ...serverNotes].sort(
-    (a, b) => b.updatedAt - a.updatedAt,
-  );
+  const serverItems = serverNotes;
+  const seen = new Set<string>();
+  const merged: HomeListItem[] = [];
+  for (const item of [...draftItems, ...serverItems]) {
+    if (seen.has(item.id)) {
+      continue;
+    }
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export function isLocalDraftSummary(note: NoteSummary): note is HomeListItem {

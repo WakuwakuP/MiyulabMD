@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
 import { indexedDB } from "fake-indexeddb";
-import { configureOfflineDb, resetOfflineDbForTests } from "../lib/offline-db.ts";
+import {
+  configureOfflineDb,
+  OFFLINE_DB_NAME,
+  resetOfflineDbForTests,
+} from "../lib/offline-db.ts";
+import { resetDraftJournalForTests } from "../lib/draft-journal.ts";
 import { listDrafts, resetDraftStoreForTests } from "../lib/draft-store.ts";
 import {
   __testSetSessionState,
@@ -20,12 +25,14 @@ const user = {
   id: "me",
 };
 
-afterEach(() => {
+afterEach(async () => {
   mock.restoreAll();
   resetDraftStoreForTests();
+  resetDraftJournalForTests();
   resetOfflineDbForTests();
   resetOfflineSessionForTests();
   resetCreateNoteCoalescingForTests();
+  await indexedDB.deleteDatabase(OFFLINE_DB_NAME);
 });
 
 test("persistNewNote coalesces same-tick double create into one draft", async () => {

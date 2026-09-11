@@ -90,6 +90,15 @@ export function resetDraftStoreForTests(): void {
   storageUnavailable = false;
 }
 
+/** Drop in-memory draft after server promotion (#97). IDB row is removed separately. */
+export function removeDraftFromMemory(
+  ownerId: string,
+  localId: LocalDraftId,
+): void {
+  memoryDrafts.delete(draftKey(ownerId, localId));
+  notifyDraftListeners();
+}
+
 export function subscribeDrafts(listener: DraftListener): () => void {
   draftListeners.add(listener);
   return () => {
@@ -134,8 +143,7 @@ export async function listDrafts(ownerId: string): Promise<LocalDraft[]> {
   if (db) {
     try {
       const tx = db.transaction(DRAFTS_STORE, "readonly");
-      const index = tx.objectStore(DRAFTS_STORE).index("ownerId");
-      const request = index.openCursor(IDBKeyRange.only(ownerId));
+      const request = tx.objectStore(DRAFTS_STORE).openCursor();
       await new Promise<void>((resolve, reject) => {
         request.onsuccess = () => {
           const cursor = request.result;
@@ -144,6 +152,10 @@ export async function listDrafts(ownerId: string): Promise<LocalDraft[]> {
             return;
           }
           const draft = cursor.value as LocalDraft;
+          if (draft.ownerId !== ownerId) {
+            cursor.continue();
+            return;
+          }
           const key = draftKey(ownerId, draft.localId);
           if (!memoryTombstones.has(key)) {
             results.push(draft);

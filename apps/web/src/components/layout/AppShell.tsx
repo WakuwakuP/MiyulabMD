@@ -5,6 +5,7 @@ import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import { installYjsPersistenceCleanup } from "../../lib/collaboration-persistence.ts";
+import { startDraftSyncService } from "../../lib/draft-sync.ts";
 import {
   getSessionSnapshot,
   hydrateSessionFromDb,
@@ -45,6 +46,7 @@ export function AppShell() {
 
   useEffect(() => {
     installYjsPersistenceCleanup();
+    const stopDraftSync = startDraftSyncService();
     Promise.all([hydrateSessionFromDb(), fetchAuthConfig()])
       .then(async ([, configResult]) => {
         if (configResult.ok) {
@@ -55,6 +57,9 @@ export function AppShell() {
         await verifySession();
       })
       .finally(() => setLoading(false));
+    return () => {
+      stopDraftSync();
+    };
   }, []);
 
   const setHeader = useCallback(

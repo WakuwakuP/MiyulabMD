@@ -36,7 +36,7 @@ function ogFallbackOrigin(): string | null {
 export type ApiFailure =
   | { ok: false; kind: "network"; status: 0; error: string }
   | { ok: false; kind: "aborted"; status: 0; error: string }
-  | { ok: false; kind: "http"; status: number; error: string }
+  | { ok: false; kind: "http"; status: number; error: string; code?: string }
   | {
       ok: false;
       kind: "invalid-response";
@@ -58,11 +58,21 @@ function isAbortError(error: unknown): boolean {
 }
 
 function parseErrorFromText(text: string, statusText: string): string {
+  return parseErrorPayload(text, statusText).error;
+}
+
+function parseErrorPayload(
+  text: string,
+  statusText: string,
+): { error: string; code?: string } {
   try {
-    const body = JSON.parse(text) as { error?: string };
-    return body.error ?? statusText;
+    const body = JSON.parse(text) as { error?: string; code?: string };
+    return {
+      code: typeof body.code === "string" ? body.code : undefined,
+      error: body.error ?? statusText,
+    };
   } catch {
-    return statusText;
+    return { error: statusText };
   }
 }
 
@@ -119,8 +129,10 @@ export async function apiRequest<T>(
           status: 0,
         };
       }
+      const payload = parseErrorPayload(text, res.statusText);
       return {
-        error: parseErrorFromText(text, res.statusText),
+        code: payload.code,
+        error: payload.error,
         kind: "http",
         ok: false,
         status: res.status,
@@ -150,8 +162,10 @@ export async function apiRequest<T>(
   }
 
   if (!res.ok) {
+    const payload = parseErrorPayload(text, res.statusText);
     return {
-      error: parseErrorFromText(text, res.statusText),
+      code: payload.code,
+      error: payload.error,
       kind: "http",
       ok: false,
       status: res.status,
@@ -406,6 +420,9 @@ export async function updateNote(
   patch: {
     title?: string;
     markdown?: string;
+    expectedMarkdown?: string;
+    clientDraftId?: string;
+    draftOwnerId?: string;
     folder?: string;
     permission?: PermissionPreset;
     inheritAccess?: boolean;

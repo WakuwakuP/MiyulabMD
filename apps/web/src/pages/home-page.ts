@@ -30,12 +30,22 @@ import {
   updateNote,
 } from "../lib/api.ts";
 import {
+  commitCreateJournal,
+  listPromotions,
+  subscribeDraftJournal,
+} from "../lib/draft-journal.ts";
+import {
+  convertCreateJournalToDraft,
+  promoteNoteAfterOnlineCreate,
+  requestDraftDelete,
+} from "../lib/draft-sync.ts";
+import {
   createLocalDraftId,
-  deleteDraft,
   insertDraft,
   listDrafts,
   subscribeDrafts,
   type LocalDraft,
+  type LocalDraftId,
 } from "../lib/draft-store.ts";
 import {
   canCreateLocalDraft,
@@ -53,6 +63,7 @@ import {
   loadNotes,
   type NotesLoadState,
   peekFolder,
+  peekNotes,
   seedFolderCache,
   upsertNoteSummary,
 } from "../lib/list-cache.ts";
@@ -122,12 +133,36 @@ function folderTargetForDraft(
   return { folder: "" };
 }
 
+function createInputForDraft(
+  ownerId: string,
+  localId: LocalDraftId,
+  visibleFolder: FolderAccess | null,
+): import("@miyulabmd/shared").CreateNoteInput {
+  return {
+    ...folderTargetForDraft(visibleFolder),
+    clientDraftId: localId,
+    draftOwnerId: ownerId,
+    inheritAccess: true,
+    markdown: INITIAL_MARKDOWN,
+  };
+}
+
 async function saveLocalDraftNote(
   ownerId: string,
   visibleFolder: FolderAccess | null,
+  localId: LocalDraftId = createLocalDraftId(),
 ): Promise<string | null> {
   const now = Date.now();
-  const localId = createLocalDraftId();
+  const createInput = createInputForDraft(ownerId, localId, visibleFolder);
+  const journalOk = await commitCreateJournal({
+    createInput,
+    localId,
+    ownerId,
+    revision: 1,
+  });
+  if (!journalOk) {
+    return null;
+  }
   const draft: LocalDraft = {
     createdAt: now,
     ...folderTargetForDraft(visibleFolder),
@@ -143,6 +178,7 @@ async function saveLocalDraftNote(
   if (!ok) {
     return null;
   }
+  await convertCreateJournalToDraft(ownerId, localId, draft);
   return localId;
 }
 
@@ -245,36 +281,60 @@ export function subscribeHomeNotes(
       setNotes(serverNotes);
       return;
     }
-    const drafts = await listDrafts(user.id);
-    setNotes(mergeHomeDisplayNotes(serverNotes, drafts, currentFolderId));
+    const [drafts, promotions] = await Promise.all([
+      listDrafts(user.id),
+      listPromotions(user.id),
+    ]);
+    setNotes(
+      mergeHomeDisplayNotes(serverNotes, drafts, currentFolderId, promotions),
+    );
   };
 
   setNotesLoadState(getNotesLoadState());
-  void loadNotes(true).then((noteList) => {
-    if (cancelled) {
-      return;
+  void (async () => {
+    try {
+      const noteList = await loadNotes(true);
+      if (cancelled) {
+        return;
+      }
+      const state = getNotesLoadState();
+      setNotesLoadState(state);
+      if (state === "error") {
+        setNotesError(true);
+        return;
+      }
+      setNotesError(false);
+      await publish(noteList);
+    } catch {
+      if (!cancelled) {
+        setNotesError(true);
+      }
     }
-    const state = getNotesLoadState();
-    setNotesLoadState(state);
-    if (state === "error") {
-      setNotesError(true);
-      return;
-    }
-    setNotesError(false);
-    void publish(noteList);
-  });
+  })();
 
-  const unsubDrafts = user
-    ? subscribeDrafts(() => {
-        void loadNotes(false).then((noteList) => {
-          void publish(noteList);
-        });
-      })
-    : undefined;
+  const refreshFromCache = () => {
+    void (async () => {
+      try {
+        const noteList = await loadNotes(false);
+        if (cancelled) {
+          return;
+        }
+        await publish(noteList);
+      } catch {
+        // keep the last rendered list
+      }
+    })();
+  };
+  const unsubDrafts = user ? subscribeDrafts(refreshFromCache) : undefined;
+  const unsubJournal = user ? subscribeDraftJournal(refreshFromCache) : undefined;
+  if (user && peekNotes()) {
+    void publish(peekNotes() ?? []);
+  }
 
   return () => {
     cancelled = true;
     unsubDrafts?.();
+    unsubJournal?.();
     abortNoteBodyPrefetch();
   };
 }
@@ -400,21 +460,40 @@ export async function persistNewNote(
         return await saveLocalDraftNote(ownerId, visibleFolder);
       }
 
-      const result = await createNote({
-        folder: visibleFolder?.folder,
-        folderId: visibleFolder?.id ?? undefined,
-        inheritAccess: true,
-        markdown: INITIAL_MARKDOWN,
+      const localId = createLocalDraftId();
+      const createInput = createInputForDraft(ownerId, localId, visibleFolder);
+      const journalOk = await commitCreateJournal({
+        createInput,
+        localId,
+        ownerId,
+        revision: 1,
       });
+      if (!journalOk) {
+        setError("端末への保存に失敗しました。通信が回復するまで再試行できません。");
+        return null;
+      }
+
+      const result = await createNote(createInput);
       if (result.ok) {
+        const session = getSessionSnapshot();
+        await promoteNoteAfterOnlineCreate({
+          localId,
+          note: result.data,
+          ownerId,
+          sessionEpoch: session.sessionEpoch,
+        });
         const { markdown: _markdown, ...summary } = result.data;
         upsertNoteSummary(summary);
         seedNoteCache(result.data);
         return result.data.id;
       }
       if (result.kind === "network") {
-        // #97: auto re-POST when back online.
-        return await saveLocalDraftNote(ownerId, visibleFolder);
+        const draftId = await saveLocalDraftNote(
+          ownerId,
+          visibleFolder,
+          localId,
+        );
+        return draftId;
       }
       setError(
         result.status === 401
@@ -818,16 +897,21 @@ export async function persistDraftDelete(
   }
   setters.setConfirmBusy(true);
   setters.setConfirmError(null);
-  invalidateLocalDraftEditor(user.id, confirm.id as import("../lib/draft-store.ts").LocalDraftId);
-  await deleteDraft(user.id, confirm.id as import("../lib/draft-store.ts").LocalDraftId);
+  invalidateLocalDraftEditor(user.id, confirm.id as LocalDraftId);
+  await requestDraftDelete(user.id, confirm.id as LocalDraftId);
   setters.setConfirm(null);
   setters.setConfirmBusy(false);
   if (openDraftId === confirm.id) {
     navigate("/");
   }
   const serverNotes = await loadNotes(false);
-  const drafts = await listDrafts(user.id);
-  setters.setNotes(mergeHomeDisplayNotes(serverNotes, drafts, null));
+  const [drafts, promotions] = await Promise.all([
+    listDrafts(user.id),
+    listPromotions(user.id),
+  ]);
+  setters.setNotes(
+    mergeHomeDisplayNotes(serverNotes, drafts, null, promotions),
+  );
 }
 
 export async function persistHomeDelete(

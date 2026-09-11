@@ -12,6 +12,7 @@ import {
   saveDraft,
 } from "./draft-store.ts";
 import { getEditorDrain } from "./editor-drain.ts";
+import { maybeScheduleDraftSync } from "./draft-sync-scheduler.ts";
 import type { SessionEpoch } from "./offline-types.ts";
 
 const MARKDOWN_FIELD = "markdown";
@@ -90,6 +91,7 @@ async function runSave(entry: EditorEntry): Promise<void> {
     entry.editor.draft = result.draft;
     entry.editor.saveState = "idle";
     entry.editor.saveError = null;
+    maybeScheduleDraftSync(entry.editor.draft.localId);
     return;
   }
   entry.nextRevision = Math.max(entry.nextRevision - 1, entry.editor.draft.revision + 1);
@@ -232,7 +234,4 @@ export function resetLocalDraftEditorsForTests(): void {
   entries.clear();
 }
 
-/** #97 sync runs on the editing tab — stub for now. */
-export function maybeScheduleDraftSync(_localId: LocalDraftId): void {
-  // #97: POST journal / promote local id when online.
-}
+export { maybeScheduleDraftSync } from "./draft-sync-scheduler.ts";

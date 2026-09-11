@@ -36,6 +36,8 @@ test("openDb opens miyulabmd-offline with notes lists session stores", async () 
   assert.ok(db.objectStoreNames.contains("notes"));
   assert.ok(db.objectStoreNames.contains("lists"));
   assert.ok(db.objectStoreNames.contains("session"));
+  assert.ok(db.objectStoreNames.contains("draft-journal"));
+  assert.ok(db.objectStoreNames.contains("draft-promotions"));
   closeOfflineDb();
 });
 

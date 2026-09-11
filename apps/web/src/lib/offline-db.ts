@@ -1,7 +1,7 @@
 import type { AccountScope, SessionEpoch } from "./offline-types.ts";
 
 export const OFFLINE_DB_NAME = "miyulabmd-offline";
-export const OFFLINE_DB_VERSION = 2;
+export const OFFLINE_DB_VERSION = 3;
 
 export const SESSION_STORE = "session";
 export const SESSION_RECORD_KEY = "current";
@@ -10,6 +10,8 @@ export const LISTS_STORE = "lists";
 export const DRAFTS_STORE = "drafts";
 export const DRAFT_LOCKS_STORE = "draft-locks";
 export const DRAFT_TOMBSTONES_STORE = "draft-tombstones";
+export const DRAFT_JOURNAL_STORE = "draft-journal";
+export const DRAFT_PROMOTIONS_STORE = "draft-promotions";
 
 /** Persisted session metadata for offline-known and coordinator teardown. */
 export type OfflineSessionRecord = {
@@ -66,7 +68,7 @@ export function closeOfflineDb(): void {
 
 /** Server-backed ids only — `local-*` drafts belong in drafts store (#96). */
 export function isPersistableRemoteId(id: string): boolean {
-  return !id.startsWith("local-");
+  return typeof id === "string" && id.length > 0 && !id.startsWith("local-");
 }
 
 export function assertPersistableRemoteId(id: string): void {
@@ -111,7 +113,17 @@ function createStores(db: IDBDatabase): void {
       keyPath: ["ownerId", "localId"],
     });
   }
-  // #97: add journal store in the same upgrade path.
+  if (!db.objectStoreNames.contains(DRAFT_JOURNAL_STORE)) {
+    const journal = db.createObjectStore(DRAFT_JOURNAL_STORE, {
+      keyPath: ["ownerId", "localId"],
+    });
+    journal.createIndex("ownerId", "ownerId", { unique: false });
+  }
+  if (!db.objectStoreNames.contains(DRAFT_PROMOTIONS_STORE)) {
+    db.createObjectStore(DRAFT_PROMOTIONS_STORE, {
+      keyPath: ["ownerId", "localId"],
+    });
+  }
 }
 
 function attachVersionChangeHandler(db: IDBDatabase): void {

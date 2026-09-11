@@ -91,7 +91,8 @@ DB 名: `miyulabmd-offline`。`openDb(): Promise<IDBDatabase | null>` を `offli
 | `draft-locks` | `[ownerId, localId]` | 非 `navigator.locks` 環境向け編集 lease |
 | `draft-tombstones` | `[ownerId, localId]` | 削除後の復活拒否 |
 
-journal store は #97 で同一 upgrade に追加する。
+| `draft-journal` | `[ownerId, localId]` | 復帰 POST / PATCH journal（#97 B） |
+| `draft-promotions` | `[ownerId, localId]` | local → server ID 昇格 mapping（#97 B） |
 
 ## 6. キャッシュ型と allowlist
 
@@ -292,7 +293,7 @@ SharePage（`/s/:id`）も同一表。従来の「cache hit なら全エラー�
 - `online-confirmed` / `offline-known` の **non-null user** のみ。guest / `unknown` / `verification-error` / `unauthenticated` では開始しない。
 - オフラインまたは `createNote` が `network(status:0)` のとき `# 無題\n` で drafts store に保存し `/n/local-{uuid}` へ遷移。HTTP 4xx/5xx / Abort では draft を増やさない。
 - 同一 tick の二重作成は in-flight Promise で 1 件に合流。
-- #97: オンライン復帰後の自動 POST は未実装。
+- オンライン復帰後の自動 POST / ID 昇格は #97 B（`draft-sync.ts`）。
 
 ### 一覧
 
@@ -367,11 +368,52 @@ DocumentRoom は比較と反映の間に await を挟まず、成功前に Yjs �
 | `isConditionalMarkdownUpdate` | PATCH が条件付きか判定 |
 | `NoteCreateErrorCode` | エラー code 定数 |
 
-## 17. 未実装（#97 B）
+## 17. 復帰同期クライアント（#97 B — 実装済み）
 
-| 項目 | Issue |
+実装: `draft-journal.ts` / `draft-sync.ts` / `draft-sync-scheduler.ts` / `draft-markdown-merge.ts`。
+
+### IndexedDB 追加ストア（`OFFLINE_DB_VERSION` 3）
+
+| ストア | キー | 内容 |
+| --- | --- | --- |
+| `draft-journal` | `[ownerId, localId]` | `kind: create-journal \| draft` + `DraftSyncState`（create 要求・serverId・baseline・pending PATCH・phase） |
+| `draft-promotions` | `[ownerId, localId]` | `{ serverId, promotedAt }` — 他タブ / reload 後も local URL を server ID に解決 |
+
+`DraftSyncState.phase`: `pending` / `creating` / `updating` / `promoting` / `blocked` / `delete-pending`。
+
+### 起動条件
+
+`AppShell` が `startDraftSyncService()` を一度だけ起動。`online-confirmed` + 本人 session 確認成功 + 表示復帰 + 手動再試行 + pending 中の指数バックオフ（1/2/4…秒、上限 60s + jitter）。`document.hidden` / 未認証 / 対象なしで timer 停止。`navigator.onLine` のみに依存せず flush 前に `verifySession()`。
+
+同一タブは `Map<ownerId, { sessionEpoch, promise }>` で flush 合流。複数タブは `navigator.locks` または IDB lease による owner/localId 別 sync ロック。編集担当タブへ BroadcastChannel で drain 依頼（Home 別タブから古い本文を送らない）。
+
+### flush 手順（固定順）
+
+1. 本人再確認。`SessionEpoch` / lock 固定後に journal 列挙。ロック後 IDB 再読込。
+2. 編集タブなら `awaitIdle → drainSync → awaitDraftCommitted` で最新 snapshot。
+3. `serverId` なし: 固定 `CreateNoteInput`（journal の hash 入力）で POST。`clientDraftId` + `draftOwnerId` 必須。成功で serverId / baseline / revision を commit。応答消失は同一キー再試行。
+4. PATCH ループ: `expectedMarkdown` + `markdown` + draft キー。frontmatter は baseline 差分合成（`draft-markdown-merge.ts`）。成功時のみ baseline 更新。
+5. 開いている Editor のみ `createNoteCollabSession` で server doc を待機同期（上限 10s）。**local Y.Doc を server CRDT に merge しない**（`adoptServerMarkdownWithoutCrdtMerge`）。
+6. 同一 tx: `draft-promotions` 書込、server 本文 cache 投影、draft + journal 削除。commit 後に session 切替 → local doc 破棄 → lease 解放。同一 owner かつ local URL の Editor のみ `replace: true` で `/n/{serverId}`。
+7. `upsertNoteSummary` / hydrate は #93 既存 queue。
+
+### 作成・一覧・削除
+
+- **`persistNewNote`**: オンラインでも先に journal + `localId`。`createNote({ clientDraftId, draftOwnerId })`。成功で即 promote。`network` のみ draft 化（同一 `localId`）。キーなし POST 禁止。journal 保存失敗時は POST 停止。
+- **Home**: `listPromotions` で昇格済み local 行を除外。server 行の重複排除。
+- **Editor**: `subscribeDraftPromotions` + `registerDraftSyncNavigation` で local URL から server URL へ replace 遷移。
+- **削除**: journal を `delete-pending` に。`serverId` 確定後 DELETE。404/410 後に local 消去。通信失敗時は待ち保持。
+
+### 失敗
+
+| 結果 | 扱い |
 | --- | --- |
-| journal store / draft-sync / 自動 re-POST / ID 昇格 / 復帰 DELETE 連携 | #97 B |
+| network / 5xx / timeout | journal / draft 保持して再試行 |
+| 401 / invalid-response | #93 状態へ。送信停止 |
+| 400 / 403 / 404 / 410 | `blocked`。自動ループ停止 |
+| 409 | `owner_mismatch` / `idempotency_conflict` / `content_conflict` / `mapping_mismatch` を code で区別。新キーで作り直さない |
+
+#96 以前のキーなし作成からの重複排除は保証しない（移管対象外）。
 
 ## 参照
 

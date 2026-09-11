@@ -84,3 +84,21 @@ test("mergeHomeDisplayNotes does not mutate server list input", () => {
     ["local-1", "server-1"],
   );
 });
+
+test("mergeHomeDisplayNotes hides promoted local drafts", () => {
+  const server = [serverNote("server-1")];
+  const merged = mergeHomeDisplayNotes(
+    server,
+    [localDraft("local-1", 3)],
+    null,
+    [
+      {
+        localId: "local-1" as const,
+        ownerId: user.id,
+        promotedAt: 1,
+        serverId: "server-1",
+      },
+    ],
+  );
+  assert.deepEqual(merged.map((note) => note.id), ["server-1"]);
+});

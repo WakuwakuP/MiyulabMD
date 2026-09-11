@@ -11,8 +11,11 @@ import {
 } from "../lib/list-cache.ts";
 import {
   configureOfflineDb,
+  OFFLINE_DB_NAME,
   resetOfflineDbForTests,
 } from "../lib/offline-db.ts";
+import { resetDraftJournalForTests } from "../lib/draft-journal.ts";
+import { resetDraftStoreForTests } from "../lib/draft-store.ts";
 import {
   __testSetSessionState,
   getSessionSnapshot,
@@ -79,20 +82,23 @@ const user: SessionUser = {
   id: "me",
 };
 
-afterEach(() => {
+afterEach(async () => {
   invalidateNotesCache();
   invalidateFolderCache();
+  resetDraftStoreForTests();
+  resetDraftJournalForTests();
   resetOfflineSessionForTests();
   resetOfflineDbForTests();
   mock.restoreAll();
+  await indexedDB.deleteDatabase(OFFLINE_DB_NAME);
 });
 
 async function waitFor(check: () => boolean) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     if (check()) {
       return;
     }
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("timed out");
 }

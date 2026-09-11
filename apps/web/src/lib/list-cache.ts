@@ -165,7 +165,7 @@ async function prefetchOneBody(
   scope: NonNullable<ReturnType<typeof getHydratableScope>>,
   signal: AbortSignal,
 ): Promise<void> {
-  if (signal.aborted || !(await noteBodyNeedsPrefetch(summary.id, scope))) {
+  if (signal.aborted || !summary.id || !(await noteBodyNeedsPrefetch(summary.id, scope))) {
     return;
   }
   const result = await loadNote(summary.id);
@@ -175,7 +175,9 @@ async function prefetchOneBody(
     }
     return;
   }
-  void loadOgCards(result.data.markdown);
+  if (typeof result.data.markdown === "string") {
+    void loadOgCards(result.data.markdown);
+  }
 }
 
 export async function prefetchNoteBodies(

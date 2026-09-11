@@ -3,8 +3,10 @@ import { afterEach, test } from "node:test";
 import { indexedDB } from "fake-indexeddb";
 import {
   configureOfflineDb,
+  OFFLINE_DB_NAME,
   resetOfflineDbForTests,
 } from "./offline-db.ts";
+import { resetDraftJournalForTests } from "./draft-journal.ts";
 import {
   deleteDraft,
   insertDraft,
@@ -33,9 +35,11 @@ function sampleDraft(revision = 1, localId = "local-abc"): LocalDraft {
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
   resetDraftStoreForTests();
+  resetDraftJournalForTests();
   resetOfflineDbForTests();
+  await indexedDB.deleteDatabase(OFFLINE_DB_NAME);
 });
 
 test("saveDraft rejects stale revision overwrites", async () => {

@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useOutletContext, useParams } from "react-router";
+import { Link, useNavigate, useOutletContext, useParams } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
@@ -87,7 +87,12 @@ import {
   invalidateLocalDraftEditor,
   type LocalDraftEditor,
 } from "../lib/local-draft-editor.ts";
-import { isDraftStorageUnavailable } from "../lib/draft-store.ts";
+import { isDraftStorageUnavailable, type LocalDraftId } from "../lib/draft-store.ts";
+import {
+  getPromotedServerId,
+  registerDraftSyncNavigation,
+  subscribeDraftPromotions,
+} from "../lib/draft-sync.ts";
 
 function EditorLoadError({
   message,
@@ -551,6 +556,7 @@ function applySnapshot(
 
 export function EditorPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
   const [session, setSession] = useState(getSessionSnapshot);
   const initial = resetEditorSnapshotForRoute(id);
@@ -691,6 +697,28 @@ export function EditorPage() {
   };
 
   useEffect(() => subscribeSession(setSession), []);
+
+  useEffect(() => {
+    return registerDraftSyncNavigation(navigate, () =>
+      isLocalDraftId(id) ? (id as LocalDraftId) : null,
+    );
+  }, [navigate, id]);
+
+  useEffect(() => {
+    if (!user?.id || !isLocalDraftId(id)) {
+      return;
+    }
+    void getPromotedServerId(user.id, id as LocalDraftId).then((serverId) => {
+      if (serverId) {
+        navigate(`/n/${serverId}`, { replace: true });
+      }
+    });
+    return subscribeDraftPromotions((ownerId, localId, serverId) => {
+      if (ownerId === user.id && localId === id) {
+        navigate(`/n/${serverId}`, { replace: true });
+      }
+    });
+  }, [id, navigate, user?.id]);
 
   useEffect(() => {
     if (collabBanner === collabBannerRef.current) {
