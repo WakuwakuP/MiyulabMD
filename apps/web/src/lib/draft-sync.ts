@@ -242,9 +242,9 @@ async function readLatestMarkdown(
   return { markdown, revision: journal?.sync.createRequest?.revision ?? 1 };
 }
 
-function buildCreateInput(
+/** Fixed create body from journal only — never overlay latest draft fields (#97 B). */
+export function buildCreateInput(
   journal: DraftJournalRecord,
-  draft: LocalDraft | null,
 ): CreateNoteInput | null {
   const base = journal.sync.createRequest?.input;
   if (!base) {
@@ -261,10 +261,6 @@ function buildCreateInput(
     ...base,
     clientDraftId: keys.clientDraftId,
     draftOwnerId: keys.draftOwnerId,
-    folder: draft?.folder ?? base.folder,
-    folderId: draft?.folderId ?? base.folderId,
-    inheritAccess: draft?.inheritAccess ?? base.inheritAccess ?? true,
-    markdown: draft?.markdown ?? base.markdown,
   };
 }
 
@@ -464,7 +460,7 @@ async function flushOneDraft(
     if (sync.phase === "pending" || sync.phase === "creating") {
       sync = { ...sync, phase: "creating" };
       await commitJournalSync(ownerId, localId, sync);
-      const createInput = buildCreateInput(journal, draft);
+      const createInput = buildCreateInput(journal);
       if (!createInput) {
         sync = {
           ...sync,
@@ -480,10 +476,9 @@ async function flushOneDraft(
         if (result.ok) {
           sync = {
             ...sync,
-            acknowledgedLocalMarkdown:
-              draft?.markdown ?? createInput.markdown ?? "",
+            acknowledgedLocalMarkdown: createInput.markdown ?? "",
             acknowledgedMarkdown: result.data.markdown,
-            acknowledgedRevision: draft?.revision ?? sync.createRequest?.revision ?? 1,
+            acknowledgedRevision: sync.createRequest?.revision ?? 1,
             phase: "updating",
             serverId: result.data.id,
           };

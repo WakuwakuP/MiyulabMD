@@ -18,11 +18,17 @@ import {
   resetDraftStoreForTests,
   type LocalDraftId,
 } from "./draft-store.ts";
+import type { DraftJournalRecord } from "./draft-journal.ts";
 import {
   __testDraftSyncRetryDelayMs,
+  buildCreateInput,
   flushPendingDrafts,
   resetDraftSyncForTests,
 } from "./draft-sync.ts";
+import {
+  computeCreateRequestHash,
+  type CreateNoteInput,
+} from "@miyulabmd/shared";
 import {
   adoptServerMarkdownWithoutCrdtMerge,
   mergeDraftMarkdownForPatch,
@@ -318,6 +324,103 @@ test("410 blocks automatic retry loop", async () => {
   });
   await flushPendingDrafts();
   assert.equal((await getJournal(user.id, localId))?.sync.phase, "blocked");
+});
+
+function sampleJournal(markdown: string): DraftJournalRecord {
+  return {
+    kind: "draft",
+    localId,
+    ownerId: user.id,
+    sync: {
+      acknowledgedLocalMarkdown: markdown,
+      acknowledgedMarkdown: markdown,
+      acknowledgedRevision: 1,
+      createRequest: { input: createInput(markdown), revision: 1 },
+      phase: "pending",
+    },
+  };
+}
+
+test("buildCreateInput keeps journal markdown when draft has newer body", () => {
+  const input = buildCreateInput(sampleJournal("# 無題\n"));
+  assert.equal(input?.markdown, "# 無題\n");
+});
+
+test("overlaying draft markdown changes create request hash", async () => {
+  const fixed = createInput("# 無題\n");
+  const overlaid: CreateNoteInput = { ...fixed, markdown: "# Hello\n" };
+  assert.notEqual(
+    await computeCreateRequestHash(fixed),
+    await computeCreateRequestHash(overlaid),
+  );
+});
+
+test("POST uses journal markdown then PATCH sends draft edits", async () => {
+  configureOfflineDb({ indexedDB });
+  __testSetSessionState({
+    offlineReadable: true,
+    scope: accountScopeFromUserId(user.id),
+    status: "online-confirmed",
+    user,
+  });
+
+  let postMarkdown: string | undefined;
+  let patchMarkdown: string | undefined;
+  let patchExpected: string | undefined;
+
+  mock.method(globalThis, "fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/notes") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as CreateNoteInput;
+      postMarkdown = body.markdown;
+      return Promise.resolve(noteResponse("server-patch-1", "# 無題\n"));
+    }
+    if (url.includes("/api/notes/server-patch-1") && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body)) as {
+        markdown?: string;
+        expectedMarkdown?: string;
+      };
+      patchMarkdown = body.markdown;
+      patchExpected = body.expectedMarkdown;
+      return Promise.resolve(noteResponse("server-patch-1", "# Hello\n", 200));
+    }
+    if (url.includes("/api/notes/server-patch-1")) {
+      return Promise.resolve(noteResponse("server-patch-1", "# Hello\n", 200));
+    }
+    if (url.endsWith("/api/me")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ user }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        }),
+      );
+    }
+    return Promise.resolve(new Response("{}", { status: 404 }));
+  });
+
+  await commitCreateJournal({
+    createInput: createInput("# 無題\n"),
+    localId,
+    ownerId: user.id,
+    revision: 1,
+  });
+  await insertDraft({
+    createdAt: 1,
+    folder: "",
+    inheritAccess: true,
+    kind: "draft",
+    localId,
+    markdown: "# Hello\n",
+    ownerId: user.id,
+    revision: 2,
+    updatedAt: 2,
+  });
+
+  await flushPendingDrafts();
+
+  assert.equal(postMarkdown, "# 無題\n");
+  assert.equal(patchExpected, "# 無題\n");
+  assert.equal(patchMarkdown, "# Hello\n");
 });
 
 test("adoptServerMarkdownWithoutCrdtMerge keeps server markdown only", () => {
