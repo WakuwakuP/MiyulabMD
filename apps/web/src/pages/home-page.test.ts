@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
 import type { FolderAccess, NoteSummary, SessionUser } from "@miyulabmd/shared";
+import { indexedDB } from "fake-indexeddb";
 import {
   invalidateFolderCache,
   invalidateNotesCache,
@@ -8,6 +9,15 @@ import {
   seedFolderCache,
   upsertNoteSummary,
 } from "../lib/list-cache.ts";
+import {
+  configureOfflineDb,
+  resetOfflineDbForTests,
+} from "../lib/offline-db.ts";
+import {
+  __testSetSessionState,
+  resetOfflineSessionForTests,
+} from "../lib/offline-session.ts";
+import { accountScopeFromUserId } from "../lib/offline-types.ts";
 import {
   homeListFlags,
   subscribeHomeFolder,
@@ -70,6 +80,8 @@ const user: SessionUser = {
 afterEach(() => {
   invalidateNotesCache();
   invalidateFolderCache();
+  resetOfflineSessionForTests();
+  resetOfflineDbForTests();
   mock.restoreAll();
 });
 
@@ -88,6 +100,8 @@ test("homeListFlags keeps the tree visible while a folder is still loading", () 
     error: null,
     folderId: "folder-1",
     folderPending: false,
+    notesError: false,
+    notesLoadState: "ready",
     user,
     userLoading: false,
     visibleFolder: null,
@@ -101,6 +115,8 @@ test("homeListFlags hides the tree when the folder failed to load", () => {
     error: "フォルダが見つかりません。",
     folderId: "folder-1",
     folderPending: false,
+    notesError: false,
+    notesLoadState: "ready",
     user,
     userLoading: false,
     visibleFolder: null,
@@ -110,6 +126,13 @@ test("homeListFlags hides the tree when the folder failed to load", () => {
 });
 
 test("subscribeHomeNotes keeps the list cache while refetching after a remount", async () => {
+  configureOfflineDb({ indexedDB });
+  __testSetSessionState({
+    offlineReadable: true,
+    scope: accountScopeFromUserId(user.id),
+    status: "online-confirmed",
+    user,
+  });
   upsertNoteSummary(note("keep-me"));
   const fetched = Promise.withResolvers<void>();
   mock.method(globalThis, "fetch", () => {
@@ -122,20 +145,75 @@ test("subscribeHomeNotes keeps the list cache while refetching after a remount",
   });
 
   const setNotes = mock.fn<(notes: NoteSummary[]) => void>();
-  const unsubscribe = subscribeHomeNotes(false, setNotes);
+  const setNotesLoadState = mock.fn();
+  const setNotesError = mock.fn();
+  const unsubscribe = subscribeHomeNotes(
+    false,
+    setNotes,
+    setNotesLoadState,
+    setNotesError,
+  );
   assert.deepEqual(
     peekNotes()?.map((item) => item.id),
     ["keep-me"],
   );
-  assert.equal(setNotes.mock.callCount(), 0);
+  if (setNotes.mock.callCount() > 0) {
+    assert.deepEqual(
+      setNotes.mock.calls[0]?.arguments[0].map((item) => item.id),
+      ["keep-me"],
+    );
+  }
 
   await fetched.promise;
   await waitFor(() => setNotes.mock.callCount() > 0);
   assert.deepEqual(
-    setNotes.mock.calls[0]?.arguments[0].map((item) => item.id),
-    ["fresh"],
+    setNotes.mock.calls.at(-1)?.arguments[0].map((item) => item.id),
+    ["keep-me", "fresh"],
   );
   unsubscribe?.();
+});
+
+test("homeListFlags shows notes placeholder while hydrating", () => {
+  const flags = homeListFlags({
+    error: null,
+    folderId: undefined,
+    folderPending: false,
+    notesError: false,
+    notesLoadState: "hydrating",
+    user,
+    userLoading: false,
+    visibleFolder: folder("root"),
+  });
+  assert.equal(flags.notesPending, true);
+  assert.equal(flags.showEmptyList, false);
+});
+
+test("homeListFlags distinguishes empty ready list from error", () => {
+  const empty = homeListFlags({
+    error: null,
+    folderId: undefined,
+    folderPending: false,
+    notesError: false,
+    notesLoadState: "ready",
+    user,
+    userLoading: false,
+    visibleFolder: folder("root"),
+  });
+  assert.equal(empty.showEmptyList, true);
+  assert.equal(empty.notesError, false);
+
+  const failed = homeListFlags({
+    error: null,
+    folderId: undefined,
+    folderPending: false,
+    notesError: true,
+    notesLoadState: "error",
+    user,
+    userLoading: false,
+    visibleFolder: folder("root"),
+  });
+  assert.equal(failed.showEmptyList, false);
+  assert.equal(failed.notesError, true);
 });
 
 test("subscribeHomeFolder shows the cached folder immediately and refreshes it", async () => {

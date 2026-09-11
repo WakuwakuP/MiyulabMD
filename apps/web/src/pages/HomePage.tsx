@@ -22,7 +22,12 @@ import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { peekFolder, peekNotes } from "../lib/list-cache.ts";
+import {
+  getNotesLoadState,
+  type NotesLoadState,
+  peekFolder,
+  peekNotes,
+} from "../lib/list-cache.ts";
 import {
   type ConfirmState,
   confirmCopy,
@@ -234,6 +239,7 @@ function HomePageView({
   folderId,
   userLoading,
   notes,
+  notesError,
   visibleFolder,
   publicFolders,
   error,
@@ -250,6 +256,7 @@ function HomePageView({
   publicFolders: FolderRecord[];
   error: string | null;
   flags: ReturnType<typeof homeListFlags>;
+  notesError: boolean;
   menu: MenuState | null;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
   dialogs: ReactNode;
@@ -261,6 +268,7 @@ function HomePageView({
         <h1 className="mb-3 text-lg font-semibold">全体公開</h1>
       )}
       {error && <ErrorText>{error}</ErrorText>}
+      {notesError && <ErrorText>一覧を取得できませんでした。</ErrorText>}
       {flags.showTree ? (
         <NoteTree
           childrenFolders={
@@ -277,6 +285,7 @@ function HomePageView({
           placeholder={flags.showPlaceholder}
           rootHref={user ? "/shared" : "/"}
           showAllNotes={!(user || folderId)}
+          showEmptyMessage={flags.showEmptyList}
           showRootCrumb={flags.canAdmin}
         />
       ) : null}
@@ -290,6 +299,10 @@ export function HomePage() {
   const { folderId } = useParams();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
   const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
+  const [notesLoadState, setNotesLoadState] = useState<NotesLoadState>(() =>
+    getNotesLoadState(),
+  );
+  const [notesError, setNotesError] = useState(false);
   const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(
     () => peekFolder(folderId) ?? null,
   );
@@ -324,6 +337,8 @@ export function HomePage() {
     error,
     folderId,
     folderPending,
+    notesError,
+    notesLoadState,
     user,
     userLoading,
     visibleFolder,
@@ -333,7 +348,12 @@ export function HomePage() {
 
   useEffect(() => {
     void sessionKey;
-    return subscribeHomeNotes(userLoading, setNotes);
+    return subscribeHomeNotes(
+      userLoading,
+      setNotes,
+      setNotesLoadState,
+      setNotesError,
+    );
   }, [sessionKey, userLoading]);
 
   useEffect(() => {
@@ -459,6 +479,7 @@ export function HomePage() {
       folderId={folderId}
       menu={menu}
       notes={notes}
+      notesError={notesError}
       onItemMenu={(event, target) => {
         handleItemMenu(
           event,

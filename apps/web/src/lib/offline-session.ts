@@ -117,7 +117,7 @@ async function invokeScopeCleanup(
   }
 }
 
-async function invokeNoteCleanup(
+export async function invokePersistenceCleanupForNotes(
   scope: AccountScope,
   ids: string[],
   reason: string,
@@ -353,17 +353,10 @@ export function registerPersistenceCleanup(
   };
 }
 
-/** Stub for slice C — memory invalidate + cleanup hooks only for now. */
 export function evictNotesEverywhere(ids: string[], reason: string): void {
-  const scope = snapshot.scope;
-  for (const id of ids) {
-    invalidateNoteCache(id);
-  }
-  invalidateNotesCache();
-  invalidateFolderCache();
-  if (scope) {
-    void invokeNoteCleanup(scope, ids, reason);
-  }
+  void import("./offline-evict.ts").then(({ evictNotesEverywhereImpl }) =>
+    evictNotesEverywhereImpl(ids, reason, snapshot.scope),
+  );
 }
 
 export async function hydrateSessionFromDb(): Promise<void> {

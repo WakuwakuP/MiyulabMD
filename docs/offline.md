@@ -129,14 +129,21 @@ wipe は「確定した別 non-null user / 明示 logout」に限る。guest で
 
 bridge 実装は MarkdownEditor / RichMarkdownEditor（#95/#96）。
 
-## 11. 未実装（後続スライス）
+## 11. 実装済み（#93 スライス C）
+
+- **`CachedNote` / `CachedSummary` / `CachedFolder`**: `offline-cache-types.ts`。`access.grants`・共有先メール・認証情報は保存しない。権限フラグは表示専用。
+- **IDB persist / hydrate**: `offline-cache.ts` + `note-cache.ts` / `list-cache.ts`。`SessionEpoch` 一致時のみ書込。
+- **`loadNotes` 状態**: `getNotesLoadState()` — `unhydrated` / `hydrating` / `ready` / `error`。
+- **`loadNote` 詳細**: `loadNoteRecord()` / `getLoadedNoteMeta()` — `source` / `cachedAt` / `verifiedForSession`（強制 GET 成功時のみ `true`）。
+- **prefetch**: 一覧取得後、本文未保存を更新順最大 20 件・並列 2。
+- **`evictNotesEverywhere`**: メモリ + IDB + bootstrap + `#95` hook（draft は保持）。
+- **Home**: 未取得 / 空 / エラーを `homeListFlags` と `NoteTree` で区別。
+
+## 12. 未実装（後続スライス）
 
 | 項目 | Issue |
 | --- | --- |
-| note-cache / list-cache の IDB persist | #93 次 |
-| 本文 prefetch 20 件 | #93 次 |
 | EditorDrain bridge | #95/#96 |
-| Home 空/未取得 UI 区別 | #93 次 |
 | Service Worker / PWA シェル | #92 |
 
 ## 参照

@@ -30,15 +30,19 @@ import {
   updateNote,
 } from "../lib/api.ts";
 import {
+  abortNoteBodyPrefetch,
+  getNotesLoadState,
   invalidateFolderCache,
   invalidateNotesCache,
   loadFolder,
   loadNotes,
+  type NotesLoadState,
   peekFolder,
   seedFolderCache,
   upsertNoteSummary,
 } from "../lib/list-cache.ts";
 import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
+import { getHydratableScope } from "../lib/offline-scope.ts";
 
 export type ShareState =
   | { kind: "folder"; folderId: string; name: string; draft: AccessDraft }
@@ -96,17 +100,30 @@ export function homeListFlags(input: {
   folderPending: boolean;
   visibleFolder: FolderAccess | null;
   error: string | null;
+  notesLoadState: NotesLoadState;
+  notesError: boolean;
 }) {
   const needsFolder = Boolean(input.folderId || input.user);
   const waitingForFolder = needsFolder && !input.visibleFolder && !input.error;
+  const notesPending =
+    input.notesLoadState === "unhydrated" ||
+    input.notesLoadState === "hydrating";
   const showPlaceholder =
-    (input.userLoading || input.folderPending || waitingForFolder) &&
+    (input.userLoading ||
+      input.folderPending ||
+      waitingForFolder ||
+      notesPending) &&
     !input.visibleFolder;
   return {
     canAdmin: Boolean(input.visibleFolder?.flags.canAdmin),
     isDriveRoot: Boolean(input.visibleFolder?.locked),
-    listPending: input.folderPending && Boolean(input.visibleFolder),
+    listPending:
+      (input.folderPending && Boolean(input.visibleFolder)) || notesPending,
     needsFolder,
+    notesError: input.notesError,
+    notesPending,
+    showEmptyList:
+      input.notesLoadState === "ready" && !input.notesError && !notesPending,
     showPlaceholder,
     showTree:
       (!input.folderId || input.visibleFolder || showPlaceholder) &&
@@ -117,18 +134,35 @@ export function homeListFlags(input: {
 export function subscribeHomeNotes(
   userLoading: boolean,
   setNotes: (notes: NoteSummary[]) => void,
+  setNotesLoadState: (state: NotesLoadState) => void,
+  setNotesError: (error: boolean) => void,
 ): (() => void) | undefined {
   if (userLoading) {
     return undefined;
   }
+  if (!getHydratableScope() && getNotesLoadState() === "unhydrated") {
+    setNotes([]);
+    setNotesLoadState("unhydrated");
+    setNotesError(false);
+  }
   let cancelled = false;
+  setNotesLoadState(getNotesLoadState());
   void loadNotes(true).then((noteList) => {
-    if (!cancelled) {
-      setNotes(noteList);
+    if (cancelled) {
+      return;
     }
+    const state = getNotesLoadState();
+    setNotesLoadState(state);
+    if (state === "error") {
+      setNotesError(true);
+      return;
+    }
+    setNotesError(false);
+    setNotes(noteList);
   });
   return () => {
     cancelled = true;
+    abortNoteBodyPrefetch();
   };
 }
 
