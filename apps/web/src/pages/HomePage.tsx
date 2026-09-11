@@ -293,7 +293,9 @@ export function HomePage() {
   const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(
     () => peekFolder(folderId) ?? null,
   );
-  const [folderPending, setFolderPending] = useState(false);
+  const [folderPending, setFolderPending] = useState(
+    () => !peekFolder(folderId),
+  );
   const [publicFolders, setPublicFolders] = useState<FolderRecord[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
