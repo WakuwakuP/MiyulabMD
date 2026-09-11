@@ -10,7 +10,9 @@ import {
 } from "../lib/offline-types.ts";
 import {
   applyEditorForceLoadResult,
+  applyEditorLoadOutcome,
   canStartEdit,
+  editorDesiredConnection,
   editorHeaderMutationsVisible,
   editorNeedsSession,
   isLocalDraftId,
@@ -215,10 +217,84 @@ test("editorNeedsSession is true only while preparing or editing", () => {
   assert.equal(editorNeedsSession("server-preview"), false);
 });
 
-test("shouldRemoveSsrPreview waits for settled preview phases", () => {
+test("editorDesiredConnection is true while preparing or editing", () => {
+  assert.equal(editorDesiredConnection("preparing-edit"), true);
+  assert.equal(editorDesiredConnection("editing"), true);
+  assert.equal(editorDesiredConnection("server-preview"), false);
+});
+
+test("shouldRemoveSsrPreview removes SSR for every phase except loading", () => {
   assert.equal(shouldRemoveSsrPreview("loading"), false);
+  assert.equal(shouldRemoveSsrPreview("revalidating"), true);
   assert.equal(shouldRemoveSsrPreview("offline-preview"), true);
-  assert.equal(shouldRemoveSsrPreview("uncached"), false);
+  assert.equal(shouldRemoveSsrPreview("uncached"), true);
+  assert.equal(shouldRemoveSsrPreview("denied"), true);
+  assert.equal(shouldRemoveSsrPreview("not-found"), true);
+});
+
+test("applyEditorLoadOutcome keeps pendingEdit on successful revalidation", () => {
+  const generation = nextRequestGeneration();
+  const sessionEpoch = nextSessionEpoch();
+  const current = {
+    accessDraft: null,
+    folder: "docs",
+    loadError: null,
+    markdown: "# Cached",
+    meta: {
+      cachedAt: 1,
+      source: "idb" as const,
+      verifiedForSession: false,
+    },
+    note,
+    pendingEdit: true,
+    previewBanner: null,
+    viewPhase: "preparing-edit" as const,
+  };
+  const outcome = applyEditorForceLoadResult({
+    ctx: { generation, routeId: note.id, sessionEpoch },
+    currentGeneration: generation,
+    currentSessionEpoch: sessionEpoch,
+    hadPreview: true,
+    result: {
+      data: {
+        cachedAt: Date.now(),
+        note,
+        source: "server",
+        verifiedForSession: true,
+      },
+      ok: true,
+    },
+  });
+  const merged = applyEditorLoadOutcome(outcome, current);
+  assert.equal(merged.pendingEdit, true);
+  assert.equal(merged.viewPhase, "server-preview");
+});
+
+test("applyEditorLoadOutcome clears pendingEdit on terminal denied", () => {
+  const current = {
+    accessDraft: null,
+    folder: "",
+    loadError: null,
+    markdown: "",
+    meta: null,
+    note: null,
+    pendingEdit: true,
+    previewBanner: null,
+    viewPhase: "preparing-edit" as const,
+  };
+  const merged = applyEditorLoadOutcome(
+    {
+      snapshot: {
+        loadError: "forbidden",
+        pendingEdit: false,
+        viewPhase: "denied",
+      },
+      stale: false,
+    },
+    current,
+  );
+  assert.equal(merged.pendingEdit, false);
+  assert.equal(merged.viewPhase, "denied");
 });
 
 test("editorHeaderMutationsVisible hides controls for offline preview", () => {
@@ -257,6 +333,15 @@ test("taskNoteIdFor is omitted offline and before verification", () => {
       note,
       phase: "server-preview",
       session: offlineSession,
+    }),
+    undefined,
+  );
+  assert.equal(
+    taskNoteIdFor({
+      meta: { cachedAt: 1, source: "server", verifiedForSession: true },
+      note,
+      phase: "editing",
+      session: onlineSession,
     }),
     undefined,
   );

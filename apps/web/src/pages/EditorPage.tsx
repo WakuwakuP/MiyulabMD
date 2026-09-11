@@ -496,7 +496,7 @@ function articleIssuesFor(
 }
 
 function applySnapshot(
-  snapshot: EditorNoteSnapshot,
+  snapshot: Partial<EditorNoteSnapshot>,
   setters: {
     setNote: (note: Note | null) => void;
     setMarkdown: (markdown: string) => void;
@@ -509,15 +509,33 @@ function applySnapshot(
     setViewPhase: (phase: EditorViewPhase) => void;
   },
 ) {
-  setters.setNote(snapshot.note);
-  setters.setMarkdown(snapshot.markdown);
-  setters.setFolder(snapshot.folder);
-  setters.setAccessDraft(snapshot.accessDraft);
-  setters.setLoadError(snapshot.loadError);
-  setters.setPreviewBanner(snapshot.previewBanner);
-  setters.setMeta(snapshot.meta);
-  setters.setPendingEdit(snapshot.pendingEdit);
-  setters.setViewPhase(snapshot.viewPhase);
+  if (snapshot.note !== undefined) {
+    setters.setNote(snapshot.note);
+  }
+  if (snapshot.markdown !== undefined) {
+    setters.setMarkdown(snapshot.markdown);
+  }
+  if (snapshot.folder !== undefined) {
+    setters.setFolder(snapshot.folder);
+  }
+  if (snapshot.accessDraft !== undefined) {
+    setters.setAccessDraft(snapshot.accessDraft);
+  }
+  if (snapshot.loadError !== undefined) {
+    setters.setLoadError(snapshot.loadError);
+  }
+  if (snapshot.previewBanner !== undefined) {
+    setters.setPreviewBanner(snapshot.previewBanner);
+  }
+  if (snapshot.meta !== undefined) {
+    setters.setMeta(snapshot.meta);
+  }
+  if (snapshot.pendingEdit !== undefined) {
+    setters.setPendingEdit(snapshot.pendingEdit);
+  }
+  if (snapshot.viewPhase !== undefined) {
+    setters.setViewPhase(snapshot.viewPhase);
+  }
 }
 
 export function EditorPage() {
@@ -787,7 +805,7 @@ export function EditorPage() {
 
   useEffect(() => {
     bindEditorCollab({
-      desiredConnection: editorDesiredConnection(resolvedPhase, collabReady),
+      desiredConnection: editorDesiredConnection(resolvedPhase),
       hydrated,
       needsSession: editorNeedsSession(resolvedPhase),
       noteId,
@@ -800,7 +818,7 @@ export function EditorPage() {
       user,
       userLoading,
     });
-  }, [noteId, userLoading, resolvedPhase, collabReady, hydrated, user]);
+  }, [noteId, userLoading, resolvedPhase, hydrated, user]);
 
   useEffect(() => {
     syncCollabUser(collab, user);

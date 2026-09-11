@@ -172,7 +172,7 @@ export function allowsTaskCheckboxMutations(
   if (!verifiedCanEdit(note, meta)) {
     return false;
   }
-  return phase === "editing" || phase === "server-preview";
+  return phase === "server-preview";
 }
 
 export function taskNoteIdFor(input: {
@@ -201,11 +201,8 @@ export function editorNeedsSession(phase: EditorViewPhase): boolean {
   return phase === "preparing-edit" || phase === "editing";
 }
 
-export function editorDesiredConnection(
-  phase: EditorViewPhase,
-  collabReady: boolean,
-): boolean {
-  return phase === "editing" && collabReady;
+export function editorDesiredConnection(phase: EditorViewPhase): boolean {
+  return phase === "preparing-edit" || phase === "editing";
 }
 
 export function editorViewModeFor(input: {
@@ -220,11 +217,7 @@ export function editorViewModeFor(input: {
 }
 
 export function shouldRemoveSsrPreview(phase: EditorViewPhase): boolean {
-  return !(
-    phase === "loading" ||
-    phase === "revalidating" ||
-    TERMINAL_PHASES.has(phase)
-  );
+  return phase !== "loading";
 }
 
 export function formatCachedAt(cachedAt: number | null): string | null {
@@ -340,7 +333,7 @@ export function beginEditorPreviewHydrate(routeId: string): {
 export function snapshotFromPreview(
   preview: { note: Note; meta: EditorPreviewMeta },
   phase: EditorViewPhase = "cached-preview",
-): EditorNoteSnapshot {
+): Omit<EditorNoteSnapshot, "pendingEdit"> {
   return {
     accessDraft: draftFromNote(preview.note),
     folder: preview.note.folder,
@@ -348,7 +341,6 @@ export function snapshotFromPreview(
     markdown: preview.note.markdown,
     meta: preview.meta,
     note: preview.note,
-    pendingEdit: false,
     previewBanner: previewBannerFor(phase, preview.meta),
     viewPhase: phase,
   };
@@ -620,7 +612,7 @@ export function subscribeEditorNoteLoad(input: {
   routeId: string;
   generation: RequestGeneration;
   sessionEpoch: SessionEpoch;
-  onPreview: (snapshot: EditorNoteSnapshot) => void;
+  onPreview: (snapshot: Partial<EditorNoteSnapshot>) => void;
   onRevalidating: () => void;
   onResult: (outcome: ApplyEditorLoadOutcome) => void;
 }): () => void {
@@ -974,6 +966,12 @@ export function handleCollabAuthStop(input: {
   return {};
 }
 
+function isTerminalLoadClear(snapshot: Partial<EditorNoteSnapshot>): boolean {
+  return Boolean(
+    snapshot.viewPhase && TERMINAL_PHASES.has(snapshot.viewPhase),
+  );
+}
+
 export function applyEditorLoadOutcome(
   outcome: ApplyEditorLoadOutcome,
   current: EditorNoteSnapshot,
@@ -984,5 +982,12 @@ export function applyEditorLoadOutcome(
   if (outcome.evictIds?.length) {
     evictNotesEverywhere(outcome.evictIds, "editor-load-denied");
   }
-  return { ...current, ...outcome.snapshot };
+  const merged: EditorNoteSnapshot = { ...current, ...outcome.snapshot };
+  if (
+    !isTerminalLoadClear(outcome.snapshot) &&
+    outcome.snapshot.pendingEdit === undefined
+  ) {
+    merged.pendingEdit = current.pendingEdit;
+  }
+  return merged;
 }
