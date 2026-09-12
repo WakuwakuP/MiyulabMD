@@ -366,6 +366,40 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **採用ソースSHA256**：`note-read-session.ts`
   `b49748b4b9c42b11fc1b5ced350f6c91e21545e7515d12b6d7036d43c95e4dbb`。
 
+## D32：AppShellがviewer contextを所有する
+
+- **状態**：推奨案を選択、公開コンポーネントを使うテストでRED確認。
+- **選択前チェックポイント**：`2df0b81`（cached viewerのローカル読み取りを採用済み）。
+- **選択肢A**：AppShellが`resolveViewerContext`を使ってviewerを所有し、
+  既存のuserはそこから導出する。auth-configは独立に解決する。
+  B＝各ページがviewerを別々に解決する。C＝userとviewerを別々の可変stateとして持つ。
+- **採用**：A。認証の取得を重複させず、cached viewerを認証済みにしない共通状態を作る。
+  ノートのsourceまでAppShellが推測することはせず、ページの実際の読込結果に任せる。
+- **互換性**：既存のuser/userLoading/setUser/setHeaderを維持し、contextにviewerを追加。
+  ProfileSettingsのsetUser更新は同じユーザーのキャッシュ所属だけを維持し、
+  未確認の別IDへの保存先を作らない。古いbootstrapが後から上書きしないよう中止する。
+- **失敗時**：auth-config失敗はviewer成功を失わせない。viewerのcached復元判断は
+  既存resolverへ集約し、他のbootstrap例外から勝手にcachedへ変換しない。
+- **検証**：実AppShellと公開Outlet contextを観測するStrictMode fixtureを追加。
+  auth-config通信失敗＋me成功で認証済みviewerを要求し、次のreloadではmeも通信失敗させて
+  user:nullのcached viewerを要求する。現状はuser:null/viewer:nullでRED。
+- **範囲**：ノート画面、更新dispatch、logout purgeはこの小スライスには混ぜない。
+
+## D33：UI候補の階層を候補ランナーで扱う
+
+- **状態**：拡張・基本検証済み。
+- **背景**：従来のランナーは直下の `.ts` を `src/lib/` として扱うだけだった。
+  AppShellの候補をライブへ先に入れず、元と同じ相対importで検証したい。
+- **選択肢A**：候補内の `src/**` の `.ts` / `.tsx` を同じ実装パスへoverlayする。
+  B＝候補だけimportを書き換える。C＝UIだけライブへ先に配置して検証する。
+- **採用**：A。候補と採用後のコードを同じに保ち、レビュー前のライブ反映を避ける。
+  既存の直下 `.ts` 方式は互換維持し、同じ実装パスへの重複候補は拒否する。
+- **検証**：既存候補の型チェックとローカル読込テスト1件は成功。
+  階層付きAppShell候補の型チェック成功と、その候補にだけ追加した型エラーの検出を確認。
+  実AppShell fixtureのREDは候補UI実装後にGREENへ進める。
+- **制約**：実装用srcは変更しない。型チェックは検証専用ツリー、ブラウザはVite overlay、
+  検証前後のファイル不変チェックを維持する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

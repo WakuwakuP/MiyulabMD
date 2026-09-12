@@ -34,29 +34,55 @@ if (candidateRoot === path.join(webRoot, "src/lib")) {
   throw new Error("Use a candidate directory, not the live source directory");
 }
 
-const files = (await readdir(candidateRoot)).filter((name) =>
-  name.endsWith(".ts"),
-);
-for (const required of ["offline-cache.ts", "note-read-session.ts"]) {
-  if (!files.includes(required)) {
+const candidatePaths = new Map();
+async function collectCandidates(directory = "") {
+  const entries = await readdir(path.join(candidateRoot, directory), {
+    withFileTypes: true,
+  });
+  for (const entry of entries) {
+    const relativePath = normalizePath(path.join(directory, entry.name));
+    if (entry.isDirectory()) {
+      await collectCandidates(relativePath);
+      continue;
+    }
+    if (!(entry.isFile() && /\.tsx?$/.test(entry.name))) {
+      continue;
+    }
+    if (directory && !relativePath.startsWith("src/")) {
+      throw new Error(`Nested candidates must be under src/: ${relativePath}`);
+    }
+    const sourcePath = directory ? relativePath : `src/lib/${entry.name}`;
+    if (candidatePaths.has(sourcePath)) {
+      throw new Error(`Duplicate candidate for ${sourcePath}`);
+    }
+    candidatePaths.set(sourcePath, path.join(candidateRoot, relativePath));
+  }
+}
+await collectCandidates();
+const files = [...candidatePaths.keys()];
+for (const required of [
+  "src/lib/offline-cache.ts",
+  "src/lib/note-read-session.ts",
+]) {
+  if (!candidatePaths.has(required)) {
     throw new Error(`Missing candidate: ${required}`);
   }
 }
 const contents = new Map();
 for (const name of files) {
-  contents.set(name, await readFile(path.join(candidateRoot, name), "utf8"));
+  contents.set(name, await readFile(candidatePaths.get(name), "utf8"));
 }
 const digest = (text) => createHash("sha256").update(text).digest("hex");
 const sources = new Map(
   [...contents].map(([name, text]) => [
-    normalizePath(path.join(webRoot, "src/lib", name)),
+    normalizePath(path.join(webRoot, name)),
     text,
   ]),
 );
 const liveBefore = new Map();
 async function readLive(name) {
   try {
-    return await readFile(path.join(webRoot, "src/lib", name), "utf8");
+    return await readFile(path.join(webRoot, name), "utf8");
   } catch (error) {
     if (error.code === "ENOENT") {
       return null;
@@ -102,7 +128,9 @@ async function typecheck() {
     recursive: true,
   });
   for (const [name, text] of contents) {
-    await writeFile(path.join(runRoot, "src/lib", name), text);
+    const destination = path.join(runRoot, name);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, text);
   }
   const config = path.join(runRoot, "tsconfig.json");
   await writeFile(
@@ -125,7 +153,7 @@ async function lint() {
   await runNode([
     await packageBin("@biomejs/biome", "biome"),
     "check",
-    ...files.map((name) => path.join(candidateRoot, name)),
+    ...candidatePaths.values(),
   ]);
 }
 
@@ -186,6 +214,7 @@ async function browser() {
       ...(specs.length
         ? specs
         : [
+            "app-shell-viewer.spec.ts",
             "cached-viewer-note-read.spec.ts",
             "offline-direct-denial.spec.ts",
             "note-denial-entry-ordering.spec.ts",
@@ -222,7 +251,7 @@ async function browser() {
 
 async function verifyUnchanged() {
   for (const [name, text] of contents) {
-    if ((await readFile(path.join(candidateRoot, name), "utf8")) !== text) {
+    if ((await readFile(candidatePaths.get(name), "utf8")) !== text) {
       throw new Error(`Candidate changed during validation: ${name}`);
     }
     if ((await readLive(name)) !== liveBefore.get(name)) {

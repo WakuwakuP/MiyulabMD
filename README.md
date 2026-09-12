@@ -84,6 +84,9 @@ pnpm --filter @miyulabmd/web test:browser storage-platform.spec.ts
 
 未採用の実装は、候補ディレクトリ内の `offline-cache.ts`、`note-read-session.ts` を直接編集して検証できる。同じディレクトリの追加 `.ts` ファイルも `src/lib/` の候補として扱う。
 
+UIの候補は、候補ディレクトリ配下の `src/` に実装と同じ階層の `.ts` / `.tsx` を置く
+（例：`src/components/layout/AppShell.tsx`）。同じ実装パスを指す候補の重複はエラーにする。
+
 ```bash
 # リポジトリのルートで実行。候補ファイルはこのディレクトリ自体に保持する。
 node apps/web/scripts/check-offline-candidate.mjs review-artifacts/offline-candidate all
