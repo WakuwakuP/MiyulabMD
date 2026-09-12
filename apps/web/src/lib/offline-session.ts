@@ -323,6 +323,22 @@ async function handleConfirmedUserChange(nextUser: SessionUser): Promise<void> {
   broadcastSnapshot();
 }
 
+function lastConfirmedMatchesScope(scope: AccountScope | null): boolean {
+  return Boolean(
+    scope &&
+      lastConfirmedUser &&
+      scope === accountScopeFromUserId(lastConfirmedUser.id),
+  );
+}
+
+function canEnterOfflineKnown(): boolean {
+  return Boolean(
+    snapshot.scope &&
+      (lastConfirmedMatchesScope(snapshot.scope) ||
+        snapshot.scope === GUEST_SCOPE),
+  );
+}
+
 async function handleConfirmedGuest(): Promise<void> {
   const previousScope = snapshot.scope;
   let nextEpoch = snapshot.sessionEpoch;
@@ -331,6 +347,8 @@ async function handleConfirmedGuest(): Promise<void> {
     nextEpoch = nextSessionEpoch();
     invalidateMemoryCaches();
   }
+  lastConfirmedUser = null;
+  lastConfirmedAt = null;
   setSnapshot({
     ...snapshot,
     dbBlocked: false,
@@ -353,9 +371,10 @@ async function handleOfflineKnown(): Promise<void> {
     dbBlocked: false,
     offlineReadable: true,
     status: "offline-known",
-    user: lastConfirmedUser
-      ? sessionUserFromConfirmed(lastConfirmedUser)
-      : snapshot.user,
+    user:
+      lastConfirmedMatchesScope(snapshot.scope) && lastConfirmedUser
+        ? sessionUserFromConfirmed(lastConfirmedUser)
+        : null,
   });
   await persistCurrentSession();
   broadcastSnapshot();
@@ -481,8 +500,7 @@ export async function verifySession(): Promise<SessionSnapshot> {
     (result.kind === "network" ||
       (result.kind === "http" && result.status >= 500)) &&
     canUseOfflineKnownFromNetwork() &&
-    snapshot.scope &&
-    lastConfirmedUser
+    canEnterOfflineKnown()
   ) {
     setSnapshot({
       ...snapshot,

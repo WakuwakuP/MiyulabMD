@@ -146,6 +146,34 @@ test("verifySession 200 guest clears memory View but keeps prior user IDB", asyn
   assert.equal(idb?.[0]?.id, "keep-me");
 });
 
+test("guest confirm then offline reload does not restore prior user", async () => {
+  configureOfflineDb({ indexedDB });
+  __testSetSessionState({
+    lastConfirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    offlineReadable: true,
+    scope: accountScopeFromUserId(userA.id),
+    status: "online-confirmed",
+    user: userA,
+  });
+  mockFetchMe(jsonResponse({ user: null }));
+  await verifySession();
+  resetOfflineSessionForTests();
+  configureOfflineDb({ indexedDB });
+  await hydrateSessionFromDb();
+  mock.method(globalThis, "fetch", () =>
+    Promise.reject(new TypeError("Failed to fetch")),
+  );
+  const snap = await verifySession();
+  assert.equal(snap.user, null);
+  assert.equal(snap.scope, "guest");
+  assert.equal(snap.status, "offline-known");
+});
+
 test("verifySession 401 becomes unauthenticated without wipe", async () => {
   configureOfflineDb({ indexedDB });
   __testSetSessionState({
