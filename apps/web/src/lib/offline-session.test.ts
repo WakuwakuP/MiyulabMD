@@ -424,12 +424,46 @@ test("beginLogout bumps epoch, calls cleanup hook, sets pending cleanup when db 
   assert.ok(snap.sessionEpoch > 2);
   assert.equal(snap.status, "unauthenticated");
   assert.equal(snap.pendingCleanup, true);
+  assert.equal(snap.pendingCleanupScope, scopeA);
   assert.deepEqual(cleaned, [scopeA]);
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: previousLocation,
   });
+});
+
+test("hydrate retries logout wipe using pendingCleanupScope after scope is cleared", async () => {
+  configureOfflineDb({ indexedDB });
+  const persistedEpoch = 8 as SessionEpoch;
+  const userScope = accountScopeFromUserId(userA.id);
+  await writeSessionRecord({
+    confirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    offlineReadable: false,
+    pendingCleanup: true,
+    pendingCleanupScope: userScope,
+    scope: null,
+    sessionEpoch: persistedEpoch,
+  });
+  assert.equal(
+    await writeCachedNotesList(
+      [summary("leftover")],
+      userScope,
+      persistedEpoch,
+    ),
+    true,
+  );
+
+  await hydrateSessionFromDb();
+  const snap = getSessionSnapshot();
+  assert.equal(snap.pendingCleanup, false);
+  assert.equal(snap.pendingCleanupScope, null);
+  assert.equal(await readCachedNotesList(userScope), null);
 });
 
 test("stale verifySession response does not rewind newer state", async () => {

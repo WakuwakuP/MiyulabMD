@@ -20,6 +20,7 @@ function session(status: SessionSnapshot["status"]): SessionSnapshot {
     dbBlocked: false,
     offlineReadable: true,
     pendingCleanup: false,
+    pendingCleanupScope: null,
     scope: accountScopeFromUserId(user.id),
     sessionEpoch: nextSessionEpoch(),
     status,

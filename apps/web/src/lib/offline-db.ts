@@ -25,6 +25,7 @@ export type OfflineSessionRecord = {
   offlineReadable: boolean;
   sessionEpoch: SessionEpoch;
   pendingCleanup?: boolean;
+  pendingCleanupScope?: AccountScope | null;
 };
 
 export type OfflineDbConfig = {

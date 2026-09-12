@@ -53,6 +53,7 @@ const onlineSession: SessionSnapshot = {
   dbBlocked: false,
   offlineReadable: true,
   pendingCleanup: false,
+  pendingCleanupScope: null,
   scope: accountScopeFromUserId("me"),
   sessionEpoch: nextSessionEpoch(),
   status: "online-confirmed",

@@ -126,6 +126,7 @@ function createFakeDeps(overrides: Partial<CollabSessionDeps> = {}): {
     dbBlocked: false,
     offlineReadable: true,
     pendingCleanup: false,
+    pendingCleanupScope: null,
     scope,
     sessionEpoch: 1 as SessionSnapshot["sessionEpoch"],
     status: "online-confirmed",

@@ -34,6 +34,7 @@ export type SessionSnapshot = {
   sessionEpoch: SessionEpoch;
   offlineReadable: boolean;
   pendingCleanup: boolean;
+  pendingCleanupScope: AccountScope | null;
   dbBlocked: boolean;
 };
 
@@ -60,6 +61,7 @@ let snapshot: SessionSnapshot = {
   dbBlocked: false,
   offlineReadable: false,
   pendingCleanup: false,
+  pendingCleanupScope: null,
   scope: null,
   sessionEpoch: nextSessionEpoch(),
   status: "unknown",
@@ -167,6 +169,7 @@ async function persistCurrentSession(
     lastConfirmedUser,
     offlineReadable: snapshot.offlineReadable,
     pendingCleanup,
+    pendingCleanupScope: snapshot.pendingCleanupScope,
     scope: snapshot.scope,
     sessionEpoch: snapshot.sessionEpoch,
   };
@@ -174,12 +177,17 @@ async function persistCurrentSession(
 }
 
 async function retryPendingCleanup(): Promise<void> {
-  if (!(snapshot.pendingCleanup && snapshot.scope)) {
+  const scope = snapshot.pendingCleanupScope ?? snapshot.scope;
+  if (!(snapshot.pendingCleanup && scope)) {
     return;
   }
-  const ok = await deleteScopeData(snapshot.scope);
+  const ok = await wipeScopeFully(scope, "pending-cleanup");
   if (ok) {
-    setSnapshot({ ...snapshot, pendingCleanup: false });
+    setSnapshot({
+      ...snapshot,
+      pendingCleanup: false,
+      pendingCleanupScope: null,
+    });
     await persistCurrentSession(false);
   }
 }
@@ -246,6 +254,18 @@ async function handleConfirmedUserChange(nextUser: SessionUser): Promise<void> {
 
   let nextEpoch = snapshot.sessionEpoch;
   let pendingCleanup = snapshot.pendingCleanup;
+  let pendingCleanupScope = snapshot.pendingCleanupScope;
+
+  if (pendingCleanup && pendingCleanupScope) {
+    const cleaned = await wipeScopeFully(
+      pendingCleanupScope,
+      "pending-cleanup",
+    );
+    if (cleaned) {
+      pendingCleanup = false;
+      pendingCleanupScope = null;
+    }
+  }
 
   if (previousScope === GUEST_SCOPE && nextScope !== GUEST_SCOPE) {
     nextEpoch = nextSessionEpoch();
@@ -260,6 +280,7 @@ async function handleConfirmedUserChange(nextUser: SessionUser): Promise<void> {
     const cleaned = await wipeScopeFully(previousScope, "user-changed");
     if (!cleaned) {
       pendingCleanup = true;
+      pendingCleanupScope = previousScope;
     }
   }
 
@@ -270,6 +291,7 @@ async function handleConfirmedUserChange(nextUser: SessionUser): Promise<void> {
     dbBlocked: isOfflineDbBlocked(),
     offlineReadable: true,
     pendingCleanup,
+    pendingCleanupScope,
     scope: nextScope,
     sessionEpoch: nextEpoch,
     status: "online-confirmed",
@@ -391,6 +413,7 @@ export async function hydrateSessionFromDb(): Promise<void> {
     ...snapshot,
     offlineReadable: record.offlineReadable,
     pendingCleanup: record.pendingCleanup ?? false,
+    pendingCleanupScope: record.pendingCleanupScope ?? null,
     scope: record.scope,
     sessionEpoch: record.sessionEpoch,
     status: "unknown",
@@ -463,12 +486,14 @@ export async function beginLogout(): Promise<void> {
   setSnapshot({
     ...snapshot,
     offlineReadable: false,
+    pendingCleanup: Boolean(scopeToWipe),
+    pendingCleanupScope: scopeToWipe,
     scope: null,
     status: "unauthenticated",
     user: null,
   });
 
-  void persistCurrentSession(snapshot.pendingCleanup);
+  await persistCurrentSession(Boolean(scopeToWipe));
   broadcastSnapshot();
 
   if (typeof window !== "undefined") {
@@ -477,9 +502,13 @@ export async function beginLogout(): Promise<void> {
 
   if (scopeToWipe) {
     void wipeScopeFully(scopeToWipe, "logout").then((cleaned) => {
-      if (!cleaned) {
-        setSnapshot({ ...snapshot, pendingCleanup: true });
-        void persistCurrentSession(true);
+      if (cleaned) {
+        setSnapshot({
+          ...snapshot,
+          pendingCleanup: false,
+          pendingCleanupScope: null,
+        });
+        void persistCurrentSession(false);
         broadcastSnapshot();
       }
     });
@@ -503,6 +532,7 @@ export function resetOfflineSessionForTests(): void {
     dbBlocked: false,
     offlineReadable: false,
     pendingCleanup: false,
+    pendingCleanupScope: null,
     scope: null,
     sessionEpoch: nextSessionEpoch(),
     status: "unknown",
