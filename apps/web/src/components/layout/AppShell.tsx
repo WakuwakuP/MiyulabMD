@@ -2,8 +2,16 @@ import type { SessionUser } from "@miyulabmd/shared";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router";
-import { type AuthConfig, fetchAuthConfig, fetchMe } from "../../lib/api.ts";
+import { type AuthConfig, fetchAuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
+import { installYjsPersistenceCleanup } from "../../lib/collaboration-persistence.ts";
+import { startDraftSyncService } from "../../lib/draft-sync.ts";
+import {
+  getSessionSnapshot,
+  hydrateSessionFromDb,
+  subscribeSession,
+  verifySession,
+} from "../../lib/offline-session.ts";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext } from "./AppShellContext.ts";
 
@@ -19,18 +27,43 @@ export function AppShell() {
     mock: true,
   });
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(getSessionSnapshot);
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
   const editor = isEditorPath(pathname);
 
   useEffect(() => {
-    Promise.all([fetchMe(), fetchAuthConfig()])
-      .then(([nextUser, config]) => {
-        setUser(nextUser);
-        setAuthConfig(config);
+    return subscribeSession((next) => {
+      setSession(next);
+      if (
+        (next.status === "online-confirmed" ||
+          next.status === "offline-known") &&
+        next.user
+      ) {
+        setUser(next.user);
+      } else if (next.status !== "unknown") {
+        setUser(null);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    installYjsPersistenceCleanup();
+    const stopDraftSync = startDraftSyncService();
+    Promise.all([hydrateSessionFromDb(), fetchAuthConfig()])
+      .then(async ([, configResult]) => {
+        if (configResult.ok) {
+          setAuthConfig(configResult.data);
+        } else {
+          setAuthConfig({ access: false, mock: true });
+        }
+        await verifySession();
       })
       .finally(() => setLoading(false));
+    return () => {
+      stopDraftSync();
+    };
   }, []);
 
   const setHeader = useCallback(
@@ -43,6 +76,7 @@ export function AppShell() {
   );
 
   const context: AppShellContext = {
+    session,
     setHeader,
     setUser,
     user,

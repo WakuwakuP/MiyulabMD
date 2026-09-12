@@ -102,6 +102,9 @@ function mutateNoteToolResponse(result: MutateNoteResult) {
   if (result.kind === "bad_request") {
     return textError(result.error);
   }
+  if (result.kind === "conflict") {
+    return textError(result.error);
+  }
   return textResult({ note: result.note });
 }
 
@@ -435,11 +438,11 @@ export function createMcpServerFactory() {
         title,
         writeScope,
       });
-      if ("error" in created) {
+      if (created.kind === "error") {
         return textError(created.error);
       }
 
-      return textResult({ note: created });
+      return textResult({ note: created.note });
     },
   );
 
@@ -621,11 +624,7 @@ export function createMcpServerFactory() {
       if (result.kind === "denied") {
         return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
       }
-      if (result.kind === "bad_request") {
-        return textError(result.error);
-      }
-
-      return textResult({ note: result.note });
+      return mutateNoteToolResponse(result);
     },
   );
 

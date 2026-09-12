@@ -36,9 +36,14 @@ export function McpSettingsPage() {
     setLoading(true);
     setError(null);
 
-    const nextUser = await fetchMe();
-    setLoggedIn(nextUser !== null);
-    if (!nextUser) {
+    const meResult = await fetchMe();
+    if (!meResult.ok) {
+      setError(meResult.error);
+      setLoading(false);
+      return;
+    }
+    setLoggedIn(meResult.data.user !== null);
+    if (!meResult.data.user) {
       setTokens([]);
       setLoading(false);
       return;

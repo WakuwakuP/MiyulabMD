@@ -14,7 +14,12 @@ import { FolderIcon, MarkdownIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { fetchSharedFolders } from "../lib/api.ts";
 import { sharedNotesForUser } from "../lib/drive-items.ts";
-import { loadNotes, peekNotes, prefetchFolder } from "../lib/list-cache.ts";
+import {
+  getNotesLoadState,
+  loadNotes,
+  peekNotes,
+  prefetchFolder,
+} from "../lib/list-cache.ts";
 import { prefetchNote } from "../lib/note-cache.ts";
 
 type MenuState = {
@@ -30,6 +35,7 @@ export function SharedPage() {
   const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
   const [folders, setFolders] = useState<FolderRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notesError, setNotesError] = useState(false);
   const [pending, setPending] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
 
@@ -59,7 +65,13 @@ export function SharedPage() {
           return;
         }
         setPending(false);
-        setNotes(noteList);
+        const notesState = getNotesLoadState();
+        if (notesState === "error") {
+          setNotesError(true);
+        } else {
+          setNotesError(false);
+          setNotes(noteList);
+        }
         if (!folderResult.ok) {
           setError(folderResult.error);
           return;
@@ -78,7 +90,8 @@ export function SharedPage() {
   }
 
   const sharedNotes = sharedNotesForUser(notes, user.id);
-  const empty = folders.length === 0 && sharedNotes.length === 0;
+  const notesReady = getNotesLoadState() === "ready" && !notesError;
+  const empty = notesReady && folders.length === 0 && sharedNotes.length === 0;
 
   function menuPosition(event: MouseEvent) {
     const target = event.currentTarget;
@@ -118,6 +131,9 @@ export function SharedPage() {
   return (
     <section>
       {error && <ErrorText>{error}</ErrorText>}
+      {notesError && !pending && (
+        <ErrorText>一覧を取得できませんでした。</ErrorText>
+      )}
       {empty && !pending ? (
         <p>共有されているアイテムはありません。</p>
       ) : (

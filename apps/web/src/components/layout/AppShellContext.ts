@@ -1,11 +1,13 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import type { ReactNode } from "react";
+import type { SessionSnapshot } from "../../lib/offline-session.ts";
 
 export type HeaderLayout = "page" | "editor";
 
 export type AppShellContext = {
   user: SessionUser | null;
   userLoading: boolean;
+  session: SessionSnapshot;
   setUser: (user: SessionUser | null) => void;
   setHeader: (
     header: {
