@@ -4,6 +4,8 @@ import type { Note } from "@miyulabmd/shared";
 import { ApiCommunicationError, type ApiResult, fetchNote } from "./api.ts";
 import {
   beginOfflineNoteRead,
+  enterOfflineNoteDenial,
+  isOfflineCacheUserSuspended,
   isOfflineNoteReadCurrent,
   openOfflineCache,
   suspendOfflineCacheUser,
@@ -292,10 +294,14 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
         }
         let cacheWarning: string | undefined;
         if (isDenial(result) && capturedViewer.cacheViewerId) {
+          const denialToken = enterOfflineNoteDenial(
+            capturedViewer.cacheViewerId,
+            id,
+          );
           try {
             const openedCache = await getCache();
             if (openedCache) {
-              await openedCache.denyNote(id);
+              await openedCache.denyNote(id, denialToken);
             } else if (cacheOpenFailed) {
               suspendOfflineCacheUser(capturedViewer.cacheViewerId);
               cacheWarning =
@@ -311,6 +317,14 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       }
       if (signal.aborted) {
         throw signal.reason;
+      }
+      if (
+        published.ok &&
+        published.source === "cache" &&
+        capturedViewer.cacheViewerId &&
+        isOfflineCacheUserSuspended(capturedViewer.cacheViewerId)
+      ) {
+        throw new DOMException("Offline cache is suspended");
       }
       if (
         published.ok &&

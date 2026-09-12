@@ -46,7 +46,7 @@ type OfflineCache = {
     options?: CancellationOptions & { orderingToken?: number },
   ): Promise<void>;
   beginNoteRead(id: string): number;
-  denyNote(id: string): Promise<void>;
+  denyNote(id: string, orderingToken?: number): Promise<void>;
   clearNoteDenial(id: string, orderingToken?: number): Promise<void>;
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
   putNoteList(notes: NoteSummary[]): Promise<void>;
@@ -79,6 +79,10 @@ export function suspendOfflineCacheUser(userId: string): void {
   }
 }
 
+export function isOfflineCacheUserSuspended(userId: string): boolean {
+  return suspendedUsers.has(userId);
+}
+
 function isUserSuspended(userId: string): boolean {
   return suspendedUsers.has(userId);
 }
@@ -95,6 +99,13 @@ function assertUserActive(userId: string, lifetime: number): void {
 
 export function beginOfflineNoteRead(userId: string, noteId: string): number {
   return currentNoteGeneration(userId, noteId);
+}
+
+export function enterOfflineNoteDenial(userId: string, noteId: string): number {
+  const key = generationKey(userId, noteId);
+  const generation = currentNoteGeneration(userId, noteId) + 1;
+  noteGenerations.set(key, generation);
+  return generation;
 }
 
 export function isOfflineNoteReadCurrent(
@@ -637,15 +648,19 @@ export async function openOfflineCache(
       }
     },
 
-    async denyNote(id) {
+    async denyNote(id, orderingToken) {
       if (closed) {
         throw new Error("Offline cache is closed");
       }
       if (suspendedUsers.has(userId)) {
         throw new Error("Offline cache is suspended");
       }
-      const key = generationKey(userId, id);
-      noteGenerations.set(key, currentNoteGeneration(userId, id) + 1);
+      if (
+        orderingToken !== undefined &&
+        orderingToken !== currentNoteGeneration(userId, id)
+      ) {
+        return;
+      }
       try {
         await commitTransaction(
           database,
@@ -657,7 +672,7 @@ export async function openOfflineCache(
           userId,
         );
       } catch (error) {
-        suspendedUsers.add(userId);
+        suspendOfflineCacheUser(userId);
         throw error;
       }
       try {

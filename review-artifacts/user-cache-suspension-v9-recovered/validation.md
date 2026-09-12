@@ -37,3 +37,36 @@ DB接続失敗を伴う403の後でも、先行した200が成功を返してし
 - cached diff-check：exit0。
 
 当時の29件成功を、現在の追加テストを含む30件成功とは扱わない。
+
+## D26修正後の検証
+
+依存関係が未配置だったため、認可された frozen install を先に実行した。
+Chromiumも指定されたWebパッケージのinstallコマンドだけで導入した。
+
+```text
+pnpm install --frozen-lockfile
+exit 0
+pnpm --filter @miyulabmd/web test:browser:install
+exit 0
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser note-denial-entry-ordering.spec.ts
+exit 0
+1 passed
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all
+exit 0
+candidate typecheck: passed
+candidate Biome: passed
+browser: 30 passed
+git diff --check
+exit 0
+```
+
+`all` の30件には既存29件と `note-denial-entry-ordering.spec.ts` を含む。
+`pnpm --filter @miyulabmd/web test` はこの担当では再実行していないため、既存ライブ
+Webの過去の根拠（117 passed、exit 0）とは区別する。
+
+最終候補ファイルのSHA256（この記録追記後のコードファイル）:
+
+```text
+note-read-session.ts 8bc7b324065c126fc8590b1a1b2e8babbdff159add0e23329079e65d83fe5d73
+offline-cache.ts    4a1f88f52bca0ab86f2d54b1f2f0398430e68367ed7189248fb445f61e94db4e
+```
