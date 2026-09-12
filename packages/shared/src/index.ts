@@ -50,14 +50,12 @@ export { MCP_NOTE_URL_HINT, MCP_TOOLS } from "./mcp.ts";
 export type {
   AccessGrantInput,
   CreateNoteInput,
-  DraftKeyValidation,
   FolderAccess,
   FolderCrumb,
   FolderRecord,
   Note,
   NoteAccess,
   NoteCollaborator,
-  NoteCreateErrorCode,
   NoteEditEvent,
   NoteEditOp,
   NoteHistoryActor,
@@ -69,21 +67,14 @@ export type {
   NoteRevisionRestore,
   NoteSummary,
   UpdateFolderAccessInput,
-  UpdateNoteMarkdownInput,
   UpdateNoteMetaInput,
 } from "./note.ts";
 export {
-  computeCreateRequestHash,
-  isClientDraftId,
-  isConditionalMarkdownUpdate,
   isNoteEditOp,
   isNoteHistoryActorKind,
-  NOTE_CREATE_ERROR_CODES,
   NOTE_EDIT_OPS,
   NOTE_HISTORY_ACTOR_KINDS,
   NOTE_RESTORE_MESSAGE,
-  normalizedCreateInputForHash,
-  validateDraftKeys,
 } from "./note.ts";
 export type {
   AccessGrant,

@@ -30,49 +30,15 @@ import {
   updateNote,
 } from "../lib/api.ts";
 import {
-  commitCreateJournal,
-  listPromotions,
-  subscribeDraftJournal,
-} from "../lib/draft-journal.ts";
-import {
-  createLocalDraftId,
-  insertDraft,
-  type LocalDraft,
-  type LocalDraftId,
-  listDrafts,
-  subscribeDrafts,
-} from "../lib/draft-store.ts";
-import {
-  convertCreateJournalToDraft,
-  promoteNoteAfterOnlineCreate,
-  requestDraftDelete,
-} from "../lib/draft-sync.ts";
-import {
-  canCreateLocalDraft,
-  isLocalDraftSummary,
-  mergeHomeDisplayNotes,
-} from "../lib/home-draft-list.ts";
-import {
-  abortNoteBodyPrefetch,
-  getNotesLoadState,
   invalidateFolderCache,
   invalidateNotesCache,
   loadFolder,
   loadNotes,
-  type NotesLoadState,
   peekFolder,
-  peekNotes,
   seedFolderCache,
   upsertNoteSummary,
 } from "../lib/list-cache.ts";
-import { invalidateLocalDraftEditor } from "../lib/local-draft-editor.ts";
 import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
-import { getHydratableScope } from "../lib/offline-scope.ts";
-import {
-  evictNotesEverywhere,
-  getSessionSnapshot,
-  type SessionSnapshot,
-} from "../lib/offline-session.ts";
 
 export type ShareState =
   | { kind: "folder"; folderId: string; name: string; draft: AccessDraft }
@@ -102,101 +68,6 @@ type ShareSetters = {
   setNotes: (notes: NoteSummary[]) => void;
 };
 
-export function homeRemoteMutationsBlocked(session: SessionSnapshot): boolean {
-  return session.status === "offline-known";
-}
-
-export function homeOfflineCreateMessage(): string {
-  return "ログインしてから新規ノートを作成してください。";
-}
-
-const INITIAL_MARKDOWN = "# 無題\n";
-
-let createNoteInFlight: Promise<string | null> | null = null;
-let createNoteOwnerId: string | null = null;
-
-export function resetCreateNoteCoalescingForTests(): void {
-  createNoteInFlight = null;
-  createNoteOwnerId = null;
-}
-
-function folderTargetForDraft(
-  visibleFolder: FolderAccess | null,
-): Pick<LocalDraft, "folder" | "folderId"> {
-  if (visibleFolder?.folder !== undefined) {
-    return {
-      folder: visibleFolder.folder,
-      folderId: visibleFolder.id ?? undefined,
-    };
-  }
-  return { folder: "" };
-}
-
-function createInputForDraft(
-  ownerId: string,
-  localId: LocalDraftId,
-  visibleFolder: FolderAccess | null,
-): import("@miyulabmd/shared").CreateNoteInput {
-  return {
-    ...folderTargetForDraft(visibleFolder),
-    clientDraftId: localId,
-    draftOwnerId: ownerId,
-    inheritAccess: true,
-    markdown: INITIAL_MARKDOWN,
-  };
-}
-
-async function saveLocalDraftNote(
-  ownerId: string,
-  visibleFolder: FolderAccess | null,
-  localId: LocalDraftId = createLocalDraftId(),
-): Promise<string | null> {
-  const now = Date.now();
-  const createInput = createInputForDraft(ownerId, localId, visibleFolder);
-  const journalOk = await commitCreateJournal({
-    createInput,
-    localId,
-    ownerId,
-    revision: 1,
-  });
-  if (!journalOk) {
-    return null;
-  }
-  const draft: LocalDraft = {
-    createdAt: now,
-    ...folderTargetForDraft(visibleFolder),
-    inheritAccess: true,
-    kind: "draft",
-    localId,
-    markdown: INITIAL_MARKDOWN,
-    ownerId,
-    revision: 1,
-    updatedAt: now,
-  };
-  const ok = await insertDraft(draft);
-  if (!ok) {
-    return null;
-  }
-  await convertCreateJournalToDraft(ownerId, localId, draft);
-  return localId;
-}
-
-export function filterHomeMenuItems(
-  items: ContextMenuItem[],
-  blocked: boolean,
-  localDraft = false,
-): ContextMenuItem[] {
-  if (localDraft) {
-    return items.filter(
-      (item) => item.label === "開く" || item.label === "削除",
-    );
-  }
-  if (!blocked) {
-    return items;
-  }
-  return items.filter((item) => item.label === "開く");
-}
-
 export function shareLinkFor(share: ShareState | null): string {
   if (share?.kind === "folder") {
     return `${window.location.origin}${folderUrl(share.folderId)}`;
@@ -225,30 +96,17 @@ export function homeListFlags(input: {
   folderPending: boolean;
   visibleFolder: FolderAccess | null;
   error: string | null;
-  notesLoadState: NotesLoadState;
-  notesError: boolean;
 }) {
   const needsFolder = Boolean(input.folderId || input.user);
   const waitingForFolder = needsFolder && !input.visibleFolder && !input.error;
-  const notesPending =
-    input.notesLoadState === "unhydrated" ||
-    input.notesLoadState === "hydrating";
   const showPlaceholder =
-    (input.userLoading ||
-      input.folderPending ||
-      waitingForFolder ||
-      notesPending) &&
+    (input.userLoading || input.folderPending || waitingForFolder) &&
     !input.visibleFolder;
   return {
     canAdmin: Boolean(input.visibleFolder?.flags.canAdmin),
     isDriveRoot: Boolean(input.visibleFolder?.locked),
-    listPending:
-      (input.folderPending && Boolean(input.visibleFolder)) || notesPending,
+    listPending: input.folderPending && Boolean(input.visibleFolder),
     needsFolder,
-    notesError: input.notesError,
-    notesPending,
-    showEmptyList:
-      input.notesLoadState === "ready" && !input.notesError && !notesPending,
     showPlaceholder,
     showTree:
       (!input.folderId || input.visibleFolder || showPlaceholder) &&
@@ -258,87 +116,19 @@ export function homeListFlags(input: {
 
 export function subscribeHomeNotes(
   userLoading: boolean,
-  user: SessionUser | null,
-  currentFolderId: string | null,
   setNotes: (notes: NoteSummary[]) => void,
-  setNotesLoadState: (state: NotesLoadState) => void,
-  setNotesError: (error: boolean) => void,
 ): (() => void) | undefined {
   if (userLoading) {
     return undefined;
   }
-  if (!getHydratableScope() && getNotesLoadState() === "unhydrated") {
-    setNotes([]);
-    setNotesLoadState("unhydrated");
-    setNotesError(false);
-  }
   let cancelled = false;
-
-  const publish = async (serverNotes: NoteSummary[]) => {
-    if (cancelled) {
-      return;
+  void loadNotes(true).then((noteList) => {
+    if (!cancelled) {
+      setNotes(noteList);
     }
-    if (!user) {
-      setNotes(serverNotes);
-      return;
-    }
-    const [drafts, promotions] = await Promise.all([
-      listDrafts(user.id),
-      listPromotions(user.id),
-    ]);
-    setNotes(
-      mergeHomeDisplayNotes(serverNotes, drafts, currentFolderId, promotions),
-    );
-  };
-
-  setNotesLoadState(getNotesLoadState());
-  void (async () => {
-    try {
-      const noteList = await loadNotes(true);
-      if (cancelled) {
-        return;
-      }
-      const state = getNotesLoadState();
-      setNotesLoadState(state);
-      if (state === "error") {
-        setNotesError(true);
-        return;
-      }
-      setNotesError(false);
-      await publish(noteList);
-    } catch {
-      if (!cancelled) {
-        setNotesError(true);
-      }
-    }
-  })();
-
-  const refreshFromCache = () => {
-    void (async () => {
-      try {
-        const noteList = await loadNotes(false);
-        if (cancelled) {
-          return;
-        }
-        await publish(noteList);
-      } catch {
-        // keep the last rendered list
-      }
-    })();
-  };
-  const unsubDrafts = user ? subscribeDrafts(refreshFromCache) : undefined;
-  const unsubJournal = user
-    ? subscribeDraftJournal(refreshFromCache)
-    : undefined;
-  if (user && peekNotes()) {
-    void publish(peekNotes() ?? []);
-  }
-
+  });
   return () => {
     cancelled = true;
-    unsubDrafts?.();
-    unsubJournal?.();
-    abortNoteBodyPrefetch();
   };
 }
 
@@ -427,102 +217,30 @@ export async function persistNewNote(
   navigate: NavigateFunction,
   setCreating: (creating: boolean) => void,
   setError: (error: string | null) => void,
-  user: SessionUser | null,
-  session: SessionSnapshot = getSessionSnapshot(),
 ) {
-  if (!canCreateLocalDraft(session, user)) {
-    setError(homeOfflineCreateMessage());
-    return;
-  }
-  const ownerId = user?.id;
-  if (!ownerId) {
-    setError(homeOfflineCreateMessage());
-    return;
-  }
-
-  if (createNoteInFlight && createNoteOwnerId === ownerId) {
-    setCreating(true);
-    setError(null);
-    const localId = await createNoteInFlight;
-    setCreating(false);
-    if (localId) {
-      navigate(`/n/${localId}`);
-    }
-    return;
-  }
-
   setCreating(true);
   setError(null);
-  createNoteOwnerId = ownerId;
-  createNoteInFlight = (async () => {
-    try {
-      const offline =
-        session.status === "offline-known" ||
-        (typeof navigator !== "undefined" && navigator.onLine === false);
-      if (offline) {
-        return await saveLocalDraftNote(ownerId, visibleFolder);
-      }
 
-      const localId = createLocalDraftId();
-      const createInput = createInputForDraft(ownerId, localId, visibleFolder);
-      const journalOk = await commitCreateJournal({
-        createInput,
-        localId,
-        ownerId,
-        revision: 1,
-      });
-      if (!journalOk) {
-        setError(
-          "端末への保存に失敗しました。通信が回復するまで再試行できません。",
-        );
-        return null;
-      }
-
-      const result = await createNote(createInput);
-      if (result.ok) {
-        const session = getSessionSnapshot();
-        await promoteNoteAfterOnlineCreate({
-          localId,
-          note: result.data,
-          ownerId,
-          sessionEpoch: session.sessionEpoch,
-        });
-        const { markdown: _markdown, ...summary } = result.data;
-        upsertNoteSummary(summary);
-        seedNoteCache(result.data);
-        return result.data.id;
-      }
-      if (result.kind === "network") {
-        const draftId = await saveLocalDraftNote(
-          ownerId,
-          visibleFolder,
-          localId,
-        );
-        return draftId;
-      }
-      setError(
-        result.status === 401
-          ? "ノートを作成するにはログインが必要です。"
-          : result.error,
-      );
-      return null;
-    } finally {
-      if (createNoteOwnerId === ownerId) {
-        createNoteInFlight = null;
-        createNoteOwnerId = null;
-      }
-      setCreating(false);
-    }
-  })();
-
-  const id = await createNoteInFlight;
-  if (id) {
-    if (id.startsWith("local-")) {
-      navigate(`/n/${id}`);
-      return;
-    }
-    navigate(`/n/${id}`);
+  const result = await createNote({
+    folder: visibleFolder?.folder,
+    folderId: visibleFolder?.id ?? undefined,
+    inheritAccess: true,
+    markdown: "# 無題\n",
+  });
+  if (!result.ok) {
+    setError(
+      result.status === 401
+        ? "ノートを作成するにはログインが必要です。"
+        : result.error,
+    );
+    setCreating(false);
+    return;
   }
+
+  const { markdown: _markdown, ...summary } = result.data;
+  upsertNoteSummary(summary);
+  seedNoteCache(result.data);
+  navigate(`/n/${result.data.id}`);
 }
 
 export async function persistNewFolder(
@@ -536,14 +254,7 @@ export async function persistNewFolder(
     setShare: (share: ShareState) => void;
     setShareError: (error: string | null) => void;
   },
-  blocked = false,
 ) {
-  if (blocked) {
-    setters.setFolderCreateError(
-      "オフラインではフォルダを作成できません。オンラインでお試しください。",
-    );
-    return;
-  }
   setters.setFolderCreating(true);
   setters.setFolderCreateError(null);
 
@@ -579,11 +290,7 @@ export async function openFolderShare(
   setError: (error: string | null) => void,
   setShare: (share: ShareState) => void,
   setShareError: (error: string | null) => void,
-  blocked = false,
 ) {
-  if (blocked) {
-    return;
-  }
   const result = await fetchFolder(id);
   if (!result.ok) {
     setError(result.error);
@@ -607,11 +314,7 @@ export async function openNoteShare(
   setError: (error: string | null) => void,
   setShare: (share: ShareState) => void,
   setShareError: (error: string | null) => void,
-  blocked = false,
 ) {
-  if (blocked) {
-    return;
-  }
   const result = await fetchNote(note.id);
   if (!result.ok) {
     setError(result.error);
@@ -673,9 +376,8 @@ export async function persistHomeShare(
   next: AccessDraft,
   visibleFolderId: string | null | undefined,
   setters: ShareSetters & { setVisibleFolder: (folder: FolderAccess) => void },
-  blocked = false,
 ) {
-  if (!share || blocked) {
+  if (!share) {
     return;
   }
   setters.setShare({ ...share, draft: next });
@@ -735,16 +437,6 @@ function noteMenuItems(
   onShare: (note: NoteSummary) => void,
   onDelete: (id: string, name: string) => void,
 ): ContextMenuItem[] {
-  if (isLocalDraftSummary(note)) {
-    return [
-      { label: "開く", onSelect: () => navigate(`/n/${note.id}`) },
-      {
-        danger: true,
-        label: "削除",
-        onSelect: () => onDelete(note.id, note.title),
-      },
-    ];
-  }
   const items: ContextMenuItem[] = [
     { label: "開く", onSelect: () => navigate(`/n/${note.id}`) },
     { label: "共有", onSelect: () => onShare(note) },
@@ -770,37 +462,28 @@ export function handleItemMenu(
   onNoteShare: (note: NoteSummary) => void,
   onRename: (id: string, name: string) => void,
   onDelete: (kind: ConfirmState["kind"], id: string, name: string) => void,
-  blocked = false,
 ) {
   const position = menuPosition(event);
   if (target.kind === "folder") {
     setMenu({
       id: target.id,
       ...position,
-      items: filterHomeMenuItems(
-        folderMenuItems(
-          target,
-          canAdmin,
-          navigate,
-          onFolderShare,
-          onRename,
-          (id, name) => onDelete("folder", id, name),
-        ),
-        blocked,
+      items: folderMenuItems(
+        target,
+        canAdmin,
+        navigate,
+        onFolderShare,
+        onRename,
+        (id, name) => onDelete("folder", id, name),
       ),
     });
     return;
   }
-  const localDraft = isLocalDraftSummary(target.note);
   setMenu({
     id: target.note.id,
     ...position,
-    items: filterHomeMenuItems(
-      noteMenuItems(target.note, navigate, onNoteShare, (id, name) =>
-        onDelete("note", id, name),
-      ),
-      blocked,
-      localDraft,
+    items: noteMenuItems(target.note, navigate, onNoteShare, (id, name) =>
+      onDelete("note", id, name),
     ),
   });
 }
@@ -850,9 +533,8 @@ export async function persistRenameFolder(
     setVisibleFolder: (folder: FolderAccess | null) => void;
     setNotes: (notes: NoteSummary[]) => void;
   },
-  blocked = false,
 ) {
-  if (!folderRename || blocked) {
+  if (!folderRename) {
     return;
   }
   if (name === folderRename.name) {
@@ -885,40 +567,6 @@ export async function persistRenameFolder(
   );
 }
 
-export async function persistDraftDelete(
-  confirm: Extract<ConfirmState, { kind: "note" }>,
-  user: SessionUser | null,
-  navigate: NavigateFunction,
-  setters: {
-    setConfirmBusy: (busy: boolean) => void;
-    setConfirmError: (error: string | null) => void;
-    setConfirm: (value: ConfirmState | null) => void;
-    setNotes: (notes: NoteSummary[]) => void;
-  },
-  openDraftId?: string,
-) {
-  if (!user) {
-    return;
-  }
-  setters.setConfirmBusy(true);
-  setters.setConfirmError(null);
-  invalidateLocalDraftEditor(user.id, confirm.id as LocalDraftId);
-  await requestDraftDelete(user.id, confirm.id as LocalDraftId);
-  setters.setConfirm(null);
-  setters.setConfirmBusy(false);
-  if (openDraftId === confirm.id) {
-    navigate("/");
-  }
-  const serverNotes = await loadNotes(false);
-  const [drafts, promotions] = await Promise.all([
-    listDrafts(user.id),
-    listPromotions(user.id),
-  ]);
-  setters.setNotes(
-    mergeHomeDisplayNotes(serverNotes, drafts, null, promotions),
-  );
-}
-
 export async function persistHomeDelete(
   confirm: ConfirmState | null,
   folderId: string | undefined,
@@ -932,46 +580,22 @@ export async function persistHomeDelete(
     setNotes: (notes: NoteSummary[]) => void;
     setVisibleFolder: (folder: FolderAccess | null) => void;
   },
-  blocked = false,
-  openDraftId?: string,
 ) {
   if (!confirm) {
     return;
   }
-  if (confirm.kind === "note" && confirm.id.startsWith("local-")) {
-    await persistDraftDelete(confirm, user, navigate, setters, openDraftId);
-    return;
-  }
-  if (blocked) {
-    return;
-  }
   setters.setConfirmBusy(true);
   setters.setConfirmError(null);
-  if (confirm.kind === "folder") {
-    const result = await deleteFolder(confirm.id);
-    if (!result.ok) {
-      setters.setConfirmError(result.error);
-      setters.setConfirmBusy(false);
-      return;
-    }
-    setters.setConfirm(null);
+  const result = await deleteConfirmTarget(confirm);
+  if (!result.ok) {
+    setters.setConfirmError(result.error);
     setters.setConfirmBusy(false);
-    evictNotesEverywhere(result.data.deletedNoteIds, "folder-deleted");
-    for (const deletedFolderId of result.data.deletedFolderIds) {
-      invalidateFolderCache(deletedFolderId);
-    }
-    invalidateFolderCache(parentId);
-  } else {
-    const result = await deleteNote(confirm.id);
-    if (!result.ok) {
-      setters.setConfirmError(result.error);
-      setters.setConfirmBusy(false);
-      return;
-    }
-    setters.setConfirm(null);
-    setters.setConfirmBusy(false);
+    return;
+  }
+  setters.setConfirm(null);
+  setters.setConfirmBusy(false);
+  if (confirm.kind === "note") {
     invalidateNoteCache(confirm.id);
-    evictNotesEverywhere([confirm.id], "note-deleted");
   }
   if (confirm.kind === "folder" && folderId === confirm.id) {
     navigate(folderUrl(parentId));
@@ -983,6 +607,13 @@ export async function persistHomeDelete(
     setters.setNotes,
     setters.setVisibleFolder,
   );
+}
+
+function deleteConfirmTarget(confirm: ConfirmState) {
+  if (confirm.kind === "folder") {
+    return deleteFolder(confirm.id);
+  }
+  return deleteNote(confirm.id);
 }
 
 export function inheritLabelFor(kind: ShareState["kind"]): string {

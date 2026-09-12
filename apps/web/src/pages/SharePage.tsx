@@ -4,17 +4,10 @@ import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
 import {
   dismissStaleSsrPreview,
-  readNoteBootstrap,
   removeSsrPreview,
 } from "../lib/note-bootstrap.ts";
 import { noteFromCaches } from "../lib/note-cache.ts";
-import { getHydratableScope } from "../lib/offline-scope.ts";
-import {
-  type ShareDenied,
-  type ShareViewPhase,
-  shouldRemoveShareSsrPreview,
-  subscribeShareNote,
-} from "./share-page.ts";
+import { type ShareDenied, subscribeShareNote } from "./share-page.ts";
 
 function ShareDeniedView({ denied }: { denied: ShareDenied }) {
   if (denied === 401) {
@@ -41,30 +34,18 @@ function ShareDeniedView({ denied }: { denied: ShareDenied }) {
   );
 }
 
-function SharePreviewBanner({ message }: { message: string }) {
-  return (
-    <p className="border-border border-b px-5 py-2 text-muted text-sm">
-      {message}
-    </p>
-  );
-}
-
 function SharePageView({
   loading,
   denied,
   error,
   markdown,
-  previewBanner,
-  onRetry,
 }: {
   loading: boolean;
   denied: ShareDenied | null;
   error: string | null;
   markdown: string;
-  previewBanner: string | null;
-  onRetry?: () => void;
 }) {
-  if (loading && !markdown) {
+  if (loading) {
     return (
       <section className="flex flex-col">
         <p>読み込み中…</p>
@@ -74,17 +55,10 @@ function SharePageView({
   if (denied) {
     return <ShareDeniedView denied={denied} />;
   }
-  if (error && !markdown) {
+  if (error) {
     return (
       <section className="flex flex-col">
         <ErrorText>{error}</ErrorText>
-        {onRetry && (
-          <p>
-            <button onClick={onRetry} type="button">
-              再試行
-            </button>
-          </p>
-        )}
         <p>
           <Link to="/">ホームに戻る</Link>
         </p>
@@ -93,57 +67,35 @@ function SharePageView({
   }
   return (
     <section className="flex flex-col">
-      {previewBanner && <SharePreviewBanner message={previewBanner} />}
       <PreviewWithToc documentScroll={true} markdown={markdown} />
     </section>
   );
 }
 
-function initialShareMarkdown(id: string): string {
-  const boot = readNoteBootstrap(id);
-  if (boot) {
-    return boot.markdown;
-  }
-  if (!getHydratableScope()) {
-    return "";
-  }
-  return noteFromCaches(id)?.markdown ?? "";
-}
-
 export function SharePage() {
   const { id = "" } = useParams();
-  const initialMarkdown = initialShareMarkdown(id);
-  const [markdown, setMarkdown] = useState(initialMarkdown);
-  const [loading, setLoading] = useState(() => !initialMarkdown);
+  const cached = noteFromCaches(id);
+  const [markdown, setMarkdown] = useState(() => cached?.markdown ?? "");
+  const [loading, setLoading] = useState(() => !cached);
   const [denied, setDenied] = useState<ShareDenied | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [previewBanner, setPreviewBanner] = useState<string | null>(null);
-  const [phase, setPhase] = useState<ShareViewPhase>(
-    initialMarkdown ? "cached-preview" : "loading",
-  );
-  const [loadTick, setLoadTick] = useState(0);
 
   useEffect(() => {
     dismissStaleSsrPreview(id);
-    setDenied(null);
-    setError(null);
-    setPreviewBanner(null);
     return subscribeShareNote(id, {
       setDenied,
       setError,
       setLoading,
       setMarkdown,
-      setPhase,
-      setPreviewBanner,
     });
-  }, [id, loadTick]);
+  }, [id]);
 
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);
-    if (shouldRemoveShareSsrPreview(phase)) {
+    if (!loading && markdown) {
       removeSsrPreview();
     }
-  }, [id, phase]);
+  }, [id, loading, markdown]);
 
   return (
     <SharePageView
@@ -151,12 +103,6 @@ export function SharePage() {
       error={error}
       loading={loading}
       markdown={markdown}
-      onRetry={
-        phase === "load-error" || phase === "uncached"
-          ? () => setLoadTick((value) => value + 1)
-          : undefined
-      }
-      previewBanner={previewBanner}
     />
   );
 }

@@ -44,9 +44,6 @@ export function readNoteBootstrap(id: string): Note | null {
 }
 
 export function dismissStaleSsrPreview(id: string): void {
-  if (typeof document === "undefined") {
-    return;
-  }
   const el = document.getElementById(SSR_PREVIEW_ID);
   if (!el) {
     return;
@@ -59,33 +56,5 @@ export function dismissStaleSsrPreview(id: string): void {
 }
 
 export function removeSsrPreview(): void {
-  if (typeof document === "undefined") {
-    return;
-  }
   document.getElementById(SSR_PREVIEW_ID)?.remove();
-}
-
-export function removeNoteBootstrap(id?: string): void {
-  if (typeof document === "undefined") {
-    return;
-  }
-  const el = document.getElementById(BOOTSTRAP_ID);
-  if (!el) {
-    return;
-  }
-  if (!id) {
-    el.remove();
-    return;
-  }
-  try {
-    const note = JSON.parse(el.textContent ?? "") as Pick<
-      Note,
-      "id" | "shortId"
-    >;
-    if (matchesNoteId(note, id)) {
-      el.remove();
-    }
-  } catch {
-    el.remove();
-  }
 }

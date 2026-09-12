@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router";
+import { Link, useOutletContext, useParams } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
@@ -24,98 +24,42 @@ import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx"
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterAlert.tsx";
+import { draftFromNote } from "../components/notes/access-draft.ts";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { HistoryIcon, ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { cn } from "../lib/cn.ts";
-import type { NoteCollabSession } from "../lib/collaboration-session.ts";
-import {
-  type CollabSessionSnapshot,
-  collabBannerMessage,
-} from "../lib/collaboration-session.ts";
-import {
-  isDraftStorageUnavailable,
-  type LocalDraftId,
-} from "../lib/draft-store.ts";
-import {
-  getPromotedServerId,
-  registerDraftSyncNavigation,
-  subscribeDraftPromotions,
-} from "../lib/draft-sync.ts";
+import type { YjsSession } from "../lib/collaboration.ts";
 import type { EditorMode } from "../lib/editor-mode.ts";
-import {
-  getLocalDraftEditor,
-  invalidateLocalDraftEditor,
-  type LocalDraftEditor,
-} from "../lib/local-draft-editor.ts";
 import {
   dismissStaleSsrPreview,
   removeSsrPreview,
 } from "../lib/note-bootstrap.ts";
+import { loadNote, noteFromCaches } from "../lib/note-cache.ts";
 import {
-  getSessionSnapshot,
-  subscribeSession,
-} from "../lib/offline-session.ts";
-import { nextRequestGeneration } from "../lib/offline-types.ts";
-import { subscribeOnlineStatus } from "../lib/online-status.ts";
-import {
-  allowsServerMutations,
-  applyEditorLoadOutcome,
+  applyEditorNoteLoad,
   applySplitScroll,
+  beginEditorNoteLoad,
   bindEditorCollab,
-  canStartEdit,
   changeEditorMode,
-  type EditorNoteSnapshot,
-  type EditorPreviewMeta,
-  type EditorViewPhase,
-  editorDesiredConnection,
   editorGridClass,
-  editorHeaderMutationsVisible,
-  editorModeSwitchVisible,
-  editorNeedsSession,
-  editorViewModeFor,
-  handleCollabAuthStop,
-  isLocalDraftId,
-  isLocalEditorPhase,
-  isOfflineKnownSession,
   ownerLabelFor,
   persistEditorAccess,
   persistEditorFolder,
-  resetEditorSnapshotForRoute,
-  resolveEditorViewPhase,
-  shouldReloadEditorOnFocus,
-  shouldRemoveSsrPreview,
   sourceLineNumbers,
   subscribeArticleSources,
-  subscribeEditorNoteLoad,
-  subscribeLocalDraftLoad,
   syncCollabUser,
-  taskNoteIdFor,
   teardownCollab,
-  verifiedCanEdit,
 } from "./editor-page.ts";
 
-function EditorLoadError({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry?: () => void;
-}) {
+function EditorLoadError({ message }: { message: string }) {
   const showAuthLinks =
     message.includes("ログイン") || message.includes("権限");
   return (
     <section className="flex flex-col px-5 py-4">
       <ErrorText>{message}</ErrorText>
-      {onRetry && (
-        <p>
-          <button onClick={onRetry} type="button">
-            再試行
-          </button>
-        </p>
-      )}
       {showAuthLinks && (
         <p>
           <Link to="/">ホームに戻る</Link>
@@ -124,14 +68,6 @@ function EditorLoadError({
         </p>
       )}
     </section>
-  );
-}
-
-function EditorPreviewBanner({ message }: { message: string }) {
-  return (
-    <p className="border-border border-b px-5 py-2 text-muted text-sm">
-      {message}
-    </p>
   );
 }
 
@@ -146,8 +82,8 @@ function EditorSourcePane({
   onSplitScroll,
 }: {
   ready: boolean;
-  yMarkdown: NoteCollabSession["yMarkdown"] | undefined;
-  awareness: NoteCollabSession["awareness"] | undefined;
+  yMarkdown: YjsSession["yMarkdown"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
   noteId: string;
   canEdit: boolean;
   viewMode: EditorMode;
@@ -213,8 +149,8 @@ function EditorRichPane({
   canEdit,
 }: {
   ready: boolean;
-  yMarkdown: NoteCollabSession["yMarkdown"] | undefined;
-  awareness: NoteCollabSession["awareness"] | undefined;
+  yMarkdown: YjsSession["yMarkdown"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
   noteId: string;
   canEdit: boolean;
 }) {
@@ -276,35 +212,14 @@ function EditorShareDialog({
   );
 }
 
-function CollabStatusBanner({
-  message,
-  live,
-}: {
-  message: string;
-  live: boolean;
-}) {
-  return (
-    <p
-      aria-live={live ? "polite" : undefined}
-      className="border-border border-b px-5 py-2 text-muted text-sm"
-    >
-      {message}
-    </p>
-  );
-}
-
 function EditorWorkspace({
   note,
   markdown,
   accessDraft,
   saveError,
-  previewBanner,
-  collabBanner,
-  collabBannerLive,
   articleSource,
   articleIssues,
   viewMode,
-  viewPhase,
   usesInternalScroll,
   ready,
   yMarkdown,
@@ -316,7 +231,6 @@ function EditorWorkspace({
   headingTitle,
   user,
   isOwner,
-  taskNoteId,
   onSplitScroll,
   onPersistAccess,
   onCloseShare,
@@ -326,17 +240,13 @@ function EditorWorkspace({
   markdown: string;
   accessDraft: AccessDraft;
   saveError: string | null;
-  previewBanner: string | null;
-  collabBanner: string | null;
-  collabBannerLive: boolean;
   articleSource: ArticleSource | null;
   articleIssues: ReturnType<typeof validateArticleDocument>["issues"];
   viewMode: EditorMode;
-  viewPhase: EditorViewPhase;
   usesInternalScroll: boolean;
   ready: boolean;
-  yMarkdown: NoteCollabSession["yMarkdown"] | undefined;
-  awareness: NoteCollabSession["awareness"] | undefined;
+  yMarkdown: YjsSession["yMarkdown"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
   canEdit: boolean;
   splitScroll: number;
   shareOpen: boolean;
@@ -344,7 +254,6 @@ function EditorWorkspace({
   headingTitle: string;
   user: AppShellContext["user"];
   isOwner: boolean;
-  taskNoteId?: string;
   onSplitScroll: (ratio: number) => void;
   onPersistAccess: (next: AccessDraft) => void;
   onCloseShare: () => void;
@@ -353,23 +262,17 @@ function EditorWorkspace({
   const showSource = viewMode === "split" || viewMode === "source";
   const showPreview = viewMode === "split" || viewMode === "preview";
   const showRich = viewMode === "rich";
-  const editorCanEdit =
-    canEdit && (viewPhase === "editing" || viewPhase === "local-editing");
   return (
     <section
       className={cn("flex flex-col", usesInternalScroll && "h-full min-h-0")}
     >
-      {previewBanner && <EditorPreviewBanner message={previewBanner} />}
-      {collabBanner && (
-        <CollabStatusBanner live={collabBannerLive} message={collabBanner} />
-      )}
       {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
       {articleSource && <ArticleFrontmatterAlert issues={articleIssues} />}
       <div className={editorGridClass(viewMode, usesInternalScroll, cn)}>
         {showSource && (
           <EditorSourcePane
             awareness={awareness}
-            canEdit={editorCanEdit}
+            canEdit={canEdit}
             noteId={note.id}
             onSplitScroll={onSplitScroll}
             ready={ready}
@@ -383,14 +286,14 @@ function EditorWorkspace({
             markdown={markdown}
             onSplitScroll={onSplitScroll}
             splitScroll={splitScroll}
-            taskNoteId={taskNoteId}
+            taskNoteId={canEdit ? note.id : undefined}
             viewMode={viewMode}
           />
         )}
         {showRich && (
           <EditorRichPane
             awareness={awareness}
-            canEdit={editorCanEdit}
+            canEdit={canEdit}
             noteId={note.id}
             ready={ready}
             yMarkdown={yMarkdown}
@@ -410,7 +313,7 @@ function EditorWorkspace({
       />
       {historyOpen && (
         <HistoryPanel
-          canEdit={editorCanEdit}
+          canEdit={canEdit}
           noteId={note.id}
           onClose={onCloseHistory}
         />
@@ -420,36 +323,27 @@ function EditorWorkspace({
 }
 
 function EditorPageView({
-  viewPhase,
+  loading,
   loadError,
   note,
   accessDraft,
   workspace,
-  onRetry,
 }: {
-  viewPhase: EditorViewPhase;
+  loading: boolean;
   loadError: string | null;
   note: Note | null;
   accessDraft: AccessDraft | null;
   workspace: ReactNode;
-  onRetry?: () => void;
 }) {
-  if (viewPhase === "loading" && !(note && accessDraft)) {
+  if (loading) {
     return (
       <section className="flex flex-col px-5 py-4">
         <p>読み込み中…</p>
       </section>
     );
   }
-  if (
-    loadError &&
-    !(note && accessDraft) &&
-    (viewPhase === "uncached" ||
-      viewPhase === "denied" ||
-      viewPhase === "not-found" ||
-      viewPhase === "load-error")
-  ) {
-    return <EditorLoadError message={loadError} onRetry={onRetry} />;
+  if (loadError) {
+    return <EditorLoadError message={loadError} />;
   }
   if (!(note && accessDraft)) {
     return null;
@@ -467,7 +361,7 @@ function EditorHeaderEnd({
   onHistory,
   onShare,
 }: {
-  awareness: NoteCollabSession["awareness"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
   folder: string;
   folderId: string | null;
   isOwner: boolean;
@@ -514,329 +408,66 @@ function articleIssuesFor(
   return validateArticleDocument(articleSource.schema, markdown).issues;
 }
 
-function applySnapshot(
-  snapshot: Partial<EditorNoteSnapshot>,
-  setters: {
-    setNote: (note: Note | null) => void;
-    setMarkdown: (markdown: string) => void;
-    setFolder: (folder: string) => void;
-    setAccessDraft: (draft: AccessDraft | null) => void;
-    setLoadError: (error: string | null) => void;
-    setPreviewBanner: (banner: string | null) => void;
-    setMeta: (meta: EditorPreviewMeta | null) => void;
-    setPendingEdit: (pending: boolean) => void;
-    setViewPhase: (phase: EditorViewPhase) => void;
-  },
-) {
-  if (snapshot.note !== undefined) {
-    setters.setNote(snapshot.note);
-  }
-  if (snapshot.markdown !== undefined) {
-    setters.setMarkdown(snapshot.markdown);
-  }
-  if (snapshot.folder !== undefined) {
-    setters.setFolder(snapshot.folder);
-  }
-  if (snapshot.accessDraft !== undefined) {
-    setters.setAccessDraft(snapshot.accessDraft);
-  }
-  if (snapshot.loadError !== undefined) {
-    setters.setLoadError(snapshot.loadError);
-  }
-  if (snapshot.previewBanner !== undefined) {
-    setters.setPreviewBanner(snapshot.previewBanner);
-  }
-  if (snapshot.meta !== undefined) {
-    setters.setMeta(snapshot.meta);
-  }
-  if (snapshot.pendingEdit !== undefined) {
-    setters.setPendingEdit(snapshot.pendingEdit);
-  }
-  if (snapshot.viewPhase !== undefined) {
-    setters.setViewPhase(snapshot.viewPhase);
-  }
-}
-
-function localDraftSaveBanner(editor: LocalDraftEditor | null): string | null {
-  if (editor?.saveState === "saving") {
-    return "端末へ保存中…";
-  }
-  if (editor?.saveState === "error" || editor?.saveState === "conflict") {
-    return editor.saveError ?? "端末への保存に失敗しました。";
-  }
-  if (isDraftStorageUnavailable()) {
-    return "端末に保存できていません。内容はこのタブ内のみ保持されます。";
-  }
-  return null;
-}
-
-function editorDocumentModel(
-  localEditor: LocalDraftEditor | null,
-  note: Note | null,
-): EditorNoteSnapshot["document"] {
-  if (localEditor) {
-    return { draft: localEditor.draft, kind: "draft" };
-  }
-  if (note) {
-    return { kind: "server", note };
-  }
-  return null;
-}
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: page wires session, local draft, and collab
 export function EditorPage() {
   const { id = "" } = useParams();
-  const navigate = useNavigate();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
-  const [session, setSession] = useState(getSessionSnapshot);
-  const initial = resetEditorSnapshotForRoute(id);
-  const [note, setNote] = useState<Note | null>(initial.note);
-  const [markdown, setMarkdown] = useState(initial.markdown);
-  const [folder, setFolder] = useState(initial.folder);
-  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(
-    initial.accessDraft,
+  const cached = noteFromCaches(id);
+  const [note, setNote] = useState<Note | null>(() => cached ?? null);
+  const [markdown, setMarkdown] = useState(() => cached?.markdown ?? "");
+  const [folder, setFolder] = useState(() => cached?.folder ?? "");
+  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(() =>
+    cached ? draftFromNote(cached) : null,
   );
-  const [loadError, setLoadError] = useState<string | null>(initial.loadError);
-  const [previewBanner, setPreviewBanner] = useState<string | null>(
-    initial.previewBanner,
-  );
-  const [meta, setMeta] = useState<EditorPreviewMeta | null>(initial.meta);
-  const [pendingEdit, setPendingEdit] = useState(initial.pendingEdit);
-  const [viewPhase, setViewPhase] = useState<EditorViewPhase>(
-    initial.viewPhase,
-  );
-  const [revalidating, setRevalidating] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(() => !cached);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [collab, setCollab] = useState<NoteCollabSession | null>(null);
+  const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
-  const [collabSnapshot, setCollabSnapshot] =
-    useState<CollabSessionSnapshot | null>(null);
-  const collabBannerRef = useRef<string | null>(null);
-  const [collabBannerLive, setCollabBannerLive] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
   const [mode, setMode] = useState<EditorMode>("preview");
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
-  const [hydrated, setHydrated] = useState(false);
-  const [localEditor, setLocalEditor] = useState<LocalDraftEditor | null>(null);
-  const sessionRef = useRef<NoteCollabSession | null>(null);
+  const hydratedRef = useRef(false);
+  const sessionRef = useRef<YjsSession | null>(null);
   const unbindCollabRef = useRef<(() => void) | null>(null);
-  const loadGenerationRef = useRef(nextRequestGeneration());
-  const loadSessionEpochRef = useRef(session.sessionEpoch);
-  const editorSnapshotRef = useRef<EditorNoteSnapshot>(initial);
-  const [loadTick, setLoadTick] = useState(0);
 
   const noteId = note?.id;
   const userId = user?.id;
   const flags = ownerFlags(user, note);
-  const collabActive = Boolean(collab);
-  const resolvedPhase = resolveEditorViewPhase({
-    collabActive,
-    collabReady,
-    explicitPhase: viewPhase,
-    hasPreview: Boolean(note && accessDraft),
-    loadError,
-    meta,
-    note,
-    pendingEdit,
-    revalidating,
-    routeId: id,
-  });
-  const startEditAllowed = canStartEdit({
-    collabActive,
-    meta,
-    note,
-    pendingEdit,
-    phase: resolvedPhase,
-    routeId: id,
-    session,
-  });
-  const viewMode = editorViewModeFor({
-    canStartEdit: startEditAllowed,
-    phase: resolvedPhase,
-    requestedMode: mode,
-  });
+  const viewMode: EditorMode = flags.canEdit ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
   const articleSource = matchArticleSource(folder, articleSources);
   const articleIssues = articleIssuesFor(articleSource, markdown);
-  const awareness = localEditor?.awareness ?? collab?.awareness;
-  const yMarkdown = localEditor?.yMarkdown ?? collab?.yMarkdown;
-  const ready = localEditor
-    ? Boolean(yMarkdown && awareness)
-    : Boolean(yMarkdown && awareness && collabReady);
-  const localSaveBanner = localDraftSaveBanner(localEditor);
-  const collabBanner = collabSnapshot
-    ? collabBannerMessage(collabSnapshot)
-    : null;
-  const taskNoteId = taskNoteIdFor({
-    meta,
-    note,
-    phase: resolvedPhase,
-    session,
-  });
-  const mutationGuard = () => allowsServerMutations(resolvedPhase, session);
-
-  editorSnapshotRef.current = {
-    accessDraft,
-    document: editorDocumentModel(localEditor, note),
-    folder,
-    loadError,
-    markdown,
-    meta,
-    note,
-    pendingEdit,
-    previewBanner,
-    viewPhase: resolvedPhase,
-  };
-
-  const snapshotSetters = {
-    setAccessDraft,
-    setFolder,
-    setLoadError,
-    setMarkdown,
-    setMeta,
-    setNote,
-    setPendingEdit,
-    setPreviewBanner,
-    setViewPhase,
-  };
-
-  const triggerReload = () => {
-    if (!shouldReloadEditorOnFocus(id)) {
-      return;
-    }
-    loadGenerationRef.current = nextRequestGeneration();
-    loadSessionEpochRef.current = session.sessionEpoch;
-    setLoadTick((value) => value + 1);
-  };
-
-  useEffect(() => subscribeSession(setSession), []);
-
-  useEffect(() => {
-    return registerDraftSyncNavigation(navigate, () =>
-      isLocalDraftId(id) ? (id as LocalDraftId) : null,
-    );
-  }, [navigate, id]);
-
-  useEffect(() => {
-    if (!(user?.id && isLocalDraftId(id))) {
-      return;
-    }
-    void getPromotedServerId(user.id, id as LocalDraftId).then((serverId) => {
-      if (serverId) {
-        navigate(`/n/${serverId}`, { replace: true });
-      }
-    });
-    return subscribeDraftPromotions((ownerId, localId, serverId) => {
-      if (ownerId === user.id && localId === id) {
-        navigate(`/n/${serverId}`, { replace: true });
-      }
-    });
-  }, [id, navigate, user?.id]);
-
-  useEffect(() => {
-    if (collabBanner === collabBannerRef.current) {
-      return;
-    }
-    collabBannerRef.current = collabBanner;
-    setCollabBannerLive(Boolean(collabBanner));
-  }, [collabBanner]);
+  const awareness = collab?.awareness;
+  const yMarkdown = collab?.yMarkdown;
+  const ready = Boolean(yMarkdown && awareness && collabReady);
 
   useEffect(() => {
     dismissStaleSsrPreview(id);
-    teardownCollab(
-      unbindCollabRef,
-      sessionRef,
+    const setters = {
+      hydratedRef,
+      setAccessDraft,
       setCollab,
       setCollabReady,
-      setCollabSnapshot,
-    );
-    setShareOpen(false);
-    setHistoryOpen(false);
-    setSaveError(null);
-    setMode("preview");
-    setPendingEdit(false);
-    setRevalidating(false);
-    setHydrated(false);
-    setLocalEditor(null);
-    loadGenerationRef.current = nextRequestGeneration();
-    loadSessionEpochRef.current = session.sessionEpoch;
-    applySnapshot(resetEditorSnapshotForRoute(id), snapshotSetters);
-    return () => {
-      if (user?.id && isLocalDraftId(id)) {
-        void getLocalDraftEditor(user.id, id as `local-${string}`)?.flush();
-        invalidateLocalDraftEditor(user.id, id as `local-${string}`);
-      }
+      setFolder,
+      setLoadError,
+      setLoading,
+      setMarkdown,
+      setMode,
+      setNote,
+      setSaveError,
+      setSplitScroll,
     };
-  }, [id, session.sessionEpoch, user?.id]);
-
-  useEffect(() => {
-    if (!isLocalDraftId(id)) {
-      return;
-    }
-    dismissStaleSsrPreview(id);
-    return subscribeLocalDraftLoad({
-      onSnapshot: (snapshot) => {
-        applySnapshot(snapshot, snapshotSetters);
-        if (user) {
-          setLocalEditor(getLocalDraftEditor(user.id, id as `local-${string}`));
-        }
-        setHydrated(true);
-      },
-      routeId: id as `local-${string}`,
-      session: getSessionSnapshot(),
-      user,
+    const hit = beginEditorNoteLoad(id, setters);
+    let cancelled = false;
+    void loadNote(id, Boolean(hit)).then((result) => {
+      applyEditorNoteLoad(result, id, hit, cancelled, setters);
     });
-  }, [id, user?.id, session.sessionEpoch]);
-
-  useEffect(() => {
-    if (isLocalDraftId(id)) {
-      return;
-    }
-    dismissStaleSsrPreview(id);
-    return subscribeEditorNoteLoad({
-      generation: loadGenerationRef.current,
-      onPreview: (snapshot) => {
-        applySnapshot(snapshot, snapshotSetters);
-        setHydrated(true);
-      },
-      onResult: (outcome) => {
-        setRevalidating(false);
-        applySnapshot(
-          applyEditorLoadOutcome(outcome, editorSnapshotRef.current),
-          snapshotSetters,
-        );
-        setHydrated(true);
-      },
-      onRevalidating: () => {
-        setRevalidating(true);
-        setViewPhase("revalidating");
-      },
-      routeId: id,
-      session: getSessionSnapshot(),
-      sessionEpoch: loadSessionEpochRef.current,
-      user,
-    });
-  }, [id, loadTick, session.sessionEpoch, user]);
-
-  useEffect(() => {
-    return subscribeOnlineStatus((online) => {
-      if (online) {
-        triggerReload();
-      }
-    });
-  }, [id]);
-
-  useEffect(() => {
-    const onFocus = () => {
-      triggerReload();
-    };
-    window.addEventListener("focus", onFocus);
     return () => {
-      window.removeEventListener("focus", onFocus);
+      cancelled = true;
     };
   }, [id]);
 
@@ -844,10 +475,10 @@ export function EditorPage() {
 
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);
-    if (shouldRemoveSsrPreview(resolvedPhase)) {
+    if (!loading && markdown) {
       removeSsrPreview();
     }
-  }, [id, resolvedPhase]);
+  }, [id, loading, markdown]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -862,100 +493,27 @@ export function EditorPage() {
   }, [usesInternalScroll]);
 
   useEffect(() => {
+    void noteId;
+    void userId;
     return () => {
-      teardownCollab(
-        unbindCollabRef,
-        sessionRef,
-        setCollab,
-        setCollabReady,
-        setCollabSnapshot,
-      );
+      teardownCollab(unbindCollabRef, sessionRef, setCollab, setCollabReady);
     };
   }, [noteId, userId]);
 
   useEffect(() => {
-    if (!collabSnapshot) {
-      return;
-    }
-    const patch = handleCollabAuthStop({
-      collabSnapshot,
-      snapshot: editorSnapshotRef.current,
-    });
-    if (Object.keys(patch).length === 0) {
-      return;
-    }
-    if (patch.pendingEdit === false) {
-      setPendingEdit(false);
-      setMode("preview");
-    }
-    if (patch.viewPhase) {
-      setViewPhase(patch.viewPhase);
-    }
-    if (patch.loadError !== undefined) {
-      setLoadError(patch.loadError);
-    }
-    if (patch.viewPhase === "denied") {
-      setNote(null);
-      setMarkdown("");
-      setAccessDraft(null);
-    }
-  }, [collabSnapshot]);
-
-  useEffect(() => {
-    if (isLocalEditorPhase(resolvedPhase)) {
-      return;
-    }
     bindEditorCollab({
-      desiredConnection: editorDesiredConnection(resolvedPhase),
-      hydrated,
-      needsSession: editorNeedsSession(resolvedPhase),
+      hydrated: hydratedRef.current,
       noteId,
       sessionRef,
       setCollab,
       setCollabReady,
-      setCollabSnapshot,
       setMarkdown,
       unbindRef: unbindCollabRef,
       user,
       userLoading,
+      viewMode,
     });
-  }, [noteId, userLoading, resolvedPhase, hydrated, user]);
-
-  useEffect(() => {
-    if (resolvedPhase === "local-editing" && mode === "preview") {
-      setMode("rich");
-    }
-  }, [resolvedPhase, id]);
-
-  useEffect(() => {
-    if (!(localEditor && user)) {
-      return;
-    }
-    const syncMarkdown = () => {
-      setMarkdown(localEditor.yMarkdown.toString());
-    };
-    localEditor.yMarkdown.observe(syncMarkdown);
-    const timer = window.setInterval(() => {
-      const current = getLocalDraftEditor(user.id, id as `local-${string}`);
-      if (current) {
-        setLocalEditor(current);
-      }
-    }, 500);
-    const flush = () => {
-      void localEditor.flush();
-    };
-    window.addEventListener("pagehide", flush);
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") {
-        flush();
-      }
-    });
-    return () => {
-      localEditor.yMarkdown.unobserve(syncMarkdown);
-      window.clearInterval(timer);
-      window.removeEventListener("pagehide", flush);
-    };
-  }, [localEditor?.draft.localId]);
+  }, [noteId, userLoading, viewMode, user]);
 
   useEffect(() => {
     syncCollabUser(collab, user);
@@ -972,47 +530,15 @@ export function EditorPage() {
   useEffect(() => {
     bindEditorHeader({
       awareness,
-      canEdit: startEditAllowed,
+      canEdit: flags.canEdit,
       folder,
-      headerVisible: editorModeSwitchVisible(
-        resolvedPhase,
-        session,
-        collabActive,
-      ),
       isOwner: flags.isOwner,
       note,
-      onRequestEdit: (next) => {
-        if (next === "preview") {
-          setPendingEdit(false);
-          setMode("preview");
-          return;
-        }
-        if (
-          (resolvedPhase === "editing" || resolvedPhase === "local-editing") &&
-          startEditAllowed
-        ) {
-          changeEditorMode(true, next, setMode);
-          return;
-        }
-        if (
-          verifiedCanEdit(note, meta) &&
-          resolvedPhase === "server-preview" &&
-          !isOfflineKnownSession(session)
-        ) {
-          setPendingEdit(true);
-          setMode(next);
-        }
-      },
-      serverMutationsVisible: editorHeaderMutationsVisible(
-        resolvedPhase,
-        session,
-        collabActive,
-      ),
-      session,
       setAccessDraft,
       setFolder,
       setHeader,
       setHistoryOpen,
+      setMode,
       setNote,
       setSaveError,
       setShareOpen,
@@ -1022,26 +548,19 @@ export function EditorPage() {
   }, [
     note,
     viewMode,
-    startEditAllowed,
+    flags.canEdit,
     awareness,
     folder,
     flags.isOwner,
     setHeader,
-    resolvedPhase,
-    session,
   ]);
 
   return (
     <EditorPageView
       accessDraft={accessDraft}
       loadError={loadError}
+      loading={loading}
       note={note}
-      onRetry={
-        viewPhase === "load-error" || viewPhase === "uncached"
-          ? triggerReload
-          : undefined
-      }
-      viewPhase={resolvedPhase}
       workspace={
         note && accessDraft ? (
           <EditorWorkspace
@@ -1049,9 +568,7 @@ export function EditorPage() {
             articleIssues={articleIssues}
             articleSource={articleSource}
             awareness={awareness}
-            canEdit={startEditAllowed}
-            collabBanner={collabBanner}
-            collabBannerLive={collabBannerLive}
+            canEdit={flags.canEdit}
             headingTitle={headingTitle}
             historyOpen={historyOpen}
             isOwner={flags.isOwner}
@@ -1060,34 +577,22 @@ export function EditorPage() {
             onCloseHistory={() => setHistoryOpen(false)}
             onCloseShare={() => setShareOpen(false)}
             onPersistAccess={(next) => {
-              void persistEditorAccess(
-                note,
-                next,
-                {
-                  setAccessDraft,
-                  setNote,
-                  setSaveError,
-                },
-                mutationGuard,
-              );
+              void persistEditorAccess(note, next, {
+                setAccessDraft,
+                setNote,
+                setSaveError,
+              });
             }}
             onSplitScroll={(ratio) => {
               applySplitScroll(ratio, splitScrollLock, setSplitScroll);
             }}
-            previewBanner={
-              localSaveBanner
-                ? [previewBanner, localSaveBanner].filter(Boolean).join(" · ")
-                : previewBanner
-            }
             ready={ready}
             saveError={saveError}
             shareOpen={shareOpen}
             splitScroll={splitScroll}
-            taskNoteId={taskNoteId}
             user={user}
             usesInternalScroll={usesInternalScroll}
             viewMode={viewMode}
-            viewPhase={resolvedPhase}
             yMarkdown={yMarkdown}
           />
         ) : null
@@ -1101,13 +606,10 @@ function bindEditorHeader(input: {
   folder: string;
   viewMode: EditorMode;
   canEdit: boolean;
-  headerVisible: boolean;
-  serverMutationsVisible: boolean;
-  awareness: NoteCollabSession["awareness"] | undefined;
+  awareness: YjsSession["awareness"] | undefined;
   isOwner: boolean;
-  session: import("../lib/offline-session.ts").SessionSnapshot;
   setHeader: AppShellContext["setHeader"];
-  onRequestEdit: (mode: EditorMode) => void;
+  setMode: (mode: EditorMode) => void;
   setFolder: (folder: string) => void;
   setSaveError: (error: string | null) => void;
   setNote: (note: Note) => void;
@@ -1120,44 +622,32 @@ function bindEditorHeader(input: {
     return;
   }
   input.setHeader({
-    actions: input.headerVisible ? (
+    actions: (
       <EditorModeSwitch
-        canEdit={input.canEdit || input.viewMode !== "preview"}
-        onChange={input.onRequestEdit}
+        canEdit={input.canEdit}
+        onChange={(next) =>
+          changeEditorMode(input.canEdit, next, input.setMode)
+        }
         value={input.viewMode}
       />
-    ) : null,
-    end: input.serverMutationsVisible ? (
+    ),
+    end: (
       <EditorHeaderEnd
         awareness={input.awareness}
         folder={input.folder}
         folderId={input.note.folderId}
         isOwner={input.isOwner}
         onFolderBlur={() => {
-          void persistEditorFolder(
-            input.note,
-            input.folder,
-            normalizeFolder,
-            {
-              setAccessDraft: input.setAccessDraft,
-              setFolder: input.setFolder,
-              setNote: input.setNote,
-              setSaveError: input.setSaveError,
-            },
-            () => input.serverMutationsVisible,
-          );
+          void persistEditorFolder(input.note, input.folder, normalizeFolder, {
+            setAccessDraft: input.setAccessDraft,
+            setFolder: input.setFolder,
+            setNote: input.setNote,
+            setSaveError: input.setSaveError,
+          });
         }}
         onFolderChange={input.setFolder}
         onHistory={() => input.setHistoryOpen(true)}
         onShare={() => input.setShareOpen(true)}
-      />
-    ) : (
-      <FolderPopover
-        folder={input.folder}
-        folderId={input.note.folderId}
-        isOwner={false}
-        onFolderBlur={() => undefined}
-        onFolderChange={() => undefined}
       />
     ),
     folder: input.folder,

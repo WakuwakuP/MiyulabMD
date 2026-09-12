@@ -2,7 +2,6 @@ import type { SessionUser } from "@miyulabmd/shared";
 import { type FormEvent, useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import type { AuthConfig } from "../../lib/api.ts";
-import { beginLogout } from "../../lib/offline-session.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -76,14 +75,7 @@ export function AccountMenu({ user, authConfig }: Props) {
               <MenuItem onClick={() => setOpen(false)} to="/settings">
                 設定
               </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setOpen(false);
-                  void beginLogout();
-                }}
-              >
-                ログアウト
-              </MenuItem>
+              <MenuItem href="/auth/logout">ログアウト</MenuItem>
             </>
           )}
           {!user && mockLogin && (

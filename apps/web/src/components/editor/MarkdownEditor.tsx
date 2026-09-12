@@ -12,11 +12,6 @@ import * as Y from "yjs";
 import { uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
-import {
-  registerEditorDrain,
-  unregisterEditorDrain,
-} from "../../lib/editor-drain.ts";
-import { createSourceEditorDrain } from "../../lib/source-editor-drain.ts";
 import { readEditorScrollPadPx } from "../../lib/visual-viewport.ts";
 import "../../styles/cm-highlight.css";
 import { ContextMenu } from "../notes/ContextMenu.tsx";
@@ -179,7 +174,6 @@ export function MarkdownEditor({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const composingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const onContextMenuRef = useRef<
     (event: MouseEvent, view: EditorView) => void
@@ -241,14 +235,6 @@ export function MarkdownEditor({
           onContextMenuRef.current(event, view);
         }),
         EditorView.domEventHandlers({
-          compositionend: () => {
-            composingRef.current = false;
-            return false;
-          },
-          compositionstart: () => {
-            composingRef.current = true;
-            return false;
-          },
           scroll(_event, view) {
             if (applyingScroll.current) {
               return false;
@@ -268,15 +254,6 @@ export function MarkdownEditor({
       viewRef.current = null;
     };
   }, [noteId, yText, awareness, readOnly, showLineNumbers]);
-
-  useEffect(() => {
-    const drain = createSourceEditorDrain({
-      composing: composingRef,
-      getView: () => viewRef.current,
-    });
-    registerEditorDrain(noteId, drain);
-    return () => unregisterEditorDrain(noteId, drain);
-  }, [noteId]);
 
   useEffect(() => {
     const view = viewRef.current;

@@ -19,9 +19,6 @@ NOTICE / ライセンス文言の保持が必要。
 | パッケージ                                       | 用途                     |
 | ------------------------------------------------ | ------------------------ |
 | [fast-diff](https://github.com/jhchen/fast-diff) | 差分計算（web / worker） |
-| [workbox-precaching](https://developer.chrome.com/docs/workbox) | PWA Service Worker（静的 precache） |
-| [workbox-routing](https://developer.chrome.com/docs/workbox) | PWA Service Worker（ルーティング） |
-| [workbox-strategies](https://developer.chrome.com/docs/workbox) | PWA Service Worker（NetworkOnly） |
 
 ### BSD-3-Clause
 
