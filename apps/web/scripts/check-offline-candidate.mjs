@@ -201,7 +201,13 @@ async function browser() {
             "storage-platform.spec.ts",
           ]),
     ]);
-    for (const name of ["offline-cache.ts", "note-read-session.ts"]) {
+    if (loaded.size === 0) {
+      throw new Error("The selected tests did not load any candidate module");
+    }
+    const required = specs.length
+      ? []
+      : ["offline-cache.ts", "note-read-session.ts"];
+    for (const name of required) {
       if (!loaded.has(normalizePath(path.join(webRoot, "src/lib", name)))) {
         throw new Error(`Candidate was not loaded: ${name}`);
       }
