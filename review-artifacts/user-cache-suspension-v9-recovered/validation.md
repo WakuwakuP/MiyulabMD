@@ -70,3 +70,55 @@ Webの過去の根拠（117 passed、exit 0）とは区別する。
 note-read-session.ts 8bc7b324065c126fc8590b1a1b2e8babbdff159add0e23329079e65d83fe5d73
 offline-cache.ts    4a1f88f52bca0ab86f2d54b1f2f0398430e68367ed7189248fb445f61e94db4e
 ```
+
+## D28修正の検証
+
+変更は canonical `offline-cache.ts` の `denyNote()` に限定し、直接呼び出しで
+共有同期拒否入口を使う分岐を追加した。以下をリポジトリルートから実行し、
+結果をここへ追記する。
+
+依存関係と指定ブラウザが未配置だったため、指定どおり先に導入した。
+
+```text
+pnpm install --frozen-lockfile
+exit 0
+pnpm --filter @miyulabmd/web test:browser:install
+exit 0
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser offline-direct-denial.spec.ts
+exit 0
+1 passed
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all
+exit 0
+candidate typecheck: passed
+candidate Biome: passed
+browser: 31 passed
+pnpm --filter @miyulabmd/web test
+exit 0
+117 passed
+git diff --check
+exit 0
+```
+
+最終候補ファイルのSHA256:
+
+```text
+offline-cache.ts    f80be6ed11b8e16fd02a539c23c813602c7c2f69de0e6de9d4c89a3e9b8f9581
+note-read-session.ts 8bc7b324065c126fc8590b1a1b2e8babbdff159add0e23329079e65d83fe5d73
+```
+
+## D28後の親による採用前検証
+
+親が完全な候補のハッシュ一致を確認し、次を再実行した。
+
+```text
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all
+exit 0
+candidate typecheck: passed
+candidate Biome: passed
+browser: 31 passed
+```
+
+検証対象は保存層`f80be6ed11b8e16fd02a539c23c813602c7c2f69de0e6de9d4c89a3e9b8f9581`、
+セッション`8bc7b324065c126fc8590b1a1b2e8babbdff159add0e23329079e65d83fe5d73`。
+候補レビューを終え、D29に従いライブ基盤へ反映する。
+画面・Service Worker・prefetchの完成を意味しない。

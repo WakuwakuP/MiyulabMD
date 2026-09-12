@@ -655,10 +655,8 @@ export async function openOfflineCache(
       if (suspendedUsers.has(userId)) {
         throw new Error("Offline cache is suspended");
       }
-      if (
-        orderingToken !== undefined &&
-        orderingToken !== currentNoteGeneration(userId, id)
-      ) {
+      const denialToken = orderingToken ?? enterOfflineNoteDenial(userId, id);
+      if (denialToken !== currentNoteGeneration(userId, id)) {
         return;
       }
       try {
