@@ -1,0 +1,136 @@
+import { expect, test } from "@playwright/test";
+import { note } from "./fixtures/note.ts";
+
+test("the note view restores a private cached note read-only when APIs are unreachable", async ({
+  page,
+}) => {
+  const displayedNote = {
+    ...note,
+    markdown: `${note.markdown}\n\n- [ ] オフラインでは変更しないタスク\n`,
+  };
+  let apiUnavailable = false;
+  const mutations: string[] = [];
+  const collaborationConnections: string[] = [];
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname.startsWith("/ws/notes/")) {
+      collaborationConnections.push(socket.url());
+    }
+  });
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!["GET", "HEAD"].includes(request.method())) {
+      mutations.push(`${request.method()} ${path}`);
+    }
+    if (apiUnavailable) {
+      await route.abort("internetdisconnected");
+      return;
+    }
+    switch (path) {
+      case "/api/me":
+        await route.fulfill({
+          json: {
+            user: {
+              displayName: "Alice",
+              email: "alice@example.test",
+              id: "alice",
+            },
+          },
+        });
+        return;
+      case "/api/auth/config":
+        await route.fulfill({ json: { access: false, mock: true } });
+        return;
+      case `/api/notes/${displayedNote.id}`:
+        await route.fulfill({ json: displayedNote });
+        return;
+      case "/api/article-sources":
+        await route.fulfill({ json: { sources: [] } });
+        return;
+      default:
+        await route.fulfill({
+          json: { error: "No test fixture for this API" },
+          status: 404,
+        });
+    }
+  });
+
+  await page.goto(`/n/${displayedNote.id}`);
+  await expect(
+    page.getByText("通信なしでも読みたい本文。", { exact: true }),
+  ).toBeVisible();
+
+  // Wait for successful caching through its public API, without depending on
+  // database names, object stores, OPFS paths, or background write timing.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async ({ moduleUrl, id }) => {
+          const { openOfflineCache } = await import(moduleUrl);
+          const cache = await openOfflineCache({ userId: "alice" });
+          try {
+            return (await cache.getNote(id))?.note ?? null;
+          } finally {
+            cache.close();
+          }
+        },
+        {
+          id: displayedNote.id,
+          moduleUrl: "/src/lib/offline-cache.ts",
+        },
+      ),
+    )
+    .toEqual(displayedNote);
+
+  // Keep the Vite-served shell available to isolate data-layer recovery.
+  // Full offline navigation through the service worker is a separate test.
+  apiUnavailable = true;
+  await page.reload();
+
+  await expect(
+    page.getByText("通信なしでも読みたい本文。", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "キャッシュ" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { exact: true, name: "Edit" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("checkbox")).toBeDisabled();
+
+  // Hidden UI is not sufficient: every mutation must be stopped at dispatch.
+  const blocked = await page.evaluate(
+    async ({ moduleUrl, noteId }) => {
+      const api = await import(moduleUrl);
+      const operations = [
+        () => api.updateNote(noteId, { folder: "moved" }),
+        () => api.updateNote(noteId, { permission: "freely" }),
+        () => api.createNote({ markdown: "# New note" }),
+        () => api.deleteNote(noteId),
+        () => api.renameFolder("folder-1", "Renamed"),
+        () =>
+          api.updateFolderAccess({ folderId: "folder-1", readScope: "self" }),
+        () => api.restoreNoteRevision(noteId, "revision-1"),
+        () =>
+          api.uploadImage(
+            noteId,
+            new File(["test"], "image.png", { type: "image/png" }),
+          ),
+      ];
+      return Promise.all(
+        operations.map(async (operation) => {
+          try {
+            await operation();
+            return "not-blocked";
+          } catch (error) {
+            return error instanceof Error ? error.name : "UnknownError";
+          }
+        }),
+      );
+    },
+    { moduleUrl: "/src/lib/api.ts", noteId: displayedNote.id },
+  );
+  expect(blocked).toEqual(new Array(8).fill("ReadOnlyViewingError"));
+  expect(mutations).toEqual([]);
+  expect(collaborationConnections).toEqual([]);
+});

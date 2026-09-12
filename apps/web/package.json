@@ -10,6 +10,8 @@
     "dev": "vite",
     "storybook": "storybook dev -p 6006",
     "test": "node --experimental-strip-types --test src/lib/*.test.ts src/pages/*.test.ts src/components/editor/*.test.ts",
+    "test:browser": "node scripts/playwright.mjs test",
+    "test:browser:install": "node scripts/playwright.mjs install chromium",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -50,6 +52,7 @@
     "yjs": "^13.6.32"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@storybook/addon-a11y": "^9.1.20",
     "@storybook/addon-docs": "^9.1.20",
     "@storybook/react-vite": "^9.1.20",

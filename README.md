@@ -61,6 +61,41 @@ Worker 単体で API だけ試す場合は `pnpm dev:worker` のみでよい。O
 
 URL はこのリポジトリ用の固定名。同じチェックアウトで `pnpm dev` と単独起動を重ねないこと。終了後も portless の共有プロキシは残る。他のプロジェクトでも使っていない場合のみ `pnpm exec portless proxy stop` で停止できる。
 
+## ブラウザテスト
+
+既存の Node.js テストとは別に、Playwright Test で実際の IndexedDB / OPFS を検証する。
+
+```bash
+# pnpm install 後、初回または Playwright 更新時に実行
+pnpm --filter @miyulabmd/web test:browser:install
+
+pnpm --filter @miyulabmd/web test:browser
+# 個別のテストだけ実行する場合
+pnpm --filter @miyulabmd/web test:browser storage-platform.spec.ts
+```
+
+両コマンドは `apps/web/scripts/playwright.mjs` を通し、専用 Chromium を `apps/web/node_modules/.cache/playwright/` に保存・参照する。共有ブラウザキャッシュを使用せず、自動 GC も無効にする。通常の Chrome / Edge や他プロジェクトのブラウザに影響させないため、直接 `playwright install` を実行せず上記コマンドを使う。新しい worktree ではブラウザを別途インストールする。
+
+テストは `127.0.0.1:4174` で専用の Vite サーバーを自動起動・終了する。起動済みの別サーバーは再利用しない。現在のストレージテストはアプリの起動処理を読み込まない専用ページを使い、Worker やログインを必要としない。PWA の Service Worker・本番 SSR 経路を含む受け入れテストの代わりではない。
+
+各テストは独立したブラウザコンテキストで実行する。失敗時のトレース等は `apps/web/test-results/` に保存され、Git 管理外となる。CI でブラウザテストを実行する場合も、専用ブラウザのインストールを先に行う。
+
+### オフライン実装候補のレビュー
+
+未採用の実装は、候補ディレクトリ内の `offline-cache.ts`、`note-read-session.ts` を直接編集して検証できる。同じディレクトリの追加 `.ts` ファイルも `src/lib/` の候補として扱う。
+
+```bash
+# リポジトリのルートで実行。候補ファイルはこのディレクトリ自体に保持する。
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/offline-candidate all
+# 個別の検証
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/offline-candidate browser user-cache-suspension.spec.ts
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/offline-candidate typecheck
+```
+
+このランナーは実装用の `src/` を変更・復元しない。ブラウザ検証は候補を Vite の読み込み時に差し替え、型チェックは候補と同じ内容を検証専用ツリーへ配置して行う。候補への書き戻しは行わず、検証前後で候補と元ソースが変わっていないことを確認する。候補の SHA-256 を出力するので、検証結果と併せて記録する。ブラウザは専用キャッシュを使用し、Vite は空きポートで起動する。検証専用ツリーは `apps/web/node_modules/.cache/offline-candidate/` 配下に作成し、終了時に削除する。
+
+`all` は候補の型チェック・Biome・オフライン基盤のブラウザテストを実行する。未接続の画面用テストは対象外。既存ユニットテストは別途実行する。レビュー完了までは候補ファイルを正本として保持し、実装用ファイルから候補へコピーし直さない。
+
 ## CI / デプロイ
 
 フォークや別アカウントでは、手元から対話スクリプトで Cloudflare（Access / Worker / D1 / R2）と GitHub Actions の Secrets / Variables を揃えられる。`wrangler.toml` は共通のままなので、upstream への追従でコンフリクトしにくい。

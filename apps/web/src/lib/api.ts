@@ -15,6 +15,7 @@ import type {
   PermissionPreset,
   SessionUser,
 } from "@miyulabmd/shared";
+import { requestJson } from "./api-transport.ts";
 import { notifyArticleChanged } from "./article-changed.ts";
 import type { OgPreview } from "./embeds.ts";
 
@@ -37,6 +38,8 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
 
+export { ApiCommunicationError } from "./api-transport.ts";
+
 async function parseError(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { error?: string };
@@ -52,20 +55,22 @@ export type AuthConfig = {
 };
 
 export async function fetchAuthConfig(): Promise<AuthConfig> {
-  const res = await fetch("/api/auth/config", fetchOpts);
-  if (!res.ok) {
+  const result = await requestJson<AuthConfig>("/api/auth/config", fetchOpts);
+  if (!result.ok) {
     return { access: false, mock: true };
   }
-  return (await res.json()) as AuthConfig;
+  return result.data;
 }
 
 export async function fetchMe(): Promise<SessionUser | null> {
-  const res = await fetch("/api/me", fetchOpts);
-  if (!res.ok) {
+  const result = await requestJson<{ user: SessionUser | null }>(
+    "/api/me",
+    fetchOpts,
+  );
+  if (!result.ok) {
     return null;
   }
-  const body = (await res.json()) as { user: SessionUser | null };
-  return body.user;
+  return result.data.user;
 }
 
 export async function fetchNotes(): Promise<NoteSummary[]> {
@@ -77,12 +82,14 @@ export async function fetchNotes(): Promise<NoteSummary[]> {
   return body.notes;
 }
 
-export async function fetchNote(id: string): Promise<ApiResult<Note>> {
-  const res = await fetch(`/api/notes/${id}`, fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as Note, ok: true };
+export function fetchNote(
+  id: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiResult<Note>> {
+  return requestJson<Note>(`/api/notes/${id}`, {
+    ...fetchOpts,
+    signal: options.signal,
+  });
 }
 
 export async function updateTaskCheckbox(
