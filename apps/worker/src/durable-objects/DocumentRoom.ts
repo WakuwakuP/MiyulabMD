@@ -42,6 +42,7 @@ import {
 import {
   type AgentCursor,
   applyTextDiff,
+  evaluateConditionalMarkdownUpdate,
   excerptAround,
   type InsertPosition,
   planInsert,
@@ -290,6 +291,53 @@ export class DocumentRoom extends DurableObject<Env> {
     const ytext = this.requireDoc().getText("markdown");
     applyTextDiff(ytext, markdown, APPLY_MARKDOWN_ORIGIN);
     this.scheduleSnapshotPersist();
+  }
+
+  /** REST PATCH: apply markdown and wait for Yjs + D1 snapshot persistence. */
+  async applyMarkdownAndPersist(
+    markdown: string,
+    noteId?: string,
+  ): Promise<void> {
+    await this.ensureInitialized(noteId);
+    const doc = this.requireDoc();
+    const ytext = doc.getText("markdown");
+    applyTextDiff(ytext, markdown, APPLY_MARKDOWN_ORIGIN);
+    await this.persistYjsState(doc);
+    await this.flushSnapshotToD1();
+  }
+
+  async applyMarkdownConditional(
+    noteId: string,
+    expectedMarkdown: string | undefined,
+    markdown: string,
+  ): Promise<
+    | { ok: true; noop: boolean }
+    | { ok: false; code: "content_conflict"; error: string }
+  > {
+    await this.ensureInitialized(noteId);
+    const doc = this.requireDoc();
+    const ytext = doc.getText("markdown");
+    const current = ytext.toString();
+    const decision = evaluateConditionalMarkdownUpdate(
+      current,
+      expectedMarkdown,
+      markdown,
+    );
+    if (decision.action === "noop") {
+      return { noop: true, ok: true };
+    }
+    if (decision.action === "conflict") {
+      return {
+        code: "content_conflict",
+        error: "Note content changed since expectedMarkdown",
+        ok: false,
+      };
+    }
+
+    applyTextDiff(ytext, markdown, APPLY_MARKDOWN_ORIGIN);
+    await this.persistYjsState(doc);
+    await this.flushSnapshotToD1();
+    return { noop: false, ok: true };
   }
 
   async getMarkdown(noteId?: string): Promise<string> {

@@ -15,6 +15,10 @@ import { fetchOgPreview, uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
 import {
+  registerEditorDrain,
+  unregisterEditorDrain,
+} from "../../lib/editor-drain.ts";
+import {
   canonicalizeEditorMarkdown,
   normalizeEmbedMarkdown,
   youtubeId,
@@ -33,6 +37,7 @@ import {
   readRemoteMarkdownCursors,
   writeMarkdownCursor,
 } from "../../lib/rich-awareness.ts";
+import { createRichEditorDrain } from "../../lib/rich-editor-drain.ts";
 import {
   readEditorScrollPadPx,
   scrollDeltaForPaddedRect,
@@ -439,6 +444,29 @@ export function RichMarkdownEditor({
   useEffect(() => {
     editor?.setEditable(!readOnly);
   }, [editor, readOnly]);
+
+  useEffect(() => {
+    const drain = createRichEditorDrain({
+      flushIfReady: () => {
+        const current = editorRef.current;
+        if (current) {
+          flushLocal(current);
+        }
+      },
+      isComposing: () => composing.current,
+      isPendingRemote: () => pendingRemote.current,
+      readDraft: () => {
+        const current = editorRef.current;
+        const source = lastYMarkdown.current || yText.toString();
+        if (!current) {
+          return source;
+        }
+        return withClosedFrontmatter(source, editorMarkdown(current));
+      },
+    });
+    registerEditorDrain(noteId, drain);
+    return () => unregisterEditorDrain(noteId, drain);
+  }, [noteId, yText]);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [linkModal, setLinkModal] = useState<"card" | "inline" | null>(null);

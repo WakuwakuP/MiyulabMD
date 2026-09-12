@@ -33,17 +33,182 @@ function ogFallbackOrigin(): string | null {
   return OG_FALLBACK_ORIGIN;
 }
 
-export type ApiResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; status: number; error: string };
+export type ApiFailure =
+  | { ok: false; kind: "network"; status: 0; error: string }
+  | { ok: false; kind: "aborted"; status: 0; error: string }
+  | { ok: false; kind: "http"; status: number; error: string; code?: string }
+  | {
+      ok: false;
+      kind: "invalid-response";
+      status: number;
+      error: string;
+    };
 
-async function parseError(res: Response): Promise<string> {
+export type ApiResult<T> = { ok: true; data: T } | ApiFailure;
+
+export type ApiResponseFormat<T> =
+  | { kind: "json"; parse: (body: unknown) => T | null }
+  | { kind: "empty" };
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function parseErrorPayload(
+  text: string,
+  statusText: string,
+): { error: string; code?: string } {
   try {
-    const body = (await res.json()) as { error?: string };
-    return body.error ?? res.statusText;
+    const body = JSON.parse(text) as { error?: string; code?: string };
+    return {
+      code: typeof body.code === "string" ? body.code : undefined,
+      error: body.error ?? statusText,
+    };
   } catch {
-    return res.statusText;
+    return { error: statusText };
   }
+}
+
+function looksLikeHtml(text: string): boolean {
+  const trimmed = text.trimStart().toLowerCase();
+  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: single REST transport entry
+export async function apiRequest<T>(
+  url: string,
+  // biome-ignore lint/style/useDefaultParameterLast: optional init before format keeps call sites readable
+  init: RequestInit = {},
+  format: ApiResponseFormat<T>,
+): Promise<ApiResult<T>> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (error) {
+    if (isAbortError(error)) {
+      return {
+        error: "Request aborted",
+        kind: "aborted",
+        ok: false,
+        status: 0,
+      };
+    }
+    return {
+      error: error instanceof Error ? error.message : "Network error",
+      kind: "network",
+      ok: false,
+      status: 0,
+    };
+  }
+
+  if (format.kind === "empty") {
+    if (!res.ok) {
+      let text = "";
+      try {
+        text = await res.text();
+      } catch (error) {
+        if (isAbortError(error)) {
+          return {
+            error: "Request aborted",
+            kind: "aborted",
+            ok: false,
+            status: 0,
+          };
+        }
+        return {
+          error: "Failed to read response",
+          kind: "network",
+          ok: false,
+          status: 0,
+        };
+      }
+      const payload = parseErrorPayload(text, res.statusText);
+      return {
+        code: payload.code,
+        error: payload.error,
+        kind: "http",
+        ok: false,
+        status: res.status,
+      };
+    }
+    return { data: undefined as T, ok: true };
+  }
+
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (error) {
+    if (isAbortError(error)) {
+      return {
+        error: "Request aborted",
+        kind: "aborted",
+        ok: false,
+        status: 0,
+      };
+    }
+    return {
+      error: "Failed to read response",
+      kind: "network",
+      ok: false,
+      status: 0,
+    };
+  }
+
+  if (!res.ok) {
+    const payload = parseErrorPayload(text, res.statusText);
+    return {
+      code: payload.code,
+      error: payload.error,
+      kind: "http",
+      ok: false,
+      status: res.status,
+    };
+  }
+
+  if (!text.trim()) {
+    return {
+      error: "Empty response body",
+      kind: "invalid-response",
+      ok: false,
+      status: res.status,
+    };
+  }
+
+  if (looksLikeHtml(text)) {
+    return {
+      error: "Non-JSON response",
+      kind: "invalid-response",
+      ok: false,
+      status: res.status,
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {
+      error: "Invalid JSON",
+      kind: "invalid-response",
+      ok: false,
+      status: res.status,
+    };
+  }
+
+  const data = format.parse(parsed);
+  if (data === null) {
+    return {
+      error: "Invalid response schema",
+      kind: "invalid-response",
+      ok: false,
+      status: res.status,
+    };
+  }
+
+  return { data, ok: true };
 }
 
 export type AuthConfig = {
@@ -51,54 +216,90 @@ export type AuthConfig = {
   mock: boolean;
 };
 
-export async function fetchAuthConfig(): Promise<AuthConfig> {
-  const res = await fetch("/api/auth/config", fetchOpts);
-  if (!res.ok) {
-    return { access: false, mock: true };
+function parseAuthConfig(body: unknown): AuthConfig | null {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "access" in body &&
+    typeof (body as AuthConfig).access === "boolean" &&
+    "mock" in body &&
+    typeof (body as AuthConfig).mock === "boolean"
+  ) {
+    return body as AuthConfig;
   }
-  return (await res.json()) as AuthConfig;
+  return null;
 }
 
-export async function fetchMe(): Promise<SessionUser | null> {
-  const res = await fetch("/api/me", fetchOpts);
-  if (!res.ok) {
-    return null;
-  }
-  const body = (await res.json()) as { user: SessionUser | null };
-  return body.user;
+export async function fetchAuthConfig(): Promise<ApiResult<AuthConfig>> {
+  return await apiRequest("/api/auth/config", fetchOpts, {
+    kind: "json",
+    parse: parseAuthConfig,
+  });
 }
 
-export async function fetchNotes(): Promise<NoteSummary[]> {
-  const res = await fetch("/api/notes", fetchOpts);
-  if (!res.ok) {
-    throw new Error(await parseError(res));
+function parseMeBody(body: unknown): { user: SessionUser | null } | null {
+  if (typeof body === "object" && body !== null && "user" in body) {
+    return body as { user: SessionUser | null };
   }
-  const body = (await res.json()) as { notes: NoteSummary[] };
-  return body.notes;
+  return null;
+}
+
+export async function fetchMe(): Promise<
+  ApiResult<{ user: SessionUser | null }>
+> {
+  return await apiRequest("/api/me", fetchOpts, {
+    kind: "json",
+    parse: parseMeBody,
+  });
+}
+
+function parseNotesBody(body: unknown): NoteSummary[] | null {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "notes" in body &&
+    Array.isArray((body as { notes: unknown }).notes)
+  ) {
+    return (body as { notes: NoteSummary[] }).notes;
+  }
+  return null;
+}
+
+export async function fetchNotes(): Promise<ApiResult<NoteSummary[]>> {
+  return await apiRequest("/api/notes", fetchOpts, {
+    kind: "json",
+    parse: parseNotesBody,
+  });
 }
 
 export async function fetchNote(id: string): Promise<ApiResult<Note>> {
-  const res = await fetch(`/api/notes/${id}`, fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as Note, ok: true };
+  return await apiRequest(`/api/notes/${id}`, fetchOpts, {
+    kind: "json",
+    parse: (body) =>
+      typeof body === "object" && body !== null ? (body as Note) : null,
+  });
 }
 
 export async function updateTaskCheckbox(
   id: string,
   input: TaskCheckboxUpdate,
 ): Promise<ApiResult<{ ok: true; checked: boolean }>> {
-  const res = await fetch(`/api/notes/${id}/task-checkbox`, {
-    ...fetchOpts,
-    body: JSON.stringify(input),
-    headers: { "Content-Type": "application/json" },
-    method: "PATCH",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: await res.json(), ok: true };
+  return await apiRequest(
+    `/api/notes/${id}/task-checkbox`,
+    {
+      ...fetchOpts,
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as { ok: true; checked: boolean })
+          : null,
+    },
+  );
 }
 
 export async function fetchNoteHistory(
@@ -113,70 +314,101 @@ export async function fetchNoteHistory(
     params.set("before", String(query.before));
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  const res = await fetch(`/api/notes/${id}/history${suffix}`, fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as NoteHistoryPage, ok: true };
+  return await apiRequest(`/api/notes/${id}/history${suffix}`, fetchOpts, {
+    kind: "json",
+    parse: (body) =>
+      typeof body === "object" && body !== null
+        ? (body as NoteHistoryPage)
+        : null,
+  });
 }
 
 export async function fetchNoteRevision(
   id: string,
   revisionId: string,
 ): Promise<ApiResult<NoteRevisionBody>> {
-  const res = await fetch(
+  return await apiRequest(
     `/api/notes/${id}/revisions/${revisionId}`,
     fetchOpts,
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as NoteRevisionBody)
+          : null,
+    },
   );
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as NoteRevisionBody, ok: true };
 }
 
 export async function restoreNoteRevision(
   id: string,
   revisionId: string,
 ): Promise<ApiResult<NoteRevisionRestore>> {
-  const res = await fetch(`/api/notes/${id}/revisions/${revisionId}/restore`, {
-    ...fetchOpts,
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as NoteRevisionRestore, ok: true };
+  return await apiRequest(
+    `/api/notes/${id}/revisions/${revisionId}/restore`,
+    { ...fetchOpts, method: "POST" },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as NoteRevisionRestore)
+          : null,
+    },
+  );
 }
 
 export async function createNote(
   input: CreateNoteInput = {},
 ): Promise<ApiResult<Note>> {
-  const res = await fetch("/api/notes", {
-    ...fetchOpts,
-    body: JSON.stringify(input),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
+  const result = await apiRequest<Note>(
+    "/api/notes",
+    {
+      ...fetchOpts,
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null ? (body as Note) : null,
+    },
+  );
+  if (result.ok) {
+    notifyArticleChanged();
   }
-  return { data: (await res.json()) as Note, ok: true };
+  return result;
+}
+
+function parseSessionUserBody(body: unknown): SessionUser | null {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "user" in body &&
+    typeof (body as { user: unknown }).user === "object" &&
+    (body as { user: SessionUser | null }).user !== null
+  ) {
+    return (body as { user: SessionUser }).user;
+  }
+  return null;
 }
 
 export async function updateProfile(
   displayName: string | null,
 ): Promise<ApiResult<SessionUser>> {
-  const res = await fetch("/api/me", {
-    ...fetchOpts,
-    body: JSON.stringify({ displayName }),
-    headers: { "Content-Type": "application/json" },
-    method: "PATCH",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  const body = (await res.json()) as { user: SessionUser };
-  return { data: body.user, ok: true };
+  return await apiRequest(
+    "/api/me",
+    {
+      ...fetchOpts,
+      body: JSON.stringify({ displayName }),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    {
+      kind: "json",
+      parse: parseSessionUserBody,
+    },
+  );
 }
 
 export async function updateNote(
@@ -184,6 +416,9 @@ export async function updateNote(
   patch: {
     title?: string;
     markdown?: string;
+    expectedMarkdown?: string;
+    clientDraftId?: string;
+    draftOwnerId?: string;
     folder?: string;
     permission?: PermissionPreset;
     inheritAccess?: boolean;
@@ -192,89 +427,117 @@ export async function updateNote(
     grants?: AccessGrantInput[];
   },
 ): Promise<ApiResult<Note>> {
-  const res = await fetch(`/api/notes/${id}`, {
-    ...fetchOpts,
-    body: JSON.stringify(patch),
-    headers: { "Content-Type": "application/json" },
-    method: "PATCH",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
+  const result = await apiRequest<Note>(
+    `/api/notes/${id}`,
+    {
+      ...fetchOpts,
+      body: JSON.stringify(patch),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null ? (body as Note) : null,
+    },
+  );
+  if (result.ok) {
+    notifyArticleChanged();
   }
-  notifyArticleChanged();
-  return { data: (await res.json()) as Note, ok: true };
+  return result;
+}
+
+function parseFoldersBody(body: unknown): FolderRecord[] | null {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "folders" in body &&
+    Array.isArray((body as { folders: unknown }).folders)
+  ) {
+    return (body as { folders: FolderRecord[] }).folders;
+  }
+  return null;
 }
 
 export async function fetchFolderTree(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/tree", fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  const body = (await res.json()) as { folders: FolderRecord[] };
-  return { data: body.folders, ok: true };
+  return await apiRequest("/api/folders/tree", fetchOpts, {
+    kind: "json",
+    parse: parseFoldersBody,
+  });
 }
 
 export async function fetchPublicFolders(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/public", fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  const body = (await res.json()) as { folders: FolderRecord[] };
-  return { data: body.folders, ok: true };
+  return await apiRequest("/api/folders/public", fetchOpts, {
+    kind: "json",
+    parse: parseFoldersBody,
+  });
 }
 
 export async function fetchSharedFolders(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/shared", fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  const body = (await res.json()) as { folders: FolderRecord[] };
-  return { data: body.folders, ok: true };
+  return await apiRequest("/api/folders/shared", fetchOpts, {
+    kind: "json",
+    parse: parseFoldersBody,
+  });
 }
 
 export async function createFolder(input: {
   name: string;
   parentId?: string | null;
 }): Promise<ApiResult<FolderAccess>> {
-  const res = await fetch("/api/folders", {
-    ...fetchOpts,
-    body: JSON.stringify(input),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as FolderAccess, ok: true };
+  return await apiRequest(
+    "/api/folders",
+    {
+      ...fetchOpts,
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as FolderAccess)
+          : null,
+    },
+  );
 }
 
 export async function fetchFolder(
   id?: string | null,
 ): Promise<ApiResult<FolderAccess>> {
-  const res = await fetch(
+  return await apiRequest(
     id ? `/api/folders/${id}` : "/api/folders",
     fetchOpts,
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as FolderAccess)
+          : null,
+    },
   );
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as FolderAccess, ok: true };
 }
 
 export async function renameFolder(
   id: string,
   name: string,
 ): Promise<ApiResult<FolderAccess>> {
-  const res = await fetch(`/api/folders/${id}`, {
-    ...fetchOpts,
-    body: JSON.stringify({ name }),
-    headers: { "Content-Type": "application/json" },
-    method: "PATCH",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as FolderAccess, ok: true };
+  return await apiRequest(
+    `/api/folders/${id}`,
+    {
+      ...fetchOpts,
+      body: JSON.stringify({ name }),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as FolderAccess)
+          : null,
+    },
+  );
 }
 
 export async function updateFolderAccess(input: {
@@ -284,20 +547,40 @@ export async function updateFolderAccess(input: {
   writeScope?: AccessScope;
   grants?: AccessGrantInput[];
 }): Promise<ApiResult<FolderAccess>> {
-  const res = await fetch("/api/folders", {
-    ...fetchOpts,
-    body: JSON.stringify(input),
-    headers: { "Content-Type": "application/json" },
-    method: "PATCH",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as FolderAccess, ok: true };
+  return await apiRequest(
+    "/api/folders",
+    {
+      ...fetchOpts,
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as FolderAccess)
+          : null,
+    },
+  );
 }
 
 const ogPreviewCache = new Map<string, OgPreview>();
 const ogPreviewInflight = new Map<string, Promise<ApiResult<OgPreview>>>();
+
+function parseOgPreview(body: unknown): OgPreview | null {
+  if (typeof body === "object" && body !== null && "url" in body) {
+    return body as OgPreview;
+  }
+  return null;
+}
+
+async function requestOgPreview(path: string, init: RequestInit) {
+  return await apiRequest<OgPreview>(path, init, {
+    kind: "json",
+    parse: parseOgPreview,
+  });
+}
 
 export function peekOgPreview(url: string): OgPreview | undefined {
   return ogPreviewCache.get(url);
@@ -333,23 +616,17 @@ export async function fetchOgPreview(
 
   const pending = (async () => {
     const path = `/api/og?url=${encodeURIComponent(url)}`;
-    let res = await fetch(path, fetchOpts);
+    let result = await requestOgPreview(path, fetchOpts);
     const fallbackOrigin = ogFallbackOrigin();
-    if (!res.ok && fallbackOrigin) {
-      res = await fetch(`${fallbackOrigin}${path}`, {
+    if (!result.ok && fallbackOrigin) {
+      result = await requestOgPreview(`${fallbackOrigin}${path}`, {
         credentials: "omit",
       });
     }
-    if (!res.ok) {
-      return {
-        error: await parseError(res),
-        ok: false as const,
-        status: res.status,
-      };
+    if (result.ok) {
+      ogPreviewCache.set(url, result.data);
     }
-    const data = (await res.json()) as OgPreview;
-    ogPreviewCache.set(url, data);
-    return { data, ok: true } as const;
+    return result;
   })().finally(() => {
     ogPreviewInflight.delete(url);
   });
@@ -364,41 +641,85 @@ export async function uploadImage(
 ): Promise<ApiResult<{ id: string; url: string }>> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`/api/notes/${noteId}/images`, {
-    ...fetchOpts,
-    body: form,
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as { id: string; url: string }, ok: true };
+  return await apiRequest(
+    `/api/notes/${noteId}/images`,
+    {
+      ...fetchOpts,
+      body: form,
+      method: "POST",
+    },
+    {
+      kind: "json",
+      parse: (body) => {
+        if (
+          typeof body === "object" &&
+          body !== null &&
+          "id" in body &&
+          "url" in body
+        ) {
+          return body as { id: string; url: string };
+        }
+        return null;
+      },
+    },
+  );
 }
 
-export async function deleteFolder(id: string): Promise<ApiResult<void>> {
-  const res = await fetch(`/api/folders/${id}`, {
-    ...fetchOpts,
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: undefined, ok: true };
+export type FolderDeletePayload = {
+  deletedFolderIds: string[];
+  deletedNoteIds: string[];
+};
+
+export async function deleteFolder(
+  id: string,
+): Promise<ApiResult<FolderDeletePayload>> {
+  return await apiRequest(
+    `/api/folders/${id}`,
+    {
+      ...fetchOpts,
+      method: "DELETE",
+    },
+    {
+      kind: "json",
+      parse: (body) => {
+        if (
+          typeof body === "object" &&
+          body !== null &&
+          "deletedNoteIds" in body &&
+          "deletedFolderIds" in body &&
+          Array.isArray(body.deletedNoteIds) &&
+          Array.isArray(body.deletedFolderIds) &&
+          body.deletedNoteIds.every((item) => typeof item === "string") &&
+          body.deletedFolderIds.every((item) => typeof item === "string")
+        ) {
+          return body as FolderDeletePayload;
+        }
+        return null;
+      },
+    },
+  );
 }
 
 export async function deleteNote(id: string): Promise<ApiResult<void>> {
-  const res = await fetch(`/api/notes/${id}`, {
-    ...fetchOpts,
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: undefined, ok: true };
+  return await apiRequest(
+    `/api/notes/${id}`,
+    {
+      ...fetchOpts,
+      method: "DELETE",
+    },
+    { kind: "empty" },
+  );
 }
 
 export async function logout(): Promise<void> {
-  await fetch("/auth/logout", { ...fetchOpts, method: "POST" });
+  // Best-effort cookie clear; full teardown is offline-session coordinator (#93).
+  await apiRequest(
+    "/auth/logout",
+    { ...fetchOpts, method: "POST" },
+    {
+      kind: "empty",
+    },
+  );
 }
 
 export type ApiTokenSummary = {
@@ -412,28 +733,44 @@ export type ApiTokenCreated = ApiTokenSummary & {
   token: string;
 };
 
-export async function fetchTokens(): Promise<ApiResult<ApiTokenSummary[]>> {
-  const res = await fetch("/api/tokens", fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
+function parseTokensBody(body: unknown): ApiTokenSummary[] | null {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "tokens" in body &&
+    Array.isArray((body as { tokens: unknown }).tokens)
+  ) {
+    return (body as { tokens: ApiTokenSummary[] }).tokens;
   }
-  const body = (await res.json()) as { tokens: ApiTokenSummary[] };
-  return { data: body.tokens, ok: true };
+  return null;
+}
+
+export async function fetchTokens(): Promise<ApiResult<ApiTokenSummary[]>> {
+  return await apiRequest("/api/tokens", fetchOpts, {
+    kind: "json",
+    parse: parseTokensBody,
+  });
 }
 
 export async function createToken(
   name: string,
 ): Promise<ApiResult<ApiTokenCreated>> {
-  const res = await fetch("/api/tokens", {
-    ...fetchOpts,
-    body: JSON.stringify({ name }),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as ApiTokenCreated, ok: true };
+  return await apiRequest(
+    "/api/tokens",
+    {
+      ...fetchOpts,
+      body: JSON.stringify({ name }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as ApiTokenCreated)
+          : null,
+    },
+  );
 }
 
 export type ArticleSourceWrite = {
@@ -445,94 +782,121 @@ export type ArticleSourceWrite = {
   webhookAuthorization?: string | null;
 };
 
+function parseArticleSourcesBody(body: unknown): ArticleSource[] | null {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "sources" in body &&
+    Array.isArray((body as { sources: unknown }).sources)
+  ) {
+    return (body as { sources: ArticleSource[] }).sources;
+  }
+  return null;
+}
+
 export async function fetchArticleSources(): Promise<
   ApiResult<ArticleSource[]>
 > {
-  const res = await fetch("/api/article-sources", fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  const body = (await res.json()) as { sources: ArticleSource[] };
-  return { data: body.sources, ok: true };
+  return await apiRequest("/api/article-sources", fetchOpts, {
+    kind: "json",
+    parse: parseArticleSourcesBody,
+  });
 }
 
 export async function fetchArticleSourceStatus(): Promise<
   ApiResult<ArticleSourceStatus>
 > {
-  const res = await fetch("/api/article-sources/status", fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as ArticleSourceStatus, ok: true };
+  return await apiRequest("/api/article-sources/status", fetchOpts, {
+    kind: "json",
+    parse: (body) =>
+      typeof body === "object" && body !== null
+        ? (body as ArticleSourceStatus)
+        : null,
+  });
 }
 
 export async function createArticleSource(
   input: ArticleSourceWrite,
 ): Promise<ApiResult<ArticleSource>> {
-  const res = await fetch("/api/article-sources", {
-    ...fetchOpts,
-    body: JSON.stringify(input),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
+  const result = await apiRequest<ArticleSource>(
+    "/api/article-sources",
+    {
+      ...fetchOpts,
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as ArticleSource)
+          : null,
+    },
+  );
+  if (result.ok) {
+    notifyArticleChanged();
   }
-  notifyArticleChanged();
-  return { data: (await res.json()) as ArticleSource, ok: true };
+  return result;
 }
 
 export async function updateArticleSource(
   id: string,
   input: ArticleSourceWrite,
 ): Promise<ApiResult<ArticleSource>> {
-  const res = await fetch(`/api/article-sources/${id}`, {
-    ...fetchOpts,
-    body: JSON.stringify(input),
-    headers: { "Content-Type": "application/json" },
-    method: "PATCH",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
+  const result = await apiRequest<ArticleSource>(
+    `/api/article-sources/${id}`,
+    {
+      ...fetchOpts,
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    {
+      kind: "json",
+      parse: (body) =>
+        typeof body === "object" && body !== null
+          ? (body as ArticleSource)
+          : null,
+    },
+  );
+  if (result.ok) {
+    notifyArticleChanged();
   }
-  notifyArticleChanged();
-  return { data: (await res.json()) as ArticleSource, ok: true };
+  return result;
 }
 
 export async function deleteArticleSource(
   id: string,
 ): Promise<ApiResult<void>> {
-  const res = await fetch(`/api/article-sources/${id}`, {
-    ...fetchOpts,
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
+  const result = await apiRequest<void>(
+    `/api/article-sources/${id}`,
+    { ...fetchOpts, method: "DELETE" },
+    { kind: "empty" },
+  );
+  if (result.ok) {
+    notifyArticleChanged();
   }
-  notifyArticleChanged();
-  return { data: undefined, ok: true };
+  return result;
 }
 
 export async function dispatchArticleSource(
   id: string,
 ): Promise<ApiResult<void>> {
-  const res = await fetch(`/api/article-sources/${id}/dispatch`, {
-    ...fetchOpts,
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: undefined, ok: true };
+  return await apiRequest(
+    `/api/article-sources/${id}/dispatch`,
+    { ...fetchOpts, method: "POST" },
+    { kind: "empty" },
+  );
 }
 
 export async function revokeToken(id: string): Promise<ApiResult<void>> {
-  const res = await fetch(`/api/tokens/${id}`, {
-    ...fetchOpts,
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: undefined, ok: true };
+  return await apiRequest(
+    `/api/tokens/${id}`,
+    {
+      ...fetchOpts,
+      method: "DELETE",
+    },
+    { kind: "empty" },
+  );
 }

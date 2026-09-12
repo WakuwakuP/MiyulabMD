@@ -128,6 +128,18 @@ CREATE TABLE note_revisions (
 CREATE INDEX notes_owner_id_idx ON notes (owner_id);
 CREATE INDEX note_edit_events_note_created_idx ON note_edit_events (note_id, created_at);
 CREATE INDEX note_revisions_note_created_idx ON note_revisions (note_id, created_at);
+
+CREATE TABLE note_create_requests (
+  owner_id TEXT NOT NULL,
+  client_draft_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  deleted_at INTEGER,
+  PRIMARY KEY (owner_id, client_draft_id)
+);
+
+CREATE INDEX note_create_requests_note_id_idx ON note_create_requests (note_id);
 CREATE INDEX article_sources_owner_id_idx ON article_sources (owner_id);
 CREATE INDEX notes_owner_folder_idx ON notes (owner_id, folder);
 CREATE UNIQUE INDEX access_grants_target_email_idx ON access_grants (target_kind, target_key, email);

@@ -22,13 +22,25 @@ import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { peekFolder, peekNotes } from "../lib/list-cache.ts";
+import { canCreateLocalDraft } from "../lib/home-draft-list.ts";
+import {
+  getNotesLoadState,
+  type NotesLoadState,
+  peekFolder,
+  peekNotes,
+} from "../lib/list-cache.ts";
+import {
+  getSessionSnapshot,
+  subscribeSession,
+} from "../lib/offline-session.ts";
 import {
   type ConfirmState,
   confirmCopy,
   handleItemMenu,
   headerFolderFor,
   homeListFlags,
+  homeOfflineCreateMessage,
+  homeRemoteMutationsBlocked,
   inheritLabelFor,
   type MenuState,
   openFolderShare,
@@ -48,12 +60,16 @@ function HomeHeaderEnd({
   canAdmin,
   creating,
   showEnd,
+  remoteBlocked,
+  createBlocked,
   onCreateFolder,
   onCreateNote,
 }: {
   canAdmin: boolean;
   creating: boolean;
   showEnd: boolean;
+  remoteBlocked: boolean;
+  createBlocked: boolean;
   onCreateFolder: () => void;
   onCreateNote: () => void;
 }) {
@@ -64,17 +80,24 @@ function HomeHeaderEnd({
     <>
       {canAdmin && (
         <HeaderButton
+          disabled={remoteBlocked}
           icon={<FolderOutlineIcon />}
           label="フォルダ"
           onClick={onCreateFolder}
+          title={
+            remoteBlocked
+              ? "オフラインではフォルダを作成できません。"
+              : undefined
+          }
           variant="outline"
         />
       )}
       <HeaderButton
-        disabled={creating}
+        disabled={creating || createBlocked}
         icon={<PlusIcon />}
         label={creating ? "作成中…" : "新規ノート"}
         onClick={onCreateNote}
+        title={createBlocked ? homeOfflineCreateMessage() : undefined}
         variant="accent"
       />
     </>
@@ -88,6 +111,8 @@ function useHomeHeader(
   visibleFolder: FolderAccess | null,
   canAdmin: boolean,
   creating: boolean,
+  remoteBlocked: boolean,
+  createBlocked: boolean,
   setHeader: AppShellContext["setHeader"],
   onCreateFolder: () => void,
   onCreateNote: () => void,
@@ -100,9 +125,11 @@ function useHomeHeader(
       end: (
         <HomeHeaderEnd
           canAdmin={canAdmin}
+          createBlocked={createBlocked}
           creating={creating}
           onCreateFolder={onCreateFolder}
           onCreateNote={onCreateNote}
+          remoteBlocked={remoteBlocked}
           showEnd={Boolean(visibleFolder || !folderId)}
         />
       ),
@@ -115,6 +142,8 @@ function useHomeHeader(
     folderId,
     canAdmin,
     creating,
+    remoteBlocked,
+    createBlocked,
     setHeader,
     user,
     onCreateFolder,
@@ -234,6 +263,7 @@ function HomePageView({
   folderId,
   userLoading,
   notes,
+  notesError,
   visibleFolder,
   publicFolders,
   error,
@@ -250,6 +280,7 @@ function HomePageView({
   publicFolders: FolderRecord[];
   error: string | null;
   flags: ReturnType<typeof homeListFlags>;
+  notesError: boolean;
   menu: MenuState | null;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
   dialogs: ReactNode;
@@ -261,6 +292,7 @@ function HomePageView({
         <h1 className="mb-3 text-lg font-semibold">全体公開</h1>
       )}
       {error && <ErrorText>{error}</ErrorText>}
+      {notesError && <ErrorText>一覧を取得できませんでした。</ErrorText>}
       {flags.showTree ? (
         <NoteTree
           childrenFolders={
@@ -277,6 +309,7 @@ function HomePageView({
           placeholder={flags.showPlaceholder}
           rootHref={user ? "/shared" : "/"}
           showAllNotes={!(user || folderId)}
+          showEmptyMessage={flags.showEmptyList}
           showRootCrumb={flags.canAdmin}
         />
       ) : null}
@@ -289,7 +322,14 @@ export function HomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
+  const [session, setSession] = useState(getSessionSnapshot);
+  const remoteBlocked = homeRemoteMutationsBlocked(session);
+  const createBlocked = !canCreateLocalDraft(session, user);
   const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
+  const [notesLoadState, setNotesLoadState] = useState<NotesLoadState>(() =>
+    getNotesLoadState(),
+  );
+  const [notesError, setNotesError] = useState(false);
   const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(
     () => peekFolder(folderId) ?? null,
   );
@@ -324,6 +364,8 @@ export function HomePage() {
     error,
     folderId,
     folderPending,
+    notesError,
+    notesLoadState,
     user,
     userLoading,
     visibleFolder,
@@ -331,10 +373,30 @@ export function HomePage() {
   const headerFolder = headerFolderFor(visibleFolder, folderId);
   const shareLink = shareLinkFor(share);
 
+  useEffect(() => subscribeSession(setSession), []);
+
+  useEffect(() => {
+    if (!remoteBlocked) {
+      return;
+    }
+    setShare(null);
+    setConfirm(null);
+    setFolderCreateOpen(false);
+    setFolderRename(null);
+    setMenu(null);
+  }, [remoteBlocked]);
+
   useEffect(() => {
     void sessionKey;
-    return subscribeHomeNotes(userLoading, setNotes);
-  }, [sessionKey, userLoading]);
+    return subscribeHomeNotes(
+      userLoading,
+      user,
+      visibleFolder?.id ?? null,
+      setNotes,
+      setNotesLoadState,
+      setNotesError,
+    );
+  }, [sessionKey, userLoading, user, visibleFolder?.id]);
 
   useEffect(() => {
     return subscribeHomeFolder(folderId, user, userLoading, {
@@ -352,8 +414,15 @@ export function HomePage() {
     setFolderCreateOpen(true);
   }, []);
   const handleCreateNote = useCallback(() => {
-    void persistNewNote(visibleFolder, navigate, setCreating, setError);
-  }, [visibleFolder, navigate]);
+    void persistNewNote(
+      visibleFolder,
+      navigate,
+      setCreating,
+      setError,
+      user,
+      session,
+    );
+  }, [visibleFolder, navigate, user, session]);
 
   useHomeHeader(
     headerFolder,
@@ -362,6 +431,8 @@ export function HomePage() {
     visibleFolder,
     flags.canAdmin,
     creating,
+    remoteBlocked,
+    createBlocked,
     setHeader,
     handleCreateFolder,
     handleCreateNote,
@@ -412,24 +483,38 @@ export function HomePage() {
                 setNotes,
                 setVisibleFolder,
               },
+              remoteBlocked,
+              undefined,
             );
           }}
           onCreateFolder={(name) => {
-            void persistNewFolder(name, visibleFolder, navigate, {
-              setFolderCreateError,
-              setFolderCreateOpen,
-              setFolderCreating,
-              setShare,
-              setShareError,
-            });
+            void persistNewFolder(
+              name,
+              visibleFolder,
+              navigate,
+              {
+                setFolderCreateError,
+                setFolderCreateOpen,
+                setFolderCreating,
+                setShare,
+                setShareError,
+              },
+              remoteBlocked,
+            );
           }}
           onPersistShare={(next) => {
-            void persistHomeShare(share, next, visibleFolder?.id, {
-              setNotes,
-              setShare,
-              setShareError,
-              setVisibleFolder,
-            });
+            void persistHomeShare(
+              share,
+              next,
+              visibleFolder?.id,
+              {
+                setNotes,
+                setShare,
+                setShareError,
+                setVisibleFolder,
+              },
+              remoteBlocked,
+            );
           }}
           onRenameFolder={(name) => {
             void persistRenameFolder(
@@ -446,6 +531,7 @@ export function HomePage() {
                 setNotes,
                 setVisibleFolder,
               },
+              remoteBlocked,
             );
           }}
           share={share}
@@ -459,6 +545,7 @@ export function HomePage() {
       folderId={folderId}
       menu={menu}
       notes={notes}
+      notesError={notesError}
       onItemMenu={(event, target) => {
         handleItemMenu(
           event,
@@ -467,10 +554,23 @@ export function HomePage() {
           navigate,
           setMenu,
           (id, name) => {
-            void openFolderShare(id, name, setError, setShare, setShareError);
+            void openFolderShare(
+              id,
+              name,
+              setError,
+              setShare,
+              setShareError,
+              remoteBlocked,
+            );
           },
           (note) => {
-            void openNoteShare(note, setError, setShare, setShareError);
+            void openNoteShare(
+              note,
+              setError,
+              setShare,
+              setShareError,
+              remoteBlocked,
+            );
           },
           (id, name) => {
             setFolderRename({ id, name });
@@ -480,6 +580,7 @@ export function HomePage() {
             setConfirm({ id, kind, name });
             setConfirmError(null);
           },
+          remoteBlocked,
         );
       }}
       publicFolders={publicFolders}

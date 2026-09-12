@@ -221,6 +221,23 @@ export function numberMarkdownLines(markdown: string): string {
     .join("\n");
 }
 
+export type ConditionalMarkdownDecision =
+  | { action: "noop" }
+  | { action: "apply" }
+  | { action: "conflict" };
+
+/** Compare current markdown with expected/new values without side effects. */
+export function evaluateConditionalMarkdownUpdate(
+  current: string,
+  expectedMarkdown: string | undefined,
+  markdown: string,
+): ConditionalMarkdownDecision {
+  if (expectedMarkdown !== undefined && current !== expectedMarkdown) {
+    return current === markdown ? { action: "noop" } : { action: "conflict" };
+  }
+  return current === markdown ? { action: "noop" } : { action: "apply" };
+}
+
 function findMatches(haystack: string, needle: string): number[] {
   const indexes: number[] = [];
   if (needle.length === 0) {

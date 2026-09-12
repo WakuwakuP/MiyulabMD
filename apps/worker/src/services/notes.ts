@@ -3,14 +3,16 @@ import {
   articleMetaFromNote,
   type CreateNoteInput,
   clampWriteScope,
+  computeCreateRequestHash,
   defaultNoteMarkdown,
   ensureArticleMarkdown,
   type FolderAccess,
-  folderContains,
   isAccessScope,
+  isConditionalMarkdownUpdate,
   isPermissionPreset,
   matchArticleSource,
   type Note,
+  type NoteCreateErrorCode,
   type NoteSummary,
   normalizeFolder,
   type PermissionPreset,
@@ -19,7 +21,9 @@ import {
   type SessionUser,
   scopesFromPreset,
   titleFromMarkdown,
+  type UpdateNoteMarkdownInput,
   type UpdateNoteMetaInput,
+  validateDraftKeys,
 } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
@@ -50,6 +54,10 @@ import {
   escapeLikePattern,
   rewriteArticleSourceFolders,
 } from "./articles.ts";
+import {
+  listNotesInFolderSubtree,
+  noteEvictionIds,
+} from "./folder-deletion.ts";
 import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
@@ -136,7 +144,16 @@ async function toSummary(
   return summary;
 }
 
-function generateShortId(): string {
+type TestShortIdEnv = Env & { TEST_SHORT_ID_SEQUENCE?: string[] };
+
+function generateShortId(env: Env): string {
+  const sequence = (env as TestShortIdEnv).TEST_SHORT_ID_SEQUENCE;
+  if (sequence && sequence.length > 0) {
+    const next = sequence.shift();
+    if (next) {
+      return next;
+    }
+  }
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
   return Array.from(
@@ -147,7 +164,7 @@ function generateShortId(): string {
 
 async function generateUniqueShortId(env: Env): Promise<string> {
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const shortId = generateShortId();
+    const shortId = generateShortId(env);
     const existing = await db(env)
       .prepare("SELECT id FROM notes WHERE short_id = ?")
       .bind(shortId)
@@ -157,6 +174,97 @@ async function generateUniqueShortId(env: Env): Promise<string> {
     }
   }
   throw new Error("failed to generate unique short_id");
+}
+
+type NoteCreateRequestRow = {
+  owner_id: string;
+  client_draft_id: string;
+  note_id: string;
+  request_hash: string;
+  created_at: number;
+  deleted_at: number | null;
+};
+
+function isUniqueConstraintError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("UNIQUE constraint failed");
+}
+
+function isShortIdUniqueError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("UNIQUE constraint failed") && message.includes("short_id")
+  );
+}
+
+function findCreateRequestMapping(
+  env: Env,
+  ownerId: string,
+  clientDraftId: string,
+): Promise<NoteCreateRequestRow | null> {
+  return db(env)
+    .prepare(
+      `SELECT owner_id, client_draft_id, note_id, request_hash, created_at, deleted_at
+       FROM note_create_requests
+       WHERE owner_id = ? AND client_draft_id = ?`,
+    )
+    .bind(ownerId, clientDraftId)
+    .first<NoteCreateRequestRow>();
+}
+
+async function noteFromMapping(
+  env: Env,
+  mapping: NoteCreateRequestRow,
+  user?: SessionUser | null,
+): Promise<Note | null> {
+  const row = await findNoteRow(env, mapping.note_id);
+  if (!row) {
+    return null;
+  }
+  return toNote(env, row, user);
+}
+
+async function resolveExistingCreateMapping(
+  env: Env,
+  mapping: NoteCreateRequestRow,
+  requestHash: string,
+  user?: SessionUser | null,
+): Promise<CreateNoteResult> {
+  if (mapping.deleted_at !== null) {
+    return {
+      code: "draft_deleted",
+      error: "Draft was deleted",
+      kind: "error",
+      status: 410,
+    };
+  }
+  if (mapping.request_hash !== requestHash) {
+    return {
+      code: "idempotency_conflict",
+      error: "Idempotency key reused with different payload",
+      kind: "error",
+      status: 409,
+    };
+  }
+  const note = await noteFromMapping(env, mapping, user);
+  if (!note) {
+    throw new Error("mapped note missing");
+  }
+  return { kind: "replayed", note };
+}
+
+function softDeleteCreateMappingsForNote(
+  env: Env,
+  noteId: string,
+  now: number,
+): D1PreparedStatement {
+  return db(env)
+    .prepare(
+      `UPDATE note_create_requests
+       SET deleted_at = ?
+       WHERE note_id = ? AND deleted_at IS NULL`,
+    )
+    .bind(now, noteId);
 }
 
 /** DocumentRoom から D1 へ markdown_snapshot をデバウンス書き込みする。 */
@@ -511,14 +619,34 @@ export type GetNoteResult =
   | { kind: "not_found" }
   | { kind: "denied"; status: 401 | 403 };
 
+export type CreateNoteResult =
+  | { kind: "created"; note: Note }
+  | { kind: "replayed"; note: Note }
+  | {
+      kind: "error";
+      error: string;
+      status: number;
+      code?: NoteCreateErrorCode;
+    };
+
 export type MutateNoteResult =
   | { kind: "ok"; note: Note }
   | { kind: "not_found" }
   | { kind: "denied"; status: 401 | 403 }
-  | { kind: "bad_request"; error: string };
+  | { kind: "bad_request"; error: string }
+  | {
+      kind: "conflict";
+      status: 409 | 410;
+      error: string;
+      code: NoteCreateErrorCode;
+    };
+
+export type ConditionalMarkdownPrepResult =
+  | { kind: "ok"; noteId: string; expectedMarkdown?: string; markdown: string }
+  | Exclude<MutateNoteResult, { kind: "ok" }>;
 
 export type RemoveFolderResult =
-  | { kind: "ok" }
+  | { kind: "ok"; deletedNoteIds: string[]; deletedFolderIds: string[] }
   | { kind: "not_found" }
   | { kind: "denied"; status: 401 | 403 };
 
@@ -637,26 +765,138 @@ async function deleteOwnedNotesInFolder(
   env: Env,
   ownerId: string,
   folder: string,
-): Promise<void> {
+): Promise<string[]> {
   const owned = await db(env)
     .prepare(`SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?`)
     .bind(ownerId)
     .all<NoteRow>();
+  const targets = listNotesInFolderSubtree(
+    (owned.results ?? []).map((row) => ({
+      folder: row.folder ?? "",
+      id: row.id,
+      shortId: row.short_id,
+    })),
+    folder,
+  );
   const images = createImageService(env);
-  for (const row of owned.results ?? []) {
-    if (!folderContains(folder, row.folder ?? "")) {
-      continue;
+  const deleted: string[] = [];
+  const now = Date.now();
+  for (const target of targets) {
+    try {
+      await images.deleteAllForNote(target.id);
+      await deleteRevisionsForNote(env, target.id);
+      await db(env).batch([
+        db(env)
+          .prepare(
+            "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+          )
+          .bind(target.id),
+        db(env).prepare("DELETE FROM notes WHERE id = ?").bind(target.id),
+        await softDeleteCreateMappingsForNote(env, target.id, now),
+      ]);
+      deleted.push(...noteEvictionIds(target));
+    } catch {
+      // Keep confirmed deletions only when a later row fails.
     }
-    await images.deleteAllForNote(row.id);
-    await deleteRevisionsForNote(env, row.id);
-    await db(env)
-      .prepare(
-        "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
-      )
-      .bind(row.id)
-      .run();
-    await db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id).run();
   }
+  return deleted;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: shortId retry + mapping race
+async function insertIdempotentNote(
+  env: Env,
+  owner: SessionUser,
+  user: SessionUser | undefined,
+  input: CreateNoteInput,
+  draftOwnerId: string,
+  clientDraftId: string,
+): Promise<CreateNoteResult> {
+  const requestHash = await computeCreateRequestHash(input);
+  const scopes = scopesFromInput(env, input);
+  if ("error" in scopes) {
+    return { error: scopes.error, kind: "error", status: 400 };
+  }
+
+  const resolved = await resolveCreateFolder(env, owner.id, input);
+  if ("error" in resolved) {
+    return { error: resolved.error, kind: "error", status: resolved.status };
+  }
+  const folder = resolved.folder;
+  await ensureFolderRow(env, owner.id, folder);
+  const markdown = await markdownForCreate(env, owner.id, folder, input);
+  const title = titleFromMarkdown(markdown);
+  const now = Date.now();
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const id = crypto.randomUUID();
+    const shortId = await generateUniqueShortId(env);
+    try {
+      await db(env).batch([
+        db(env)
+          .prepare(
+            `INSERT INTO note_create_requests (
+               owner_id, client_draft_id, note_id, request_hash, created_at
+             ) VALUES (?, ?, ?, ?, ?)`,
+          )
+          .bind(draftOwnerId, clientDraftId, id, requestHash, now),
+        db(env)
+          .prepare(
+            `INSERT INTO notes (
+               id, short_id, alias, owner_id, title, folder, permission,
+               read_scope, write_scope,
+               markdown_snapshot, snapshot_updated_at, created_at, updated_at
+             ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            id,
+            shortId,
+            owner.id,
+            title,
+            folder,
+            scopes.permission,
+            scopes.readScope,
+            scopes.writeScope,
+            markdown,
+            now,
+            now,
+            now,
+          ),
+      ]);
+      const row = await findNoteRow(env, id);
+      if (!row) {
+        throw new Error("note insert failed");
+      }
+      return {
+        kind: "created",
+        note: await toNote(env, row, user ?? owner),
+      };
+    } catch (error) {
+      const existing = await findCreateRequestMapping(
+        env,
+        draftOwnerId,
+        clientDraftId,
+      );
+      if (existing) {
+        return resolveExistingCreateMapping(env, existing, requestHash, user);
+      }
+      if (isShortIdUniqueError(error)) {
+        continue;
+      }
+      if (isUniqueConstraintError(error)) {
+        const raced = await findCreateRequestMapping(
+          env,
+          draftOwnerId,
+          clientDraftId,
+        );
+        if (raced) {
+          return resolveExistingCreateMapping(env, raced, requestHash, user);
+        }
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("failed to create note after short_id retries");
 }
 
 async function rewriteOwnedNoteFolders(
@@ -722,18 +962,61 @@ async function validateRenameFolder(
 /** HTTP と MCP が共有するノートドメイン。 */
 export function createNoteService(env: Env) {
   return {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: draft keys, mapping, and legacy create
     async create(
       user: SessionUser | undefined,
       input: CreateNoteInput,
-    ): Promise<Note | { error: string; status: number }> {
+    ): Promise<CreateNoteResult> {
+      const draftKeys = validateDraftKeys(input);
+      if (!draftKeys.ok) {
+        return { error: draftKeys.error, kind: "error", status: 400 };
+      }
+
+      if (draftKeys.clientDraftId && draftKeys.draftOwnerId) {
+        if (!user) {
+          return { error: "login required", kind: "error", status: 401 };
+        }
+        if (draftKeys.draftOwnerId !== user.id) {
+          return {
+            code: "owner_mismatch",
+            error: "Draft owner does not match authenticated user",
+            kind: "error",
+            status: 409,
+          };
+        }
+
+        const requestHash = await computeCreateRequestHash(input);
+        const existing = await findCreateRequestMapping(
+          env,
+          draftKeys.draftOwnerId,
+          draftKeys.clientDraftId,
+        );
+        if (existing) {
+          return resolveExistingCreateMapping(env, existing, requestHash, user);
+        }
+
+        const owner = await resolveOwnerForCreate(env, user);
+        if ("error" in owner) {
+          return { error: owner.error, kind: "error", status: 401 };
+        }
+        return insertIdempotentNote(
+          env,
+          owner,
+          user,
+          input,
+          draftKeys.draftOwnerId,
+          draftKeys.clientDraftId,
+        );
+      }
+
       const owner = await resolveOwnerForCreate(env, user);
       if ("error" in owner) {
-        return { error: owner.error, status: 401 };
+        return { error: owner.error, kind: "error", status: 401 };
       }
 
       const scopes = scopesFromInput(env, input);
       if ("error" in scopes) {
-        return { error: scopes.error, status: 400 };
+        return { error: scopes.error, kind: "error", status: 400 };
       }
 
       const now = Date.now();
@@ -741,7 +1024,7 @@ export function createNoteService(env: Env) {
       const shortId = await generateUniqueShortId(env);
       const resolved = await resolveCreateFolder(env, owner.id, input);
       if ("error" in resolved) {
-        return resolved;
+        return { kind: "error", ...resolved };
       }
       const folder = resolved.folder;
       await ensureFolderRow(env, owner.id, folder);
@@ -776,7 +1059,10 @@ export function createNoteService(env: Env) {
       if (!row) {
         throw new Error("note insert failed");
       }
-      return toNote(env, row, user ?? owner);
+      return {
+        kind: "created",
+        note: await toNote(env, row, user ?? owner),
+      };
     },
 
     async get(idOrShortId: string, user?: SessionUser): Promise<GetNoteResult> {
@@ -809,6 +1095,136 @@ export function createNoteService(env: Env) {
       return Promise.all(rows.map((row) => toSummary(env, row, user)));
     },
 
+    async noteAfterMarkdownPersisted(
+      noteId: string,
+      user: SessionUser | undefined,
+    ): Promise<MutateNoteResult> {
+      const row = await findNoteRow(env, noteId);
+      if (!row) {
+        return { kind: "not_found" };
+      }
+      return { kind: "ok", note: await toNote(env, row, user) };
+    },
+
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: mapping, owner, and permission gates
+    async prepareConditionalMarkdownUpdate(
+      idOrShortId: string,
+      user: SessionUser | undefined,
+      input: UpdateNoteMarkdownInput,
+    ): Promise<ConditionalMarkdownPrepResult> {
+      const draftKeys = validateDraftKeys(input);
+      if (!draftKeys.ok) {
+        return { error: draftKeys.error, kind: "bad_request" };
+      }
+
+      const row = await findNoteRow(env, idOrShortId);
+      if (!row) {
+        return { kind: "not_found" };
+      }
+
+      const current = await toNote(env, row, user);
+      if (!current.access.flags.canEdit) {
+        return {
+          kind: "denied",
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { flags: current.access.flags, ownerId: row.owner_id },
+                  undefined,
+                  env,
+                )
+              : 403,
+        };
+      }
+
+      if (draftKeys.draftOwnerId && draftKeys.clientDraftId) {
+        if (!user) {
+          return { kind: "denied", status: 401 };
+        }
+        if (draftKeys.draftOwnerId !== user.id) {
+          return {
+            code: "owner_mismatch",
+            error: "Draft owner does not match authenticated user",
+            kind: "conflict",
+            status: 409,
+          };
+        }
+
+        const mapping = await findCreateRequestMapping(
+          env,
+          draftKeys.draftOwnerId,
+          draftKeys.clientDraftId,
+        );
+        if (!mapping) {
+          return {
+            code: "mapping_mismatch",
+            error: "No create mapping for draft key",
+            kind: "conflict",
+            status: 409,
+          };
+        }
+        if (mapping.deleted_at !== null) {
+          return {
+            code: "draft_deleted",
+            error: "Draft was deleted",
+            kind: "conflict",
+            status: 410,
+          };
+        }
+        if (mapping.note_id !== row.id) {
+          return {
+            code: "mapping_mismatch",
+            error: "Draft key maps to a different note",
+            kind: "conflict",
+            status: 409,
+          };
+        }
+      }
+
+      return {
+        expectedMarkdown: input.expectedMarkdown,
+        kind: "ok",
+        markdown: input.markdown,
+        noteId: row.id,
+      };
+    },
+
+    async prepareMarkdownUpdate(
+      idOrShortId: string,
+      user: SessionUser | undefined,
+      input: UpdateNoteMarkdownInput,
+    ): Promise<ConditionalMarkdownPrepResult> {
+      if (isConditionalMarkdownUpdate(input)) {
+        return this.prepareConditionalMarkdownUpdate(idOrShortId, user, input);
+      }
+
+      const row = await findNoteRow(env, idOrShortId);
+      if (!row) {
+        return { kind: "not_found" };
+      }
+
+      const current = await toNote(env, row, user);
+      if (!current.access.flags.canEdit) {
+        return {
+          kind: "denied",
+          status:
+            user === undefined
+              ? viewDeniedHttpStatus(
+                  { flags: current.access.flags, ownerId: row.owner_id },
+                  undefined,
+                  env,
+                )
+              : 403,
+        };
+      }
+
+      return {
+        kind: "ok",
+        markdown: input.markdown,
+        noteId: row.id,
+      };
+    },
+
     async remove(
       idOrShortId: string,
       user: SessionUser | undefined,
@@ -835,16 +1251,16 @@ export function createNoteService(env: Env) {
 
       await createImageService(env).deleteAllForNote(row.id);
       await deleteRevisionsForNote(env, row.id);
-      await db(env)
-        .prepare(
-          "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
-        )
-        .bind(row.id)
-        .run();
-      await db(env)
-        .prepare("DELETE FROM notes WHERE id = ?")
-        .bind(row.id)
-        .run();
+      const now = Date.now();
+      await db(env).batch([
+        db(env)
+          .prepare(
+            "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+          )
+          .bind(row.id),
+        db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id),
+        await softDeleteCreateMappingsForNote(env, row.id, now),
+      ]);
       return { kind: "ok", note: current };
     },
 
@@ -864,10 +1280,18 @@ export function createNoteService(env: Env) {
         return { kind: "denied", status: 403 };
       }
 
-      await deleteOwnedNotesInFolder(env, rec.owner_id, rec.folder);
+      const deletedNoteIds = await deleteOwnedNotesInFolder(
+        env,
+        rec.owner_id,
+        rec.folder,
+      );
       await deleteArticleSourcesInFolder(env, rec.owner_id, rec.folder);
-      await deleteFolderTree(env, rec.owner_id, rec.folder);
-      return { kind: "ok" };
+      const deletedFolderIds = await deleteFolderTree(
+        env,
+        rec.owner_id,
+        rec.folder,
+      );
+      return { deletedFolderIds, deletedNoteIds, kind: "ok" };
     },
 
     async renameFolder(
@@ -936,47 +1360,6 @@ export function createNoteService(env: Env) {
         });
       }
       return hits;
-    },
-
-    async updateMarkdown(
-      idOrShortId: string,
-      user: SessionUser | undefined,
-      markdown: string,
-    ): Promise<MutateNoteResult> {
-      const row = await findNoteRow(env, idOrShortId);
-      if (!row) {
-        return { kind: "not_found" };
-      }
-
-      const current = await toNote(env, row, user);
-      if (!current.access.flags.canEdit) {
-        return {
-          kind: "denied",
-          status:
-            user === undefined
-              ? viewDeniedHttpStatus(
-                  { flags: current.access.flags, ownerId: row.owner_id },
-                  undefined,
-                  env,
-                )
-              : 403,
-        };
-      }
-
-      const now = Date.now();
-      const title = titleFromMarkdown(markdown);
-      await db(env)
-        .prepare(
-          "UPDATE notes SET markdown_snapshot = ?, title = ?, snapshot_updated_at = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(markdown, title, now, now, row.id)
-        .run();
-
-      const updated = await findNoteRow(env, row.id);
-      if (!updated) {
-        throw new Error("note update failed");
-      }
-      return { kind: "ok", note: await toNote(env, updated, user) };
     },
 
     async updateMeta(
