@@ -1,4 +1,19 @@
-# 回収したv9の親検証
+# 回収したv9と後継修正の親検証
+
+## 最新：D30/D31の親レビュー・ライブ反映
+
+候補セッションSHA256
+`d79a9d8ff3a28b956a2f8fd9f7bd9ef59536585d88e8b13ccfc0c6c46a7f10a7`に対して、
+親がcandidate runner `all`を再実行し、型チェック・Biome・32ブラウザが成功した。
+
+先頭の候補コメント以外のbytesをそのままライブへ反映し、一致を確認した。
+ライブセッションSHA256は
+`b49748b4b9c42b11fc1b5ced350f6c91e21545e7515d12b6d7036d43c95e4dbb`。
+通常のライブbrowserコマンドへ16specを指定して32件成功。
+Web unit117件、Web型チェック、対象ファイルのBiome、diff-checkも親が確認した。
+
+cached viewerのローカル読み取りと、HTTP statusを持たない
+`OfflineNoteUnavailableError`を採用済み。以下は以前の経過であり、最新状態とは区別する。
 
 ## 完全bytesの確認
 
@@ -139,3 +154,50 @@ Web unit117件、Web型チェック、本番ビルド、ライブ2ファイル�
 ビルドには500kB超chunk警告があるが、ビルド自体は成功。
 
 保存・読み取り基盤として採用済み。UIとService Workerの完成を示すものではない。
+
+## D30/D31の候補検証（GPT-5.6-luna）
+
+依存関係と指定ブラウザが未配置だったため、許可されたコマンドで導入した。
+
+```text
+pnpm install --frozen-lockfile
+exit 0
+pnpm --filter @miyulabmd/web test:browser:install
+exit 0
+```
+
+実装後、指定されたcached viewerテストを先に実行した。
+
+```text
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser cached-viewer-note-read.spec.ts
+exit 0
+1 passed
+```
+
+最初の `all` 実行では候補の型判定が TypeScript 7 で曖昧になったため、
+published resultの形を確認する型ガード `isPublishedReadResult()` を追加した。
+これはcached-onlyの挙動や既存経路を変更せず、候補のBiome指摘も解消する。
+
+最終コードでの検証:
+
+```text
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all
+exit 0
+candidate typecheck: passed
+candidate Biome: passed
+browser: 32 passed
+pnpm --filter @miyulabmd/web test
+exit 0
+117 passed
+git diff --check
+exit 0
+```
+
+最終SHA256（検証後）:
+
+```text
+review-artifacts/user-cache-suspension-v9-recovered/note-read-session.ts d79a9d8ff3a28b956a2f8fd9f7bd9ef59536585d88e8b13ccfc0c6c46a7f10a7
+review-artifacts/user-cache-suspension-v9-recovered/offline-cache.ts    f80be6ed11b8e16fd02a539c23c813602c7c2f69de0e6de9d4c89a3e9b8f9581
+apps/web/src/lib/note-read-session.ts                                   e6d112c9af925ca9a77f2aa6c78cc55471f43aafc3243f5d9a34bb7cfa582830
+apps/web/src/lib/offline-cache.ts                                      f8c004b8d3ce250f23571b44efc136e1f36efe006b66ed42122e3fef861648d3
+```

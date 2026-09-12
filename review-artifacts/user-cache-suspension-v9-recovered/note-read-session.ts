@@ -35,6 +35,13 @@ export type NoteReadSession = {
   dispose(): void;
 };
 
+export class OfflineNoteUnavailableError extends Error {
+  constructor(id: string) {
+    super(`Offline note unavailable: ${id}`);
+    this.name = "OfflineNoteUnavailableError";
+  }
+}
+
 function snapshotViewer(viewer: ViewerContext): ViewerContext {
   return {
     cacheViewerId: viewer.cacheViewerId,
@@ -68,6 +75,17 @@ function cachedReadResult(
     source: "cache",
     viewer: snapshotViewer(viewer),
   };
+}
+
+function isPublishedReadResult(
+  result: ApiResult<Note> | NoteReadResult,
+): result is NoteReadResult {
+  return (
+    result.ok &&
+    "source" in result &&
+    "viewer" in result &&
+    "cachedAt" in result
+  );
 }
 
 function failedReadResult(
@@ -263,6 +281,14 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
     return result;
   };
 
+  const readCachedOnly = async (id: string): Promise<NoteReadResult> => {
+    const cached = await readCachedNote(id);
+    if (!cached) {
+      throw new OfflineNoteUnavailableError(id);
+    }
+    return cachedReadResult(cached, capturedViewer);
+  };
+
   return {
     dispose() {
       if (disposed) {
@@ -282,9 +308,12 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       const orderingToken = capturedViewer.cacheViewerId
         ? beginOfflineNoteRead(capturedViewer.cacheViewerId, id)
         : 0;
-      const result = await fetchWithFallback(id, orderingToken);
+      const result =
+        capturedViewer.mode === "cached"
+          ? await readCachedOnly(id)
+          : await fetchWithFallback(id, orderingToken);
       let published: NoteReadResult;
-      if (result.ok && "source" in result) {
+      if (isPublishedReadResult(result)) {
         published = result;
       } else if (result.ok) {
         published = await readNetworkNote(result.data, orderingToken);

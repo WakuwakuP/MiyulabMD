@@ -83,3 +83,28 @@ D26でHTTP拒否経路の世代作成を呼び出し側へ移した際、直接�
 世代が作成されない回帰が入った。入口を `orderingToken ?? enterOfflineNoteDenial(...)`
 として共有し、直接拒否では保留中の読み取りを無効化しつつ、既存のトークン付き経路の
 順序と stale-token チェックを変更しない。無関係なメソッドは変更しない。
+
+## D30/D31：cached viewerのlocal-only note read（GPT-5.6-luna）
+
+### 採用した選択
+
+`viewer.mode === "cached"` をセッション生成時に捕捉したviewerのモードとして判定し、
+既存の `getCache()` / `readCachedNote()` / `cachedReadResult()` だけで読む分岐を追加した。
+この分岐では `fetchNote()`、認証、キャッシュ更新、SSR seed、network fallbackを行わない。
+`cacheViewerId` がない場合、ストレージを開けない場合、またはノートがない場合は、
+HTTP statusを持たないexport済み `OfflineNoteUnavailableError` を投げる。
+
+### 理由と棄却した代替案
+
+- cached viewerでもnetwork-firstしてmiss時に救済する案は、別principalの本文で既存Alice
+  キャッシュを上書きし、未検証viewerにネットワーク結果を公開するため棄却した。
+- missを `status: 404` のread resultにする案は、local unavailableをHTTP結果へ偽装し、
+  既存のnetwork result unionを不必要に広げるため棄却した。
+- cached成功だけを早期returnする案は、停止・stale ordering・dispose/abortのpublication
+  gatesを迂回するため棄却した。cache read後は既存の最終ゲートを通す。
+
+### スコープ
+
+変更はこの候補の `note-read-session.ts` と本記録だけ。認証済みviewer／confirmed guestの
+network-first経路、拒否・取消しの理由、storage module、AppShell／Editor／mutation API、
+およびライブ `apps/web/src` は変更しない。
