@@ -1,10 +1,10 @@
 import type { SessionUser } from "@miyulabmd/shared";
-import { Awareness } from "y-protocols/awareness";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
+import { createSessionLifecycle } from "./page-lifecycle.ts";
 import { colorForEmail } from "./user-style.ts";
 
-export type CollabAwareness = Awareness;
+export type CollabAwareness = WebsocketProvider["awareness"];
 
 export type AwarenessUserState = {
   userId: string;
@@ -90,20 +90,6 @@ export function applyAwarenessUser(
   });
 }
 
-/** In-memory awareness for local drafts (#96). No WebSocket provider or room. */
-export function createOfflineAwareness(doc: Y.Doc): {
-  awareness: CollabAwareness;
-  destroy: () => void;
-} {
-  const awareness = new Awareness(doc);
-  return {
-    awareness,
-    destroy() {
-      awareness.destroy();
-    },
-  };
-}
-
 /** Yjs ドキュメントと WebSocket プロバイダを初期化し、awareness にローカル状態を設定する。 */
 export function createYjsSession(
   noteId: string,
@@ -112,31 +98,34 @@ export function createYjsSession(
   const doc = new Y.Doc();
   const yMarkdown = doc.getText(MARKDOWN_FIELD);
   const provider = new WebsocketProvider(collaborationWsBase(), noteId, doc, {
-    connect: false,
-    disableBc: true,
-    shouldReconnect: () => false,
+    connect: true,
   });
 
   applyAwarenessUser(provider.awareness, user);
 
   let currentUser = user;
-
-  return {
-    awareness: provider.awareness,
-    destroy() {
+  const lifecycle = createSessionLifecycle({
+    dispose: () => {
       provider.destroy();
       doc.destroy();
     },
-    doc,
-    leave() {
+    leave: () => {
       provider.awareness.setLocalState(null);
       provider.disconnect();
     },
-    provider,
-    reconnect() {
+    reconnect: () => {
       applyAwarenessUser(provider.awareness, currentUser);
       provider.connect();
     },
+  });
+
+  return {
+    awareness: provider.awareness,
+    destroy: lifecycle.destroy,
+    doc,
+    leave: lifecycle.leave,
+    provider,
+    reconnect: lifecycle.reconnect,
     setUser(next) {
       currentUser = next;
     },

@@ -25,7 +25,6 @@ const MIGRATIONS = [
   "0007_user_root_folders.sql",
   "0008_split_link_and_public_scopes.sql",
   "0009_note_history.sql",
-  "0010_note_create_requests.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {

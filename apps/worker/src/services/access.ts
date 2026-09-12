@@ -28,7 +28,6 @@ import {
 import { db } from "../db/client.ts";
 import { findUserByEmail } from "../db/users.ts";
 import { instanceFlags } from "../env.ts";
-import { listFoldersInSubtree } from "./folder-deletion.ts";
 
 function applyInstanceFlags(
   flags: PermissionFlags,
@@ -909,36 +908,31 @@ export async function deleteFolderTree(
   env: Env,
   ownerId: string,
   folder: string,
-): Promise<string[]> {
+): Promise<void> {
   if (!folder) {
-    return [];
+    return;
   }
   const rows = await db(env)
-    .prepare("SELECT id, folder FROM folders WHERE owner_id = ?")
+    .prepare("SELECT folder FROM folders WHERE owner_id = ?")
     .bind(ownerId)
-    .all<{ folder: string; id: string }>();
+    .all<{ folder: string }>();
 
-  const targets = listFoldersInSubtree(rows.results ?? [], folder);
-  const deleted: string[] = [];
-  for (const target of targets) {
-    try {
-      await deleteFolderPolicy(env, ownerId, target.folder);
-      await db(env)
-        .prepare(
-          "DELETE FROM access_grants WHERE owner_id = ? AND target_kind = 'folder' AND target_key = ?",
-        )
-        .bind(ownerId, target.folder)
-        .run();
-      await db(env)
-        .prepare("DELETE FROM folders WHERE owner_id = ? AND folder = ?")
-        .bind(ownerId, target.folder)
-        .run();
-      deleted.push(target.id);
-    } catch {
-      // Keep confirmed deletions only when a later row fails.
+  for (const row of rows.results ?? []) {
+    if (!folderContains(folder, row.folder)) {
+      continue;
     }
+    await deleteFolderPolicy(env, ownerId, row.folder);
+    await db(env)
+      .prepare(
+        "DELETE FROM access_grants WHERE owner_id = ? AND target_kind = 'folder' AND target_key = ?",
+      )
+      .bind(ownerId, row.folder)
+      .run();
+    await db(env)
+      .prepare("DELETE FROM folders WHERE owner_id = ? AND folder = ?")
+      .bind(ownerId, row.folder)
+      .run();
   }
-  return deleted;
 }
 
 export async function listSharedFolderCandidates(

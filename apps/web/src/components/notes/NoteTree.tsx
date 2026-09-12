@@ -22,7 +22,6 @@ type Props = {
   openMenuId?: string | null;
   pending?: boolean;
   placeholder?: boolean;
-  showEmptyMessage?: boolean;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
 };
 
@@ -68,7 +67,6 @@ export function NoteTree({
   openMenuId = null,
   pending = false,
   placeholder = false,
-  showEmptyMessage = true,
   onItemMenu,
 }: Props) {
   const items = showAllNotes
@@ -146,10 +144,9 @@ export function NoteTree({
       )}
 
       {placeholder && <ListSkeleton />}
-      {!placeholder &&
-        showEmptyMessage &&
-        folders.length === 0 &&
-        items.length === 0 && <p>このフォルダは空です。</p>}
+      {!placeholder && folders.length === 0 && items.length === 0 && (
+        <p>このフォルダは空です。</p>
+      )}
       {!placeholder && (folders.length > 0 || items.length > 0) && (
         <DriveList
           className={cn(
@@ -198,11 +195,7 @@ export function NoteTree({
                 }
                 name={note.title}
                 onMenu={(event) => handleRowMenu(event, target)}
-                onPointerEnter={() => {
-                  if (!note.id.startsWith("local-")) {
-                    prefetchNote(note.id);
-                  }
-                }}
+                onPointerEnter={() => prefetchNote(note.id)}
               />
             );
           })}
