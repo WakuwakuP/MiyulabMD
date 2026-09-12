@@ -36,9 +36,13 @@ export function AppShell() {
   useEffect(() => {
     return subscribeSession((next) => {
       setSession(next);
-      if (next.status === "online-confirmed" && next.user) {
+      if (
+        (next.status === "online-confirmed" ||
+          next.status === "offline-known") &&
+        next.user
+      ) {
         setUser(next.user);
-      } else {
+      } else if (next.status !== "unknown") {
         setUser(null);
       }
     });

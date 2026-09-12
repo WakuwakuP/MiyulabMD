@@ -223,6 +223,7 @@ test("verifySession network with past scope becomes offline-known", async () => 
   assert.equal(snap.status, "offline-known");
   assert.equal(snap.scope, accountScopeFromUserId(userA.id));
   assert.equal(snap.offlineReadable, true);
+  assert.equal(snap.user?.id, userA.id);
 });
 
 test("verifySession 401 then network stays unauthenticated without offline-known", async () => {

@@ -475,6 +475,16 @@ test("mergeDraftMarkdownForPatch uses server body when local unchanged", () => {
   assert.match(merged.markdown, /title: b/);
 });
 
+test("mergeDraftMarkdownForPatch applies local replacements onto server body", () => {
+  const merged = mergeDraftMarkdownForPatch({
+    acknowledgedLocalMarkdown: "hello world",
+    acknowledgedMarkdown: "hello world",
+    localMarkdown: "hello there",
+  });
+  assert.equal(merged.conflict, false);
+  assert.equal(merged.markdown, "hello there");
+});
+
 test("retry delay grows with cap", () => {
   assert.ok(__testDraftSyncRetryDelayMs(0) >= 1000);
   assert.ok(__testDraftSyncRetryDelayMs(10) <= 60_000 + 12_000);

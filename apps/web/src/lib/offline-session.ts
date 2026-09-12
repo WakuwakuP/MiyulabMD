@@ -95,6 +95,16 @@ function toConfirmedUser(
   };
 }
 
+function sessionUserFromConfirmed(
+  record: NonNullable<OfflineSessionRecord["lastConfirmedUser"]>,
+): SessionUser {
+  return {
+    displayName: record.displayName,
+    email: record.email,
+    id: record.id,
+  };
+}
+
 function usersEqual(
   a: SessionUser | null | undefined,
   b: SessionUser | null | undefined,
@@ -291,7 +301,9 @@ async function handleOfflineKnown(): Promise<void> {
     dbBlocked: false,
     offlineReadable: true,
     status: "offline-known",
-    user: null,
+    user: lastConfirmedUser
+      ? sessionUserFromConfirmed(lastConfirmedUser)
+      : snapshot.user,
   });
   await persistCurrentSession();
   broadcastSnapshot();

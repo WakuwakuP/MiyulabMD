@@ -121,7 +121,7 @@ function resetRetryAttempt(): void {
   clearRetryTimer();
 }
 
-function notifyPromotion(
+function emitPromotionLocal(
   ownerId: string,
   localId: LocalDraftId,
   serverId: string,
@@ -129,6 +129,14 @@ function notifyPromotion(
   for (const listener of promotionListeners) {
     listener(ownerId, localId, serverId);
   }
+}
+
+function notifyPromotion(
+  ownerId: string,
+  localId: LocalDraftId,
+  serverId: string,
+): void {
+  emitPromotionLocal(ownerId, localId, serverId);
   broadcast?.postMessage({
     localId,
     ownerId,
@@ -950,7 +958,7 @@ export function startDraftSyncService(): () => void {
         data.localId &&
         data.serverId
       ) {
-        notifyPromotion(data.ownerId, data.localId, data.serverId);
+        emitPromotionLocal(data.ownerId, data.localId, data.serverId);
       }
     };
   }

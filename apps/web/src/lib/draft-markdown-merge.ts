@@ -24,8 +24,8 @@ function collectChanges(base: string, next: string): RegionChange[] {
       changes.push({ end: index + text.length, start: index, text: "" });
       index += text.length;
     } else if (op === INSERT) {
+      // Inserts are not in `base`; keep the cursor on the original string.
       changes.push({ end: index, start: index, text });
-      index += text.length;
     }
   }
   return changes;
