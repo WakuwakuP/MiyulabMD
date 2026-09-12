@@ -201,3 +201,10 @@ review-artifacts/user-cache-suspension-v9-recovered/offline-cache.ts    f80be6ed
 apps/web/src/lib/note-read-session.ts                                   e6d112c9af925ca9a77f2aa6c78cc55471f43aafc3243f5d9a34bb7cfa582830
 apps/web/src/lib/offline-cache.ts                                      f8c004b8d3ce250f23571b44efc136e1f36efe006b66ed42122e3fef861648d3
 ```
+
+## D32 AppShell viewer-context candidate
+
+The D32 decision and validation records are preserved in:
+
+- [`app-shell-decisions.md`](app-shell-decisions.md)
+- [`app-shell-validation.md`](app-shell-validation.md)

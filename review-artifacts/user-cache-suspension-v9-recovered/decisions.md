@@ -108,3 +108,10 @@ HTTP statusを持たないexport済み `OfflineNoteUnavailableError` を投げ�
 変更はこの候補の `note-read-session.ts` と本記録だけ。認証済みviewer／confirmed guestの
 network-first経路、拒否・取消しの理由、storage module、AppShell／Editor／mutation API、
 およびライブ `apps/web/src` は変更しない。
+
+## D32 AppShell viewer-context candidate
+
+The D32 decision and validation records are preserved in:
+
+- [`app-shell-decisions.md`](app-shell-decisions.md)
+- [`app-shell-validation.md`](app-shell-validation.md)

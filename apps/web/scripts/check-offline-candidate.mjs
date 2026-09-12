@@ -9,6 +9,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createServer as createPortProbe } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, normalizePath } from "vite";
@@ -157,7 +158,35 @@ async function lint() {
   ]);
 }
 
+async function unusedPort() {
+  const probe = createPortProbe();
+  try {
+    await new Promise((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", resolve);
+    });
+    const address = probe.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Could not select a local test port");
+    }
+    return address.port;
+  } finally {
+    if (probe.listening) {
+      await new Promise((resolve, reject) => {
+        probe.close((error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+  }
+}
+
 async function browser() {
+  const selectedPort = await unusedPort();
   const loaded = new Set();
   const server = await createServer({
     plugins: [
@@ -188,11 +217,14 @@ async function browser() {
       },
     ],
     root: webRoot,
-    server: { host: "127.0.0.1", port: 0 },
+    server: { host: "127.0.0.1", port: selectedPort, strictPort: true },
   });
   try {
     await server.listen();
     const port = server.httpServer.address().port;
+    if (port !== selectedPort) {
+      throw new Error("Candidate server did not use the selected port");
+    }
     const config = path.join(runRoot, "playwright.config.mjs");
     await writeFile(
       config,

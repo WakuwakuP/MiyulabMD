@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useOutletContext } from "react-router";
 import { AppShell } from "../../../src/components/layout/AppShell.tsx";
 import type { AppShellContext } from "../../../src/components/layout/AppShellContext.ts";
+import { ThemeProvider } from "../../../src/hooks/use-theme.ts";
 
 function ViewerProbe() {
   const context = useOutletContext<AppShellContext>();
@@ -23,12 +24,14 @@ if (!root) {
 }
 createRoot(root).render(
   <StrictMode>
-    <MemoryRouter>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route element={<ViewerProbe />} path="/" />
-        </Route>
-      </Routes>
-    </MemoryRouter>
+    <ThemeProvider>
+      <MemoryRouter>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route element={<ViewerProbe />} path="/" />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </ThemeProvider>
   </StrictMode>,
 );
