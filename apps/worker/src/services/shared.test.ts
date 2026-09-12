@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { upsertUserByEmail } from "../db/users.ts";
 import type { CreateNoteInput, SessionUser } from "@miyulabmd/shared";
+import { upsertUserByEmail } from "../db/users.ts";
 import {
   ensureFolderRow,
   listPublicSharedFolders,
@@ -131,7 +131,7 @@ async function createEnvWithSeededData() {
   const owner = await upsertUserByEmail(env, "owner@example.com", "Owner");
   const viewer = await upsertUserByEmail(env, "viewer@example.com", "Viewer");
 
-  const directSignedIn = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "inbox",
     markdown:
       "# Direct signed-in note\nThis markdown contains shared-token for direct-signed-in note.",
@@ -139,7 +139,7 @@ async function createEnvWithSeededData() {
     title: "Direct signed-in note",
   });
 
-  const inheritedSignedIn = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "shared/docs",
     inheritAccess: true,
     markdown:
@@ -147,7 +147,7 @@ async function createEnvWithSeededData() {
     title: "Inherited signed-in note",
   });
 
-  const privateOverride = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "team/private",
     markdown:
       "# Self-only override note\nThis markdown contains private-only token that must stay hidden.",
@@ -164,7 +164,7 @@ async function createEnvWithSeededData() {
     writeScope: "users",
   });
 
-  const publicLinkOnly = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "public-link",
     markdown:
       "# Public-link-only note\nThis markdown contains public-link-only token.",
@@ -223,7 +223,7 @@ async function createEnvWithPublicDiscoverySeededData(
 
   const owner = await upsertUserByEmail(env, "owner@example.com", "Owner");
 
-  const directPublic = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "public-zone",
     markdown: "# Direct public note\nThis note should be visible to guests.",
     readScope: "public",
@@ -233,7 +233,7 @@ async function createEnvWithPublicDiscoverySeededData(
 
   await upsertFolderPolicy(env, owner.id, "shared-public", "public", "public");
 
-  const inheritedPublic = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "shared-public/docs",
     inheritAccess: true,
     markdown:
@@ -241,7 +241,7 @@ async function createEnvWithPublicDiscoverySeededData(
     title: "Inherited public note",
   });
 
-  const privateOverride = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "shared-public/hidden",
     markdown:
       "# Private override note\nThis private note should not appear for guests.",
@@ -249,7 +249,7 @@ async function createEnvWithPublicDiscoverySeededData(
     title: "Private override note",
   });
 
-  const signedInOverride = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "shared-public/login",
     markdown:
       "# Signed-in override note\nThis signed-in only note should not appear for guests.",
@@ -257,7 +257,7 @@ async function createEnvWithPublicDiscoverySeededData(
     title: "Signed-in override note",
   });
 
-  const usersOverride = await createNoteOrThrow(env, owner, {
+  await createNoteOrThrow(env, owner, {
     folder: "shared-public/users",
     markdown:
       "# Users override note\nThis users-only note should not appear for anonymous users.",

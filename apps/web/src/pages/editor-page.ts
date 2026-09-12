@@ -20,12 +20,12 @@ import {
   type LocalDraft,
   type LocalDraftId,
 } from "../lib/draft-store.ts";
+import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
 import { canCreateLocalDraft } from "../lib/home-draft-list.ts";
 import {
   getLocalDraftEditor,
   openLocalDraftEditor,
 } from "../lib/local-draft-editor.ts";
-import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
 import { loadOgCards } from "../lib/markdown.ts";
 import { readNoteBootstrap } from "../lib/note-bootstrap.ts";
 import {
@@ -721,6 +721,7 @@ export function subscribeLocalDraftLoad(input: {
   onSnapshot: (snapshot: EditorNoteSnapshot) => void;
 }): () => void {
   let cancelled = false;
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: draft lock, hydrate, and deny paths
   void (async () => {
     if (!canCreateLocalDraft(input.session, input.user)) {
       if (!cancelled) {
@@ -1163,9 +1164,7 @@ export function handleCollabAuthStop(input: {
 }
 
 function isTerminalLoadClear(snapshot: Partial<EditorNoteSnapshot>): boolean {
-  return Boolean(
-    snapshot.viewPhase && TERMINAL_PHASES.has(snapshot.viewPhase),
-  );
+  return Boolean(snapshot.viewPhase && TERMINAL_PHASES.has(snapshot.viewPhase));
 }
 
 export function applyEditorLoadOutcome(

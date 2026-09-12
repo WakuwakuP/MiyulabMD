@@ -232,10 +232,8 @@ export function evaluateConditionalMarkdownUpdate(
   expectedMarkdown: string | undefined,
   markdown: string,
 ): ConditionalMarkdownDecision {
-  if (expectedMarkdown !== undefined) {
-    if (current !== expectedMarkdown) {
-      return current === markdown ? { action: "noop" } : { action: "conflict" };
-    }
+  if (expectedMarkdown !== undefined && current !== expectedMarkdown) {
+    return current === markdown ? { action: "noop" } : { action: "conflict" };
   }
   return current === markdown ? { action: "noop" } : { action: "apply" };
 }

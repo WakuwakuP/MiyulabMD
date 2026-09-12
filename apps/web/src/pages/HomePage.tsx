@@ -22,13 +22,13 @@ import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
+import { canCreateLocalDraft } from "../lib/home-draft-list.ts";
 import {
   getNotesLoadState,
   type NotesLoadState,
   peekFolder,
   peekNotes,
 } from "../lib/list-cache.ts";
-import { canCreateLocalDraft } from "../lib/home-draft-list.ts";
 import {
   getSessionSnapshot,
   subscribeSession,

@@ -7,8 +7,8 @@ import {
   readCachedNote,
   writeCachedNote,
 } from "./offline-cache.ts";
-import { isPersistableRemoteId } from "./offline-db.ts";
 import { cachedToNote } from "./offline-cache-types.ts";
+import { isPersistableRemoteId } from "./offline-db.ts";
 import { getHydratableScope } from "./offline-scope.ts";
 import { getSessionSnapshot } from "./offline-session.ts";
 import {

@@ -57,10 +57,6 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
-function parseErrorFromText(text: string, statusText: string): string {
-  return parseErrorPayload(text, statusText).error;
-}
-
 function parseErrorPayload(
   text: string,
   statusText: string,

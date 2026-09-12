@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Note } from "@miyulabmd/shared";
 import type { ApiFailure } from "../lib/api.ts";
+import type { LocalDraft } from "../lib/draft-store.ts";
 import type { SessionSnapshot } from "../lib/offline-session.ts";
 import {
   accountScopeFromUserId,
   nextRequestGeneration,
   nextSessionEpoch,
 } from "../lib/offline-types.ts";
-import type { LocalDraft } from "../lib/draft-store.ts";
 import {
   allowsServerMutations,
   applyEditorForceLoadResult,

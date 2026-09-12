@@ -97,26 +97,22 @@ test("applyTextDiff inserts without rewriting the rest", () => {
 });
 
 test("evaluateConditionalMarkdownUpdate handles match, noop, and conflict", () => {
-  assert.deepEqual(
-    evaluateConditionalMarkdownUpdate("base", "base", "next"),
-    { action: "apply" },
-  );
-  assert.deepEqual(
-    evaluateConditionalMarkdownUpdate("next", "base", "next"),
-    { action: "noop" },
-  );
-  assert.deepEqual(
-    evaluateConditionalMarkdownUpdate("other", "base", "next"),
-    { action: "conflict" },
-  );
+  assert.deepEqual(evaluateConditionalMarkdownUpdate("base", "base", "next"), {
+    action: "apply",
+  });
+  assert.deepEqual(evaluateConditionalMarkdownUpdate("next", "base", "next"), {
+    action: "noop",
+  });
+  assert.deepEqual(evaluateConditionalMarkdownUpdate("other", "base", "next"), {
+    action: "conflict",
+  });
   assert.deepEqual(
     evaluateConditionalMarkdownUpdate("same", undefined, "same"),
     { action: "noop" },
   );
-  assert.deepEqual(
-    evaluateConditionalMarkdownUpdate("old", undefined, "new"),
-    { action: "apply" },
-  );
+  assert.deepEqual(evaluateConditionalMarkdownUpdate("old", undefined, "new"), {
+    action: "apply",
+  });
 });
 
 test("excerptAround and outline helpers", () => {

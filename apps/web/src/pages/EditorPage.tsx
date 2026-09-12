@@ -35,7 +35,21 @@ import {
   type CollabSessionSnapshot,
   collabBannerMessage,
 } from "../lib/collaboration-session.ts";
+import {
+  isDraftStorageUnavailable,
+  type LocalDraftId,
+} from "../lib/draft-store.ts";
+import {
+  getPromotedServerId,
+  registerDraftSyncNavigation,
+  subscribeDraftPromotions,
+} from "../lib/draft-sync.ts";
 import type { EditorMode } from "../lib/editor-mode.ts";
+import {
+  getLocalDraftEditor,
+  invalidateLocalDraftEditor,
+  type LocalDraftEditor,
+} from "../lib/local-draft-editor.ts";
 import {
   dismissStaleSsrPreview,
   removeSsrPreview,
@@ -82,17 +96,6 @@ import {
   teardownCollab,
   verifiedCanEdit,
 } from "./editor-page.ts";
-import {
-  getLocalDraftEditor,
-  invalidateLocalDraftEditor,
-  type LocalDraftEditor,
-} from "../lib/local-draft-editor.ts";
-import { isDraftStorageUnavailable, type LocalDraftId } from "../lib/draft-store.ts";
-import {
-  getPromotedServerId,
-  registerDraftSyncNavigation,
-  subscribeDraftPromotions,
-} from "../lib/draft-sync.ts";
 
 function EditorLoadError({
   message,
@@ -554,6 +557,33 @@ function applySnapshot(
   }
 }
 
+function localDraftSaveBanner(editor: LocalDraftEditor | null): string | null {
+  if (editor?.saveState === "saving") {
+    return "端末へ保存中…";
+  }
+  if (editor?.saveState === "error" || editor?.saveState === "conflict") {
+    return editor.saveError ?? "端末への保存に失敗しました。";
+  }
+  if (isDraftStorageUnavailable()) {
+    return "端末に保存できていません。内容はこのタブ内のみ保持されます。";
+  }
+  return null;
+}
+
+function editorDocumentModel(
+  localEditor: LocalDraftEditor | null,
+  note: Note | null,
+): EditorNoteSnapshot["document"] {
+  if (localEditor) {
+    return { draft: localEditor.draft, kind: "draft" };
+  }
+  if (note) {
+    return { kind: "server", note };
+  }
+  return null;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: page wires session, local draft, and collab
 export function EditorPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -634,19 +664,10 @@ export function EditorPage() {
   const articleIssues = articleIssuesFor(articleSource, markdown);
   const awareness = localEditor?.awareness ?? collab?.awareness;
   const yMarkdown = localEditor?.yMarkdown ?? collab?.yMarkdown;
-  const ready = Boolean(
-    localEditor
-      ? yMarkdown && awareness
-      : yMarkdown && awareness && collabReady,
-  );
-  const localSaveBanner =
-    localEditor?.saveState === "saving"
-      ? "端末へ保存中…"
-      : localEditor?.saveState === "error" || localEditor?.saveState === "conflict"
-        ? (localEditor.saveError ?? "端末への保存に失敗しました。")
-        : isDraftStorageUnavailable()
-          ? "端末に保存できていません。内容はこのタブ内のみ保持されます。"
-          : null;
+  const ready = localEditor
+    ? Boolean(yMarkdown && awareness)
+    : Boolean(yMarkdown && awareness && collabReady);
+  const localSaveBanner = localDraftSaveBanner(localEditor);
   const collabBanner = collabSnapshot
     ? collabBannerMessage(collabSnapshot)
     : null;
@@ -660,11 +681,7 @@ export function EditorPage() {
 
   editorSnapshotRef.current = {
     accessDraft,
-    document: localEditor
-      ? { draft: localEditor.draft, kind: "draft" }
-      : note
-        ? { kind: "server", note }
-        : null,
+    document: editorDocumentModel(localEditor, note),
     folder,
     loadError,
     markdown,
@@ -705,7 +722,7 @@ export function EditorPage() {
   }, [navigate, id]);
 
   useEffect(() => {
-    if (!user?.id || !isLocalDraftId(id)) {
+    if (!(user?.id && isLocalDraftId(id))) {
       return;
     }
     void getPromotedServerId(user.id, id as LocalDraftId).then((serverId) => {
@@ -911,7 +928,7 @@ export function EditorPage() {
   }, [resolvedPhase, id]);
 
   useEffect(() => {
-    if (!localEditor || !user) {
+    if (!(localEditor && user)) {
       return;
     }
     const syncMarkdown = () => {
@@ -919,10 +936,7 @@ export function EditorPage() {
     };
     localEditor.yMarkdown.observe(syncMarkdown);
     const timer = window.setInterval(() => {
-      const current = getLocalDraftEditor(
-        user.id,
-        id as `local-${string}`,
-      );
+      const current = getLocalDraftEditor(user.id, id as `local-${string}`);
       if (current) {
         setLocalEditor(current);
       }
@@ -965,11 +979,6 @@ export function EditorPage() {
         session,
         collabActive,
       ),
-      serverMutationsVisible: editorHeaderMutationsVisible(
-        resolvedPhase,
-        session,
-        collabActive,
-      ),
       isOwner: flags.isOwner,
       note,
       onRequestEdit: (next) => {
@@ -994,6 +1003,11 @@ export function EditorPage() {
           setMode(next);
         }
       },
+      serverMutationsVisible: editorHeaderMutationsVisible(
+        resolvedPhase,
+        session,
+        collabActive,
+      ),
       session,
       setAccessDraft,
       setFolder,

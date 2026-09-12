@@ -313,13 +313,17 @@ export function openApiDocument() {
           responses: {
             "200": {
               content: {
-                "application/json": { schema: { $ref: "#/components/schemas/Note" } },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Note" },
+                },
               },
               description: "Idempotent replay of an existing mapped note",
             },
             "201": {
               content: {
-                "application/json": { schema: { $ref: "#/components/schemas/Note" } },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Note" },
+                },
               },
               description: "New note (or first mapped create)",
             },
@@ -337,7 +341,8 @@ export function openApiDocument() {
             },
             "410": {
               content: { "application/json": { schema: errorSchema } },
-              description: "draft_deleted — mapping exists but note was removed",
+              description:
+                "draft_deleted — mapping exists but note was removed",
             },
           },
           summary: "Create note (optional idempotent draft keys)",
@@ -375,7 +380,9 @@ export function openApiDocument() {
           responses: {
             "200": {
               content: {
-                "application/json": { schema: { $ref: "#/components/schemas/Note" } },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Note" },
+                },
               },
               description: "Updated note",
             },

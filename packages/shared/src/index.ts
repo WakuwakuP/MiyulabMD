@@ -69,8 +69,8 @@ export type {
   NoteRevisionRestore,
   NoteSummary,
   UpdateFolderAccessInput,
-  UpdateNoteMetaInput,
   UpdateNoteMarkdownInput,
+  UpdateNoteMetaInput,
 } from "./note.ts";
 export {
   computeCreateRequestHash,
@@ -78,11 +78,11 @@ export {
   isConditionalMarkdownUpdate,
   isNoteEditOp,
   isNoteHistoryActorKind,
-  normalizedCreateInputForHash,
   NOTE_CREATE_ERROR_CODES,
   NOTE_EDIT_OPS,
   NOTE_HISTORY_ACTOR_KINDS,
   NOTE_RESTORE_MESSAGE,
+  normalizedCreateInputForHash,
   validateDraftKeys,
 } from "./note.ts";
 export type {

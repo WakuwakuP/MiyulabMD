@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { NoteSummary } from "@miyulabmd/shared";
+import type { LocalDraft } from "./draft-store.ts";
 import {
   canCreateLocalDraft,
   mergeHomeDisplayNotes,
 } from "./home-draft-list.ts";
-import type { LocalDraft } from "./draft-store.ts";
 import type { SessionSnapshot } from "./offline-session.ts";
 import { accountScopeFromUserId, nextSessionEpoch } from "./offline-types.ts";
 
@@ -77,8 +77,15 @@ test("canCreateLocalDraft allows online-confirmed and offline-known only", () =>
 
 test("mergeHomeDisplayNotes does not mutate server list input", () => {
   const server = [serverNote("server-1")];
-  const merged = mergeHomeDisplayNotes(server, [localDraft("local-1", 3)], null);
-  assert.deepEqual(server.map((note) => note.id), ["server-1"]);
+  const merged = mergeHomeDisplayNotes(
+    server,
+    [localDraft("local-1", 3)],
+    null,
+  );
+  assert.deepEqual(
+    server.map((note) => note.id),
+    ["server-1"],
+  );
   assert.deepEqual(
     merged.map((note) => note.id),
     ["local-1", "server-1"],
@@ -100,5 +107,8 @@ test("mergeHomeDisplayNotes hides promoted local drafts", () => {
       },
     ],
   );
-  assert.deepEqual(merged.map((note) => note.id), ["server-1"]);
+  assert.deepEqual(
+    merged.map((note) => note.id),
+    ["server-1"],
+  );
 });

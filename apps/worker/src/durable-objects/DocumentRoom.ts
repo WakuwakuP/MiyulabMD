@@ -324,7 +324,7 @@ export class DocumentRoom extends DurableObject<Env> {
       markdown,
     );
     if (decision.action === "noop") {
-      return { ok: true, noop: true };
+      return { noop: true, ok: true };
     }
     if (decision.action === "conflict") {
       return {
@@ -337,7 +337,7 @@ export class DocumentRoom extends DurableObject<Env> {
     applyTextDiff(ytext, markdown, APPLY_MARKDOWN_ORIGIN);
     await this.persistYjsState(doc);
     await this.flushSnapshotToD1();
-    return { ok: true, noop: false };
+    return { noop: false, ok: true };
   }
 
   async getMarkdown(noteId?: string): Promise<string> {

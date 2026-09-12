@@ -176,24 +176,31 @@ export type DraftKeyValidation =
 export function validateDraftKeys(input: {
   clientDraftId?: string;
   draftOwnerId?: string;
-}): DraftKeyValidation | { ok: true; clientDraftId?: undefined; draftOwnerId?: undefined } {
+}):
+  | DraftKeyValidation
+  | { ok: true; clientDraftId?: undefined; draftOwnerId?: undefined } {
   const hasClient = input.clientDraftId !== undefined;
   const hasOwner = input.draftOwnerId !== undefined;
-  if (!hasClient && !hasOwner) {
+  if (!(hasClient || hasOwner)) {
     return { ok: true };
   }
-  if (!hasClient || !hasOwner) {
-    return { ok: false, error: "clientDraftId and draftOwnerId must both be provided" };
+  const rawClientId = input.clientDraftId;
+  const rawOwnerId = input.draftOwnerId;
+  if (rawClientId === undefined || rawOwnerId === undefined) {
+    return {
+      error: "clientDraftId and draftOwnerId must both be provided",
+      ok: false,
+    };
   }
-  const clientDraftId = input.clientDraftId!.trim();
-  const draftOwnerId = input.draftOwnerId!.trim();
+  const clientDraftId = rawClientId.trim();
+  const draftOwnerId = rawOwnerId.trim();
   if (!isClientDraftId(clientDraftId)) {
-    return { ok: false, error: "clientDraftId must match local-{uuid}" };
+    return { error: "clientDraftId must match local-{uuid}", ok: false };
   }
   if (draftOwnerId.length === 0 || draftOwnerId.length > 128) {
-    return { ok: false, error: "draftOwnerId is invalid" };
+    return { error: "draftOwnerId is invalid", ok: false };
   }
-  return { ok: true, clientDraftId, draftOwnerId };
+  return { clientDraftId, draftOwnerId, ok: true };
 }
 
 export function isConditionalMarkdownUpdate(

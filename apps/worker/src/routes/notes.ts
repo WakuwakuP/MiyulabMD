@@ -15,8 +15,8 @@ import { readSession } from "../auth/session.ts";
 import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import {
-  createNoteService,
   type CreateNoteResult,
+  createNoteService,
   type MutateNoteResult,
 } from "../services/notes.ts";
 
@@ -26,8 +26,7 @@ function documentRoom(noteId: string) {
 
 const notes = createNoteService(env);
 
-type PatchNoteBody = UpdateNoteMetaInput &
-  Partial<UpdateNoteMarkdownInput>;
+type PatchNoteBody = UpdateNoteMetaInput & Partial<UpdateNoteMarkdownInput>;
 
 type RouteSet = { status?: number | string };
 

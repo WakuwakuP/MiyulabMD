@@ -1,9 +1,23 @@
 import type { CreateNoteInput, Note, SessionUser } from "@miyulabmd/shared";
 import { validateDraftKeys } from "@miyulabmd/shared";
 import type { ApiResult } from "./api.ts";
-import { createNote, deleteNote, updateNote } from "./api.ts";
+import { createNote, deleteNote, fetchNote, updateNote } from "./api.ts";
 import { createNoteCollabSession } from "./collaboration-session.ts";
-import { applyTextDiff } from "./y-text-diff.ts";
+import {
+  convertJournalToDraftKind,
+  type DraftJournalRecord,
+  type DraftSyncState,
+  deleteJournal,
+  getJournal,
+  getPromotion,
+  listJournals,
+  putJournal,
+  subscribeDraftJournal,
+} from "./draft-journal.ts";
+import {
+  adoptServerMarkdownWithoutCrdtMerge,
+  mergeDraftMarkdownForPatch,
+} from "./draft-markdown-merge.ts";
 import {
   awaitDraftCommitted,
   deleteDraft,
@@ -12,36 +26,10 @@ import {
   type LocalDraftId,
   removeDraftFromMemory,
 } from "./draft-store.ts";
-import {
-  convertJournalToDraftKind,
-  deleteJournal,
-  getJournal,
-  getPromotion,
-  type DraftJournalRecord,
-  type DraftSyncState,
-  listJournals,
-  putJournal,
-  putPromotion,
-  subscribeDraftJournal,
-} from "./draft-journal.ts";
-import {
-  adoptServerMarkdownWithoutCrdtMerge,
-  mergeDraftMarkdownForPatch,
-} from "./draft-markdown-merge.ts";
-import { getLocalDraftEditor } from "./local-draft-editor.ts";
+import { registerDraftSyncScheduler } from "./draft-sync-scheduler.ts";
 import { upsertNoteSummary } from "./list-cache.ts";
+import { getLocalDraftEditor } from "./local-draft-editor.ts";
 import { seedNoteCache } from "./note-cache.ts";
-import { fetchNote } from "./api.ts";
-import {
-  accountScopeFromUserId,
-  nextRequestGeneration,
-  type SessionEpoch,
-} from "./offline-types.ts";
-import {
-  getSessionSnapshot,
-  subscribeSession,
-  verifySession,
-} from "./offline-session.ts";
 import { writeCachedNote } from "./offline-cache.ts";
 import {
   awaitTx,
@@ -50,8 +38,18 @@ import {
   DRAFTS_STORE,
   openDb,
 } from "./offline-db.ts";
+import {
+  getSessionSnapshot,
+  subscribeSession,
+  verifySession,
+} from "./offline-session.ts";
+import {
+  accountScopeFromUserId,
+  nextRequestGeneration,
+  type SessionEpoch,
+} from "./offline-types.ts";
 import { subscribeOnlineStatus } from "./online-status.ts";
-import { registerDraftSyncScheduler } from "./draft-sync-scheduler.ts";
+import { applyTextDiff } from "./y-text-diff.ts";
 
 const SYNC_CHANNEL = "miyulabmd-draft-sync";
 const MAX_BACKOFF_MS = 60_000;
@@ -66,7 +64,9 @@ type OwnerFlush = {
 };
 
 const ownerFlushes = new Map<string, OwnerFlush>();
-const promotionListeners = new Set<(ownerId: string, localId: LocalDraftId, serverId: string) => void>();
+const promotionListeners = new Set<
+  (ownerId: string, localId: LocalDraftId, serverId: string) => void
+>();
 
 let serviceStarted = false;
 let retryAttempt = 0;
@@ -75,7 +75,6 @@ let navigateReplace: NavigateReplace | null = null;
 let openLocalRouteId: (() => LocalDraftId | null) | null = null;
 let broadcast: BroadcastChannel | null = null;
 let activeOwnerId: string | null = null;
-let activeSessionEpoch: SessionEpoch | null = null;
 
 function syncLockName(ownerId: string, localId: LocalDraftId): string {
   return `miyulabmd:draft-sync:${ownerId}:${localId}`;
@@ -169,12 +168,12 @@ async function acquireSyncLock(
   return () => undefined;
 }
 
-async function delegateFlushToEditorTab(
+function delegateFlushToEditorTab(
   ownerId: string,
   localId: LocalDraftId,
 ): Promise<boolean> {
   if (!broadcast) {
-    return false;
+    return Promise.resolve(false);
   }
   const requestId = crypto.randomUUID();
   return new Promise((resolve) => {
@@ -281,13 +280,11 @@ async function commitJournalSync(
   });
 }
 
-async function postCreate(
-  createInput: CreateNoteInput,
-): Promise<ApiResult<Note>> {
+function postCreate(createInput: CreateNoteInput): Promise<ApiResult<Note>> {
   return createNote(createInput);
 }
 
-async function patchMarkdown(
+function patchMarkdown(
   serverId: string,
   body: {
     markdown: string;
@@ -317,9 +314,10 @@ function isAuthFailure(result: ApiResult<unknown>): boolean {
     return false;
   }
   return (
-    result.kind === "http" &&
-    (result.status === 401 || result.status === 403)
-  ) || result.kind === "invalid-response";
+    (result.kind === "http" &&
+      (result.status === 401 || result.status === 403)) ||
+    result.kind === "invalid-response"
+  );
 }
 
 function isBlockedFailure(result: ApiResult<unknown>): boolean {
@@ -364,7 +362,7 @@ async function waitForCollabSynced(
   const serverMarkdown = session.yMarkdown.toString();
   await session.close();
 
-  if (!synced || !localEditor) {
+  if (!(synced && localEditor)) {
     return serverMarkdown.length > 0 ? serverMarkdown : null;
   }
 
@@ -395,11 +393,7 @@ async function promoteDraftRecord(input: {
 
   try {
     const tx = db.transaction(
-      [
-        DRAFT_PROMOTIONS_STORE,
-        DRAFTS_STORE,
-        DRAFT_JOURNAL_STORE,
-      ],
+      [DRAFT_PROMOTIONS_STORE, DRAFTS_STORE, DRAFT_JOURNAL_STORE],
       "readwrite",
     );
     tx.objectStore(DRAFT_PROMOTIONS_STORE).put({
@@ -423,10 +417,7 @@ async function promoteDraftRecord(input: {
   notifyPromotion(input.ownerId, input.localId, note.id);
 
   const openLocalId = openLocalRouteId?.();
-  if (
-    openLocalId === input.localId &&
-    activeOwnerId === input.ownerId
-  ) {
+  if (openLocalId === input.localId && activeOwnerId === input.ownerId) {
     navigateReplace?.(`/n/${note.id}`, { replace: true });
   }
   return true;
@@ -454,7 +445,6 @@ async function flushOneDraft(
       return;
     }
 
-    const draft = await getDraft(ownerId, localId);
     let sync = { ...journal.sync };
 
     if (sync.phase === "pending" || sync.phase === "creating") {
@@ -510,7 +500,10 @@ async function flushOneDraft(
           sync = {
             ...sync,
             lastError: {
-              code: result.kind === "http" ? (result.code ?? String(result.status)) : result.kind,
+              code:
+                result.kind === "http"
+                  ? (result.code ?? String(result.status))
+                  : result.kind,
               message: result.error,
             },
             phase: "blocked",
@@ -543,7 +536,7 @@ async function flushOneDraft(
       localId,
       sync.acknowledgedRevision ?? 1,
     );
-    if (!latest || !sync.serverId) {
+    if (!(latest && sync.serverId)) {
       return;
     }
 
@@ -555,7 +548,8 @@ async function flushOneDraft(
 
     if (localMarkdown !== (sync.acknowledgedLocalMarkdown ?? "")) {
       const merged = mergeDraftMarkdownForPatch({
-        acknowledgedLocalMarkdown: sync.acknowledgedLocalMarkdown ?? expectedMarkdown,
+        acknowledgedLocalMarkdown:
+          sync.acknowledgedLocalMarkdown ?? expectedMarkdown,
         acknowledgedMarkdown: sync.acknowledgedMarkdown ?? expectedMarkdown,
         localMarkdown,
       });
@@ -677,21 +671,16 @@ async function flushOneDraft(
     let adoptedMarkdown: string | null = null;
     const localEditor = getLocalDraftEditor(ownerId, localId);
     if (localEditor) {
-      adoptedMarkdown = await waitForCollabSynced(
-        serverId,
-        user,
-        localEditor,
-      );
+      adoptedMarkdown = await waitForCollabSynced(serverId, user, localEditor);
     }
 
     const noteResult = await fetchNote(serverId);
-    const noteForPromote: Note =
-      noteResult.ok
-        ? noteResult.data
-        : ({
-            id: serverId,
-            markdown: sync.acknowledgedMarkdown ?? refreshed?.markdown ?? "",
-          } as Note);
+    const noteForPromote: Note = noteResult.ok
+      ? noteResult.data
+      : ({
+          id: serverId,
+          markdown: sync.acknowledgedMarkdown ?? refreshed?.markdown ?? "",
+        } as Note);
 
     const promoted = await promoteDraftRecord({
       adoptedMarkdown,
@@ -726,7 +715,10 @@ async function flushDeletePending(
     return;
   }
   const result = await deleteNote(serverId);
-  if (result.ok || (result.kind === "http" && [404, 410].includes(result.status))) {
+  if (
+    result.ok ||
+    (result.kind === "http" && [404, 410].includes(result.status))
+  ) {
     await deleteDraft(ownerId, localId);
     await deleteJournal(ownerId, localId);
     return;
@@ -742,7 +734,6 @@ async function flushOwnerDrafts(
   user: SessionUser,
 ): Promise<void> {
   activeOwnerId = ownerId;
-  activeSessionEpoch = sessionEpoch;
   const journals = await listJournals(ownerId);
   const pending = journals.filter(
     (entry) =>
@@ -753,7 +744,6 @@ async function flushOwnerDrafts(
     await flushOneDraft(ownerId, entry.localId, sessionEpoch, user);
   }
   activeOwnerId = null;
-  activeSessionEpoch = null;
 }
 
 export async function flushPendingDrafts(): Promise<void> {
@@ -874,7 +864,7 @@ export async function requestDraftDelete(
   maybeScheduleDraftSync(localId);
 }
 
-export async function promoteNoteAfterOnlineCreate(input: {
+export function promoteNoteAfterOnlineCreate(input: {
   ownerId: string;
   localId: LocalDraftId;
   note: Note;
@@ -954,7 +944,12 @@ export function startDraftSyncService(): () => void {
             });
           });
       }
-      if (data.type === "promoted" && data.ownerId && data.localId && data.serverId) {
+      if (
+        data.type === "promoted" &&
+        data.ownerId &&
+        data.localId &&
+        data.serverId
+      ) {
         notifyPromotion(data.ownerId, data.localId, data.serverId);
       }
     };
@@ -976,10 +971,10 @@ export function startDraftSyncService(): () => void {
     maybeScheduleDraftSync();
   });
   const onVisible = () => {
-    if (!document.hidden) {
-      maybeScheduleDraftSync();
-    } else {
+    if (document.hidden) {
       clearRetryTimer();
+    } else {
+      maybeScheduleDraftSync();
     }
   };
   document.addEventListener("visibilitychange", onVisible);
@@ -1014,5 +1009,4 @@ export function resetDraftSyncForTests(): void {
   navigateReplace = null;
   openLocalRouteId = null;
   activeOwnerId = null;
-  activeSessionEpoch = null;
 }

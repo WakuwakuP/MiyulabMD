@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
+import {
+  type CreateNoteInput,
+  computeCreateRequestHash,
+} from "@miyulabmd/shared";
 import { indexedDB } from "fake-indexeddb";
+import { resetCreateNoteCoalescingForTests } from "../pages/home-page.ts";
+import type { DraftJournalRecord } from "./draft-journal.ts";
 import {
   commitCreateJournal,
   getJournal,
@@ -8,17 +14,15 @@ import {
   resetDraftJournalForTests,
 } from "./draft-journal.ts";
 import {
-  configureOfflineDb,
-  OFFLINE_DB_NAME,
-  resetOfflineDbForTests,
-} from "./offline-db.ts";
+  adoptServerMarkdownWithoutCrdtMerge,
+  mergeDraftMarkdownForPatch,
+} from "./draft-markdown-merge.ts";
 import {
   insertDraft,
+  type LocalDraftId,
   listDrafts,
   resetDraftStoreForTests,
-  type LocalDraftId,
 } from "./draft-store.ts";
-import type { DraftJournalRecord } from "./draft-journal.ts";
 import {
   __testDraftSyncRetryDelayMs,
   buildCreateInput,
@@ -26,19 +30,15 @@ import {
   resetDraftSyncForTests,
 } from "./draft-sync.ts";
 import {
-  computeCreateRequestHash,
-  type CreateNoteInput,
-} from "@miyulabmd/shared";
-import {
-  adoptServerMarkdownWithoutCrdtMerge,
-  mergeDraftMarkdownForPatch,
-} from "./draft-markdown-merge.ts";
+  configureOfflineDb,
+  OFFLINE_DB_NAME,
+  resetOfflineDbForTests,
+} from "./offline-db.ts";
 import {
   __testSetSessionState,
   resetOfflineSessionForTests,
 } from "./offline-session.ts";
 import { accountScopeFromUserId } from "./offline-types.ts";
-import { resetCreateNoteCoalescingForTests } from "../pages/home-page.ts";
 
 const user = {
   displayName: "Me",
@@ -109,25 +109,29 @@ test("journal precedes POST and duplicate flush coalesces to one create", async 
   });
 
   let postCount = 0;
-  mock.method(globalThis, "fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/api/notes") && init?.method === "POST") {
-      postCount += 1;
-      return Promise.resolve(noteResponse("server-1", "# 無題\n"));
-    }
-    if (url.includes("/api/notes/server-1") && init?.method === "GET") {
-      return Promise.resolve(noteResponse("server-1", "# 無題\n", 200));
-    }
-    if (url.endsWith("/api/me")) {
-      return Promise.resolve(
-        new Response(JSON.stringify({ user }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        }),
-      );
-    }
-    return Promise.resolve(new Response("{}", { status: 404 }));
-  });
+  mock.method(
+    globalThis,
+    "fetch",
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/notes") && init?.method === "POST") {
+        postCount += 1;
+        return Promise.resolve(noteResponse("server-1", "# 無題\n"));
+      }
+      if (url.includes("/api/notes/server-1") && init?.method === "GET") {
+        return Promise.resolve(noteResponse("server-1", "# 無題\n", 200));
+      }
+      if (url.endsWith("/api/me")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ user }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    },
+  );
 
   await commitCreateJournal({
     createInput: createInput(),
@@ -162,23 +166,29 @@ test("same clientDraftId replay returns 200 without extra local drafts", async (
   });
 
   let postCount = 0;
-  mock.method(globalThis, "fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/api/notes") && init?.method === "POST") {
-      postCount += 1;
-      const status = postCount === 1 ? 201 : 200;
-      return Promise.resolve(noteResponse("server-replay", "# 無題\n", status));
-    }
-    if (url.endsWith("/api/me")) {
-      return Promise.resolve(
-        new Response(JSON.stringify({ user }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        }),
-      );
-    }
-    return Promise.resolve(new Response("{}", { status: 404 }));
-  });
+  mock.method(
+    globalThis,
+    "fetch",
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/notes") && init?.method === "POST") {
+        postCount += 1;
+        const status = postCount === 1 ? 201 : 200;
+        return Promise.resolve(
+          noteResponse("server-replay", "# 無題\n", status),
+        );
+      }
+      if (url.endsWith("/api/me")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ user }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    },
+  );
 
   const input = createInput();
   const { createNote } = await import("./api.ts");
@@ -252,26 +262,33 @@ test("HTTP 4xx does not add another draft journal", async () => {
     user,
   });
 
-  mock.method(globalThis, "fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/api/notes") && init?.method === "POST") {
-      return Promise.resolve(
-        new Response(JSON.stringify({ code: "owner_mismatch", error: "bad" }), {
-          headers: { "Content-Type": "application/json" },
-          status: 409,
-        }),
-      );
-    }
-    if (url.endsWith("/api/me")) {
-      return Promise.resolve(
-        new Response(JSON.stringify({ user }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        }),
-      );
-    }
-    return Promise.resolve(new Response("{}", { status: 404 }));
-  });
+  mock.method(
+    globalThis,
+    "fetch",
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/notes") && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ code: "owner_mismatch", error: "bad" }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 409,
+            },
+          ),
+        );
+      }
+      if (url.endsWith("/api/me")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ user }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    },
+  );
 
   await commitCreateJournal({
     createInput: createInput(),
@@ -295,26 +312,33 @@ test("410 blocks automatic retry loop", async () => {
     user,
   });
 
-  mock.method(globalThis, "fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/api/notes") && init?.method === "POST") {
-      return Promise.resolve(
-        new Response(JSON.stringify({ code: "draft_deleted", error: "gone" }), {
-          headers: { "Content-Type": "application/json" },
-          status: 410,
-        }),
-      );
-    }
-    if (url.endsWith("/api/me")) {
-      return Promise.resolve(
-        new Response(JSON.stringify({ user }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        }),
-      );
-    }
-    return Promise.resolve(new Response("{}", { status: 404 }));
-  });
+  mock.method(
+    globalThis,
+    "fetch",
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/notes") && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ code: "draft_deleted", error: "gone" }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 410,
+            },
+          ),
+        );
+      }
+      if (url.endsWith("/api/me")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ user }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    },
+  );
 
   await commitCreateJournal({
     createInput: createInput(),
@@ -368,35 +392,46 @@ test("POST uses journal markdown then PATCH sends draft edits", async () => {
   let patchMarkdown: string | undefined;
   let patchExpected: string | undefined;
 
-  mock.method(globalThis, "fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/api/notes") && init?.method === "POST") {
-      const body = JSON.parse(String(init.body)) as CreateNoteInput;
-      postMarkdown = body.markdown;
-      return Promise.resolve(noteResponse("server-patch-1", "# 無題\n"));
-    }
-    if (url.includes("/api/notes/server-patch-1") && init?.method === "PATCH") {
-      const body = JSON.parse(String(init.body)) as {
-        markdown?: string;
-        expectedMarkdown?: string;
-      };
-      patchMarkdown = body.markdown;
-      patchExpected = body.expectedMarkdown;
-      return Promise.resolve(noteResponse("server-patch-1", "# Hello\n", 200));
-    }
-    if (url.includes("/api/notes/server-patch-1")) {
-      return Promise.resolve(noteResponse("server-patch-1", "# Hello\n", 200));
-    }
-    if (url.endsWith("/api/me")) {
-      return Promise.resolve(
-        new Response(JSON.stringify({ user }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        }),
-      );
-    }
-    return Promise.resolve(new Response("{}", { status: 404 }));
-  });
+  mock.method(
+    globalThis,
+    "fetch",
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/notes") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as CreateNoteInput;
+        postMarkdown = body.markdown;
+        return Promise.resolve(noteResponse("server-patch-1", "# 無題\n"));
+      }
+      if (
+        url.includes("/api/notes/server-patch-1") &&
+        init?.method === "PATCH"
+      ) {
+        const body = JSON.parse(String(init.body)) as {
+          markdown?: string;
+          expectedMarkdown?: string;
+        };
+        patchMarkdown = body.markdown;
+        patchExpected = body.expectedMarkdown;
+        return Promise.resolve(
+          noteResponse("server-patch-1", "# Hello\n", 200),
+        );
+      }
+      if (url.includes("/api/notes/server-patch-1")) {
+        return Promise.resolve(
+          noteResponse("server-patch-1", "# Hello\n", 200),
+        );
+      }
+      if (url.endsWith("/api/me")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ user }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    },
+  );
 
   await commitCreateJournal({
     createInput: createInput("# 無題\n"),
@@ -426,10 +461,7 @@ test("POST uses journal markdown then PATCH sends draft edits", async () => {
 test("adoptServerMarkdownWithoutCrdtMerge keeps server markdown only", () => {
   const local = "# local\nbody";
   const server = "# server\nbody";
-  assert.equal(
-    adoptServerMarkdownWithoutCrdtMerge(local, server),
-    server,
-  );
+  assert.equal(adoptServerMarkdownWithoutCrdtMerge(local, server), server);
 });
 
 test("mergeDraftMarkdownForPatch uses server body when local unchanged", () => {

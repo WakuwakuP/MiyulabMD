@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
 import type { FolderAccess, NoteSummary, SessionUser } from "@miyulabmd/shared";
 import { indexedDB } from "fake-indexeddb";
+import { resetDraftJournalForTests } from "../lib/draft-journal.ts";
+import { resetDraftStoreForTests } from "../lib/draft-store.ts";
 import {
   invalidateFolderCache,
   invalidateNotesCache,
@@ -14,8 +16,6 @@ import {
   OFFLINE_DB_NAME,
   resetOfflineDbForTests,
 } from "../lib/offline-db.ts";
-import { resetDraftJournalForTests } from "../lib/draft-journal.ts";
-import { resetDraftStoreForTests } from "../lib/draft-store.ts";
 import {
   __testSetSessionState,
   getSessionSnapshot,

@@ -5,7 +5,7 @@ import {
   removeDraftLock,
   writeDraftLock,
 } from "./draft-store.ts";
-import { nextLockEpoch, type LockEpoch } from "./offline-types.ts";
+import { type LockEpoch, nextLockEpoch } from "./offline-types.ts";
 
 const TAB_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -60,7 +60,11 @@ async function tryAcquireIdbLease(
       return;
     }
     const current = await readDraftLock(ownerId, localId);
-    if (!current || current.tabId !== TAB_ID || current.lockEpoch !== lockEpoch) {
+    if (
+      !current ||
+      current.tabId !== TAB_ID ||
+      current.lockEpoch !== lockEpoch
+    ) {
       released = true;
       if (renewTimer) {
         clearInterval(renewTimer);

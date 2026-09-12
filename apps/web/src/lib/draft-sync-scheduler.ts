@@ -4,7 +4,9 @@ type DraftSyncScheduler = (localId?: LocalDraftId) => void;
 
 let scheduler: DraftSyncScheduler | null = null;
 
-export function registerDraftSyncScheduler(next: DraftSyncScheduler | null): void {
+export function registerDraftSyncScheduler(
+  next: DraftSyncScheduler | null,
+): void {
   scheduler = next;
 }
 

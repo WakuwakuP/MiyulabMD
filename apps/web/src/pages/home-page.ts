@@ -35,25 +35,23 @@ import {
   subscribeDraftJournal,
 } from "../lib/draft-journal.ts";
 import {
+  createLocalDraftId,
+  insertDraft,
+  type LocalDraft,
+  type LocalDraftId,
+  listDrafts,
+  subscribeDrafts,
+} from "../lib/draft-store.ts";
+import {
   convertCreateJournalToDraft,
   promoteNoteAfterOnlineCreate,
   requestDraftDelete,
 } from "../lib/draft-sync.ts";
 import {
-  createLocalDraftId,
-  insertDraft,
-  listDrafts,
-  subscribeDrafts,
-  type LocalDraft,
-  type LocalDraftId,
-} from "../lib/draft-store.ts";
-import {
   canCreateLocalDraft,
-  draftToNoteSummary,
   isLocalDraftSummary,
   mergeHomeDisplayNotes,
 } from "../lib/home-draft-list.ts";
-import { invalidateLocalDraftEditor } from "../lib/local-draft-editor.ts";
 import {
   abortNoteBodyPrefetch,
   getNotesLoadState,
@@ -67,6 +65,7 @@ import {
   seedFolderCache,
   upsertNoteSummary,
 } from "../lib/list-cache.ts";
+import { invalidateLocalDraftEditor } from "../lib/local-draft-editor.ts";
 import { invalidateNoteCache, seedNoteCache } from "../lib/note-cache.ts";
 import { getHydratableScope } from "../lib/offline-scope.ts";
 import {
@@ -188,7 +187,9 @@ export function filterHomeMenuItems(
   localDraft = false,
 ): ContextMenuItem[] {
   if (localDraft) {
-    return items.filter((item) => item.label === "開く" || item.label === "削除");
+    return items.filter(
+      (item) => item.label === "開く" || item.label === "削除",
+    );
   }
   if (!blocked) {
     return items;
@@ -326,7 +327,9 @@ export function subscribeHomeNotes(
     })();
   };
   const unsubDrafts = user ? subscribeDrafts(refreshFromCache) : undefined;
-  const unsubJournal = user ? subscribeDraftJournal(refreshFromCache) : undefined;
+  const unsubJournal = user
+    ? subscribeDraftJournal(refreshFromCache)
+    : undefined;
   if (user && peekNotes()) {
     void publish(peekNotes() ?? []);
   }
@@ -469,7 +472,9 @@ export async function persistNewNote(
         revision: 1,
       });
       if (!journalOk) {
-        setError("端末への保存に失敗しました。通信が回復するまで再試行できません。");
+        setError(
+          "端末への保存に失敗しました。通信が回復するまで再試行できません。",
+        );
         return null;
       }
 

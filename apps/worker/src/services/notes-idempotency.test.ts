@@ -136,7 +136,9 @@ test("idempotent create replays same note without mutating content", async (t) =
     .prepare("UPDATE notes SET markdown_snapshot = ?, title = ? WHERE id = ?")
     .run("# mutated\n", "mutated", first.note.id);
   const beforeReplay = sqlite
-    .prepare("SELECT markdown_snapshot, title, updated_at FROM notes WHERE id = ?")
+    .prepare(
+      "SELECT markdown_snapshot, title, updated_at FROM notes WHERE id = ?",
+    )
     .get(first.note.id) as {
     markdown_snapshot: string;
     title: string;
@@ -154,7 +156,9 @@ test("idempotent create replays same note without mutating content", async (t) =
   assert.equal(second.note.title, "mutated");
 
   const afterReplay = sqlite
-    .prepare("SELECT markdown_snapshot, title, updated_at FROM notes WHERE id = ?")
+    .prepare(
+      "SELECT markdown_snapshot, title, updated_at FROM notes WHERE id = ?",
+    )
     .get(first.note.id) as {
     markdown_snapshot: string;
     title: string;

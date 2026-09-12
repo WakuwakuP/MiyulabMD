@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
 import { indexedDB } from "fake-indexeddb";
+import { resetDraftJournalForTests } from "../lib/draft-journal.ts";
+import { listDrafts, resetDraftStoreForTests } from "../lib/draft-store.ts";
+import { peekNotes } from "../lib/list-cache.ts";
 import {
   configureOfflineDb,
   OFFLINE_DB_NAME,
   resetOfflineDbForTests,
 } from "../lib/offline-db.ts";
-import { resetDraftJournalForTests } from "../lib/draft-journal.ts";
-import { listDrafts, resetDraftStoreForTests } from "../lib/draft-store.ts";
 import {
   __testSetSessionState,
   resetOfflineSessionForTests,
 } from "../lib/offline-session.ts";
 import { accountScopeFromUserId } from "../lib/offline-types.ts";
-import { peekNotes } from "../lib/list-cache.ts";
 import {
   persistNewNote,
   resetCreateNoteCoalescingForTests,
@@ -95,7 +95,9 @@ test("persistNewNote creates draft on network status 0", async () => {
     status: "online-confirmed",
     user,
   });
-  mock.method(globalThis, "fetch", () => Promise.reject(new TypeError("offline")));
+  mock.method(globalThis, "fetch", () =>
+    Promise.reject(new TypeError("offline")),
+  );
   const navigate = mock.fn();
   await persistNewNote(
     null,
@@ -133,7 +135,10 @@ test("persistNewNote does not write local id into notes cache", async () => {
     user,
   );
   const ids = peekNotes()?.map((note) => note.id) ?? [];
-  assert.equal(ids.some((id) => id.startsWith("local-")), false);
+  assert.equal(
+    ids.some((id) => id.startsWith("local-")),
+    false,
+  );
 });
 
 test("guest session cannot create local draft", async () => {

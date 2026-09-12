@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { indexedDB } from "fake-indexeddb";
-import {
-  configureOfflineDb,
-  OFFLINE_DB_NAME,
-  resetOfflineDbForTests,
-} from "./offline-db.ts";
 import { resetDraftJournalForTests } from "./draft-journal.ts";
 import {
   deleteDraft,
   insertDraft,
+  type LocalDraft,
   listDrafts,
   resetDraftStoreForTests,
   saveDraft,
-  type LocalDraft,
 } from "./draft-store.ts";
+import {
+  configureOfflineDb,
+  OFFLINE_DB_NAME,
+  resetOfflineDbForTests,
+  writeSessionRecord,
+} from "./offline-db.ts";
 import { nextLockEpoch, nextSessionEpoch } from "./offline-types.ts";
-import { writeSessionRecord } from "./offline-db.ts";
 
 const ownerId = "user-1";
 

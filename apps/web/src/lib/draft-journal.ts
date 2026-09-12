@@ -1,11 +1,11 @@
 import type { CreateNoteInput } from "@miyulabmd/shared";
+import type { LocalDraftId } from "./draft-store.ts";
 import {
   awaitTx,
   DRAFT_JOURNAL_STORE,
   DRAFT_PROMOTIONS_STORE,
   openDb,
 } from "./offline-db.ts";
-import type { LocalDraftId } from "./draft-store.ts";
 
 export type DraftSyncPhase =
   | "pending"
@@ -106,7 +106,9 @@ export async function getJournal(
   }
 }
 
-export async function listJournals(ownerId: string): Promise<DraftJournalRecord[]> {
+export async function listJournals(
+  ownerId: string,
+): Promise<DraftJournalRecord[]> {
   const db = await openDb();
   if (!db) {
     return [];
@@ -228,7 +230,9 @@ export async function listPromotions(
   return results;
 }
 
-export async function putPromotion(record: DraftPromotionRecord): Promise<boolean> {
+export async function putPromotion(
+  record: DraftPromotionRecord,
+): Promise<boolean> {
   const db = await openDb();
   if (!db) {
     return false;
@@ -257,7 +261,7 @@ export function initialSyncState(
   };
 }
 
-export async function commitCreateJournal(input: {
+export function commitCreateJournal(input: {
   ownerId: string;
   localId: LocalDraftId;
   createInput: CreateNoteInput;

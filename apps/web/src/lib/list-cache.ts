@@ -165,7 +165,11 @@ async function prefetchOneBody(
   scope: NonNullable<ReturnType<typeof getHydratableScope>>,
   signal: AbortSignal,
 ): Promise<void> {
-  if (signal.aborted || !summary.id || !(await noteBodyNeedsPrefetch(summary.id, scope))) {
+  if (
+    signal.aborted ||
+    !summary.id ||
+    !(await noteBodyNeedsPrefetch(summary.id, scope))
+  ) {
     return;
   }
   const result = await loadNote(summary.id);

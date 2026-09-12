@@ -1,8 +1,8 @@
-import diff from "fast-diff";
 import {
   splitMarkdownFrontmatter,
   withClosedFrontmatter,
 } from "@miyulabmd/shared";
+import diff from "fast-diff";
 
 const EQUAL = 0;
 const INSERT = 1;
@@ -41,7 +41,10 @@ function applyChanges(base: string, changes: RegionChange[]): string {
   let result = base;
   for (const change of [...changes].sort((a, b) => b.start - a.start)) {
     if (change.text.length > 0) {
-      result = result.slice(0, change.start) + change.text + result.slice(change.start);
+      result =
+        result.slice(0, change.start) +
+        change.text +
+        result.slice(change.start);
     } else {
       result = result.slice(0, change.start) + result.slice(change.end);
     }
@@ -50,6 +53,7 @@ function applyChanges(base: string, changes: RegionChange[]): string {
 }
 
 /** Merge local/server edits since the last acknowledged local baseline. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: 3-way frontmatter/body merge
 export function mergeDraftMarkdownForPatch(input: {
   acknowledgedLocalMarkdown: string;
   acknowledgedMarkdown: string;
@@ -78,7 +82,9 @@ export function mergeDraftMarkdownForPatch(input: {
   let fmConflict = false;
   const fmMerged: RegionChange[] = [];
   for (const change of fmChangesLocal) {
-    const overlaps = fmChangesServer.some((other) => rangesOverlap(change, other));
+    const overlaps = fmChangesServer.some((other) =>
+      rangesOverlap(change, other),
+    );
     if (overlaps) {
       fmConflict = true;
       fmMerged.push(change);
@@ -87,7 +93,9 @@ export function mergeDraftMarkdownForPatch(input: {
     }
   }
   for (const change of fmChangesServer) {
-    const overlaps = fmChangesLocal.some((other) => rangesOverlap(change, other));
+    const overlaps = fmChangesLocal.some((other) =>
+      rangesOverlap(change, other),
+    );
     if (!overlaps) {
       fmMerged.push(change);
     }
@@ -107,7 +115,9 @@ export function mergeDraftMarkdownForPatch(input: {
     }
   }
   for (const change of bodyChangesServer) {
-    const overlaps = bodyChangesLocal.some((other) => rangesOverlap(change, other));
+    const overlaps = bodyChangesLocal.some((other) =>
+      rangesOverlap(change, other),
+    );
     if (!overlaps) {
       bodyMerged.push(change);
     }
@@ -123,7 +133,8 @@ export function mergeDraftMarkdownForPatch(input: {
   );
 
   if (mergedFm.length > 0 && !bodyConflict) {
-    const withFm = mergedFm.length > 0 ? `---\n${mergedFm}\n---\n\n${mergedBody}` : markdown;
+    const withFm =
+      mergedFm.length > 0 ? `---\n${mergedFm}\n---\n\n${mergedBody}` : markdown;
     return {
       conflict: fmConflict || bodyConflict,
       markdown: withFm,

@@ -1,8 +1,8 @@
 import {
   awaitTx,
   DRAFT_LOCKS_STORE,
-  DRAFTS_STORE,
   DRAFT_TOMBSTONES_STORE,
+  DRAFTS_STORE,
   openDb,
   readSessionRecord,
   SESSION_RECORD_KEY,
@@ -46,7 +46,15 @@ export type SaveDraftInput = {
 
 export type SaveDraftResult =
   | { ok: true; draft: LocalDraft }
-  | { ok: false; reason: "stale-revision" | "deleted" | "session-mismatch" | "lock-mismatch" | "storage-unavailable" };
+  | {
+      ok: false;
+      reason:
+        | "stale-revision"
+        | "deleted"
+        | "session-mismatch"
+        | "lock-mismatch"
+        | "storage-unavailable";
+    };
 
 type DraftListener = () => void;
 
@@ -66,7 +74,11 @@ function notifyDraftListeners(): void {
   }
 }
 
-function resolveCommitWaiters(ownerId: string, localId: string, draft: LocalDraft): void {
+function resolveCommitWaiters(
+  ownerId: string,
+  localId: string,
+  draft: LocalDraft,
+): void {
   const key = draftKey(ownerId, localId);
   const waiters = commitWaiters.get(key);
   if (!waiters) {
@@ -172,31 +184,17 @@ export async function listDrafts(ownerId: string): Promise<LocalDraft[]> {
   }
 
   for (const [key, draft] of memoryDrafts) {
-    if (draft.ownerId !== ownerId || memoryTombstones.has(key) || seen.has(key)) {
+    if (
+      draft.ownerId !== ownerId ||
+      memoryTombstones.has(key) ||
+      seen.has(key)
+    ) {
       continue;
     }
     results.push(draft);
   }
 
   return results.sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-async function readTombstone(
-  db: IDBDatabase,
-  ownerId: string,
-  localId: LocalDraftId,
-): Promise<boolean> {
-  try {
-    const tx = db.transaction(DRAFT_TOMBSTONES_STORE, "readonly");
-    const tombstone = await idbGet<{ deletedAt: number }>(
-      tx.objectStore(DRAFT_TOMBSTONES_STORE),
-      [ownerId, localId],
-    );
-    await awaitTx(tx);
-    return tombstone !== undefined;
-  } catch {
-    return memoryTombstones.has(draftKey(ownerId, localId));
-  }
 }
 
 async function writeTombstone(
@@ -217,10 +215,10 @@ async function writeTombstone(
     );
     tx.objectStore(DRAFTS_STORE).delete([ownerId, localId]);
     tx.objectStore(DRAFT_LOCKS_STORE).delete([ownerId, localId]);
-    tx.objectStore(DRAFT_TOMBSTONES_STORE).put(
-      { deletedAt: Date.now() },
-      [ownerId, localId],
-    );
+    tx.objectStore(DRAFT_TOMBSTONES_STORE).put({ deletedAt: Date.now() }, [
+      ownerId,
+      localId,
+    ]);
     await awaitTx(tx);
   } catch {
     // memory tombstone already recorded
@@ -238,7 +236,9 @@ function idbGet<T>(
   });
 }
 
-export async function saveDraft(input: SaveDraftInput): Promise<SaveDraftResult> {
+export async function saveDraft(
+  input: SaveDraftInput,
+): Promise<SaveDraftResult> {
   const key = draftKey(input.ownerId, input.localId);
   if (memoryTombstones.has(key)) {
     return { ok: false, reason: "deleted" };
@@ -267,7 +267,7 @@ export async function saveDraft(input: SaveDraftInput): Promise<SaveDraftResult>
     memoryDrafts.set(key, draft);
     notifyDraftListeners();
     resolveCommitWaiters(input.ownerId, input.localId, draft);
-    return { ok: true, draft };
+    return { draft, ok: true };
   }
 
   try {
@@ -278,12 +278,12 @@ export async function saveDraft(input: SaveDraftInput): Promise<SaveDraftResult>
     const drafts = tx.objectStore(DRAFTS_STORE);
     const sessionStore = tx.objectStore(SESSION_STORE);
     const sessionReq = sessionStore.get(SESSION_RECORD_KEY);
-    const sessionRecord = await new Promise<{ sessionEpoch?: SessionEpoch } | undefined>(
-      (resolve, reject) => {
-        sessionReq.onsuccess = () => resolve(sessionReq.result);
-        sessionReq.onerror = () => reject(sessionReq.error);
-      },
-    );
+    const sessionRecord = await new Promise<
+      { sessionEpoch?: SessionEpoch } | undefined
+    >((resolve, reject) => {
+      sessionReq.onsuccess = () => resolve(sessionReq.result);
+      sessionReq.onerror = () => reject(sessionReq.error);
+    });
     if (sessionRecord?.sessionEpoch !== input.sessionEpoch) {
       tx.abort();
       return { ok: false, reason: "session-mismatch" };
@@ -330,7 +330,7 @@ export async function saveDraft(input: SaveDraftInput): Promise<SaveDraftResult>
     memoryDrafts.set(key, draft);
     notifyDraftListeners();
     resolveCommitWaiters(input.ownerId, input.localId, draft);
-    return { ok: true, draft };
+    return { draft, ok: true };
   } catch {
     storageUnavailable = true;
     return { ok: false, reason: "storage-unavailable" };
@@ -346,7 +346,9 @@ async function readTombstoneInTx(
     tx.objectStore(DRAFT_TOMBSTONES_STORE),
     [ownerId, localId],
   );
-  return tombstone !== undefined || memoryTombstones.has(draftKey(ownerId, localId));
+  return (
+    tombstone !== undefined || memoryTombstones.has(draftKey(ownerId, localId))
+  );
 }
 
 export async function deleteDraft(
@@ -466,7 +468,10 @@ export async function insertDraft(draft: LocalDraft): Promise<boolean> {
     return true;
   }
   try {
-    const tx = db.transaction([DRAFTS_STORE, DRAFT_TOMBSTONES_STORE], "readwrite");
+    const tx = db.transaction(
+      [DRAFTS_STORE, DRAFT_TOMBSTONES_STORE],
+      "readwrite",
+    );
     if (await readTombstoneInTx(tx, draft.ownerId, draft.localId)) {
       tx.abort();
       return false;

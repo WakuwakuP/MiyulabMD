@@ -1,8 +1,8 @@
 import * as Y from "yjs";
 import {
   applyAwarenessUser,
-  createOfflineAwareness,
   type CollabAwareness,
+  createOfflineAwareness,
 } from "./collaboration.ts";
 import type { DraftLockHandle } from "./draft-lock.ts";
 import {
@@ -11,8 +11,8 @@ import {
   type LocalDraftId,
   saveDraft,
 } from "./draft-store.ts";
-import { getEditorDrain } from "./editor-drain.ts";
 import { maybeScheduleDraftSync } from "./draft-sync-scheduler.ts";
+import { getEditorDrain } from "./editor-drain.ts";
 import type { SessionEpoch } from "./offline-types.ts";
 
 const MARKDOWN_FIELD = "markdown";
@@ -94,7 +94,10 @@ async function runSave(entry: EditorEntry): Promise<void> {
     maybeScheduleDraftSync(entry.editor.draft.localId);
     return;
   }
-  entry.nextRevision = Math.max(entry.nextRevision - 1, entry.editor.draft.revision + 1);
+  entry.nextRevision = Math.max(
+    entry.nextRevision - 1,
+    entry.editor.draft.revision + 1,
+  );
   entry.editor.saveState =
     result.reason === "stale-revision" || result.reason === "lock-mismatch"
       ? "conflict"
