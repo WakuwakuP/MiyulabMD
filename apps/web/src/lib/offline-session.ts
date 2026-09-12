@@ -181,6 +181,15 @@ async function retryPendingCleanup(): Promise<void> {
   if (!(snapshot.pendingCleanup && scope)) {
     return;
   }
+  if (snapshot.scope === scope) {
+    setSnapshot({
+      ...snapshot,
+      pendingCleanup: false,
+      pendingCleanupScope: null,
+    });
+    await persistCurrentSession(false);
+    return;
+  }
   const ok = await wipeScopeFully(scope, "pending-cleanup");
   if (ok) {
     setSnapshot({
@@ -239,6 +248,30 @@ async function bumpSessionEpoch(): Promise<SessionEpoch> {
   return epoch;
 }
 
+async function resolvePendingCleanupOnUserChange(
+  nextScope: AccountScope,
+  previousScope: AccountScope | null,
+): Promise<{
+  pendingCleanup: boolean;
+  pendingCleanupScope: AccountScope | null;
+}> {
+  const pendingCleanup = snapshot.pendingCleanup;
+  const pendingCleanupScope = snapshot.pendingCleanupScope;
+  if (!(pendingCleanup && pendingCleanupScope)) {
+    return { pendingCleanup, pendingCleanupScope };
+  }
+  const returningToPending = pendingCleanupScope === nextScope;
+  const alreadyOnPending = previousScope === pendingCleanupScope;
+  if (returningToPending && alreadyOnPending) {
+    return { pendingCleanup: false, pendingCleanupScope: null };
+  }
+  const cleaned = await wipeScopeFully(pendingCleanupScope, "pending-cleanup");
+  if (cleaned || returningToPending) {
+    return { pendingCleanup: false, pendingCleanupScope: null };
+  }
+  return { pendingCleanup, pendingCleanupScope };
+}
+
 async function handleConfirmedUserChange(nextUser: SessionUser): Promise<void> {
   const nextScope = accountScopeFromUserId(nextUser.id);
   const previousScope = snapshot.scope;
@@ -253,19 +286,8 @@ async function handleConfirmedUserChange(nextUser: SessionUser): Promise<void> {
       : null);
 
   let nextEpoch = snapshot.sessionEpoch;
-  let pendingCleanup = snapshot.pendingCleanup;
-  let pendingCleanupScope = snapshot.pendingCleanupScope;
-
-  if (pendingCleanup && pendingCleanupScope) {
-    const cleaned = await wipeScopeFully(
-      pendingCleanupScope,
-      "pending-cleanup",
-    );
-    if (cleaned) {
-      pendingCleanup = false;
-      pendingCleanupScope = null;
-    }
-  }
+  let { pendingCleanup, pendingCleanupScope } =
+    await resolvePendingCleanupOnUserChange(nextScope, previousScope);
 
   if (previousScope === GUEST_SCOPE && nextScope !== GUEST_SCOPE) {
     nextEpoch = nextSessionEpoch();

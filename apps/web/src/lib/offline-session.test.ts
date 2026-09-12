@@ -466,6 +466,51 @@ test("hydrate retries logout wipe using pendingCleanupScope after scope is clear
   assert.equal(await readCachedNotesList(userScope), null);
 });
 
+test("pending cleanup does not wipe the same user after they are online again", async () => {
+  configureOfflineDb({ indexedDB });
+  const persistedEpoch = 9 as SessionEpoch;
+  const userScope = accountScopeFromUserId(userA.id);
+  await writeSessionRecord({
+    confirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    offlineReadable: true,
+    pendingCleanup: true,
+    pendingCleanupScope: userScope,
+    scope: userScope,
+    sessionEpoch: persistedEpoch,
+  });
+  __testSetSessionState({
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    offlineReadable: true,
+    pendingCleanup: true,
+    pendingCleanupScope: userScope,
+    scope: userScope,
+    sessionEpoch: persistedEpoch,
+    status: "online-confirmed",
+    user: userA,
+  });
+  const kept = summary("live-note");
+  assert.equal(
+    await writeCachedNotesList([kept], userScope, persistedEpoch),
+    true,
+  );
+  mockFetchMe(jsonResponse({ user: userA }));
+  const snap = await verifySession();
+  assert.equal(snap.status, "online-confirmed");
+  assert.equal(snap.pendingCleanup, false);
+  assert.equal(snap.pendingCleanupScope, null);
+  const idb = await readCachedNotesList(userScope);
+  assert.equal(idb?.[0]?.id, "live-note");
+});
+
 test("stale verifySession response does not rewind newer state", async () => {
   configureOfflineDb({ indexedDB });
   let resolveFirst: (value: Response) => void = () => undefined;
