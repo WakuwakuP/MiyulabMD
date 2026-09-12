@@ -280,11 +280,19 @@ async function handleConfirmedUserChange(nextUser: SessionUser): Promise<void> {
 }
 
 async function handleConfirmedGuest(): Promise<void> {
+  const previousScope = snapshot.scope;
+  let nextEpoch = snapshot.sessionEpoch;
+  // Keep prior-user IDB; drop in-memory private View so guest cannot read it.
+  if (previousScope && previousScope !== GUEST_SCOPE) {
+    nextEpoch = nextSessionEpoch();
+    invalidateMemoryCaches();
+  }
   setSnapshot({
     ...snapshot,
     dbBlocked: false,
     offlineReadable: true,
     scope: GUEST_SCOPE,
+    sessionEpoch: nextEpoch,
     status: "guest-confirmed",
     user: null,
   });

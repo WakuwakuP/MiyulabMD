@@ -8,6 +8,7 @@ import {
   upsertNoteSummary,
 } from "./list-cache.ts";
 import { peekNote } from "./note-cache.ts";
+import { readCachedNotesList, writeCachedNotesList } from "./offline-cache.ts";
 import {
   configureOfflineDb,
   resetOfflineDbForTests,
@@ -98,8 +99,21 @@ test("verifySession 200 user becomes online-confirmed with user scope", async ()
   assert.deepEqual(snap.user, userA);
 });
 
-test("verifySession 200 guest does not wipe prior user scope data", async () => {
+test("verifySession 200 guest clears memory View but keeps prior user IDB", async () => {
   configureOfflineDb({ indexedDB });
+  const persistedEpoch = 7 as SessionEpoch;
+  const userScope = accountScopeFromUserId(userA.id);
+  await writeSessionRecord({
+    confirmedAt: Date.now(),
+    lastConfirmedUser: {
+      displayName: userA.displayName,
+      email: userA.email,
+      id: userA.id,
+    },
+    offlineReadable: true,
+    scope: userScope,
+    sessionEpoch: persistedEpoch,
+  });
   __testSetSessionState({
     lastConfirmedAt: Date.now(),
     lastConfirmedUser: {
@@ -107,14 +121,29 @@ test("verifySession 200 guest does not wipe prior user scope data", async () => 
       email: userA.email,
       id: userA.id,
     },
-    scope: accountScopeFromUserId(userA.id),
+    offlineReadable: true,
+    scope: userScope,
+    sessionEpoch: persistedEpoch,
+    status: "online-confirmed",
+    user: userA,
   });
-  upsertNoteSummary(summary("keep-me"));
+  const kept = summary("keep-me");
+  assert.equal(
+    await writeCachedNotesList([kept], userScope, persistedEpoch),
+    true,
+  );
+  upsertNoteSummary(kept);
+  __testSeedNoteCache({ ...kept, markdown: "# private" });
   mockFetchMe(jsonResponse({ user: null }));
   const snap = await verifySession();
   assert.equal(snap.status, "guest-confirmed");
   assert.equal(snap.scope, "guest");
-  assert.equal(peekNotes()?.length, 1);
+  assert.ok(snap.sessionEpoch > persistedEpoch);
+  assert.equal(peekNotes(), null);
+  assert.equal(peekNote("keep-me"), undefined);
+  const idb = await readCachedNotesList(userScope);
+  assert.equal(idb?.length, 1);
+  assert.equal(idb?.[0]?.id, "keep-me");
 });
 
 test("verifySession 401 becomes unauthenticated without wipe", async () => {
