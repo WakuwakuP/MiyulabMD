@@ -4,12 +4,6 @@ import { Agent as HttpsAgent } from "node:https";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import { VitePWA } from "vite-plugin-pwa";
-
-const enablePwa =
-  process.env.STORYBOOK !== "true" &&
-  process.env.npm_lifecycle_event !== "storybook" &&
-  process.env.npm_lifecycle_event !== "build-storybook";
 
 // Keep the scheme / proxy port / TLD selected by portless.
 const workerUrl = process.env.PORTLESS_URL
@@ -33,28 +27,7 @@ const workerProxy = {
 };
 
 export default defineConfig({
-  plugins: [
-    react(),
-    tailwindcss(),
-    ...(enablePwa
-      ? [
-          VitePWA({
-            devOptions: { enabled: false },
-            filename: "sw.ts",
-            injectManifest: {
-              globIgnores: ["**/*.map"],
-              globPatterns: ["**/*.{js,css,html,png,webmanifest}"],
-              maximumFileSizeToCacheInBytes: 3_000_000,
-            },
-            injectRegister: false,
-            manifest: false,
-            registerType: "prompt",
-            srcDir: "src",
-            strategies: "injectManifest",
-          }),
-        ]
-      : []),
-  ],
+  plugins: [react(), tailwindcss()],
   server: {
     host: "127.0.0.1",
     port: Number(process.env.PORT || 5173),

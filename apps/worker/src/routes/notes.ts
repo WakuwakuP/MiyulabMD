@@ -2,11 +2,9 @@ import { env } from "cloudflare:workers";
 import { isTaskCheckboxUpdate } from "@miyulabmd/markdown";
 import {
   type CreateNoteInput,
-  isConditionalMarkdownUpdate,
   NOTE_RESTORE_MESSAGE,
   type Note,
   type SessionUser,
-  type UpdateNoteMarkdownInput,
   type UpdateNoteMetaInput,
 } from "@miyulabmd/shared";
 import { Elysia } from "elysia";
@@ -14,11 +12,7 @@ import { Elysia } from "elysia";
 import { readSession } from "../auth/session.ts";
 import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
-import {
-  type CreateNoteResult,
-  createNoteService,
-  type MutateNoteResult,
-} from "../services/notes.ts";
+import { createNoteService, type MutateNoteResult } from "../services/notes.ts";
 
 function documentRoom(noteId: string) {
   return env.DOCUMENT_ROOM.get(env.DOCUMENT_ROOM.idFromName(noteId));
@@ -26,11 +20,11 @@ function documentRoom(noteId: string) {
 
 const notes = createNoteService(env);
 
-type PatchNoteBody = UpdateNoteMetaInput & Partial<UpdateNoteMarkdownInput>;
+type PatchNoteBody = UpdateNoteMetaInput & {
+  markdown?: string;
+};
 
 type RouteSet = { status?: number | string };
-
-type ErrorBody = { error: string; code?: string };
 
 async function parseJsonBody<T>(request: Request): Promise<T | null> {
   try {
@@ -56,7 +50,7 @@ function patchHasMetaFields(meta: UpdateNoteMetaInput): boolean {
 function mutateResultError(
   set: RouteSet,
   result: Exclude<MutateNoteResult, { kind: "ok" }>,
-): ErrorBody {
+): { error: string } {
   if (result.kind === "not_found") {
     set.status = 404;
     return { error: "Not found" };
@@ -65,48 +59,8 @@ function mutateResultError(
     set.status = 400;
     return { error: result.error };
   }
-  if (result.kind === "conflict") {
-    set.status = result.status;
-    return { code: result.code, error: result.error };
-  }
   set.status = result.status;
   return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
-}
-
-function createResultError(
-  set: RouteSet,
-  result: Extract<CreateNoteResult, { kind: "error" }>,
-): ErrorBody {
-  set.status = result.status;
-  return result.code
-    ? { code: result.code, error: result.error }
-    : { error: result.error };
-}
-
-async function applyMarkdownViaRoom(
-  noteId: string,
-  prep: Extract<
-    Awaited<ReturnType<typeof notes.prepareMarkdownUpdate>>,
-    { kind: "ok" }
-  >,
-  conditional: boolean,
-  set: RouteSet,
-): Promise<ErrorBody | null> {
-  if (conditional) {
-    const applied = await documentRoom(noteId).applyMarkdownConditional(
-      noteId,
-      prep.expectedMarkdown,
-      prep.markdown,
-    );
-    if (!applied.ok) {
-      set.status = 409;
-      return { code: applied.code, error: applied.error };
-    }
-    return null;
-  }
-
-  await documentRoom(noteId).applyMarkdownAndPersist(prep.markdown, noteId);
-  return null;
 }
 
 async function applyNotePatch(
@@ -114,9 +68,8 @@ async function applyNotePatch(
   user: SessionUser | undefined,
   body: PatchNoteBody,
   set: RouteSet,
-): Promise<ErrorBody | Note> {
-  const { markdown, expectedMarkdown, clientDraftId, draftOwnerId, ...meta } =
-    body;
+): Promise<{ error: string } | Note> {
+  const { markdown, ...meta } = body;
   let latest = null as MutateNoteResult | null;
 
   if (patchHasMetaFields(meta)) {
@@ -127,32 +80,11 @@ async function applyNotePatch(
   }
 
   if (markdown !== undefined) {
-    const markdownInput: UpdateNoteMarkdownInput = {
-      clientDraftId,
-      draftOwnerId,
-      expectedMarkdown,
-      markdown,
-    };
-    const conditional = isConditionalMarkdownUpdate(markdownInput);
-    const prep = await notes.prepareMarkdownUpdate(id, user, markdownInput);
-    if (prep.kind !== "ok") {
-      return mutateResultError(set, prep);
+    const markdownResult = await notes.updateMarkdown(id, user, markdown);
+    if (markdownResult.kind !== "ok") {
+      return mutateResultError(set, markdownResult);
     }
-
-    const roomError = await applyMarkdownViaRoom(
-      prep.noteId,
-      prep,
-      conditional,
-      set,
-    );
-    if (roomError) {
-      return roomError;
-    }
-
-    latest = await notes.noteAfterMarkdownPersisted(prep.noteId, user);
-    if (latest.kind !== "ok") {
-      return mutateResultError(set, latest);
-    }
+    latest = markdownResult;
   }
 
   if (latest?.kind !== "ok") {
@@ -176,12 +108,13 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
     const body = await parseJsonBody<CreateNoteInput>(request);
 
     const created = await notes.create(user ?? undefined, body ?? {});
-    if (created.kind === "error") {
-      return createResultError(set, created);
+    if ("error" in created) {
+      set.status = created.status;
+      return { error: created.error };
     }
 
-    set.status = created.kind === "replayed" ? 200 : 201;
-    return created.note;
+    set.status = 201;
+    return created;
   })
   .get("/:id/history", async ({ request, params, set }) => {
     const user = await readSession(request, env);

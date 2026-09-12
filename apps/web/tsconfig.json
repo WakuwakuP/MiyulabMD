@@ -3,9 +3,9 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true,
-    "types": ["vite/client", "vite-plugin-pwa/client"]
+    "types": ["vite/client"]
   },
-  "exclude": ["src/**/*.test.ts", "src/sw.ts"],
+  "exclude": ["src/**/*.test.ts"],
   "extends": "../../tsconfig.base.json",
   "include": ["src"]
 }

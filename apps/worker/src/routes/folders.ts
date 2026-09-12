@@ -344,8 +344,6 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
     }
 
-    return {
-      deletedFolderIds: result.deletedFolderIds,
-      deletedNoteIds: result.deletedNoteIds,
-    };
+    set.status = 204;
+    return new Response(null, { status: 204 });
   });

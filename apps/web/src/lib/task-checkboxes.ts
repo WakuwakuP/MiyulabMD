@@ -2,14 +2,9 @@ import { taskContextHash } from "@miyulabmd/markdown";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { updateTaskCheckbox } from "./api.ts";
 import { invalidateNoteCache } from "./note-cache.ts";
-import { getSessionSnapshot } from "./offline-session.ts";
 
 const selector = "input[type=checkbox][data-task-line]";
 type State = { checked: boolean; pending: boolean };
-
-export function taskCheckboxMutationsAllowed(): boolean {
-  return getSessionSnapshot().status !== "offline-known";
-}
 
 async function saveCheckbox(
   noteId: string,
@@ -17,12 +12,6 @@ async function saveCheckbox(
   checked: boolean,
   contextHash: Promise<string>,
 ) {
-  if (!taskCheckboxMutationsAllowed()) {
-    return {
-      checked: undefined,
-      error: "オフラインではチェック状態を更新できません。",
-    };
-  }
   try {
     const result = await updateTaskCheckbox(noteId, {
       checked,
@@ -83,14 +72,28 @@ export function useTaskCheckboxes(
         input.setAttribute("aria-busy", String(state.pending));
       }
     }
-    function applyCheckboxResult(
-      line: number,
-      result: Awaited<ReturnType<typeof saveCheckbox>>,
-    ) {
-      const state = states.get(line);
-      if (!state) {
+    async function change(event: Event) {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement && input.matches(selector))) {
         return;
       }
+      const line = Number(input.dataset.taskLine);
+      const state = states.get(line);
+      if (!state || state.pending) {
+        refreshInputs();
+        return;
+      }
+      const checked = input.checked;
+      state.pending = true;
+      setError(null);
+      refreshInputs();
+      contextHash ??= taskContextHash(markdown);
+      const result = await saveCheckbox(
+        targetNoteId,
+        line,
+        checked,
+        contextHash,
+      );
       state.pending = false;
       if (!active) {
         return;
@@ -100,31 +103,6 @@ export function useTaskCheckboxes(
       }
       setError(result.error);
       refreshInputs();
-    }
-
-    async function change(event: Event) {
-      const input = event.target;
-      if (!(input instanceof HTMLInputElement && input.matches(selector))) {
-        return;
-      }
-      if (!taskCheckboxMutationsAllowed()) {
-        refreshInputs();
-        return;
-      }
-      const line = Number(input.dataset.taskLine);
-      const state = states.get(line);
-      if (!state || state.pending) {
-        refreshInputs();
-        return;
-      }
-      state.pending = true;
-      setError(null);
-      refreshInputs();
-      contextHash ??= taskContextHash(markdown);
-      applyCheckboxResult(
-        line,
-        await saveCheckbox(targetNoteId, line, input.checked, contextHash),
-      );
     }
     refresh.current = refreshInputs;
     refreshInputs();

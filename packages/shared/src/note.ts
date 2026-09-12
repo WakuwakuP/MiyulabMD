@@ -6,7 +6,6 @@ import type {
   PermissionFlags,
   PermissionPreset,
 } from "./permission.ts";
-import { defaultNoteMarkdown, normalizeFolder } from "./title.ts";
 
 export type NoteId = string;
 
@@ -129,16 +128,6 @@ export type AccessGrantInput = {
   canWrite?: boolean;
 };
 
-export const NOTE_CREATE_ERROR_CODES = [
-  "owner_mismatch",
-  "idempotency_conflict",
-  "draft_deleted",
-  "mapping_mismatch",
-  "content_conflict",
-] as const;
-
-export type NoteCreateErrorCode = (typeof NOTE_CREATE_ERROR_CODES)[number];
-
 export type CreateNoteInput = {
   title?: string;
   markdown?: string;
@@ -148,120 +137,7 @@ export type CreateNoteInput = {
   inheritAccess?: boolean;
   readScope?: AccessScope;
   writeScope?: AccessScope;
-  /** Offline local draft id (`local-{uuid}`). Requires `draftOwnerId`. */
-  clientDraftId?: string;
-  /** Authenticated user id that owns the draft. Must match session user. */
-  draftOwnerId?: string;
 };
-
-export type UpdateNoteMarkdownInput = {
-  markdown: string;
-  expectedMarkdown?: string;
-  clientDraftId?: string;
-  draftOwnerId?: string;
-};
-
-const LOCAL_DRAFT_ID_PATTERN =
-  /^local-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function isClientDraftId(value: string): boolean {
-  return LOCAL_DRAFT_ID_PATTERN.test(value);
-}
-
-export type DraftKeyValidation =
-  | { ok: true; clientDraftId: string; draftOwnerId: string }
-  | { ok: false; error: string };
-
-/** Both draft keys must be present together with valid shapes, or both omitted. */
-export function validateDraftKeys(input: {
-  clientDraftId?: string;
-  draftOwnerId?: string;
-}):
-  | DraftKeyValidation
-  | { ok: true; clientDraftId?: undefined; draftOwnerId?: undefined } {
-  const hasClient = input.clientDraftId !== undefined;
-  const hasOwner = input.draftOwnerId !== undefined;
-  if (!(hasClient || hasOwner)) {
-    return { ok: true };
-  }
-  const rawClientId = input.clientDraftId;
-  const rawOwnerId = input.draftOwnerId;
-  if (rawClientId === undefined || rawOwnerId === undefined) {
-    return {
-      error: "clientDraftId and draftOwnerId must both be provided",
-      ok: false,
-    };
-  }
-  const clientDraftId = rawClientId.trim();
-  const draftOwnerId = rawOwnerId.trim();
-  if (!isClientDraftId(clientDraftId)) {
-    return { error: "clientDraftId must match local-{uuid}", ok: false };
-  }
-  if (draftOwnerId.length === 0 || draftOwnerId.length > 128) {
-    return { error: "draftOwnerId is invalid", ok: false };
-  }
-  return { clientDraftId, draftOwnerId, ok: true };
-}
-
-export function isConditionalMarkdownUpdate(
-  input: UpdateNoteMarkdownInput,
-): boolean {
-  return (
-    input.expectedMarkdown !== undefined ||
-    input.clientDraftId !== undefined ||
-    input.draftOwnerId !== undefined
-  );
-}
-
-/** Stable fingerprint of create intent (excludes ids, timestamps, draft keys). */
-export function normalizedCreateInputForHash(
-  input: CreateNoteInput,
-): Record<string, unknown> {
-  const title = input.title?.trim();
-  const markdown =
-    input.markdown ??
-    defaultNoteMarkdown(title && title.length > 0 ? title : "無題");
-  const payload: Record<string, unknown> = { markdown };
-  if (input.folder !== undefined) {
-    payload.folder = normalizeFolder(input.folder);
-  }
-  if (input.folderId !== undefined) {
-    payload.folderId = input.folderId;
-  }
-  if (input.inheritAccess !== undefined) {
-    payload.inheritAccess = input.inheritAccess;
-  }
-  if (input.permission !== undefined) {
-    payload.permission = input.permission;
-  }
-  if (input.readScope !== undefined) {
-    payload.readScope = input.readScope;
-  }
-  if (input.writeScope !== undefined) {
-    payload.writeScope = input.writeScope;
-  }
-  if (title !== undefined && title.length > 0) {
-    payload.title = title;
-  }
-  const stable: Record<string, unknown> = {};
-  for (const key of Object.keys(payload).sort()) {
-    stable[key] = payload[key];
-  }
-  return stable;
-}
-
-export async function computeCreateRequestHash(
-  input: CreateNoteInput,
-): Promise<string> {
-  const json = JSON.stringify(normalizedCreateInputForHash(input));
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(json),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-}
 
 export type UpdateNoteMetaInput = {
   title?: string;
