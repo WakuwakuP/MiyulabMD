@@ -1,7 +1,14 @@
 import type { Note } from "@miyulabmd/shared";
 
 import { ApiCommunicationError, type ApiResult, fetchNote } from "./api.ts";
-import { openOfflineCache } from "./offline-cache.ts";
+import {
+  beginOfflineNoteRead,
+  enterOfflineNoteDenial,
+  isOfflineCacheUserSuspended,
+  isOfflineNoteReadCurrent,
+  openOfflineCache,
+  suspendOfflineCacheUser,
+} from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export type NoteReadResult =
@@ -19,6 +26,7 @@ export type NoteReadResult =
       viewer: ViewerContext;
       source: "network";
       cachedAt: null;
+      cacheWarning?: string;
     };
 
 export type NoteReadSession = {
@@ -44,6 +52,10 @@ function isServerFailure(result: ApiResult<Note>): boolean {
   return !result.ok && result.status >= 500 && result.status <= 599;
 }
 
+function isDenial(result: ApiResult<Note>): boolean {
+  return !result.ok && (result.status === 403 || result.status === 404);
+}
+
 function cachedReadResult(
   cached: { note: Note; cachedAt: number },
   viewer: ViewerContext,
@@ -60,6 +72,7 @@ function cachedReadResult(
 function failedReadResult(
   result: { error: string; status: number },
   viewer: ViewerContext,
+  cacheWarning?: string,
 ): NoteReadResult {
   return {
     cachedAt: null,
@@ -67,6 +80,7 @@ function failedReadResult(
     ok: false,
     source: "network",
     status: result.status,
+    ...(cacheWarning ? { cacheWarning } : {}),
     viewer: snapshotViewer(viewer),
   };
 }
@@ -75,9 +89,11 @@ async function persistNote(
   cache: Awaited<ReturnType<typeof openOfflineCache>>,
   note: Note,
   signal: AbortSignal,
+  orderingToken: number,
 ): Promise<void> {
   try {
-    await cache.putNote(note, { signal });
+    await cache.putNote(note, { orderingToken, signal });
+    await cache.clearNoteDenial(note.id, orderingToken);
   } catch {
     if (signal.aborted) {
       throw signal.reason;
@@ -95,6 +111,7 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
     | undefined;
   let disposed = false;
   let cache: Awaited<ReturnType<typeof openOfflineCache>> | null = null;
+  let cacheOpenFailed = false;
 
   const getCache = async () => {
     if (!cachePromise) {
@@ -114,6 +131,7 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
               if (signal.aborted) {
                 throw signal.reason;
               }
+              cacheOpenFailed = true;
               return null;
             },
           )
@@ -150,7 +168,11 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
     }
   };
 
-  const communicationFallback = async (id: string, error: unknown) => {
+  const communicationFallback = async (
+    id: string,
+    error: unknown,
+    orderingToken: number,
+  ) => {
     if (signal.aborted) {
       throw signal.reason;
     }
@@ -158,30 +180,61 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       throw error;
     }
     const cached = await readCachedNote(id);
+    if (
+      cached &&
+      capturedViewer.cacheViewerId &&
+      !isOfflineNoteReadCurrent(capturedViewer.cacheViewerId, id, orderingToken)
+    ) {
+      throw error;
+    }
     if (cached) {
       return cachedReadResult(cached, capturedViewer);
     }
     throw error;
   };
 
-  const serverFallback = async (id: string, result: ApiResult<Note>) => {
+  const serverFallback = async (
+    id: string,
+    result: ApiResult<Note>,
+    orderingToken: number,
+  ) => {
     if (!isServerFailure(result)) {
       return null;
     }
     const cached = await readCachedNote(id);
+    if (
+      cached &&
+      capturedViewer.cacheViewerId &&
+      !isOfflineNoteReadCurrent(capturedViewer.cacheViewerId, id, orderingToken)
+    ) {
+      return null;
+    }
     return cached ? cachedReadResult(cached, capturedViewer) : null;
   };
 
-  const readNetworkNote = async (note: Note): Promise<NoteReadResult> => {
+  const readNetworkNote = async (
+    note: Note,
+    orderingToken: number,
+  ): Promise<NoteReadResult> => {
     if (signal.aborted) {
       throw signal.reason;
     }
     const openedCache = await getCache();
     if (openedCache) {
-      await persistNote(openedCache, note, signal);
+      await persistNote(openedCache, note, signal, orderingToken);
     }
     if (signal.aborted) {
       throw signal.reason;
+    }
+    if (
+      capturedViewer.cacheViewerId &&
+      !isOfflineNoteReadCurrent(
+        capturedViewer.cacheViewerId,
+        note.id,
+        orderingToken,
+      )
+    ) {
+      throw new DOMException("Note read superseded by denial");
     }
     return {
       cachedAt: null,
@@ -194,14 +247,15 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
 
   const fetchWithFallback = async (
     id: string,
+    orderingToken: number,
   ): Promise<ApiResult<Note> | NoteReadResult> => {
     let result: ApiResult<Note>;
     try {
       result = await fetchNote(id, { signal });
     } catch (error) {
-      return await communicationFallback(id, error);
+      return await communicationFallback(id, error, orderingToken);
     }
-    const fallback = await serverFallback(id, result);
+    const fallback = await serverFallback(id, result, orderingToken);
     if (fallback) {
       return fallback;
     }
@@ -219,24 +273,68 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       cache = null;
     },
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: terminal publication and denial guards are intentionally explicit.
     async read(id) {
       if (signal.aborted) {
         throw signal.reason;
       }
-      const result = await fetchWithFallback(id);
+      const orderingToken = capturedViewer.cacheViewerId
+        ? beginOfflineNoteRead(capturedViewer.cacheViewerId, id)
+        : 0;
+      const result = await fetchWithFallback(id, orderingToken);
       let published: NoteReadResult;
       if (result.ok && "source" in result) {
         published = result;
       } else if (result.ok) {
-        published = await readNetworkNote(result.data);
+        published = await readNetworkNote(result.data, orderingToken);
       } else {
         if (signal.aborted) {
           throw signal.reason;
         }
-        published = failedReadResult(result, capturedViewer);
+        let cacheWarning: string | undefined;
+        if (isDenial(result) && capturedViewer.cacheViewerId) {
+          const denialToken = enterOfflineNoteDenial(
+            capturedViewer.cacheViewerId,
+            id,
+          );
+          try {
+            const openedCache = await getCache();
+            if (openedCache) {
+              await openedCache.denyNote(id, denialToken);
+            } else if (cacheOpenFailed) {
+              suspendOfflineCacheUser(capturedViewer.cacheViewerId);
+              cacheWarning =
+                "キャッシュを無効化できませんでした。安全のためキャッシュをクリアしてください。";
+            }
+          } catch {
+            suspendOfflineCacheUser(capturedViewer.cacheViewerId);
+            cacheWarning =
+              "キャッシュの無効化を保存できませんでした。安全のためキャッシュをクリアしてください。";
+          }
+        }
+        published = failedReadResult(result, capturedViewer, cacheWarning);
       }
       if (signal.aborted) {
         throw signal.reason;
+      }
+      if (
+        published.ok &&
+        published.source === "cache" &&
+        capturedViewer.cacheViewerId &&
+        isOfflineCacheUserSuspended(capturedViewer.cacheViewerId)
+      ) {
+        throw new DOMException("Offline cache is suspended");
+      }
+      if (
+        published.ok &&
+        capturedViewer.cacheViewerId &&
+        !isOfflineNoteReadCurrent(
+          capturedViewer.cacheViewerId,
+          id,
+          orderingToken,
+        )
+      ) {
+        throw new DOMException("Note read superseded by denial");
       }
       return published;
     },

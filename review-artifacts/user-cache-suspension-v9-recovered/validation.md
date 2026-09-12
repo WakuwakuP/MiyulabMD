@@ -122,3 +122,20 @@ browser: 31 passed
 セッション`8bc7b324065c126fc8590b1a1b2e8babbdff159add0e23329079e65d83fe5d73`。
 候補レビューを終え、D29に従いライブ基盤へ反映する。
 画面・Service Worker・prefetchの完成を意味しない。
+
+## D29：ライブソースへの反映後
+
+親が、両ライブファイルは候補の先頭コメント1行を除く全bytesと一致することを確認した。
+反映後のSHA256:
+
+```text
+apps/web/src/lib/offline-cache.ts f8c004b8d3ce250f23571b44efc136e1f36efe006b66ed42122e3fef861648d3
+apps/web/src/lib/note-read-session.ts e6d112c9af925ca9a77f2aa6c78cc55471f43aafc3243f5d9a34bb7cfa582830
+```
+
+通常のライブソースを使うbrowserコマンドへ、候補ランナー既定の15specを指定して再実行：
+31 passed、exit0。未接続の `offline-note-view.spec.ts` は対象外。
+Web unit117件、Web型チェック、本番ビルド、ライブ2ファイルのBiome、diff-checkも親が成功を確認した。
+ビルドには500kB超chunk警告があるが、ビルド自体は成功。
+
+保存・読み取り基盤として採用済み。UIとService Workerの完成を示すものではない。
