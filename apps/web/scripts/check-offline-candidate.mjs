@@ -186,6 +186,7 @@ async function browser() {
       ...(specs.length
         ? specs
         : [
+            "user-cache-write-lifecycle.spec.ts",
             "user-cache-suspension.spec.ts",
             "note-denial-ordering.spec.ts",
             "note-denial-failure.spec.ts",

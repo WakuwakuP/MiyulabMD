@@ -44,3 +44,15 @@ exit 0
 これらはコードレビューによる指摘であり、上記27件の成功が解消を証明するものではない。
 ユーザーの推奨案で進めてよいという指示に従い、未確定操作の取消と終端の事実を
 共通化する後継案へ進む。判断は意思決定台帳D22へ記録する。
+
+## 親による追加再現
+
+```text
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v8 browser user-cache-write-lifecycle.spec.ts
+exit 1
+2 failed
+```
+
+native IndexedDBのput直後に停止した場合も、completeイベントで停止した場合も、
+再読み込み後に本文を取得できなかった。前者は旧本文、後者は確定した新本文を
+維持すべきであり、書き込みとファイルcleanupの不整合を回帰テストで確認した。
