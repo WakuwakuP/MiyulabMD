@@ -1735,6 +1735,29 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   非表示中の全ての通信を禁止する機能ではなく、定期triggerに対する条件である。
   その他の取得契機・認証・画像・容量・HTTP拒否接続の未完了範囲はそのまま残す。
 
+## D94：成功したdrive API更新を共通の再確認通知へ接続する
+
+- 状態：親の実画面・公開APIテストがRED、候補実装へ進む。
+- チェックポイント：`6ae5278`。
+- 既存 `article-changed` はサイト更新ボタン用で、全drive更新を表す契約ではない。
+  各API wrapperに個別通知を追加するとcreate/delete/folder等で漏れや二重通知を
+  作りやすいため、共通 `apiFetch` のHTTP成功境界を採用する。
+- 推奨：同一originの `/api/notes`／`/api/folders` 配下に対する非readメソッドで、
+  2xxかつredirectでない応答だけ、payloadなしのdrive変更イベントを送る。
+  coordinatorは既存requestCycleへ接続し、disposeでlistenerを解除する。
+  依存循環を避けるためイベント定義は小さい独立moduleに置く。
+- GET/HEAD/OPTIONS、失敗・中断、無関係なprofile等、他origin、login redirectは
+  通知しない。Request／URL／文字列とinit.methodの上書きを尊重する。
+  mutation gateの実行順序・例外とResponse/bodyの利用可能性を変えない。
+  Node/SSR等でwindowがなくてもAPI呼び出しを壊さない。
+- 親テストは初回取得後、GET・500更新・profile更新ではcycleが増えず、
+  共通入口へ渡した本物のRequestによるPATCH成功後だけ本文が再取得されることを要求。
+  現状はHTTP200のbodyを呼び出し側が読めた後も古いキャッシュのままでexit 1。
+  手動event／coordinator呼び出し／cache更新で成功に見せていない。
+- Biomeの整形指摘は親がliteral patchで修正した。重複発行したコマンドの回数は
+  検証証拠に数えない。これはHTTP更新通知であり、Yjsのサーバー保存確認、
+  別タブ認証変更、通常取得統合、画像／容量／フォルダHTTP拒否までは扱わない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
