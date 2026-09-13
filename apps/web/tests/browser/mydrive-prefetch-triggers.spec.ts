@@ -102,3 +102,104 @@ for (const trigger of ["online", "visibilitychange"] as const) {
     await expect(page).toHaveURL(/\/$/);
   });
 }
+
+test("events during acquisition queue one later cycle and disposal prevents another", async ({
+  page,
+}) => {
+  const rootId = "alice-root";
+  const root = {
+    ...note.access,
+    children: [],
+    crumbs: [],
+    folder: "",
+    id: rootId,
+    locked: true,
+    name: "マイドライブ",
+    parentId: null,
+  };
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  let cycles = 0;
+  let previousCycleCommitted: boolean | null = null;
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/folders/tree") {
+      cycles += 1;
+      if (cycles === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      } else if (cycles === 2) {
+        previousCycleCommitted = await page.evaluate(async () => {
+          const storageUrl = "/src/lib/offline-cache.ts";
+          const { openOfflineCache } = await import(storageUrl);
+          const cache = await openOfflineCache({ userId: "alice" });
+          try {
+            return Boolean(
+              (await cache.getFolder(null)) && (await cache.getNoteList()),
+            );
+          } finally {
+            cache.close();
+          }
+        });
+      }
+      return route.fulfill({
+        json: {
+          folders: [
+            { folder: "", id: rootId, name: root.name, parentId: null },
+          ],
+        },
+      });
+    }
+    if (path === `/api/folders/${rootId}`) {
+      return route.fulfill({ json: root });
+    }
+    if (path === "/api/notes") {
+      return route.fulfill({ json: { notes: [] } });
+    }
+    return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+  });
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const observationWindow = await page.evaluate(async () => {
+    const coordinatorUrl = "/src/lib/mydrive-prefetch-coordinator.ts";
+    const {
+      attachMyDrivePrefetchCoordinator,
+      PREFETCH_DEBOUNCE_MS,
+      PREFETCH_MIN_INTERVAL_MS,
+    } = await import(coordinatorUrl);
+    const coordinator = attachMyDrivePrefetchCoordinator({
+      cacheViewerId: "alice",
+      mode: "authenticated",
+      user: {
+        displayName: "Alice",
+        email: "alice@example.test",
+        id: "alice",
+      },
+    });
+    (window as Window & { stopPrefetch: () => void }).stopPrefetch =
+      coordinator.dispose;
+    return PREFETCH_DEBOUNCE_MS + PREFETCH_MIN_INTERVAL_MS + 100;
+  });
+  try {
+    await firstStarted.promise;
+    await page.evaluate(() => {
+      for (let index = 0; index < 3; index += 1) {
+        window.dispatchEvent(new Event("online"));
+        document.dispatchEvent(new Event("visibilitychange"));
+      }
+    });
+    releaseFirst.resolve();
+    await expect.poll(() => previousCycleCommitted).toBe(true);
+    expect(cycles).toBe(2);
+    await page.evaluate(() => {
+      (window as Window & { stopPrefetch: () => void }).stopPrefetch();
+      window.dispatchEvent(new Event("online"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    // Observe beyond both scheduling deadlines: disposal must prevent even a
+    // queued or newly signalled third cycle, not merely return synchronously.
+    await page.waitForTimeout(observationWindow);
+    expect(cycles).toBe(2);
+  } finally {
+    releaseFirst.resolve();
+  }
+});

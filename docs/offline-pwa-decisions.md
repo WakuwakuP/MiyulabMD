@@ -1593,6 +1593,29 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 変更はcandidateのcoordinator新規ファイルとAppShellの接続、専用記録のみ。
   取得本体・API・storage・UIやPWAに別の動作を混ぜない。
 
+## D86：復帰イベントcoordinatorの検証と限定採用
+
+- 状態：D85の候補を親が読み、独立検証したうえで本体反映を承認。
+- 親candidate allはtypecheck／Biomeと76件成功。その後、取得中にonlineと
+  visibilitychangeが重なる場合の公開coordinator試験を追加し、focused3件が成功。
+  追加試験では最初のtree応答を保留し、2回目のcycleが始まる時点で前cycleの
+  root/listが保存済みであること、通知が1回分にまとまることを確認する。
+  dispose後は両イベントを再通知し、debounceと最低実行間隔を超えて観測しても
+  3回目のcycleが発生しない。停止後の再起動を即時値だけで判定しない。
+- 取得本体は変更せず、認証済みviewerのcoordinatorがlistener／timer／active
+  AbortControllerの寿命だけを管理する。起動前にviewer/userをコピーし、
+  guest/cached/unavailableにはlistenerを登録しない。disposeは冪等。
+- 採用対象と候補SHA256：
+  - src/lib/mydrive-prefetch-coordinator.ts：
+    `66d69d81e75611e10eede709aa1314a942ec44c9a718a2858087f54226eee177`
+  - src/components/layout/AppShell.tsx：
+    `4a2cc87657ec28228477ffb452412b31815e00f6540e93b25651c6dc7b2471e8`
+- 本体反映後は新しい全browser77件、unit117件、app+SW typecheck、
+  production PWA8件を確認する。初回2件のREDと後から追加した検証は区別し、
+  追加前の76件成功を77件成功と書き換えない。
+- D85の限定範囲を維持する。再認証・定期／変更後trigger・複数タブ排他・
+  通常取得との統合・添付画像・容量整理・フォルダHTTP拒否接続などは未完了。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
