@@ -1,6 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+type RecoveryProbe = Window & {
+  recoveryProbe: {
+    enabled: boolean;
+    requests: number;
+    signal: AbortSignal | null | undefined;
+    release: () => void;
+  };
+};
+
 for (const verifiedUser of ["alice", "bob"] as const) {
   test(`cached viewing waits for authoritative recovery as ${verifiedUser} without reloading`, async ({
     page,
@@ -252,4 +261,94 @@ test("failed verification preserves cached reading state and permits a later ret
   } finally {
     releaseRetry.resolve();
   }
+});
+
+test("a late recovery response cannot replace a newer explicitly set viewer", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const originalFetch = globalThis.fetch;
+    const probe: RecoveryProbe["recoveryProbe"] = {
+      enabled: false,
+      release: () => {
+        throw new Error("Recovery request has not started");
+      },
+      requests: 0,
+      signal: undefined,
+    };
+    Object.assign(window, { recoveryProbe: probe });
+    globalThis.fetch = (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (!(probe.enabled && url.endsWith("/api/me"))) {
+        return originalFetch(input, init);
+      }
+      probe.requests += 1;
+      probe.signal = init?.signal;
+      // Deliberately ignore cancellation in this transport to exercise the
+      // publication guard as well as native AbortSignal propagation.
+      return new Promise<Response>((resolve) => {
+        probe.release = () =>
+          resolve(
+            new Response(
+              JSON.stringify({
+                user: {
+                  displayName: "Alice",
+                  email: "alice@example.test",
+                  id: "alice",
+                },
+              }),
+            ),
+          );
+      });
+    };
+  });
+  await page.goto("/tests/browser/fixtures/storage.html");
+  await page.evaluate(async () => {
+    const storageUrl = "/src/lib/offline-cache.ts";
+    const { persistCachedViewerId } = await import(storageUrl);
+    await persistCachedViewerId("alice");
+  });
+  await page.route("**/api/**", (route) => route.abort("internetdisconnected"));
+  await page.goto("/tests/browser/fixtures/app-shell.html");
+  const readViewer = async () =>
+    JSON.parse((await page.getByLabel("Viewer context").textContent()) ?? "{}");
+  await expect.poll(readViewer).toMatchObject({
+    viewer: { cacheViewerId: "alice", mode: "cached", user: null },
+  });
+  await page.evaluate(() => {
+    (window as RecoveryProbe).recoveryProbe.enabled = true;
+    window.dispatchEvent(new Event("online"));
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as RecoveryProbe).recoveryProbe.requests),
+    )
+    .toBe(1);
+  await page.getByRole("button", { name: "Set Bob viewer" }).click();
+  await expect.poll(readViewer).toMatchObject({
+    viewer: {
+      cacheViewerId: null,
+      mode: "authenticated",
+      user: { id: "bob" },
+    },
+  });
+  expect(
+    await page.evaluate(
+      () => (window as RecoveryProbe).recoveryProbe.signal?.aborted,
+    ),
+  ).toBe(true);
+  await page.evaluate(() => (window as RecoveryProbe).recoveryProbe.release());
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await expect.poll(readViewer).toMatchObject({
+    viewer: {
+      cacheViewerId: null,
+      mode: "authenticated",
+      user: { id: "bob" },
+    },
+  });
 });

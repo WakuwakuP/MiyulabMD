@@ -1840,6 +1840,24 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   resolverのHTTP意味を変更せず、失敗後にも再試行できることを維持する。
   重複発行した試験の回数を証拠に数えず、表示されたREDの内容を根拠とする。
 
+## D99：キャッシュ閲覧からの認証再確認を限定採用する
+
+- 状態：D97/D98を親がレビューし、追加の遅延応答試験を含むcandidate全体で
+  typecheck／Biomeと85件成功を確認した。test側の整形・論理式指摘は別途修正した。
+- 追加試験はpublic AppShellContext.setUserを使うfixtureボタンを用意し、
+  復帰要求中にBobを明示設定する。キャンセルを無視するテストtransportから
+  Alice応答を後着させてもBobとcacheViewerId=nullが維持され、旧signalはabort済み。
+  既存fixtureの公開contextを使い、AppShell内部refを直接操作していない。
+- 候補は現在の要求を一意に所有し、generation／active／abortで公開を制限する。
+  settle時のref解除、dispose時の現在要求の中断、listener解除を確認した。
+  cached/unavailable同士で値が同じ場合はReact stateとviewerRefの両方を保持する。
+- 採用対象は `src/components/layout/AppShell.tsx` のみ。SHA256：
+  `743d25bc602ebb1788f9fe5de0de4d7b6dc80dd5050a6b9c9185d1d3f5c46590`。
+  親が承認済み差分をliteral patchで配置し、byte一致と本体検証を行う。
+- 対象はcached/unavailableからonline／可視復帰時の再確認。既にauthenticatedやguestな
+  画面の認証再確認を新たに行うものではない。別タブのログイン変更検出、全ての
+  同時認証競合、画像／容量／フォルダHTTP拒否などは別の未完了事項とする。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

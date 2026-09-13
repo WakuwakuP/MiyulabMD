@@ -43,6 +43,18 @@ function ViewerProbe() {
       >
         Use network viewing
       </button>
+      <button
+        onClick={() =>
+          context.setUser({
+            displayName: "Bob",
+            email: "bob@example.test",
+            id: "bob",
+          })
+        }
+        type="button"
+      >
+        Set Bob viewer
+      </button>
     </>
   );
 }

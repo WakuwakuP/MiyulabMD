@@ -32,6 +32,18 @@ const unavailableViewer: ViewerContext = {
   user: null,
 };
 
+function shouldPreserveViewerIdentity(
+  previousViewer: ViewerContext,
+  nextViewer: ViewerContext,
+): boolean {
+  return (
+    previousViewer.user === null &&
+    nextViewer.user === null &&
+    previousViewer.mode === nextViewer.mode &&
+    previousViewer.cacheViewerId === nextViewer.cacheViewerId
+  );
+}
+
 export function AppShell() {
   const { pathname } = useLocation();
   const [viewer, setViewer] = useState<ViewerContext>(unavailableViewer);
@@ -76,8 +88,11 @@ export function AppShell() {
             generationRef.current === generation &&
             !controller.signal.aborted
           ) {
-            viewerRef.current = nextViewer;
-            setViewer(nextViewer);
+            const previousViewer = viewerRef.current;
+            if (!shouldPreserveViewerIdentity(previousViewer, nextViewer)) {
+              viewerRef.current = nextViewer;
+              setViewer(nextViewer);
+            }
             if (initial) {
               setLoading(false);
             }
