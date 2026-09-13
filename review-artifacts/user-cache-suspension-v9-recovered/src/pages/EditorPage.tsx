@@ -469,6 +469,9 @@ export function EditorPage() {
   const hydratedRef = useRef(false);
   const sessionRef = useRef<YjsSession | null>(null);
   const unbindCollabRef = useRef<(() => void) | null>(null);
+  const [viewScope, setViewScope] = useState<{
+    isCurrent: () => boolean;
+  } | null>(null);
 
   const noteId = note?.id;
   const userId = user?.id;
@@ -506,6 +509,10 @@ export function EditorPage() {
     setMarkdown("");
     setFolder("");
     setMode("preview");
+    setViewScope(null);
+    setShareOpen(false);
+    setHistoryOpen(false);
+    setSaveError(null);
   }, [id, viewer]);
 
   useEffect(() => {
@@ -514,6 +521,7 @@ export function EditorPage() {
       return;
     }
     const scope = viewing.beginView(viewer);
+    setViewScope(scope);
     let cancelled = false;
     if (viewer.mode === "unavailable") {
       setReadState({ id, ownerViewer: viewer, phase: "error" });
@@ -523,6 +531,7 @@ export function EditorPage() {
       );
       return () => {
         cancelled = true;
+        setViewScope(null);
         scope.dispose();
       };
     }
@@ -583,6 +592,7 @@ export function EditorPage() {
     return () => {
       cancelled = true;
       session.dispose();
+      setViewScope(null);
       scope.dispose();
     };
   }, [id, userLoading, viewer, viewing]);
@@ -648,6 +658,7 @@ export function EditorPage() {
       awareness,
       canEdit,
       folder,
+      isCurrent: () => viewScope?.isCurrent() === true,
       isOwner: flags.isOwner,
       note,
       readSource,
@@ -671,6 +682,7 @@ export function EditorPage() {
     flags.isOwner,
     readSource,
     setHeader,
+    viewScope,
   ]);
 
   return (
@@ -698,6 +710,7 @@ export function EditorPage() {
             onCloseShare={() => setShareOpen(false)}
             onPersistAccess={(next) => {
               void persistEditorAccess(note, next, {
+                isCurrent: () => viewScope?.isCurrent() === true,
                 setAccessDraft,
                 setNote,
                 setSaveError,
@@ -733,6 +746,7 @@ function bindEditorHeader(input: {
   setMode: (mode: EditorMode) => void;
   setFolder: (folder: string) => void;
   setSaveError: (error: string | null) => void;
+  isCurrent: () => boolean;
   setNote: (note: Note) => void;
   setAccessDraft: (draft: AccessDraft) => void;
   setShareOpen: (open: boolean) => void;
@@ -765,6 +779,7 @@ function bindEditorHeader(input: {
               input.folder,
               normalizeFolder,
               {
+                isCurrent: input.isCurrent,
                 setAccessDraft: input.setAccessDraft,
                 setFolder: input.setFolder,
                 setNote: input.setNote,

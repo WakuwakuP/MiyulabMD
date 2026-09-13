@@ -58,6 +58,7 @@ function snapshotAccess(access: MutationAccess): MutationAccess {
 export function createViewingAccess(readViewer: () => ViewerContext): {
   getAccess: () => MutationAccess;
   beginView: (ownerViewer: ViewerContext) => {
+    isCurrent: () => boolean;
     publish: (access: MutationAccess) => boolean;
     dispose: () => void;
   };
@@ -82,6 +83,7 @@ export function createViewingAccess(readViewer: () => ViewerContext): {
         dispose: () => {
           // This handle never owned a scope.
         },
+        isCurrent: () => false,
         publish: () => false,
       };
     }
@@ -99,6 +101,18 @@ export function createViewingAccess(readViewer: () => ViewerContext): {
         if (scope?.token === token) {
           scope = undefined;
         }
+      },
+      isCurrent(): boolean {
+        const current = scope;
+        return Boolean(
+          current &&
+            current.token === token &&
+            current.owner === readViewer() &&
+            sameAssociation(
+              current.ownerAssociation,
+              association(readViewer()),
+            ),
+        );
       },
       publish(access: MutationAccess): boolean {
         const current = scope;

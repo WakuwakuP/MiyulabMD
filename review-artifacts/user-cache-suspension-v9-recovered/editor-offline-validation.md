@@ -60,3 +60,28 @@ post-edit `EditorPage.tsx` candidate SHA-256 is
 * `git diff --check` — exit 0.
 
 The live editor source and live tests remain untouched.
+
+## D45/D46 execution record
+
+Commands requested by the parent were run serially after the implementation:
+
+* `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser viewing-access.spec.ts editor-read-lifecycle.spec.ts offline-note-view.spec.ts`
+  — exit 0, 9 passed.
+* `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all`
+  — exit 0, typecheck/Biome passed and 44 browser tests passed.
+* `pnpm --filter @miyulabmd/web test`
+  — exit 0, 117 passed; this validates the live unit suite, not the candidate
+  implementation.
+* `git diff --check` — exit 0.
+
+The candidate source was not restored after validation. Parent review should
+record exact exits, browser counts, and SHA-256 hashes here before adoption.
+
+Final candidate SHA-256 values:
+
+* `src/pages/EditorPage.tsx`
+  `7c7be07bc3c1676d559838ace823765cfb0109debd745b3279add52e754bfac7`
+* `src/pages/editor-page.ts`
+  `6fb91e5a1308b25ef4ae4b73dff998ebefe8e8d2100d5393ea4c6592635a640d`
+* `viewing-access.ts`
+  `8e89921d2685bf0191db43c25f1ce1fad0460f7a0be7dc0f1f26c6837e027308`

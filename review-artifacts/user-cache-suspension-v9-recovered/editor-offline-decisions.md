@@ -77,3 +77,28 @@ new-note/history navigation behavior rather than fixing the WebSocket count by
 removing collaboration. Scope publication and error callbacks both require
 the current scope and cancellation check, while disposal remains tied to the
 ID/viewer lifetime.
+
+## D45/D46 implementation decisions
+
+Mutation callbacks now receive the `isCurrent` predicate from the viewing
+scope. They check it before dispatch and again after the awaited update, before
+any success, error, rollback, or legacy cache seeding. A stale response is
+silently ignored; this does not claim to undo a request already accepted by the
+server. Thrown update errors are reported only while the scope remains current.
+The ordinary no-scope network default and the existing mutation gate are
+unchanged.
+
+The scope handle exposes a pure `isCurrent()` method backed by its existing
+token, owner reference, and viewer-association rules. Replacing a scope,
+changing its viewer, starting with a stale owner, and disposing a scope all
+return `false`.
+
+ID/viewer lifetime resets now also close share and history dialogs and clear
+the prior save error. Cached and pending views continue to force preview mode
+and omit editable header controls. The complete online editor, Yjs lifecycle,
+mode switching, and existing Markdown history behavior remain intact.
+
+The chosen scope-based callback contract was preferred over wrapping each
+setter independently because it covers cache seeding and exception paths with
+one rule. Treating every no-scope page as pending was rejected because it would
+break intentionally network-capable authenticated and guest pages.
