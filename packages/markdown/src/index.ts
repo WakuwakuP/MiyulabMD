@@ -20,7 +20,7 @@ export {
   resolveLanguage,
   serializeFenceInfo,
 } from "./fence-info.ts";
-export { renderMarkdownHtml } from "./render.ts";
+export { collectImageUrls, renderMarkdownHtml } from "./render.ts";
 export {
   collectStandaloneLinkUrls,
   mapLinesOutsideFences,

@@ -258,6 +258,7 @@ async function browser() {
             "viewer-recovery.spec.ts",
             "note-request-sharing.spec.ts",
             "note-request-subscribers.spec.ts",
+            "offline-cache-clear.spec.ts",
             "cached-drive-lifecycle.spec.ts",
             "offline-folder-denial.spec.ts",
             "home-metadata.spec.ts",

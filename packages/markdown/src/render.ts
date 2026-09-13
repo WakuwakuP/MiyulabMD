@@ -64,19 +64,61 @@ const schema = {
   ],
 };
 
-const processor = remark()
-  .use(remarkGfm)
-  .use(remarkFenceInfo)
-  .use(remarkTaskCheckboxes)
-  .use(remarkRehype, { allowDangerousHtml: true })
-  .use(rehypeRaw)
-  .use(rehypeCodeFilename)
-  .use(rehypeHighlight)
-  .use(rehypeCodeFilenameWrap)
-  .use(rehypeSlug)
-  .use(rehypeSanitize, schema)
-  .use(rehypeTaskCheckboxes)
-  .use(rehypeStringify);
+function createProcessor(render: boolean) {
+  const configured = remark()
+    .use(remarkGfm)
+    .use(remarkFenceInfo)
+    .use(remarkTaskCheckboxes)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw);
+
+  if (render) {
+    configured
+      .use(rehypeCodeFilename)
+      .use(rehypeHighlight)
+      .use(rehypeCodeFilenameWrap)
+      .use(rehypeSlug);
+  }
+
+  configured.use(rehypeSanitize, schema).use(rehypeTaskCheckboxes);
+  if (render) {
+    configured.use(rehypeStringify);
+  }
+  return configured;
+}
+
+const processor = createProcessor(true);
+const imageProcessor = createProcessor(false);
+
+function collectImageNodes(node: unknown, urls: Set<string>): void {
+  if (!node || typeof node !== "object") {
+    return;
+  }
+  const record = node as Record<string, unknown>;
+  if (record.type === "element" && record.tagName === "img") {
+    const properties = record.properties;
+    if (properties && typeof properties === "object") {
+      const src = (properties as Record<string, unknown>).src;
+      if (typeof src === "string" && src) {
+        urls.add(src);
+      }
+    }
+  }
+  if (Array.isArray(record.children)) {
+    for (const child of record.children) {
+      collectImageNodes(child, urls);
+    }
+  }
+}
+
+/** Collect image destinations using the same Markdown and sanitization rules as rendering. */
+export function collectImageUrls(markdown: string): string[] {
+  const normalized = normalizeEmbedMarkdown(markdownBody(markdown));
+  const tree = imageProcessor.runSync(imageProcessor.parse(normalized));
+  const urls = new Set<string>();
+  collectImageNodes(tree, urls);
+  return [...urls];
+}
 
 /** Sync HTML for View / Worker SSR. Does not fetch OGP. */
 export function renderMarkdownHtml(

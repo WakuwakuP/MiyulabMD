@@ -2015,6 +2015,26 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - デプロイ等の外部操作は、必要な承認を確認してから行う。ローカルの実Workerを
   使った本番相当の受け入れ検証は先に進める。
 
+## D108：削除・logout・切替の共通user purge基盤
+
+- C1/C2の共通基盤としてclearOfflineCacheUser(userId)を先に作る。
+  設定UI、logout、別タブ連携はこの上に接続し、ここだけで完了とはしない。
+- 親の3ケースは未実装exportでRED：userだけのIDB/OPFS削除と別user／shell保持、
+  旧handleの失効と後続新handleの保存、まだ保存されたことのないIDの旧note応答、
+  旧Home応答の保存・公開抑止を要求する。原子的commit済みデータを過去に遡って
+  失敗扱いにするのではなく、明示操作によってその後に削除する。
+- userの操作寿命を進め、旧handle／進行中処理を止め、noteの未知IDも含めた
+  読み取り世代を失効させる。Homeは要求開始時の寿命を保存・公開前に確認する。
+  既知の保存済みIDだけを列挙して失効させる案は採らない。
+- IDBの対象userの参照とmetadataを削除してから、そのuserのOPFS領域を削除する。
+  remembered viewerは削除対象userの場合だけ消す。別userとCache Storageの
+  起動資産を削除しない。失敗を成功表示せず、停止状態を維持して再試行可能にする。
+- 成功後は新しい通常読み取り／保存を許可し、旧handleは再利用させない。
+  自動prefetch停止、device全体削除、UI、cross-tabの永続的な失効fenceは
+  続く必須作業としてcompletion checklistで追跡する。
+- 同じcache coreを並行編集せず、専任workerがこの基盤を実装する。
+  parser追加は親がpackage21件とpackage/Web型検査を独立確認した。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
