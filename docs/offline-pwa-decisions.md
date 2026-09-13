@@ -1552,6 +1552,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   これらまで完成したとはしない。本体反映後の通常browser74件、unit117件、
   app+SW typecheck、production PWA8件を再確認してチェックポイントを作る。
 
+## D84：起動時MyDrive先読みの本体検証
+
+- 状態：D83の4ファイルを本体へ正確に反映し、親も候補とのbyte一致を確認した。
+- 親の本体検証：app+SW typecheck成功、browser全74件成功（除外なし）、
+  unit117件成功、production buildとPWA8件成功、Biome4ファイル成功、
+  diffcheck成功。API fixtureの未モックtreeリクエストはlocalhost proxyの
+  接続拒否として出力されたが、外部環境への取得やデプロイは行っていない。
+- production precacheは119 entries、3278.08 KiB。main chunk約2298.57 kBの
+  既存サイズ警告は継続し、設定した5MiB上限以内でoffline起動試験が成功した。
+- 担当の二重dispatchが1回発生したため、重複側へ即時停止を指示した。
+  重複側はread/listだけで停止し、編集・install・test・restore・commitはしていない。
+  採用内容は正規担当の4ファイルだけ。検証の重複発行も実行回数の証拠には使わず、
+  上記の明示された各suiteの成功件数とbyte比較を採用根拠にする。
+- READMEに本番PWA試験と現在の起動時取得範囲を追記した。全ての取得契機、
+  cross-tab／重複調整、画像、容量管理、フォルダ拒否HTTP接続などは未完了。
+  これは初回取得サイクルのチェックポイントであり、仕様全体の完了ではない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

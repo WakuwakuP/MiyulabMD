@@ -16,7 +16,7 @@ import type {
   SessionUser,
 } from "@miyulabmd/shared";
 import { apiFetch as fetch } from "./api-fetch.ts";
-import { requestJson } from "./api-transport.ts";
+import { ApiHttpError, requestJson } from "./api-transport.ts";
 import { notifyArticleChanged } from "./article-changed.ts";
 import type { OgPreview } from "./embeds.ts";
 
@@ -39,7 +39,7 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
 
-export { ApiCommunicationError } from "./api-transport.ts";
+export { ApiCommunicationError, ApiHttpError } from "./api-transport.ts";
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -82,7 +82,7 @@ export async function fetchNotes(
     signal: options.signal,
   });
   if (!res.ok) {
-    throw new Error(await parseError(res));
+    throw new ApiHttpError(await parseError(res), res.status);
   }
   const body = (await res.json()) as { notes: NoteSummary[] };
   return body.notes;
@@ -218,8 +218,13 @@ export async function updateNote(
   return { data: (await res.json()) as Note, ok: true };
 }
 
-export async function fetchFolderTree(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/tree", fetchOpts);
+export async function fetchFolderTree(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiResult<FolderRecord[]>> {
+  const res = await fetch("/api/folders/tree", {
+    ...fetchOpts,
+    signal: options.signal,
+  });
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }

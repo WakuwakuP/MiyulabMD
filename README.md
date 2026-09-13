@@ -63,7 +63,7 @@ URL はこのリポジトリ用の固定名。同じチェックアウトで `pn
 
 ## ブラウザテスト
 
-既存の Node.js テストとは別に、Playwright Test で実際の IndexedDB / OPFS を検証する。
+既存の Node.js テストとは別に、Playwright Test で実際の IndexedDB / OPFS と、キャッシュ閲覧・自動先読みの画面連携を検証する。
 
 ```bash
 # pnpm install 後、初回または Playwright 更新時に実行
@@ -72,11 +72,15 @@ pnpm --filter @miyulabmd/web test:browser:install
 pnpm --filter @miyulabmd/web test:browser
 # 個別のテストだけ実行する場合
 pnpm --filter @miyulabmd/web test:browser storage-platform.spec.ts
+# 本番ビルドの Service Worker・オフライン起動を検証する場合
+pnpm --filter @miyulabmd/web test:pwa
 ```
 
 両コマンドは `apps/web/scripts/playwright.mjs` を通し、専用 Chromium を `apps/web/node_modules/.cache/playwright/` に保存・参照する。共有ブラウザキャッシュを使用せず、自動 GC も無効にする。通常の Chrome / Edge や他プロジェクトのブラウザに影響させないため、直接 `playwright install` を実行せず上記コマンドを使う。新しい worktree ではブラウザを別途インストールする。
 
-テストは `127.0.0.1:4174` で専用の Vite サーバーを自動起動・終了する。起動済みの別サーバーは再利用しない。現在のストレージテストはアプリの起動処理を読み込まない専用ページを使い、Worker やログインを必要としない。PWA の Service Worker・本番 SSR 経路を含む受け入れテストの代わりではない。
+`test:browser` は `127.0.0.1:4174` で専用の Vite サーバーを自動起動・終了する。起動済みの別サーバーは再利用しない。ストレージの基盤テストは専用ページ、画面テストは実際のアプリとAPI fixtureを使い、Worker や実ログインを必要としない。
+
+`test:pwa` は本番ビルド後、`127.0.0.1:4175` の専用previewサーバーで、HTTP cacheに依存しないオフライン起動、SSR HTMLを保存しないこと、キャッシュ整理と更新待機などを検証する。SSR応答はテスト用HTTP fixtureであり、実際のCloudflare配信・認証・エッジキャッシュの検証を代替しない。開発用ViteではService Workerを登録しない。
 
 各テストは独立したブラウザコンテキストで実行する。失敗時のトレース等は `apps/web/test-results/` に保存され、Git 管理外となる。CI でブラウザテストを実行する場合も、専用ブラウザのインストールを先に行う。
 
@@ -97,7 +101,13 @@ node apps/web/scripts/check-offline-candidate.mjs review-artifacts/offline-candi
 
 このランナーは実装用の `src/` を変更・復元しない。ブラウザ検証は候補を Vite の読み込み時に差し替え、型チェックは候補と同じ内容を検証専用ツリーへ配置して行う。候補への書き戻しは行わず、検証前後で候補と元ソースが変わっていないことを確認する。候補の SHA-256 を出力するので、検証結果と併せて記録する。ブラウザは専用キャッシュを使用し、Vite は空きポートで起動する。検証専用ツリーは `apps/web/node_modules/.cache/offline-candidate/` 配下に作成し、終了時に削除する。
 
-`all` は候補の型チェック・Biome・オフライン基盤のブラウザテストを実行する。未接続の画面用テストは対象外。既存ユニットテストは別途実行する。レビュー完了までは候補ファイルを正本として保持し、実装用ファイルから候補へコピーし直さない。
+`all` は候補の型チェック・Biomeと、ランナーに明示した基盤・画面テストを実行する。新しいspecはデフォルト一覧にも登録する。既存ユニットテストは別途実行する。レビュー完了までは候補ファイルを正本として保持し、実装用ファイルから候補へコピーし直さない。
+
+### 現在のオフライン対応範囲
+
+本番ビルドは共通の起動用資産を保存し、保存済みのノート・フォルダを閲覧専用で表示する。認証済みのアプリ起動時には、自分のMyDriveのフォルダとノート本文を順次先読みする。通常の画面表示・編集は維持し、共有されているだけの他人のノート本文は自動先読みしない。ブラウザの保存容量や通信状況によって取得・保持できない項目があるため、全件保存やバックアップを保証しない。
+
+通信復帰・前面復帰などの再取得契機、複数タブや通常取得との重複調整、添付画像、容量回収、フォルダHTTP拒否の接続などは継続実装中。仕様と実装済み範囲は区別し、最新の判断・検証は [意思決定台帳](docs/offline-pwa-decisions.md) を参照する。
 
 ## CI / デプロイ
 
