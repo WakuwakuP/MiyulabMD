@@ -893,6 +893,39 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   キャッシュ書込を呼ぶネットワーク取得の接続は次の工程であり、ここでは
   ルート参照・正規folder保存・再読込時の整合性を公開APIと実画面で確認した。
 
+## D52：通常のHome取得をユーザー所有のmetadata保存へ接続する
+
+- **状態**：実画面の自動保存テストを親が追加しRED確認。選択前は`e70c007`
+  （ライブ51 browser／117 unit、型・build成功）。
+- **親テスト**：オンラインの実Homeでrootとchildを開き、公開cache APIで保存を観測する。
+  テスト自身はsnapshotを書かない。API通信不能でreloadした後、同じchildとroot直下noteを
+  readonlyで表示することを要求する。現状はroot／child／note-listが全て未保存で失敗した。
+- **選択肢A**：画面の各setterやfetchのthenへ個別に保存処理を追加する。
+  ユーザー区分・取消・通信とstorage失敗の扱いが分散するため選ばない。
+- **選択肢B**：共有のmetadata readerでnetwork取得とbest-effort保存を所有し、
+  Homeは取得結果の表示だけを担当する。captured viewer、要求folderId、signal、
+  現在の表示の所有権を入力として固定する。
+- **採用**：B。`readHomeMetadata`相当の小さい共通入口を作り、root/childのfolderと
+  完全な`/api/notes`応答を取得する。ルート指定時は`asDriveRoot:true`で保存する。
+  ネットワーク取得の本体は既存API helpersを再利用し、必要なoptional signalだけを追加する。
+- **認証区分**：保存は確認済みauthenticated viewerに限り、user.idとcacheViewerIdの
+  対応が確認できる領域だけへ行う。cacheViewerIdがない場合でも正当なオンライン表示は維持する。
+  guest/publicは従来の表示を維持して私有キャッシュへ保存しない。cached/unavailableを
+  authenticatedに昇格させず、cachedのローカルreaderは変更しない。
+- **失敗・取消**：必要なnetwork応答が成功したときだけ保存を試みる。storage失敗は
+  正常なオンライン表示を失敗に変えず、キャッシュを保存できなかったことを区別して返す。
+  detached writeは作らず、保存処理の終了後にhandleを閉じる。signalをHTTPとmetadata
+  writeへ渡し、取消後の新規保存／結果反映を止める。確定済みcommitは取り消さない。
+- **memory cache**：Homeの初期表示と新しい取得経路はユーザー未区分のpeek/load結果を
+  使用しない。前ユーザーの配列へfallbackする既存list-cacheはこの読込から外す。
+  他画面の互換呼出しを一括削除せず、通常のHomeの作成・共有・変更UIも削除しない。
+- **範囲**：最初は可視directoryのnetwork snapshotをまとめて取得する。
+  folder遷移時の全note-list再取得というコストは残り、将来のprefetchでは一覧取得と
+  子folder取得の共有・重複抑制を改めて接続する。現時点で全件prefetchや高速化は主張しない。
+  authenticatedの503キャッシュfallback、folder拒否の永続無効化も別の検証対象として残る。
+- **検証の進め方**：まず追加した自動保存の縦断テストを通し、既定52件と通常UIを確認。
+  所有権変更・storage失敗・取消などは続く境界テストでも検証してから採用する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

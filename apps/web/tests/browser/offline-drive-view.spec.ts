@@ -365,3 +365,103 @@ test("MyDrive root keeps its canonical server ID across cached routes and update
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
 });
+
+test("online Home visits automatically save directory snapshots for readonly reload", async ({
+  page,
+}) => {
+  const rootId = "online-drive-root";
+  const serverRoot: FolderAccess = {
+    ...root,
+    children: [{ id: "docs", name: "資料", parentId: rootId }],
+    id: rootId,
+    locked: true,
+  };
+  const serverDocs: FolderAccess = {
+    ...docs,
+    children: [],
+    parentId: rootId,
+  };
+  const rootNote: NoteSummary = {
+    ...note,
+    folder: "",
+    folderId: rootId,
+    id: "online-root-note",
+    shortId: "online-root-short",
+    title: "ルートのオンラインノート",
+  };
+  const docNote: NoteSummary = { ...note, title: "オンラインで開いた資料" };
+  let offline = false;
+  const offlineDataRequests: string[] = [];
+  await page.route("**/api/**", (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (offline) {
+      if (/^\/api\/(?:notes|folders)(?:\/|$)/.test(pathname)) {
+        offlineDataRequests.push(pathname);
+      }
+      return route.abort("internetdisconnected");
+    }
+    switch (pathname) {
+      case "/api/me":
+        return route.fulfill({
+          json: {
+            user: {
+              displayName: "Alice",
+              email: "alice@example.test",
+              id: "alice",
+            },
+          },
+        });
+      case "/api/auth/config":
+        return route.fulfill({ json: { access: false, mock: true } });
+      case "/api/notes":
+        return route.fulfill({ json: { notes: [rootNote, docNote] } });
+      case "/api/folders":
+        return route.fulfill({ json: serverRoot });
+      case "/api/folders/docs":
+        return route.fulfill({ json: serverDocs });
+      default:
+        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+    }
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
+  await page.getByRole("link", { exact: true, name: "資料" }).click();
+  await expect(page.getByRole("link", { name: docNote.title })).toBeVisible();
+
+  // Observe the public cache; this test never seeds it or writes snapshots.
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const moduleUrl = "/src/lib/offline-cache.ts";
+        const { openOfflineCache } = await import(moduleUrl);
+        const cache = await openOfflineCache({ userId: "alice" });
+        try {
+          return {
+            docsId: (await cache.getFolder("docs"))?.folder.id,
+            notes: (await cache.getNoteList())?.notes.map(
+              (summary: NoteSummary) => summary.id,
+            ),
+            rootId: (await cache.getFolder(null))?.folder.id,
+          };
+        } finally {
+          cache.close();
+        }
+      }),
+    )
+    .toEqual({
+      docsId: "docs",
+      notes: [rootNote.id, docNote.id],
+      rootId,
+    });
+
+  offline = true;
+  await page.reload();
+  await expect(page.getByRole("link", { name: docNote.title })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("キャッシュ");
+  await expect(page.getByRole("button", { name: "新規ノート" })).toHaveCount(0);
+  await page.getByRole("link", { name: "上のフォルダへ" }).click();
+  await expect(page).toHaveURL(`/f/${rootId}`);
+  await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
+  expect(offlineDataRequests).toEqual([]);
+});
