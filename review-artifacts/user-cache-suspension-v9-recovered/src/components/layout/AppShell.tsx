@@ -1,6 +1,12 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
@@ -8,6 +14,10 @@ import {
   resolveViewerContext,
   type ViewerContext,
 } from "../../lib/viewer-context.ts";
+import {
+  bindMutationAccess,
+  createViewingAccess,
+} from "../../lib/viewing-access.ts";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext } from "./AppShellContext.ts";
 
@@ -33,12 +43,17 @@ export function AppShell() {
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
   const viewerRef = useRef(viewer);
+  const [viewing] = useState(() =>
+    createViewingAccess(() => viewerRef.current),
+  );
   const viewerRequestRef = useRef<{
     controller: AbortController;
     generation: number;
   } | null>(null);
   const generationRef = useRef(0);
   const editor = isEditorPath(pathname);
+
+  useLayoutEffect(() => bindMutationAccess(viewing.getAccess), [viewing]);
 
   useEffect(() => {
     let active = true;
@@ -134,6 +149,7 @@ export function AppShell() {
     user: viewer.user,
     userLoading: loading,
     viewer,
+    viewing,
   };
 
   return (

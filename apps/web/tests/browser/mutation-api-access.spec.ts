@@ -5,12 +5,17 @@ test("API mutation dispatch follows AppShell's actual viewing access without blo
   page,
 }) => {
   const writes: string[] = [];
+  let logouts = 0;
   let offlineViewer = false;
   const user = {
     displayName: "Alice",
     email: "alice@example.test",
     id: "alice",
   };
+  await page.route("**/auth/logout", (route) => {
+    logouts += 1;
+    return route.fulfill({ status: 204 });
+  });
   await page.route("**/api/**", (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -28,7 +33,7 @@ test("API mutation dispatch follows AppShell's actual viewing access without blo
       case "/api/article-sources":
         return route.fulfill({ json: { sources: [] } });
       case "/api/notes":
-        return route.fulfill({ json: [] });
+        return route.fulfill({ json: { notes: [] } });
       case `/api/notes/${note.id}`:
         return route.fulfill({ json: note });
       default:
@@ -96,12 +101,14 @@ test("API mutation dispatch follows AppShell's actual viewing access without blo
   const reads = await page.evaluate(async (id) => {
     const moduleUrl = "/src/lib/api.ts";
     const api = await import(moduleUrl);
+    await api.logout();
     return {
       list: await api.fetchNotes(),
       note: (await api.fetchNote(id)).ok,
     };
   }, note.id);
   expect(reads).toEqual({ list: [], note: true });
+  expect(logouts).toBe(1);
 
   await page.getByRole("button", { name: "Use network viewing" }).click();
   expect(await update()).toBe(true);
@@ -114,5 +121,11 @@ test("API mutation dispatch follows AppShell's actual viewing access without blo
     viewer: { cacheViewerId: "alice", mode: "cached", user: null },
   });
   expect(await update()).toBe("ReadOnlyViewingError");
+  await page.evaluate(async () => {
+    const moduleUrl = "/src/lib/api.ts";
+    const api = await import(moduleUrl);
+    await api.logout();
+  });
+  expect(logouts).toBe(2);
   expect(writes).toHaveLength(2);
 });
