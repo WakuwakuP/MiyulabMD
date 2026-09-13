@@ -24,10 +24,8 @@ export async function readCachedDrive(
     if (signal?.aborted) {
       throw signal.reason;
     }
-    const [folder, noteList] = await Promise.all([
-      cache.getFolder(folderId),
-      cache.getNoteList(),
-    ]);
+    const noteList = await cache.getNoteList();
+    const folder = await cache.getFolder(folderId);
     if (signal?.aborted) {
       throw signal.reason;
     }

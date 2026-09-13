@@ -233,6 +233,7 @@ test("a pending drive snapshot cannot publish a completed folder after user susp
     const released = new Promise<void>((resolve) => {
       releaseList = resolve;
     });
+    let folderStarted = false;
     const originalTransaction = IDBDatabase.prototype.transaction;
     const originalGet = IDBObjectStore.prototype.get;
     const success = Object.getOwnPropertyDescriptor(
@@ -249,6 +250,7 @@ test("a pending drive snapshot cannot publish a completed folder after user susp
     ) {
       const transaction = originalTransaction.apply(this, args);
       if (args[0] === "folders" && args[1] === "readonly") {
+        folderStarted = true;
         transaction.addEventListener("complete", folderCompleted, {
           once: true,
         });
@@ -278,8 +280,12 @@ test("a pending drive snapshot cannot publish a completed folder after user susp
         (value: unknown) => ({ rejected: false, value }),
         () => ({ rejected: true, value: null }),
       );
-      // The folder has completed, but the combined read still awaits its list.
-      await Promise.all([folderReady, listReady]);
+      await listReady;
+      // A parallel reader already has a folder request; a folder-last reader
+      // must also reject suspension without being forced to start it early.
+      if (folderStarted) {
+        await folderReady;
+      }
       suspendOfflineCacheUser("alice");
       releaseList();
       return await pending;

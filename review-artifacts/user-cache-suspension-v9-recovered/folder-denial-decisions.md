@@ -45,3 +45,22 @@ without inventing a timestamp.
 
 This is candidate-only and remains unadopted. Composite reader and HTTP denial
 wiring are separate future slices.
+
+## D72 compound-reader rationale
+
+`readCachedDrive` now awaits `getNoteList()` before invoking `getFolder()`.
+This makes the folder read, including D63's user-scoped denial-marker scan, the
+last storage boundary before the compound result is assembled. A denial
+committed while the note-list read is delayed therefore cannot be masked by a
+folder snapshot that was completed earlier. The existing signal/current and
+suspension checks, missing flags, timestamps, and `finally`-owned `cache.close`
+boundary are unchanged.
+
+This is a one-pass ordering correction only: it adds no retry loop, duplicate
+folder scan, schema change, HTTP wiring, or PWA/live-source change. The
+candidate remains unadopted pending parent review. The focused and complete
+candidate runs still expose the existing native IndexedDB suspension test
+timeout and the compound test's `AbortError` when its delayed note-list
+transaction is held open while `denyFolder` commits; those results are recorded
+exactly in the companion validation record rather than being hidden or worked
+around here.

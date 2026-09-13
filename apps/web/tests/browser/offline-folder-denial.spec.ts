@@ -230,8 +230,9 @@ test("a compound drive read applies folder denial while its note list is pending
         Object.defineProperty(request, "onsuccess", {
           set(handler: (event: Event) => void) {
             success.set?.call(request, (event: Event) => {
+              const finished = request.result === null;
               handler.call(request, event);
-              if (!request.result) {
+              if (finished) {
                 folderScanned.resolve();
               }
             });
