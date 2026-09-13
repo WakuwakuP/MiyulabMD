@@ -683,6 +683,37 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   Viteからアプリ資産を配信しているテストであり、ネットワークなしのアプリ起動や
   実サーバーとの共同編集同期まで検証したという意味ではない。
 
+## D47：キャッシュ済みマイドライブの実画面探索を接続する
+
+- **状態**：次の縦断スライスを選択。親が実画面テストを追加しREDを確認した。
+- **選択前チェックポイント**：`bc44b5f`。ノート画面はライブで44 browser／117 unit成功。
+- **背景**：HomePageは`user:null`をゲストとして扱い、cached viewerでも公開一覧APIへ
+  進む。既存list-cacheはメモリのみで、IndexedDBに保存済みのfolder/listを表示しない。
+  NoteTreeのhoverにもネットワーク先読みがあり、行の操作menuが常に描画される。
+- **選択肢A**：HomePageの既存表示部品を維持し、cached viewerのデータ取得を
+  ユーザー・要求寿命に紐づく共通readerへ分離する。既存offline-cache公開APIを使い、
+  folderとnote-listの取得日時／欠落を保持する。表示側はreadonlyとして描画する。
+- **選択肢B**：各画面・hoverへ個別のcatchや`navigator.onLine`分岐を加える。
+  viewer区分と取消の処理が分散するため選ばない。
+- **選択肢C**：オフライン専用の別ルート・別ツリーを作る。
+  同じURL・表示を使う仕様と、既存UI維持の方針に合わないため選ばない。
+- **採用**：A。最初はcached viewerのローカル探索だけを接続し、通常のauthenticated／
+  guest表示を維持する。オンライン取得の永続化・503 fallback・全体prefetchは後続で
+  テストを追加して接続する。保存済みflagsを認証・更新許可として扱わない。
+- **欠落の意味**：folder missは「保存されていない」であり空ではない。
+  note-list missも空配列へ黙って変換しない。各snapshotの元のcachedAtを表示に使い、
+  一覧だけで本文も保存済みだとは示さない。
+- **UI**：子・親・パンくずの既存リンクを使い、現在のfolderIdで一覧を絞る。
+  cache表示では作成・変更・削除menuを出さず、pointer hoverによるAPI先読みも止める。
+  unavailable viewerをcachedとして扱ったり、cached IDをSessionUserへ昇格したりしない。
+- **親テスト**：`offline-drive-view.spec.ts`。公開cache APIから保存後、API通信不能で
+  `/`→子→reload→空folder→親→ルートcrumb→未取得folderを辿る。
+  note/folder API要求0件、更新menuなし、取得済み空と未取得の違いを要求する。
+  現状は最初のcache statusが存在せず失敗した（exit 1）。既定browserは45件となる。
+- **制約**：shellはViteから取得しており、SW起動の検証ではない。`/api/notes`は
+  現在full accessible listを返す非ページングAPIで、MyDrive全体の先読み対象は後続で
+  所属を照合する。scope／完全性metadataを実際より広く主張しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
