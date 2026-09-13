@@ -500,7 +500,9 @@ export function HomePage() {
   }
   if (viewer.mode === "cached" && viewer.cacheViewerId !== null) {
     return (
-      <CachedDriveView key={`${viewer.cacheViewerId}:${folderId ?? "root"}`} />
+      <CachedDriveView
+        key={JSON.stringify([viewer.cacheViewerId, folderId ?? null])}
+      />
     );
   }
   if (viewer.mode === "unavailable") {

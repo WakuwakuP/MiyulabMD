@@ -50,3 +50,22 @@ snapshots exist. Missing snapshots remain distinguishable and pending, while
 available child folders remain navigable with an incomplete-list explanation.
 Readonly `NoteTree`/`DriveRow` suppresses hover prefetch and all row/context
 menus without changing default callers.
+
+## D49 suspension boundary correction
+
+The D48 reader already checked cancellation and the current viewing scope, but
+those checks did not cover the user-wide offline-cache suspension state. A
+folder snapshot could therefore complete before suspension while the pending
+note-list snapshot returned `null` after suspension, and the compound reader
+could still publish the completed folder.
+
+The correction keeps the existing `Promise.all` composition and adds the
+canonical `isOfflineCacheUserSuspended` check at the final return boundary,
+after both reads and the current-scope check. A suspended read rejects with
+`DOMException("Offline cache is suspended")`; it does not mutate, delete, reset,
+or retry cache state. The HomePage cache child key now uses
+`JSON.stringify([viewer.cacheViewerId, folderId ?? null])`, preserving the
+storage contract while distinguishing a `null` root route from a literal
+`"root"` folder ID.
+
+No live source, test, runner, schema, or other candidate file was changed.

@@ -1,5 +1,8 @@
 import type { FolderAccess, NoteSummary } from "@miyulabmd/shared";
-import { openOfflineCache } from "./offline-cache.ts";
+import {
+  isOfflineCacheUserSuspended,
+  openOfflineCache,
+} from "./offline-cache.ts";
 
 export type CachedDriveView = {
   folder: FolderAccess | null;
@@ -41,6 +44,9 @@ export async function readCachedDrive(
         "Cached drive view is no longer current",
         "AbortError",
       );
+    }
+    if (isOfflineCacheUserSuspended(userId)) {
+      throw new DOMException("Offline cache is suspended");
     }
     return result;
   } finally {

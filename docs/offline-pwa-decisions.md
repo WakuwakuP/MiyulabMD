@@ -772,6 +772,24 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   `folderId ?? "root"`のような通常IDとの衝突を避け、JSONの配列でnullを保持する。
   これは既存のfolderキー契約と同じルールであり、新しい識別方式を追加しない。
 
+### D47–D49：マイドライブ候補の採用判定
+
+- 親が最終diffをレビューし、readerの最終停止検査と構造化keyの小さい修正を確認。
+  通常Homeの本体は原典を維持し、cached branchは共通NoteTree／DriveRowを再利用している。
+- 親が候補runner `all`を独立実行し、型チェック・Biome・browser48件すべて成功。
+  D49の停止競合、cachedの子／親／crumb／reload／未取得表示、通常authenticated／
+  guestの一覧と操作を含む。
+- 採用対象5ファイルのSHA256：
+  - `HomePage.tsx`: `4afdca6bd28aa7f3adf6cb77eca3460785923f97e7336090eebbbd5a121acd72`
+  - `CachedDriveView.tsx`: `beddfd7ae56483f82e551e9b6757da44f15e9e574ab7c1f828f3c0ce259cf4b1`
+  - `NoteTree.tsx`: `70ef3f4e1d76e01618e107a65a5a1d905837e65c076eae37b716925471d56618`
+  - `DriveList.tsx`: `a855c63fe0a84ad3ff70f392cff7378f97c0afa9e24d829bad8b733dbb7fb55d`
+  - `cached-drive-reader.ts`: `2248e1ada26df30abe3bd42736c67c02c74131eb540cc6e93982497718312da1`
+- これらのライブ反映を承認し、反映後に通常runnerで再検証する。
+  このスライスは既に保存済みのfolder/listを読む接続であり、通常閲覧からの
+  folder/list自動保存、authenticated時の503 fallback、MyDrive全体prefetchは後続。
+  テストの保存元は公開cache APIによるfixtureであり、自動保存済みとは報告しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
