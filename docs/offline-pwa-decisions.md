@@ -1144,6 +1144,28 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   build設定・public assetsを含むため、従来のsrc差替えrunnerは使わず、使い捨てbuild treeで
   検証する専用runnerを用意する。通常ソースを書き換えてから戻す方式へは戻らない。
 
+### D61の検証基盤・依存関係
+
+- 親が`check-pwa-candidate.mjs`を作成。候補はWeb相対pathで扱い、使い捨てtreeへ
+  live入力と候補を重ね、native TypeScript CLI／Biome／production build／previewで検証する。
+  固定portや既存serverを再利用せず、正の空きportを選び実際のlisten先も確認する。
+  終了時にlive入力・候補の不変を検査し、一時treeのみ削除する。秘密のenv fileは複製しない。
+- 空の候補でbaseline smokeを実行した。型チェックとbuildは通り、通常のPWAテストと同じ
+  registration未実装のREDまで到達した。これは実装成功ではなく、候補の実行経路の確認。
+- registryでVite互換性を確認し、`vite-plugin-pwa@1.3.0`、直接使用する
+  `workbox-core`／`workbox-precaching`／`workbox-routing@7.4.1`をdev依存へ固定した。
+  Workbox方式を採用し、manifest生成・asset列挙の独自実装を増やさない。
+- `pnpm install`は成功（+243／-13）。peer警告のTiptap collaboration 3.30.5と
+  Babel decorators 8.0.2＋core 7.29.7の組合せは、HEADのlockにも同じものがあることを確認した。
+  今回それらを一括upgradeしない。Workbox由来globのdeprecated警告とcore-js-pureの
+  build-script無効化警告も記録する。
+- 依存追加と検証toolingだけであり、SW登録・manifest・icon・fetch handlerはまだ実装していない。
+- `deleted-files.json`で旧SW/helper等の削除も一時treeにだけ適用できるようにした。
+  正規化されていないpathや置換との矛盾を拒否し、候補のdependency宣言も導入済みの
+  Web manifestと一致させる。通常sourceへ直接コピーしてから戻す方式は使わない。
+- 依存導入後、Web unit117件・型チェックが成功した。最終runnerのNode構文確認、
+  Biome、frozen-lockfile install、diffチェックも成功した。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
