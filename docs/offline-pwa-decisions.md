@@ -1858,6 +1858,21 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   画面の認証再確認を新たに行うものではない。別タブのログイン変更検出、全ての
   同時認証競合、画像／容量／フォルダHTTP拒否などは別の未完了事項とする。
 
+## D100：利用者の復帰確認の本体検証
+
+- 状態：親がD99の承認済みAppShellをliteral patchで本体へ配置し、候補byte一致を
+  確認した。SHA256：
+  `743d25bc602ebb1788f9fe5de0de4d7b6dc80dd5050a6b9c9185d1d3f5c46590`。
+- 親の本体検証はapp+SW typecheck、browser85件、unit117件、production buildと
+  PWA8件、関連3ファイルのBiome、diffcheckが全て成功した。
+  新しい利用者への切替、失敗後の選択保持、後着応答の抑止を含む。
+- precacheは119 entries、3280.36 KiB。main chunk約2.30MBの既存警告は継続する。
+- READMEの「cachedモードの復帰にはreloadが必要」を更新した。これはサーバーへの
+  確認を経た復帰であり、cacheViewerIdを認証情報として使ったものではない。
+  既にauthenticated／guestの画面や別タブの認証変更検出まで対応済みとはしない。
+- 検証はlocal API fixtureと本番ビルドによるもので、Cloudflareへのdeployや
+  実認証環境での配信確認は行っていない。仕様全体の完了ではない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

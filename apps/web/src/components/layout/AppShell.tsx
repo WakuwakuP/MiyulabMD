@@ -32,6 +32,18 @@ const unavailableViewer: ViewerContext = {
   user: null,
 };
 
+function shouldPreserveViewerIdentity(
+  previousViewer: ViewerContext,
+  nextViewer: ViewerContext,
+): boolean {
+  return (
+    previousViewer.user === null &&
+    nextViewer.user === null &&
+    previousViewer.mode === nextViewer.mode &&
+    previousViewer.cacheViewerId === nextViewer.cacheViewerId
+  );
+}
+
 export function AppShell() {
   const { pathname } = useLocation();
   const [viewer, setViewer] = useState<ViewerContext>(unavailableViewer);
@@ -58,40 +70,78 @@ export function AppShell() {
 
   useEffect(() => {
     let active = true;
-    const controller = new AbortController();
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    viewerRequestRef.current = { controller, generation };
+    const requestViewer = (initial: boolean) => {
+      if (!active || viewerRequestRef.current) {
+        return;
+      }
 
-    void resolveViewerContext({ signal: controller.signal })
-      .then((nextViewer) => {
-        if (
-          active &&
-          generationRef.current === generation &&
-          !controller.signal.aborted
-        ) {
-          viewerRef.current = nextViewer;
-          setViewer(nextViewer);
-          setLoading(false);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!active || controller.signal.aborted) {
-          return;
-        }
-        if (generationRef.current === generation) {
-          const nextViewer = unavailableViewer;
-          viewerRef.current = nextViewer;
-          setViewer(nextViewer);
-          setLoading(false);
-        }
-        console.error("Failed to resolve viewer context", error);
-      });
+      const controller = new AbortController();
+      const generation = generationRef.current + 1;
+      generationRef.current = generation;
+      const request = { controller, generation };
+      viewerRequestRef.current = request;
+
+      void resolveViewerContext({ signal: controller.signal })
+        .then((nextViewer) => {
+          if (
+            active &&
+            generationRef.current === generation &&
+            !controller.signal.aborted
+          ) {
+            const previousViewer = viewerRef.current;
+            if (!shouldPreserveViewerIdentity(previousViewer, nextViewer)) {
+              viewerRef.current = nextViewer;
+              setViewer(nextViewer);
+            }
+            if (initial) {
+              setLoading(false);
+            }
+          }
+        })
+        .catch((error: unknown) => {
+          if (!active || controller.signal.aborted) {
+            return;
+          }
+          if (initial && generationRef.current === generation) {
+            const nextViewer = unavailableViewer;
+            viewerRef.current = nextViewer;
+            setViewer(nextViewer);
+            setLoading(false);
+          }
+          console.error("Failed to resolve viewer context", error);
+        })
+        .finally(() => {
+          if (viewerRequestRef.current === request) {
+            viewerRequestRef.current = null;
+          }
+        });
+    };
+
+    const retryCachedViewer = () => {
+      if (
+        viewerRef.current.mode === "cached" ||
+        viewerRef.current.mode === "unavailable"
+      ) {
+        requestViewer(false);
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        retryCachedViewer();
+      }
+    };
+
+    window.addEventListener("online", retryCachedViewer);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    requestViewer(true);
 
     return () => {
       active = false;
-      controller.abort();
-      if (viewerRequestRef.current?.generation === generation) {
+      window.removeEventListener("online", retryCachedViewer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      const request = viewerRequestRef.current;
+      request?.controller.abort();
+      if (request) {
         viewerRequestRef.current = null;
       }
     };
