@@ -313,3 +313,78 @@ test("Home reports failed cache saves without making network data readonly", asy
     )
     .toBe(folder.id);
 });
+
+for (const kind of ["folder", "note-list"] as const) {
+  test(`cancelling a pending ${kind} save preserves the abort reason and prior snapshot`, async ({
+    page,
+  }) => {
+    const { markdown: _markdown, ...summary } = note;
+    await page.goto("/tests/browser/fixtures/storage.html");
+    const outcome = await page.evaluate(
+      async ({ kind, folder, summary }) => {
+        const moduleUrl = "/src/lib/offline-cache.ts";
+        const { openOfflineCache } = await import(moduleUrl);
+        const cache = await openOfflineCache({ userId: "alice" });
+        const controller = new AbortController();
+        const reason = new Error("Metadata save cancelled");
+        await cache.putFolder(folder, { asDriveRoot: true });
+        await cache.putNoteList([summary]);
+        const before = {
+          folder: await cache.getFolder(null),
+          notes: await cache.getNoteList(),
+        };
+        const originalPut = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function (
+          this: IDBObjectStore,
+          ...args: Parameters<IDBObjectStore["put"]>
+        ) {
+          const request = originalPut.apply(this, args);
+          if (this.name === (kind === "folder" ? "folders" : "note-lists")) {
+            controller.abort(reason);
+          }
+          return request;
+        };
+        try {
+          const options = { signal: controller.signal };
+          const pending =
+            kind === "folder"
+              ? cache.putFolder(
+                  {
+                    ...folder,
+                    children: [
+                      {
+                        id: "new-child",
+                        name: "New child",
+                        parentId: folder.id,
+                      },
+                    ],
+                  },
+                  { ...options, asDriveRoot: true },
+                )
+              : cache.putNoteList(
+                  [{ ...summary, title: "Uncommitted title" }],
+                  options,
+                );
+          const reasonPreserved = await pending.then(
+            () => false,
+            (error: unknown) => error === reason,
+          );
+          return {
+            after: {
+              folder: await cache.getFolder(null),
+              notes: await cache.getNoteList(),
+            },
+            before,
+            reasonPreserved,
+          };
+        } finally {
+          IDBObjectStore.prototype.put = originalPut;
+          cache.close();
+        }
+      },
+      { folder, kind, summary },
+    );
+    expect(outcome.after).toEqual(outcome.before);
+    expect(outcome.reasonPreserved).toBe(true);
+  });
+}

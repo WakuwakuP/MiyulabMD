@@ -1009,6 +1009,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   容量回復を模した次のreloadで警告が消え、root snapshotが保存されることを確認する。
   既定browserは57件。取消の終了境界は引き続き次の検証対象。
 
+## D57：metadata writeのabort reasonを終了境界で保持する
+
+- **状態**：D56のUI差分を親が確認。担当は57件成功を報告した。
+  folder／note-listのnative put直後に取消する公開APIテストを2件追加してRED確認。
+- **観測**：どちらも以前のsnapshotは維持されており、中止自体はできている。
+  ただしrejectされた値が呼出側の`signal.reason`ではないため、両ケースとも失敗した。
+  folderの複数writeでは後続putのTransactionInactiveErrorが、本来の取消を覆うこともある。
+- **選択肢A**：transactionのabortイベントでsignalがabortedなら、そのreasonをそのまま
+  rejectする。そうでなければ既存のputError／transaction.errorを使う。
+- **選択肢B**：常に一般的なAbortErrorへ作り直す。呼出側が指定したreasonの同一性を失う。
+  C＝後続write例外を優先する案も、要求の取消をstorage障害として誤分類するため選ばない。
+- **採用**：A。note／viewer側の既存取消契約と同じルールにする。completeが実際に確定した
+  transactionを後から失敗に変えず、abort側の理由選択だけを修正する。
+- **検証**：以前のfolder/listとroot参照が不変であること、reject値が指定reasonと
+  同一であることを確認する。既定browserは59件となる。
+- readerの保存完了後〜結果公開までの取消境界は、これとは別に続けて検証する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

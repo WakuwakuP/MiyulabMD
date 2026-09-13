@@ -40,6 +40,27 @@
   and cancellation-reason behavior remain later review items. The candidate is
   not adopted into live `apps/web/src`.
 
+## D56 storage warning UI
+
+- **Status:** Candidate-only implementation, ready for parent review; live
+  `apps/web/src` remains unchanged.
+- **Reproduction:** A native folder `put` rejected with `QuotaExceededError`
+  while valid network folder/list data was returned. The reader produced
+  `cacheWarning`, but `NetworkHomePage` discarded it, so the nonfatal warning
+  status was missing.
+- **Choice:** Keep a nullable cache-warning state separate from the fatal
+  network error. Clear it at the start of each read/viewer lifetime, publish
+  `snapshot.cacheWarning ?? null` on a current successful snapshot, and pass it
+  to `HomePageView`, which renders it with `role="status"`.
+- **Reason:** Online network data and normal mutations remain available while
+  users are told that the best-effort cache save failed. Converting this to a
+  page error, cached readonly view, or silent failure would either hide valid
+  data/actions or hide the storage limitation.
+- **Scope:** Only candidate `src/pages/HomePage.tsx` was changed. Reader,
+  storage, API, runner, tests, and live sources were not changed. Existing
+  D53 viewer keying and effect ownership guards remain intact. Cancellation
+  termination behavior is explicitly deferred to the next review item.
+
 ## D55 network mode gate
 
 - Candidate-only implementation after the owned viewer snapshot and existing

@@ -107,3 +107,37 @@ The two D55 RED cases are green: cached and unavailable viewers reject locally
 with zero metadata requests and no fabricated HTTP status. Authenticated and
 guest successful network reads remain green. This remains a candidate for parent
 review and adoption, not a live source change.
+
+## D56 storage warning UI validation
+
+Validation was run serially from checkpoint `2b96d32`; no commit or restore was
+made. The initial targeted browser command exited `1` because `vite` was absent,
+so dependencies were installed before the required browser setup.
+
+### Commands and exact results
+
+1. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-drive-view.spec.ts` —
+   exit `1`; `ERR_MODULE_NOT_FOUND: vite`.
+2. `pnpm install --frozen-lockfile` — exit `0`; `625` packages installed.
+3. `pnpm --filter @miyulabmd/web test:browser:install` — exit `0`; Chromium
+   (and Playwright's required FFmpeg/headless support packages) installed.
+4. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-drive-view.spec.ts` —
+   exit `0`; `11 passed`, `0 failed`.
+5. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all` —
+   exit `0`; `16 files` checked and `57 passed`, `0 failed`.
+6. `pnpm --filter @miyulabmd/web test` — exit `0`; `117 passed`, `0 failed`,
+   `0 skipped`.
+7. `git diff --check` — exit `0`.
+8. `git diff --quiet -- apps/web/src` — exit `0`; live `apps/web/src` is
+   unchanged.
+
+Final candidate SHA-256 for
+`src/pages/HomePage.tsx`:
+`2eac5e8bdfcecaccbb75dc90c57ec6ff3da5d885a7a3f35ee27814ea214db571`.
+
+The D56 RED case is green: a failed cache save displays a `role="status"`
+containing `キャッシュを保存できません`, while valid network notes and the
+new-note control remain usable and cached-only wording is absent. A subsequent
+reload after the injected fault is disabled clears the warning and saves the
+root snapshot. Warning state is reset on each read and viewer remount, while
+the next cancellation-boundary test remains out of scope.

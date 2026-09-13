@@ -243,6 +243,7 @@ function HomePageView({
   visibleFolder,
   publicFolders,
   error,
+  cacheWarning,
   flags,
   menu,
   onItemMenu,
@@ -255,6 +256,7 @@ function HomePageView({
   visibleFolder: FolderAccess | null;
   publicFolders: FolderRecord[];
   error: string | null;
+  cacheWarning: string | null;
   flags: ReturnType<typeof homeListFlags>;
   menu: MenuState | null;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
@@ -267,6 +269,7 @@ function HomePageView({
         <h1 className="mb-3 text-lg font-semibold">全体公開</h1>
       )}
       {error && <ErrorText>{error}</ErrorText>}
+      {cacheWarning && <p role="status">{cacheWarning}</p>}
       {flags.showTree ? (
         <NoteTree
           childrenFolders={
@@ -302,6 +305,7 @@ function NetworkHomePage() {
   const [publicFolders, setPublicFolders] = useState<FolderRecord[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null);
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -340,6 +344,7 @@ function NetworkHomePage() {
     const controller = new AbortController();
     let current = true;
     setError(null);
+    setCacheWarning(null);
     setFolderPending(true);
     void readHomeMetadata({
       folderId,
@@ -354,6 +359,7 @@ function NetworkHomePage() {
         setNotes(snapshot.notes);
         setVisibleFolder(snapshot.visibleFolder);
         setPublicFolders(snapshot.publicFolders);
+        setCacheWarning(snapshot.cacheWarning ?? null);
         setFolderPending(false);
       })
       .catch((error: unknown) => {
@@ -400,6 +406,7 @@ function NetworkHomePage() {
 
   return (
     <HomePageView
+      cacheWarning={cacheWarning}
       dialogs={
         <HomePageDialogs
           confirm={confirm}
