@@ -714,6 +714,27 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   現在full accessible listを返す非ページングAPIで、MyDrive全体の先読み対象は後続で
   所属を照合する。scope／完全性metadataを実際より広く主張しない。
 
+## D48：通常Homeを残し、キャッシュ表示の寿命を分離する
+
+- **状態**：最初のD47候補を棄却。ライブは未変更。
+- **観測**：候補はcached viewer以外に空のsectionを返しており、既存Homeのオンライン
+  一覧・作成・共有等を削除していた。キャッシュ探索1件の成功だけでは採用できない。
+  candidate `all`もBiomeで失敗している。
+- **親の回帰テスト**：通常authenticated／guestの一覧と新規ノートbutton、
+  authenticatedのフォルダ作成dialog、guestの全体公開見出しを確認する2件を追加。
+  ライブは2件成功、候補は両方とも資料linkがなく失敗した。既定browserは47件。
+- **選択肢A**：既存HomePage全体へ多数のcached条件を散らす。
+  既存のmutation callbacks／状態がreadonly側へ漏れるため、この段階では選ばない。
+- **選択肢B**：同じHomePageルート内でviewer modeに応じた子componentを選ぶ。
+  通常Homeの実装をそのまま残し、cached側のreader・scope・取消は小さい子componentへ
+  分離する。NoteTree／DriveRow／既存layoutを共用し、別URL・別ツリーは作らない。
+- **採用**：B。通常Homeを空のstubで置き換えず、ライブ原典と比較できる最小diffにする。
+  cachedから通常への切替では子componentの寿命が終了し、保留中のローカル結果が
+  次のviewerへ反映されないようにする。cached側にも既存viewing scopeを接続する。
+- **注意**：保存済み一覧が欠落した場合は、folderの子構造を辿れても「空」と断言しない。
+  「cachedでない」ことを理由にunavailable viewerを認証済みに昇格しない。
+- **記録**：棄却候補はチェックポイントに残し、修正版は同じcanonicalパスで管理する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

@@ -141,3 +141,60 @@ test("a cached viewer navigates MyDrive without network reads or mutation contro
   ).toHaveCount(0);
   expect(dataRequests).toEqual([]);
 });
+
+for (const mode of ["authenticated", "guest"] as const) {
+  test(`normal ${mode} Home keeps its online listing and controls`, async ({
+    page,
+  }) => {
+    await page.route("**/api/**", (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      switch (pathname) {
+        case "/api/me":
+          return route.fulfill({
+            json: {
+              user:
+                mode === "authenticated"
+                  ? {
+                      displayName: "Alice",
+                      email: "alice@example.test",
+                      id: "alice",
+                    }
+                  : null,
+            },
+          });
+        case "/api/auth/config":
+          return route.fulfill({ json: { access: false, mock: true } });
+        case "/api/notes":
+          return route.fulfill({ json: { notes: [] } });
+        case "/api/folders":
+          return route.fulfill({ json: root });
+        case "/api/folders/public":
+          return route.fulfill({ json: { folders: root.children } });
+        default:
+          return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+      }
+    });
+
+    await page.goto("/");
+    await expect(
+      page.getByRole("link", { exact: true, name: "資料" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { exact: true, name: "新規ノート" }),
+    ).toBeEnabled();
+    await expect(page.getByText(/キャッシュから閲覧中/)).toHaveCount(0);
+
+    if (mode === "authenticated") {
+      await page.getByRole("button", { exact: true, name: "フォルダ" }).click();
+      await expect(
+        page.getByRole("dialog", { name: "フォルダを作成" }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "キャンセル" }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    } else {
+      await expect(
+        page.getByRole("heading", { name: "全体公開" }),
+      ).toBeVisible();
+    }
+  });
+}
