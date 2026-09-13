@@ -4,6 +4,7 @@ import { Agent as HttpsAgent } from "node:https";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 // Keep the scheme / proxy port / TLD selected by portless.
 const workerUrl = process.env.PORTLESS_URL
@@ -27,7 +28,40 @@ const workerProxy = {
 };
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    VitePWA({
+      filename: "sw.js",
+      injectManifest: {
+        globPatterns: [
+          "index.html",
+          "manifest.webmanifest",
+          "assets/**/*.{js,css,svg,png,webp,woff,woff2,ico}",
+          "icon.svg",
+        ],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      },
+      injectRegister: null,
+      manifest: {
+        display: "standalone",
+        icons: [
+          {
+            purpose: "any maskable",
+            sizes: "any",
+            src: "/icon.svg",
+            type: "image/svg+xml",
+          },
+        ],
+        name: "MiyulabMD",
+        scope: "/",
+        short_name: "MiyulabMD",
+        start_url: "/",
+      },
+      srcDir: "service-worker",
+      strategies: "injectManifest",
+    }),
+  ],
   server: {
     host: "127.0.0.1",
     port: Number(process.env.PORT || 5173),

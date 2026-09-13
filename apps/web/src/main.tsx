@@ -2,12 +2,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { ThemeProvider } from "./hooks/use-theme.ts";
-import { unregisterServiceWorkers } from "./lib/unregister-service-workers.ts";
+import { registerServiceWorker } from "./lib/register-service-worker.ts";
 import { bindVisualViewportHeight } from "./lib/visual-viewport.ts";
 import "./styles/index.css";
 
 bindVisualViewportHeight();
-void unregisterServiceWorkers();
+if (import.meta.env.PROD) {
+  void registerServiceWorker();
+}
 
 const root = document.getElementById("root");
 if (!root) {

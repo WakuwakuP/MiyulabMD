@@ -13,7 +13,7 @@
     "test:browser": "node scripts/playwright.mjs test",
     "test:browser:install": "node scripts/playwright.mjs install chromium",
     "test:pwa": "pnpm run build && node scripts/playwright.mjs test --config playwright.pwa.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.sw.json"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
