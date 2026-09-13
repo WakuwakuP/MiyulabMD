@@ -93,3 +93,84 @@ test("changing the Home viewer hides previous private rows while the new request
     release();
   }
 });
+
+test("a metadata read saves under the viewer captured before awaiting the network", async ({
+  page,
+}) => {
+  const { markdown: _markdown, ...summary } = note;
+  const aliceNote = { ...summary, folderId: folder.id };
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const snapshots = await page.evaluate(
+    async ({ folder, aliceNote }) => {
+      const readerUrl = "/src/lib/home-metadata-reader.ts";
+      const storageUrl = "/src/lib/offline-cache.ts";
+      const { readHomeMetadata } = await import(readerUrl);
+      const { openOfflineCache } = await import(storageUrl);
+      const viewer = {
+        cacheViewerId: "alice",
+        mode: "authenticated" as const,
+        user: {
+          displayName: "Alice",
+          email: "alice@example.test",
+          id: "alice",
+        },
+      };
+      let release: () => void = () => {
+        // Assigned synchronously below.
+      };
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input) => {
+        const pathname = new URL(
+          input instanceof Request ? input.url : String(input),
+          location.origin,
+        ).pathname;
+        await released;
+        if (pathname === "/api/notes") {
+          return new Response(JSON.stringify({ notes: [aliceNote] }));
+        }
+        if (pathname === "/api/folders") {
+          return new Response(JSON.stringify(folder));
+        }
+        throw new Error(`Unexpected fixture request: ${pathname}`);
+      };
+      try {
+        const pending = readHomeMetadata({
+          folderId: undefined,
+          isCurrentOwner: () => true,
+          signal: new AbortController().signal,
+          viewer,
+        });
+        // Reusing a caller-owned object must not retarget an existing request.
+        viewer.user.id = "bob";
+        viewer.user.email = "bob@example.test";
+        viewer.cacheViewerId = "bob";
+        release();
+        await pending;
+      } finally {
+        release();
+        globalThis.fetch = originalFetch;
+      }
+      const alice = await openOfflineCache({ userId: "alice" });
+      const bob = await openOfflineCache({ userId: "bob" });
+      try {
+        return {
+          aliceFolder: (await alice.getFolder(null))?.folder,
+          aliceNotes: (await alice.getNoteList())?.notes,
+          bobFolder: await bob.getFolder(null),
+          bobNotes: await bob.getNoteList(),
+        };
+      } finally {
+        alice.close();
+        bob.close();
+      }
+    },
+    { aliceNote, folder },
+  );
+  expect(snapshots.bobFolder).toBeNull();
+  expect(snapshots.bobNotes).toBeNull();
+  expect(snapshots.aliceFolder).toEqual(folder);
+  expect(snapshots.aliceNotes).toEqual([aliceNote]);
+});

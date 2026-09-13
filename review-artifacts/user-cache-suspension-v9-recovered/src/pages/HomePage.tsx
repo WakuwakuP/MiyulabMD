@@ -523,10 +523,15 @@ function NetworkHomePage() {
 
 export function HomePage() {
   const { folderId } = useParams();
-  const { userLoading, viewer } = useOutletContext<AppShellContext>();
+  const { user, userLoading, viewer } = useOutletContext<AppShellContext>();
+  const networkViewerKey = JSON.stringify([
+    viewer.mode,
+    user?.id ?? null,
+    viewer.cacheViewerId,
+  ]);
 
   if (userLoading) {
-    return <NetworkHomePage />;
+    return <NetworkHomePage key={networkViewerKey} />;
   }
   if (viewer.mode === "cached" && viewer.cacheViewerId !== null) {
     return (
@@ -542,5 +547,5 @@ export function HomePage() {
       </p>
     );
   }
-  return <NetworkHomePage />;
+  return <NetworkHomePage key={networkViewerKey} />;
 }

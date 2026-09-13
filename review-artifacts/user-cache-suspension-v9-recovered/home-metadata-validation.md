@@ -31,3 +31,30 @@ The candidate browser runner also reported the expected RED-to-green behavior:
 online authenticated root and child snapshots were saved, and the offline
 reload displayed the cached child and canonical root data without folder/note
 API reads.
+
+## D53 viewer-lifetime validation
+
+Validation is recorded after the candidate-only change. Commands are run
+serially from the repository root; exit codes and result counts are retained
+here, along with the candidate hash.
+
+### Commands and results
+
+- `pnpm install --frozen-lockfile` — exit `0`; dependencies installed.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-drive-view.spec.ts` — first run exit `1` because the Playwright Chromium executable was not installed; no test cases ran.
+- `pnpm --filter @miyulabmd/web test:browser:install` — exit `0`; Chromium and required browser support packages installed.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-drive-view.spec.ts` — exit `0`; `7 passed`, `0 failed` in `8.4s`.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all` — exit `0`; candidate check covered `16 files`, then `53 passed`, `0 failed` in `14.1s`.
+- `pnpm --filter @miyulabmd/web test` — exit `0`; `117 passed`, `0 failed`, `0 skipped`.
+- `git diff --check` — exit `0`.
+
+Candidate `src/pages/HomePage.tsx` SHA256 after validation:
+`6ed55396207a23917eb39fa70a801acee70a94b9f5ee4b2b93da9cbd143d8f51`.
+
+The live `apps/web/src` tree has no diff (`git diff --quiet -- apps/web/src`
+exit `0`). Only the allowed candidate Home file and the two allowed metadata
+records are modified.
+
+Final post-record verification: `git diff --check` exit `0`, live
+`apps/web/src` diff check exit `0`, and the candidate Home SHA256 remained
+`6ed55396207a23917eb39fa70a801acee70a94b9f5ee4b2b93da9cbd143d8f51`.
