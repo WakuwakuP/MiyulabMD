@@ -250,6 +250,7 @@ async function browser() {
             "mydrive-prefetch-ownership.spec.ts",
             "mydrive-prefetch-denial.spec.ts",
             "mydrive-prefetch-stops.spec.ts",
+            "mydrive-prefetch-triggers.spec.ts",
             "cached-drive-lifecycle.spec.ts",
             "offline-folder-denial.spec.ts",
             "home-metadata.spec.ts",

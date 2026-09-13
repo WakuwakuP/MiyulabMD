@@ -1569,6 +1569,30 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   cross-tab／重複調整、画像、容量管理、フォルダ拒否HTTP接続などは未完了。
   これは初回取得サイクルのチェックポイントであり、仕様全体の完了ではない。
 
+## D85：認証済み寿命内の復帰イベントで先読みを再開する
+
+- 状態：親の実画面テスト2件がRED、候補実装へ進む。
+- チェックポイント：`cd48760`（起動時取得の本体採用）。
+- `mydrive-prefetch-triggers.spec.ts` は認証済みHomeの最初のtree取得だけを通信失敗にし、
+  その失敗を待ってonline／可視状態のvisibilitychangeを3回続けて通知する。
+  Homeを再読み込みせず本文が保存され、追加cycleは1回、本文取得も1回と期待する。
+  現状は両ケースとも10秒後も本文nullで失敗した。
+- 初回試験のfixtureではノート名とパンくず名が同じためlocatorが曖昧だった。
+  親がノートに固有名を付け、実機能の未再開によるREDを確認した。
+  Biome整形指摘も親が修正した。重複して発行した試験回数は根拠に数えない。
+- 推奨：AppShellのviewer寿命から小さな先読みcoordinatorを開始し、起動・online・
+  可視状態への復帰を共通のschedule入口へ集約する。短いdebounceと最低実行間隔を
+  定数化し、同時cycleは1つ、実行中の追加通知は最大1つにまとめる。
+  実行中に復帰した通知を捨てて失敗後の再開を取りこぼす案は採らない。
+- disposeはlistener／timerを解除し、実行中の取得をabortする。既存の公開
+  `prefetchMyDrive` を再利用し、取得・保存・停止分類を複製しない。
+  timer登録前に所有viewerを捕捉し、cached/guest/unavailableには起動しない。
+- ここで扱うのは認証済みviewerが維持されている間の再開。cached viewerを
+  認証済みへ昇格させたり、未検証のcacheViewerIdで通信を再開しない。
+  再認証、周期／変更後trigger、cross-tab排他、通常取得との同一要求統合は別途。
+- 変更はcandidateのcoordinator新規ファイルとAppShellの接続、専用記録のみ。
+  取得本体・API・storage・UIやPWAに別の動作を混ぜない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
