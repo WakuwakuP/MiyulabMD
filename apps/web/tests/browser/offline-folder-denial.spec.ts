@@ -128,3 +128,41 @@ test("folder denial hides stale navigation references without denying independen
   expect(snapshots.note).toEqual(publicNote);
   expect(snapshots.notes?.map((summary) => summary.id)).toEqual(["note-1"]);
 });
+
+test("a deeper allowed descendant retains its nearest visible parent and cache time", async ({
+  page,
+}) => {
+  const hidden = { id: "denied", name: "Hidden ancestor" };
+  const visible = { id: "child", name: "Visible parent" };
+  const leaf = { id: "grandchild", name: "Visible leaf" };
+  const child = sharedFolder("child", visible.name, "denied", [
+    hidden,
+    visible,
+  ]);
+  const grandchild = sharedFolder("grandchild", leaf.name, "child", [
+    hidden,
+    visible,
+    leaf,
+  ]);
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const snapshots = await page.evaluate(
+    async ({ child, grandchild }) => {
+      const moduleUrl = "/src/lib/offline-cache.ts";
+      const { openOfflineCache } = await import(moduleUrl);
+      const cache = await openOfflineCache({ userId: "alice" });
+      try {
+        await cache.putFolder(child);
+        await cache.putFolder(grandchild);
+        const before = await cache.getFolder("grandchild");
+        await cache.denyFolder("denied");
+        return { after: await cache.getFolder("grandchild"), before };
+      } finally {
+        cache.close();
+      }
+    },
+    { child, grandchild },
+  );
+  expect(snapshots.after?.folder.crumbs).toEqual([visible, leaf]);
+  expect(snapshots.after?.folder.parentId).toBe("child");
+  expect(snapshots.after?.cachedAt).toBe(snapshots.before?.cachedAt);
+});

@@ -1166,6 +1166,21 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 依存導入後、Web unit117件・型チェックが成功した。最終runnerのNode構文確認、
   Biome、frozen-lockfile install、diffチェックも成功した。
 
+## D62：拒否された祖先より下の有効なparentリンクは残す
+
+- **状態**：D60候補の独立レビューで指摘され、親の追加テストでRED再現。未採用。
+- **再現**：denied→child→grandchildでchild／grandchildは独立に閲覧可能。
+  deniedを拒否した後、候補はcrumbsを[child, grandchild]にできるが、
+  parentIdを常にnullにするため、閲覧可能なchildへの上位リンクを失う。
+  親テストは期待childに対してnullで失敗した（exit 1）。
+- **選択肢A**：prefix除去後のcrumbsから、2件以上なら最後から2番目のIDをparentにする。
+  1件以下ならnullとする。WorkerのresolveFolderAccessと同じ規則を使う。
+- **選択肢B**：祖先を隠したら常にparentを消す。独立した階層移動まで壊すため選ばない。
+- **採用**：A。拒否対象や隠すprefixは増やさず、見える最も近いparentを正しく返す。
+  cachedAtは元のsnapshotから維持する。
+- **検証**：公開cache APIの新しいdeeper-descendantテストを含め既定62 browserを確認する。
+  読込途中で新しい拒否が確定する競合もレビューで指摘されており、続く別のテストで扱う。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
