@@ -18,6 +18,6 @@ and runs `tests/pwa` with the project-local Chromium installation. It checks
 that live inputs and candidate bytes did not change. Dependencies must already
 be declared and installed in the web project; the runner does not install them.
 
-The initial empty candidate is a baseline harness smoke test and is expected
-to fail because the live application still removes service workers.
-This directory is not an adopted implementation.
+The initial empty candidate was a baseline harness smoke test. The current
+candidate is the first production shell implementation and remains review-only:
+it is not an adopted implementation or a live-source materialization.

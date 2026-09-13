@@ -1197,6 +1197,22 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **検証**：直接対象とdeeper descendantの2ケースを含め既定64 browserを確認する。
   複合readerやHTTP拒否との接続が完成したという判定にはしない。
 
+## D64：PWA shellとprivate SSR応答を実HTTPで区別して検証する
+
+- **状態**：PWA候補の最初のoffline bootを親が独立実行して成功確認。
+  buildには119 precache entries（約3,274 KiB）が含まれ、約2.29 MBのmainも除外されていない。
+- **選択肢A**：Playwrightのnavigation route mockだけでSSRを検証する。
+  SW内部fetchとの経路差でfixture自体を通らない可能性があるため選ばない。
+- **採用**：production previewの前にテスト専用HTTP middlewareを付ける。
+  `/n/pwa-ssr-fixture`だけにprivate/no-storeのHTML markerを注入し、実際のSW fetch経由で
+  応答を確認する。fixture pluginはtest runner／test serverだけが読み、productionには入れない。
+- **検証**：onlineのnavigation responseにはmarkerがあり、Cache StorageのHTML entriesには
+  markerもnote pathもないこと、offline reloadはSW経由のpure index shellでmarkerを含まないことを
+  要求する。通常bootと併せて親のPWA候補runnerは2件成功した。
+- **限界**：HTTP fixtureはWorker SSRの振る舞いを模したもの。実Cloudflare Workerでの
+  認証・cache.default・deploy更新まで検証したという意味ではない。API等の除外、他cache保護、
+  update中の既存画面維持は次の独立テストで確認する。PWA候補はまだ未採用。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

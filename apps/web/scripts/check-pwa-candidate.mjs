@@ -12,6 +12,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, preview } from "vite";
+import { pwaHttpFixture } from "./pwa-http-fixture.mjs";
 
 const webRoot = fileURLToPath(new URL("../", import.meta.url));
 const repoRoot = path.resolve(webRoot, "../..");
@@ -254,6 +255,7 @@ try {
   const port = await unusedPort();
   server = await preview({
     configFile: path.join(runRoot, "vite.config.ts"),
+    plugins: [pwaHttpFixture(runRoot)],
     preview: { host: "127.0.0.1", port, proxy: {}, strictPort: true },
     root: runRoot,
   });

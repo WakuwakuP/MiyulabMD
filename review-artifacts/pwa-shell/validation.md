@@ -1,0 +1,31 @@
+# PWA shell candidate validation
+
+## Candidate runner
+
+- Command: `node apps/web/scripts/check-pwa-candidate.mjs review-artifacts/pwa-shell`
+- Exit: `0`
+- PWA browser tests: `1 passed` (1 test, 4.2 seconds)
+- Production precache: `119 entries (3274.18 KiB)`
+- Live input and candidate byte invariants: passed
+- Candidate files and SHA-256:
+  - `public/icon.svg`: `135fa8ec8a30630e1c2455b83a9d0abeb767bf1f1f07d1f1c1bfe5d9598277c1`
+  - `service-worker/sw.ts`: `7013cc83138132e565dfc5a6d384ab2f7a89646ff4ba839aff4dc56c65ea9431`
+  - `src/lib/register-service-worker.ts`: `82526993f61599c037887d64dd2ea81b37aec5237881a7b268bb44b2bd74a737`
+  - `src/main.tsx`: `4d35a33cc9aa942474610a7ed0190e687fe755564e7f7a36298176ac8062478b`
+  - `tsconfig.sw.json`: `8fbfee86a1df3c33c838d700d742c8212b2129b605dd3f30f956bb3bbccb1260`
+  - `vite.config.ts`: `74484246c7cdb0102fc28bcf017c9b04d7037fce7f312bdbd6828042e6fbad44`
+
+Build emitted the existing large-chunk warning for the approximately 2.29 MiB
+main chunk (`index-CMLf_G6Q.js`), while the 5 MiB Workbox limit included it.
+
+## Live unit regression
+
+- Command: `pnpm --filter @miyulabmd/web test`
+- Exit: `0`
+- Result: `117 passed`, `0 failed`, `0 skipped`
+- `git diff --check`: passed
+
+This is only the first boot/offline-shell checkpoint. SSR privacy, route
+exclusion, foreign-cache protection, and update lifecycle tests remain pending.
+The normal dev browser suite's separate folder-denial test is not claimed green
+for this slice.
