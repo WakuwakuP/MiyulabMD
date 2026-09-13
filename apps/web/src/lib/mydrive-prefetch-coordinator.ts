@@ -3,6 +3,7 @@ import type { ViewerContext } from "./viewer-context.ts";
 
 export const PREFETCH_DEBOUNCE_MS = 200;
 export const PREFETCH_MIN_INTERVAL_MS = 1000;
+const PREFETCH_LOCK_PREFIX = "miyulabmd:mydrive-prefetch:";
 
 type PrefetchCoordinator = {
   dispose: () => void;
@@ -16,6 +17,10 @@ function isEligibleViewer(viewer: ViewerContext): boolean {
   );
 }
 
+function prefetchLockName(userId: string): string {
+  return `${PREFETCH_LOCK_PREFIX}${JSON.stringify(userId)}`;
+}
+
 export function attachMyDrivePrefetchCoordinator(
   viewer: ViewerContext,
 ): PrefetchCoordinator {
@@ -27,6 +32,7 @@ export function attachMyDrivePrefetchCoordinator(
   if (!user) {
     return { dispose: () => undefined };
   }
+  const userId = user.id;
   const snapshot: ViewerContext = {
     cacheViewerId: viewer.cacheViewerId,
     mode: viewer.mode,
@@ -60,12 +66,25 @@ export function attachMyDrivePrefetchCoordinator(
           pending = true;
           return;
         }
+        if (!navigator.locks) {
+          return;
+        }
         lastAttemptAt = Date.now();
         const controller = new AbortController();
         activeController = controller;
-        void prefetchMyDrive(snapshot, { signal: controller.signal })
+        void navigator.locks
+          .request(
+            prefetchLockName(userId),
+            { ifAvailable: true, mode: "exclusive" },
+            async (lock) => {
+              if (!lock || disposed || controller.signal.aborted) {
+                return;
+              }
+              await prefetchMyDrive(snapshot, { signal: controller.signal });
+            },
+          )
           .catch(() => {
-            // Prefetch is best effort; its public result classifies expected stops.
+            // Prefetch and lock acquisition are both best effort.
           })
           .finally(() => {
             if (activeController === controller) {
