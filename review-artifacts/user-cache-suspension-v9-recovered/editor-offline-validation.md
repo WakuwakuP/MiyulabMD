@@ -39,3 +39,24 @@ Final candidate `EditorPage.tsx` SHA-256:
 
 The live editor source was not edited; the canonical live SHA remains
 `6b17a840782b766d9520f0aae1f05c9bb78f3689e2d67bcdac1f707b0e13217c`.
+
+## D43/D44 execution record
+
+After the corrections above:
+
+* `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered typecheck`
+  — exit 0.
+* `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser editor-read-lifecycle.spec.ts offline-note-view.spec.ts`
+  — exit 0, 5 passed.
+* `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all`
+  — exit 0, typecheck/Biome passed and 41 browser tests passed.
+
+The focused runner initially needed the authorized dependency and browser
+setup: `pnpm install --frozen-lockfile` and
+`pnpm --filter @miyulabmd/web test:browser:install`, both exit 0. The
+post-edit `EditorPage.tsx` candidate SHA-256 is
+`04f23ebc46900b6a5b8a07cd295faf8a35451de5140d87e7c55b3d3343c722ee`.
+* `pnpm --filter @miyulabmd/web test` — exit 0, 117 passed.
+* `git diff --check` — exit 0.
+
+The live editor source and live tests remain untouched.

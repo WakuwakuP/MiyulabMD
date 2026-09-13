@@ -54,3 +54,26 @@ are ignored. Cache results remain preview-only, suppress collaboration and
 mutation-oriented header controls, and expose the persisted `cachedAt` value
 in one accessible status message. A cache miss has a local-cache explanation,
 while server failures retain their cache warning.
+
+## D43/D44 correction decisions
+
+The candidate now models read provenance as one state tagged with the requested
+note ID and viewer association. A layout-phase reset clears hydration, note
+data, markdown, folder, access draft, and mode before a new ID/viewer can
+render. This was chosen over synchronizing separate `readSource` and
+`cachedAt` states because separate state can carry a previous owner's network
+capability into the first render of a new request.
+
+Only successful reads publish their real source. Denials, HTTP failures, and
+thrown communication errors publish `pending`, keep `canEdit` false, and never
+open the mutation gate. Successful network reads set hydration; cached reads
+remain preview-only. An unavailable viewer creates only a pending viewing
+scope, shows the generic `閲覧情報を確認できません` explanation, and does not
+create a note session or issue a note GET.
+
+The complete online workspace and its existing Yjs/header/rendering paths were
+retained. Resetting mode to preview on each new read preserves the original
+new-note/history navigation behavior rather than fixing the WebSocket count by
+removing collaboration. Scope publication and error callbacks both require
+the current scope and cancellation check, while disposal remains tied to the
+ID/viewer lifetime.

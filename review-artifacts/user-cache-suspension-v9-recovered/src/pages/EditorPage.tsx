@@ -424,6 +424,24 @@ function articleIssuesFor(
   return validateArticleDocument(articleSource.schema, markdown).issues;
 }
 
+type EditorReadState = {
+  id: string;
+  ownerViewer: AppShellContext["viewer"];
+  phase: "pending" | "success" | "error";
+  result?: Extract<NoteReadResult, { ok: true }>;
+};
+
+function sameViewer(
+  left: AppShellContext["viewer"],
+  right: AppShellContext["viewer"],
+) {
+  return (
+    left.mode === right.mode &&
+    left.cacheViewerId === right.cacheViewerId &&
+    left.user?.id === right.user?.id
+  );
+}
+
 export function EditorPage() {
   const { id = "" } = useParams();
   const { user, userLoading, viewer, viewing, setHeader } =
@@ -434,10 +452,11 @@ export function EditorPage() {
   const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [readSource, setReadSource] = useState<"pending" | "network" | "cache">(
-    "pending",
-  );
-  const [cachedAt, setCachedAt] = useState<number | null>(null);
+  const [readState, setReadState] = useState<EditorReadState>({
+    id: "",
+    ownerViewer: viewer,
+    phase: "pending",
+  });
   const [saveError, setSaveError] = useState<string | null>(null);
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
@@ -453,8 +472,20 @@ export function EditorPage() {
 
   const noteId = note?.id;
   const userId = user?.id;
+  const currentReadState =
+    readState.id === id && sameViewer(readState.ownerViewer, viewer)
+      ? readState
+      : null;
+  const readSource =
+    currentReadState?.phase === "success"
+      ? (currentReadState.result?.source ?? "pending")
+      : "pending";
+  const cachedAt =
+    currentReadState?.phase === "success"
+      ? (currentReadState.result?.cachedAt ?? null)
+      : null;
   const flags = ownerFlags(user, note);
-  const readReady = readSource !== "pending" && !loading;
+  const readReady = currentReadState?.phase === "success" && !loading;
   const canEdit = flags.canEdit && readSource === "network" && readReady;
   const viewMode: EditorMode = canEdit ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
@@ -465,63 +496,80 @@ export function EditorPage() {
   const yMarkdown = collab?.yMarkdown;
   const ready = Boolean(yMarkdown && awareness && collabReady);
 
-  useEffect(() => {
-    dismissStaleSsrPreview(id);
-    if (userLoading) {
-      setLoading(true);
-      setReadSource("pending");
-      return;
-    }
-    const session = createNoteReadSession(viewer);
-    const scope = viewing.beginView(viewer);
-    let cancelled = false;
+  useLayoutEffect(() => {
+    hydratedRef.current = false;
+    setReadState({ id, ownerViewer: viewer, phase: "pending" });
     setLoading(true);
-    setReadSource("pending");
     setLoadError(null);
     setNote(null);
     setAccessDraft(null);
     setMarkdown("");
     setFolder("");
+    setMode("preview");
+  }, [id, viewer]);
+
+  useEffect(() => {
+    dismissStaleSsrPreview(id);
+    if (userLoading) {
+      return;
+    }
+    const scope = viewing.beginView(viewer);
+    let cancelled = false;
+    if (viewer.mode === "unavailable") {
+      setReadState({ id, ownerViewer: viewer, phase: "error" });
+      setLoading(false);
+      setLoadError(
+        "閲覧情報を確認できません。しばらくしてから再度お試しください。",
+      );
+      return () => {
+        cancelled = true;
+        scope.dispose();
+      };
+    }
+    const session = createNoteReadSession(viewer);
+    setLoading(true);
+    setLoadError(null);
     void session.read(id).then(
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: read publication and stale-scope guards are intentionally explicit.
       (result: NoteReadResult) => {
-        if (
-          cancelled ||
-          !scope.publish({
-            source: result.ok ? result.source : "network",
-            viewer: result.viewer,
-          })
-        ) {
+        if (cancelled) {
           return;
         }
         if (!result.ok) {
+          if (!scope.publish({ source: "pending", viewer })) {
+            return;
+          }
+          hydratedRef.current = false;
+          setReadState({ id, ownerViewer: viewer, phase: "error" });
           setNote(null);
           setAccessDraft(null);
-          setReadSource("network");
-          setCachedAt(null);
+          setLoading(false);
           setLoadError(
             result.cacheWarning
               ? `${result.error} ${result.cacheWarning}`
               : result.error,
           );
-          setLoading(false);
           return;
         }
+        if (!scope.publish({ source: result.source, viewer: result.viewer })) {
+          return;
+        }
+        hydratedRef.current = result.source === "network";
+        setReadState({ id, ownerViewer: viewer, phase: "success", result });
         setNote(result.data);
         setMarkdown(result.data.markdown);
         setFolder(result.data.folder);
         setAccessDraft(draftFromNote(result.data));
-        setReadSource(result.source);
-        setCachedAt(result.cachedAt);
         setLoading(false);
       },
       (error: unknown) => {
-        if (cancelled) {
+        if (cancelled || !scope.publish({ source: "pending", viewer })) {
           return;
         }
+        hydratedRef.current = false;
+        setReadState({ id, ownerViewer: viewer, phase: "error" });
         setNote(null);
         setAccessDraft(null);
-        setReadSource("network");
-        setCachedAt(null);
         setLoading(false);
         let message = "ノートを読み込めませんでした。";
         if (error instanceof OfflineNoteUnavailableError) {
@@ -634,7 +682,7 @@ export function EditorPage() {
       note={note}
       readSource={readSource}
       workspace={
-        note && accessDraft ? (
+        currentReadState?.phase === "success" && note && accessDraft ? (
           <EditorWorkspace
             accessDraft={accessDraft}
             articleIssues={articleIssues}
