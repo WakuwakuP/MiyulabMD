@@ -3,7 +3,10 @@
 保存・拒否・利用停止基盤の採用後に行う、実画面接続の調査記録。
 本書は実装完了を示さない。意思決定は [台帳](offline-pwa-decisions.md) に追記する。
 
-## 現在の経路
+## 調査時点の経路
+
+D32・D34でAppShellのviewer所有と独立したconfig解決はライブへ反映した。
+以下は接続前の調査記録。Editor・mutation・SSRの注意点は引き続き後続作業に適用する。
 
 | 対象 | 現状と接続時の注意 |
 | --- | --- |
@@ -18,8 +21,8 @@
 
 調査時点の主な参照先：
 
-- [AppShell](../apps/web/src/components/layout/AppShell.tsx#L14)、
-  [AppShellContext](../apps/web/src/components/layout/AppShellContext.ts#L6)
+- [AppShell](../apps/web/src/components/layout/AppShell.tsx#L24)、
+  [AppShellContext](../apps/web/src/components/layout/AppShellContext.ts#L7)
 - [EditorPageの初期化・読込](../apps/web/src/pages/EditorPage.tsx#L411)
 - [従来note-cache](../apps/web/src/lib/note-cache.ts#L6)
 - [collaboration開始条件](../apps/web/src/pages/editor-page.ts#L164)

@@ -4,6 +4,12 @@ type ConfigProbe = Window & {
   authConfigProbe: { requests: number; release: () => void };
 };
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/article-sources", (route) =>
+    route.fulfill({ json: [] }),
+  );
+});
+
 test("AppShell resolves the viewer independently of auth config and restores cached identity without authentication", async ({
   page,
 }) => {

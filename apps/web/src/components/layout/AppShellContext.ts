@@ -1,11 +1,13 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import type { ReactNode } from "react";
+import type { ViewerContext } from "../../lib/viewer-context.ts";
 
 export type HeaderLayout = "page" | "editor";
 
 export type AppShellContext = {
   user: SessionUser | null;
   userLoading: boolean;
+  viewer: ViewerContext;
   setUser: (user: SessionUser | null) => void;
   setHeader: (
     header: {

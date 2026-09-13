@@ -82,11 +82,19 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
+    let active = true;
     void fetchAuthConfig()
-      .then(setAuthConfig)
+      .then((config) => {
+        if (active) {
+          setAuthConfig(config);
+        }
+      })
       .catch(() => {
         // Keep the existing mock-friendly default when optional config is unavailable.
       });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const setUser = useCallback((nextUser: SessionUser | null) => {

@@ -34,3 +34,16 @@ The live application and the helper remain unchanged for parent review.
 
 Candidate only. Parent reviews the files, runs the candidate runner, and
 chooses whether to adopt them.
+
+## D34 stale auth-config response
+
+- Chosen fix: give each auth-config effect invocation a local `active` flag,
+  guard `setAuthConfig(config)` with it, and invalidate the flag during cleanup.
+  This prevents a delayed response from a replaced StrictMode effect from
+  overwriting the newer response.
+- Alternatives rejected: changing `fetchAuthConfig`, adding an abort API,
+  coupling config lifetime to viewer resolution, or changing viewer state,
+  refs, setters, layout, context, libraries, or tests. Those approaches widen
+  the change without addressing the effect-lifetime race at its source.
+- Result: auth-config publication is now scoped to the effect that requested
+  it; config remains independent from viewer request/profile-setter behavior.

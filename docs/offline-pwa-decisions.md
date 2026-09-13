@@ -368,7 +368,7 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 
 ## D32：AppShellがviewer contextを所有する
 
-- **状態**：推奨案を選択、公開コンポーネントを使うテストでRED確認。
+- **状態**：D34補修後に親レビュー・再検証を終え、ライブへ反映済み。
 - **選択前チェックポイント**：`2df0b81`（cached viewerのローカル読み取りを採用済み）。
 - **選択肢A**：AppShellが`resolveViewerContext`を使ってviewerを所有し、
   既存のuserはそこから導出する。auth-configは独立に解決する。
@@ -384,6 +384,8 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   auth-config通信失敗＋me成功で認証済みviewerを要求し、次のreloadではmeも通信失敗させて
   user:nullのcached viewerを要求する。現状はuser:null/viewer:nullでRED。
 - **範囲**：ノート画面、更新dispatch、logout purgeはこの小スライスには混ぜない。
+- **結果**：親が候補34件を再検証し、2つのライブファイルが候補と完全一致することを確認。
+  ライブブラウザ34件、Web unit117件、型チェック、Webビルド、Biome・diff-checkが成功。
 
 ## D33：UI候補の階層を候補ランナーで扱う
 
@@ -402,7 +404,7 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 
 ## D34：auth-configもeffectの寿命に従わせる
 
-- **状態**：推奨案を選択、親の回帰テストRED。
+- **状態**：effect-localなactive/cleanupで修正、D32とともにライブ採用・検証済み。
 - **選択前チェックポイント**：`04db55b`。D32候補はまだライブへ未採用。
 - **背景**：viewer側にはStrictModeでの取消・古い結果の排除があるが、
   config側は無条件の`.then(setAuthConfig)`で、終了したeffectの応答が後の設定を上書きする。
@@ -417,6 +419,9 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   扱わず、fixture修正後に上記の本来のREDを確認した。fetchは外部境界で制御し、React内部はmockしない。
 - **記録保全**：D32担当がrootの判断・検証記録を置換したため、元の全文を戻し、
   D32は別Markdownへ保存してリンクを追記する形で修復した。UIコードのhashは不変。
+- **採用ソースSHA256**：AppShell
+  `35e12ccf2834601f960cce89e9ee4e918b630298391883ce23d1f02e5e8d25da`、
+  AppShellContext `0ff5b9d61b118865cde5859b5557eab56c21e76eeafdf2d3d680e47d78de2915`。
 
 ## D35：候補サーバーへ実際の空きポート番号を渡す
 
