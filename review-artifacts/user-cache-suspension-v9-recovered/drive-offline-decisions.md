@@ -35,3 +35,18 @@ drive tree in a separate offline route, which risks route and markup drift.
 The chosen design preserves all normal dialogs and operations, suppresses
 menus/context handlers/prefetch only for cached rows, and uses a
 viewer-owned, abortable viewing scope for final publication.
+
+## D48 implementation result
+
+The focused candidate now keeps the complete network HomePage intact behind a
+route-local wrapper. After viewer loading, only a viewer with a non-null cached
+namespace selects `CachedDriveView`; unavailable viewer state gives a generic
+status message and never falls through to public APIs. The cached child is keyed
+by cached viewer and folder route, so its reader scope cannot publish data to a
+different owner or route.
+
+Cached snapshots publish `source: "cache"` only when both folder and note-list
+snapshots exist. Missing snapshots remain distinguishable and pending, while
+available child folders remain navigable with an incomplete-list explanation.
+Readonly `NoteTree`/`DriveRow` suppresses hover prefetch and all row/context
+menus without changing default callers.

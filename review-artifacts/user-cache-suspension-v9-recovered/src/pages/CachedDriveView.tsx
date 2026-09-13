@@ -46,7 +46,15 @@ export function CachedDriveView() {
     )
       .then((next) => {
         if (!controller.signal.aborted && scope.isCurrent()) {
-          setView(next);
+          const published =
+            !(next.folderMissing || next.notesMissing) &&
+            scope.publish({
+              source: "cache",
+              viewer,
+            });
+          if (published || (!next.folderMissing && scope.isCurrent())) {
+            setView(next);
+          }
         }
       })
       .catch(() => {
@@ -73,9 +81,9 @@ export function CachedDriveView() {
     <section>
       <p aria-live="polite" role="status">
         キャッシュから閲覧中
-        {view.folderCachedAt
-          ? `（保存日時: ${new Date(view.folderCachedAt).toLocaleString("ja-JP")}）`
-          : ""}
+        {view.folderCachedAt === null
+          ? ""
+          : `（保存日時: ${new Date(view.folderCachedAt).toLocaleString("ja-JP")}）`}
       </p>
       {error && <p>{error}</p>}
       {unavailable || (view.folderMissing && !pending) ? (

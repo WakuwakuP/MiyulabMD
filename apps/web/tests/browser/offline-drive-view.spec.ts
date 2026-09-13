@@ -198,3 +198,96 @@ for (const mode of ["authenticated", "guest"] as const) {
     }
   });
 }
+
+test("a pending drive snapshot cannot publish a completed folder after user suspension", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(async (root) => {
+    const storageUrl = "/src/lib/offline-cache.ts";
+    const readerUrl = "/src/lib/cached-drive-reader.ts";
+    const { openOfflineCache, suspendOfflineCacheUser } = await import(
+      storageUrl
+    );
+    const { readCachedDrive } = await import(readerUrl);
+    const cache = await openOfflineCache({ userId: "alice" });
+    await cache.putFolder(root);
+    await cache.putNoteList([]);
+    cache.close();
+
+    let folderCompleted: () => void = () => {
+      // Assigned synchronously by the promise constructor below.
+    };
+    let listWaiting: () => void = () => {
+      // Assigned synchronously by the promise constructor below.
+    };
+    let releaseList: () => void = () => {
+      // Assigned synchronously by the promise constructor below.
+    };
+    const folderReady = new Promise<void>((resolve) => {
+      folderCompleted = resolve;
+    });
+    const listReady = new Promise<void>((resolve) => {
+      listWaiting = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    const originalTransaction = IDBDatabase.prototype.transaction;
+    const originalGet = IDBObjectStore.prototype.get;
+    const success = Object.getOwnPropertyDescriptor(
+      IDBRequest.prototype,
+      "onsuccess",
+    );
+    if (!success?.set) {
+      throw new Error("Native IndexedDB success boundary unavailable");
+    }
+
+    IDBDatabase.prototype.transaction = function (
+      this: IDBDatabase,
+      ...args: Parameters<IDBDatabase["transaction"]>
+    ) {
+      const transaction = originalTransaction.apply(this, args);
+      if (args[0] === "folders" && args[1] === "readonly") {
+        transaction.addEventListener("complete", folderCompleted, {
+          once: true,
+        });
+      }
+      return transaction;
+    };
+    IDBObjectStore.prototype.get = function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore["get"]>
+    ) {
+      const request = originalGet.apply(this, args);
+      if (this.name === "note-lists") {
+        Object.defineProperty(request, "onsuccess", {
+          set(handler: (event: Event) => void) {
+            success.set?.call(request, (event: Event) => {
+              listWaiting();
+              void released.then(() => handler.call(request, event));
+            });
+          },
+        });
+      }
+      return request;
+    };
+
+    try {
+      const pending = readCachedDrive("alice", null).then(
+        (value: unknown) => ({ rejected: false, value }),
+        () => ({ rejected: true, value: null }),
+      );
+      // The folder has completed, but the combined read still awaits its list.
+      await Promise.all([folderReady, listReady]);
+      suspendOfflineCacheUser("alice");
+      releaseList();
+      return await pending;
+    } finally {
+      releaseList();
+      IDBDatabase.prototype.transaction = originalTransaction;
+      IDBObjectStore.prototype.get = originalGet;
+    }
+  }, root);
+  expect(result.rejected).toBe(true);
+});
