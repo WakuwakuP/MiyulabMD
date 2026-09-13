@@ -1,9 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
-test("the note view restores a private cached note read-only when APIs are unreachable", async ({
-  page,
-}) => {
+async function verifyCachedNoteView(
+  page: Page,
+  failure: "offline" | "note-server-error",
+) {
+  await page.clock.setFixedTime(new Date("2024-01-02T03:04:05Z"));
   const displayedNote = {
     ...note,
     markdown: `${note.markdown}\n\n- [ ] オフラインでは変更しないタスク\n`,
@@ -22,8 +24,12 @@ test("the note view restores a private cached note read-only when APIs are unrea
     if (!["GET", "HEAD"].includes(request.method())) {
       mutations.push(`${request.method()} ${path}`);
     }
-    if (apiUnavailable) {
+    if (apiUnavailable && failure === "offline") {
       await route.abort("internetdisconnected");
+      return;
+    }
+    if (apiUnavailable && path === `/api/notes/${displayedNote.id}`) {
+      await route.fulfill({ json: { error: "Unavailable" }, status: 503 });
       return;
     }
     switch (path) {
@@ -85,6 +91,7 @@ test("the note view restores a private cached note read-only when APIs are unrea
   // Keep the Vite-served shell available to isolate data-layer recovery.
   // Full offline navigation through the service worker is a separate test.
   apiUnavailable = true;
+  await page.clock.setFixedTime(new Date("2025-06-07T08:09:10Z"));
   await page.reload();
 
   await expect(
@@ -93,6 +100,9 @@ test("the note view restores a private cached note read-only when APIs are unrea
   await expect(
     page.getByRole("status").filter({ hasText: "キャッシュ" }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "キャッシュ" }),
+  ).toContainText("2024");
   await expect(
     page.getByRole("button", { exact: true, name: "Edit" }),
   ).toHaveCount(0);
@@ -133,4 +143,16 @@ test("the note view restores a private cached note read-only when APIs are unrea
   expect(blocked).toEqual(new Array(8).fill("ReadOnlyViewingError"));
   expect(mutations).toEqual([]);
   expect(collaborationConnections).toEqual([]);
+}
+
+test("the note view restores a private cached note read-only when APIs are unreachable", async ({
+  page,
+}) => {
+  await verifyCachedNoteView(page, "offline");
+});
+
+test("an authenticated viewer still gets read-only cached content when only the note API fails", async ({
+  page,
+}) => {
+  await verifyCachedNoteView(page, "note-server-error");
 });

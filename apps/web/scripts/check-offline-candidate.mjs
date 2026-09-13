@@ -246,6 +246,7 @@ async function browser() {
       ...(specs.length
         ? specs
         : [
+            "offline-note-view.spec.ts",
             "mutation-api-access.spec.ts",
             "viewing-access.spec.ts",
             "app-shell-viewer.spec.ts",

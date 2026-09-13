@@ -538,6 +538,28 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **結果**：固定の`logout()`を`globalThis.fetch`へ戻し、拡張したテストを含む
   36件が成功した。一般APIのgateにURL例外は加えていない。
 
+## D41：Editorの実読込結果をキャッシュ表示と更新gateへ接続する
+
+- **状態**：親の実画面テスト2ケースをRED確認し、D37の方向で実装へ進む。
+- **選択前チェックポイント**：`eb6e7cc`（API dispatch接続をライブ採用）。
+- **対象**：`/n/:id`の初回表示・再読み込み・ID/viewer変更時の読込。
+  既存Editorの表示・Markdown previewを使い、`createNoteReadSession`の結果を保持する。
+- **所有権**：ページがreading sessionとviewing scopeを所有し、終了時に両方を破棄する。
+  現在のID/viewerに属する結果だけをUIへ適用し、同じresultのsourceをscopeへpublishする。
+  loading／失敗をnetwork成功としてpublishしない。
+- **readonly**：cache由来はpreview固定、Edit・管理系更新操作・タスク更新を無効にし、
+  collaborationを開始しない。認証済みでもノートだけ503でcacheへ戻った場合は同じ。
+- **日時**：実際のcachedAtを絶対日時で表示する。テストでは2024年に保存し、
+  2025年に再読込するため、現在時刻を表示する実装では通らない。
+- **SSR／旧Map**：bootstrapや旧Mapを未確認viewerの永続保存の根拠にしない。
+  拒否・未取得で古い本文を残さず、空本文も成功として扱う。
+- **検証**：`offline-note-view.spec.ts`を共通ワークフローの2ケースに拡張。
+  API全体の通信不能と、me成功・ノートだけ503の両方で、現在は最初の永続保存待ちが
+  nullのままとなりRED（2 failed）。追加後の既定候補検証は38件。
+- **後続の制約**：既に入力したdraftを持つ編集中の切断・再接続、logout purge、
+  フォルダ探索、Service Worker再起動、画像・prefetchは別の縦スライスで検証する。
+  この初期閲覧の成功だけでPWA全体を完成扱いにしない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
