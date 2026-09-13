@@ -59,19 +59,23 @@ export async function prefetchMyDrive(
   viewer: ViewerContext,
   options: { signal?: AbortSignal } = {},
 ): Promise<MyDrivePrefetchResult> {
+  const ownedViewer: ViewerContext = {
+    ...viewer,
+    user: viewer.user ? { ...viewer.user } : null,
+  };
   const signal = options.signal ?? new AbortController().signal;
   const counts: Counts = { folders: 0, notes: 0 };
   if (
-    viewer.mode !== "authenticated" ||
-    !viewer.user ||
-    viewer.cacheViewerId !== viewer.user.id
+    ownedViewer.mode !== "authenticated" ||
+    !ownedViewer.user ||
+    ownedViewer.cacheViewerId !== ownedViewer.user.id
   ) {
     return stopped("unavailable", counts);
   }
 
   let cache: Awaited<ReturnType<typeof openOfflineCache>> | null = null;
   try {
-    cache = await openOfflineCache({ signal, userId: viewer.user.id });
+    cache = await openOfflineCache({ signal, userId: ownedViewer.user.id });
     const treeResult = await fetchFolderTree({ signal });
     if (!treeResult.ok) {
       return stopped(
@@ -114,7 +118,7 @@ export async function prefetchMyDrive(
     await cache.putNoteList(summaries, { signal });
     const targets = summaries.filter(
       (summary: NoteSummary) =>
-        summary.ownerId === viewer.user?.id &&
+        summary.ownerId === ownedViewer.user?.id &&
         summary.folderId !== null &&
         ownedFolders.has(summary.folderId),
     );

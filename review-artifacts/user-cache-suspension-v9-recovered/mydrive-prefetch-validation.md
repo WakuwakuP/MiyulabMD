@@ -23,3 +23,20 @@ Candidate SHA-256 values:
 This deliberately does not claim live adoption, full offline coverage, retries,
 cross-tab coordination, images, or quota recovery. The parent should rerun the
 combined suite when the two D76 lifecycle cases are present.
+
+## D77 validation
+
+- Candidate focused browser command
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser mydrive-prefetch-ownership.spec.ts mydrive-prefetch.spec.ts`:
+  first attempt failed before tests ran because the worktree-local Chromium
+  executable was missing; after the allowed local install, 2 passed.
+- Candidate all command
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all`:
+  the default list includes ownership and cached lifecycle2 coverage; 69
+  passed, 0 failed, including typecheck and Biome checks.
+- Parent baseline before this fix remains 67 passed / 1 failed (68 total);
+  the focused Home root-link failure passed on five one-worker repeats, so it
+  remains an unresolved intermittent failure rather than being called green.
+- Live web unit command `pnpm --filter @miyulabmd/web test`: 117 passed,
+  0 failed.
+- `git diff --check`: passed.

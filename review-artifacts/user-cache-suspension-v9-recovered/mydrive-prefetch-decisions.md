@@ -16,3 +16,12 @@ This intentionally does not add retry triggers, cross-tab coordination,
 coalescing with foreground reads, image acquisition, or a completion model.
 Stopping is best effort and is represented by the public `stopped` result rather
 than a download-complete claim.
+
+## D77: Capture the prefetch ownership snapshot at the public entry point
+
+The public `prefetchMyDrive` entry point now synchronously clones the
+`ViewerContext` and its nested user before any await. Mode validation, cache
+opening, and note target filtering all use that owned snapshot. This prevents a
+caller mutation of `cacheViewerId` or `user.id` after entry from switching an
+in-flight Alice prefetch to Bob, without mutating or freezing the caller and
+without introducing mutable global ownership state.
