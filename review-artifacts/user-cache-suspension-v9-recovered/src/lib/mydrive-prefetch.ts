@@ -196,7 +196,7 @@ async function acquireNotes(
       cache.beginNoteRead(summary.id),
     );
     const noteResult = await prefetchIo(signal, "network", () =>
-      fetchNote(summary.id, { signal }),
+      fetchNote(summary.id, { signal, viewerId: userId }),
     );
     if (!noteResult.ok) {
       if (noteResult.status === 401) {

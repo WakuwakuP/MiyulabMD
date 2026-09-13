@@ -8,6 +8,8 @@ test("denial invalidates an older network request even when its database cannot 
   const result = await page.evaluate(async (note) => {
     const moduleUrl = "/src/lib/note-read-session.ts";
     const { createNoteReadSession } = await import(moduleUrl);
+    const barrierUrl = "/tests/browser/fixtures/deferred-cache-open.ts";
+    const { deferNextDatabaseOpen } = await import(barrierUrl);
     const viewer = {
       cacheViewerId: "alice",
       mode: "authenticated",
@@ -21,24 +23,10 @@ test("denial invalidates an older network request even when its database cannot 
     const denyingReader = createNoteReadSession(viewer);
     const newReader = createNoteReadSession(viewer);
     const originalFetch = globalThis.fetch;
-    const originalOpen = IDBFactory.prototype.open;
-    let release: (response: Response) => void = () => {
-      throw new Error("Slow request has not started");
-    };
-    let started: () => void = () => {
-      // Assigned synchronously by the promise constructor.
-    };
-    const firstStarted = new Promise<void>((resolve) => {
-      started = resolve;
-    });
+    const opening = deferNextDatabaseOpen();
     let requests = 0;
     globalThis.fetch = () => {
-      if (++requests === 1) {
-        return new Promise<Response>((resolve) => {
-          release = resolve;
-          started();
-        });
-      }
+      requests += 1;
       return Promise.resolve(
         requests === 2
           ? new Response(JSON.stringify({ error: "Forbidden" }), {
@@ -52,19 +40,20 @@ test("denial invalidates an older network request even when its database cannot 
         (value: { ok: boolean }) => value.ok,
         () => false,
       );
-      await firstStarted;
+      // HTTP sharing has finished; the older read is still unpublished while
+      // opening storage. A later HTTP denial must invalidate it at this stage.
+      await opening.started;
       IDBFactory.prototype.open = () => {
         throw new DOMException("Database unavailable", "UnknownError");
       };
       const denial = await denyingReader.read(note.id);
-      IDBFactory.prototype.open = originalOpen;
-      release(new Response(JSON.stringify(note), { status: 200 }));
+      opening.restore();
       const oldPublished = await oldRequest;
       // Cache suspension must not prohibit a genuinely new online response.
       const fresh = await newReader.read(note.id);
       return { denial, fresh, oldPublished };
     } finally {
-      IDBFactory.prototype.open = originalOpen;
+      opening.restore();
       globalThis.fetch = originalFetch;
       slowReader.dispose();
       denyingReader.dispose();

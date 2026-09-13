@@ -10,6 +10,8 @@ test("a request started before denial cannot revive a note, but a new successful
     const readerUrl = "/src/lib/note-read-session.ts";
     const { openOfflineCache } = await import(cacheUrl);
     const { createNoteReadSession } = await import(readerUrl);
+    const barrierUrl = "/tests/browser/fixtures/deferred-cache-open.ts";
+    const { deferNextDatabaseOpen } = await import(barrierUrl);
     const viewer = {
       cacheViewerId: "alice",
       mode: "authenticated",
@@ -22,30 +24,31 @@ test("a request started before denial cannot revive a note, but a new successful
     const slowReader = createNoteReadSession(viewer);
     const denyingReader = createNoteReadSession(viewer);
     const freshReader = createNoteReadSession(viewer);
-    const recoveredNote = { ...note, markdown: "Access restored", updatedAt: 3 };
-    const originalFetch = globalThis.fetch;
-    let releaseSlow: (response: Response) => void = () => {
-      throw new Error("Slow request has not started");
+    const recoveredNote = {
+      ...note,
+      markdown: "Access restored",
+      updatedAt: 3,
     };
-    let signalStarted: () => void = () => {};
-    const started = new Promise<void>((resolve) => {
-      signalStarted = resolve;
-    });
+    const originalFetch = globalThis.fetch;
+    const opening = deferNextDatabaseOpen();
     let requests = 0;
-    globalThis.fetch = async () => {
+    globalThis.fetch = () => {
       requests += 1;
       if (requests === 1) {
-        return await new Promise<Response>((resolve) => {
-          releaseSlow = resolve;
-          signalStarted();
-        });
+        return Promise.resolve(
+          new Response(JSON.stringify(note), { status: 200 }),
+        );
       }
       if (requests === 2) {
-        return new Response(JSON.stringify({ error: "Forbidden" }), {
-          status: 403,
-        });
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "Forbidden" }), {
+            status: 403,
+          }),
+        );
       }
-      return new Response(JSON.stringify(recoveredNote), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify(recoveredNote), { status: 200 }),
+      );
     };
     try {
       // Observe the old request even if denial proactively cancels it.
@@ -53,10 +56,12 @@ test("a request started before denial cannot revive a note, but a new successful
         (value: { ok: boolean }) => value.ok,
         () => false,
       );
-      await started;
+      // Pause after the HTTP result, before storage/publication. This allows
+      // the next independent validation to observe a real server denial.
+      await opening.started;
       const denial = await denyingReader.read(note.id);
       const afterDenial = await alice.getNote(note.id);
-      releaseSlow(new Response(JSON.stringify(note), { status: 200 }));
+      opening.release();
       const stalePublished = await slow;
       const afterStale = await alice.getNote(note.id);
       // This session already existed, but this request begins after denial.
@@ -73,6 +78,7 @@ test("a request started before denial cannot revive a note, but a new successful
         stalePublished,
       };
     } finally {
+      opening.restore();
       globalThis.fetch = originalFetch;
       slowReader.dispose();
       denyingReader.dispose();
@@ -115,8 +121,8 @@ test("a cached read started before denial cannot publish after denial completes"
     const denyingReader = createNoteReadSession(viewer);
     const originalFetch = globalThis.fetch;
     const originalText = Blob.prototype.text;
-    let reading: () => void = () => {};
-    let release: () => void = () => {};
+    let reading: () => void = () => undefined;
+    let release: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       reading = resolve;
     });
@@ -129,17 +135,18 @@ test("a cached read started before denial cannot publish after denial completes"
       await released;
       return text;
     };
-    globalThis.fetch = async () => {
-      throw new TypeError("Network unavailable");
-    };
+    globalThis.fetch = () =>
+      Promise.reject(new TypeError("Network unavailable"));
     try {
       const pending = cachedReader.read(note.id).then(
         (value: { ok: boolean }) => value.ok,
         () => false,
       );
       await started;
-      globalThis.fetch = async () =>
-        new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
+      globalThis.fetch = () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }),
+        );
       const denial = await denyingReader.read(note.id);
       release();
       return { denial, stalePublished: await pending };
