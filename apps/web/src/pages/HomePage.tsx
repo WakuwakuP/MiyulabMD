@@ -22,7 +22,10 @@ import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { peekFolder, peekNotes } from "../lib/list-cache.ts";
+import {
+  HomeMetadataError,
+  readHomeMetadata,
+} from "../lib/home-metadata-reader.ts";
 import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
   type ConfirmState,
@@ -41,8 +44,6 @@ import {
   persistRenameFolder,
   type ShareState,
   shareLinkFor,
-  subscribeHomeFolder,
-  subscribeHomeNotes,
 } from "./home-page.ts";
 
 function HomeHeaderEnd({
@@ -87,6 +88,7 @@ function useHomeHeader(
   user: AppShellContext["user"],
   folderId: string | undefined,
   visibleFolder: FolderAccess | null,
+  folderPending: boolean,
   canAdmin: boolean,
   creating: boolean,
   setHeader: AppShellContext["setHeader"],
@@ -104,7 +106,9 @@ function useHomeHeader(
           creating={creating}
           onCreateFolder={onCreateFolder}
           onCreateNote={onCreateNote}
-          showEnd={Boolean(visibleFolder || !folderId)}
+          showEnd={Boolean(
+            visibleFolder || !(folderId || user || folderPending),
+          )}
         />
       ),
       folder: headerFolder,
@@ -113,6 +117,7 @@ function useHomeHeader(
   }, [
     headerFolder,
     visibleFolder,
+    folderPending,
     folderId,
     canAdmin,
     creating,
@@ -238,6 +243,7 @@ function HomePageView({
   visibleFolder,
   publicFolders,
   error,
+  cacheWarning,
   flags,
   menu,
   onItemMenu,
@@ -250,6 +256,7 @@ function HomePageView({
   visibleFolder: FolderAccess | null;
   publicFolders: FolderRecord[];
   error: string | null;
+  cacheWarning: string | null;
   flags: ReturnType<typeof homeListFlags>;
   menu: MenuState | null;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
@@ -262,6 +269,7 @@ function HomePageView({
         <h1 className="mb-3 text-lg font-semibold">全体公開</h1>
       )}
       {error && <ErrorText>{error}</ErrorText>}
+      {cacheWarning && <p role="status">{cacheWarning}</p>}
       {flags.showTree ? (
         <NoteTree
           childrenFolders={
@@ -289,17 +297,15 @@ function HomePageView({
 function NetworkHomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
-  const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
-  const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
-  const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(
-    () => peekFolder(folderId) ?? null,
-  );
-  const [folderPending, setFolderPending] = useState(
-    () => !peekFolder(folderId),
-  );
+  const { user, userLoading, viewer, setHeader } =
+    useOutletContext<AppShellContext>();
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(null);
+  const [folderPending, setFolderPending] = useState(true);
   const [publicFolders, setPublicFolders] = useState<FolderRecord[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null);
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -320,7 +326,6 @@ function NetworkHomePage() {
     null,
   );
 
-  const sessionKey = user?.id ?? "guest";
   const flags = homeListFlags({
     error,
     folderId,
@@ -333,18 +338,48 @@ function NetworkHomePage() {
   const shareLink = shareLinkFor(share);
 
   useEffect(() => {
-    void sessionKey;
-    return subscribeHomeNotes(userLoading, setNotes);
-  }, [sessionKey, userLoading]);
-
-  useEffect(() => {
-    return subscribeHomeFolder(folderId, user, userLoading, {
-      setError,
-      setFolderPending,
-      setPublicFolders,
-      setVisibleFolder,
-    });
-  }, [folderId, user, userLoading]);
+    if (userLoading) {
+      return;
+    }
+    const controller = new AbortController();
+    let current = true;
+    setError(null);
+    setCacheWarning(null);
+    setFolderPending(true);
+    void readHomeMetadata({
+      folderId,
+      isCurrentOwner: () => current,
+      signal: controller.signal,
+      viewer,
+    })
+      .then((snapshot) => {
+        if (!current || controller.signal.aborted) {
+          return;
+        }
+        setNotes(snapshot.notes);
+        setVisibleFolder(snapshot.visibleFolder);
+        setPublicFolders(snapshot.publicFolders);
+        setCacheWarning(snapshot.cacheWarning ?? null);
+        setFolderPending(false);
+      })
+      .catch((error: unknown) => {
+        if (!current || controller.signal.aborted) {
+          return;
+        }
+        setFolderPending(false);
+        setVisibleFolder(null);
+        setPublicFolders([]);
+        if (error instanceof HomeMetadataError || error instanceof Error) {
+          setError(error.message);
+        } else {
+          setError("データを取得できませんでした。");
+        }
+      });
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [folderId, userLoading, viewer]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.
@@ -361,6 +396,7 @@ function NetworkHomePage() {
     user,
     folderId,
     visibleFolder,
+    folderPending,
     flags.canAdmin,
     creating,
     setHeader,
@@ -370,6 +406,7 @@ function NetworkHomePage() {
 
   return (
     <HomePageView
+      cacheWarning={cacheWarning}
       dialogs={
         <HomePageDialogs
           confirm={confirm}
@@ -493,10 +530,15 @@ function NetworkHomePage() {
 
 export function HomePage() {
   const { folderId } = useParams();
-  const { userLoading, viewer } = useOutletContext<AppShellContext>();
+  const { user, userLoading, viewer } = useOutletContext<AppShellContext>();
+  const networkViewerKey = JSON.stringify([
+    viewer.mode,
+    user?.id ?? null,
+    viewer.cacheViewerId,
+  ]);
 
   if (userLoading) {
-    return <NetworkHomePage />;
+    return <NetworkHomePage key={networkViewerKey} />;
   }
   if (viewer.mode === "cached" && viewer.cacheViewerId !== null) {
     return (
@@ -512,5 +554,5 @@ export function HomePage() {
       </p>
     );
   }
-  return <NetworkHomePage />;
+  return <NetworkHomePage key={networkViewerKey} />;
 }

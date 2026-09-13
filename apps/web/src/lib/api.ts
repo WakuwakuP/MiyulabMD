@@ -74,8 +74,13 @@ export async function fetchMe(): Promise<SessionUser | null> {
   return result.data.user;
 }
 
-export async function fetchNotes(): Promise<NoteSummary[]> {
-  const res = await fetch("/api/notes", fetchOpts);
+export async function fetchNotes(
+  options: { signal?: AbortSignal } = {},
+): Promise<NoteSummary[]> {
+  const res = await fetch("/api/notes", {
+    ...fetchOpts,
+    signal: options.signal,
+  });
   if (!res.ok) {
     throw new Error(await parseError(res));
   }
@@ -222,8 +227,13 @@ export async function fetchFolderTree(): Promise<ApiResult<FolderRecord[]>> {
   return { data: body.folders, ok: true };
 }
 
-export async function fetchPublicFolders(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/public", fetchOpts);
+export async function fetchPublicFolders(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiResult<FolderRecord[]>> {
+  const res = await fetch("/api/folders/public", {
+    ...fetchOpts,
+    signal: options.signal,
+  });
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -258,11 +268,12 @@ export async function createFolder(input: {
 
 export async function fetchFolder(
   id?: string | null,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiResult<FolderAccess>> {
-  const res = await fetch(
-    id ? `/api/folders/${id}` : "/api/folders",
-    fetchOpts,
-  );
+  const res = await fetch(id ? `/api/folders/${id}` : "/api/folders", {
+    ...fetchOpts,
+    signal: options.signal,
+  });
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }

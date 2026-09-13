@@ -1062,6 +1062,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   authenticated時の503 fallback、添付画像・容量整理・SW起動・本番運用検証は残る。
   PWA全体の完成や公開運用可能という判定にはしない。
 
+### Home自動保存のライブ反映・親検証
+
+- 採用前チェックポイントは`311e260`。親が4つのライブファイルを候補と比較し、
+  cacheの説明先頭1行を除いて完全一致することを確認した。
+- ライブcacheのSHA256は
+  `64d56a1e0570116fe90d4613635ab262947922873a7cb8240254e82846ebbbd9`。
+  他3ファイルは上記候補SHA256と同じ。
+- 親が候補overlayを使わない通常runnerで確認し、すべてexit 0：
+  - `pnpm --filter @miyulabmd/web test:browser`：60件成功。
+  - `pnpm --filter @miyulabmd/web test`：117件成功、失敗0件。
+  - `pnpm --filter @miyulabmd/web typecheck`、`build`、`git diff --check`：成功。
+- buildの既存chunk警告は残る（最大約2,295 kB、gzip約742 kB）。
+  BrowserテストのAPI応答はfixtureであり、Cloudflareへのデプロイや完全な
+  ネットワーク切断状態からのSW起動まで検証したという意味ではない。
+- この反映で「オンラインで開いたdirectory情報の自動保存」を利用する経路ができた。
+  未訪問のMyDrive全体を取得するprefetchはまだ接続していない。
+
 ## D59：folderの拒否から子・ノート全体の拒否を推測しない
 
 - **状態**：後続の拒否キャッシュ処理のため、scoutがWorkerの実際の権限モデルを調査。
