@@ -926,6 +926,34 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **検証の進め方**：まず追加した自動保存の縦断テストを通し、既定52件と通常UIを確認。
   所有権変更・storage失敗・取消などは続く境界テストでも検証してから採用する。
 
+## D53：ネットワークHomeの表示寿命も閲覧者ごとに分ける
+
+- **状態**：D52候補は通常の自動保存を含む52件成功を担当が報告したが、親の追加
+  所有権テストでREDを確認。未採用。
+- **再現**：実AppShell／Homeを使うfixtureで公開`setUser`からAlice→Bobへ変更し、
+  Bobのmetadata応答を保留する。候補はAliceの私有ノート行を表示し続けた
+  （期待0件に対し1件、exit 1）。NetworkHomeはpeekを使わなくなっても前のstateを保持していた。
+- **選択肢A**：NetworkHomeのReact keyをviewer mode／user ID／cache区分から構造化して
+  作り、閲覧者変更で既存のeffect cleanupと全表示stateの寿命を終える。
+- **選択肢B**：個々のstateだけをpassive effectで消す。消し忘れと遷移時の旧表示が残りやすい。
+  C＝folderIdもkeyへ入れて毎回remountする案は、通常のfolder作成後の共有dialogなどを
+  壊すため選ばない。
+- **採用**：A。cached側と同様に構造化keyを使うが、network側はviewerの関連付けだけで
+  区分し、同じviewerのfolder navigationには既存UI状態と動作を維持する。
+  旧viewerの読込は既存cleanupでabortし、新viewerへ結果を反映しない。
+- **検証**：親の`home-metadata.spec.ts`を既定runnerに追加し、53件と通常のHome／Editor
+  回帰を確認する。fixtureはReact内部をmockせず、実AppShellContextの公開setterを使う。
+
+### D52候補の継続レビュー項目
+
+- readerが入力viewerをそのまま保持しており、要求開始時の防御的snapshotはまだない。
+  cached／unavailable modeに対するreader入口の明示的拒否もない。公開入口の境界テストを続ける。
+- readerの`cacheWarning`はHome側で使われていない。storage失敗時にオンライン表示を
+  維持しつつ、保存できなかった旨を表示するテストを続ける。
+- 新しいfolder/list signal対応はnative transactionのabortを行うが、終了時に
+  任意のsignal.reasonを保持できるか、保存済みcommitを残せるかを追加で検証する。
+- これらはD53のkey修正だけで解決したことにはせず、候補を採用する前に順に確認する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

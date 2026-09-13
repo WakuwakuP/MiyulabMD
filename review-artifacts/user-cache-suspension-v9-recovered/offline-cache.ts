@@ -55,11 +55,14 @@ type OfflineCache = {
   denyNote(id: string, orderingToken?: number): Promise<void>;
   clearNoteDenial(id: string, orderingToken?: number): Promise<void>;
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
-  putNoteList(notes: NoteSummary[]): Promise<void>;
+  putNoteList(
+    notes: NoteSummary[],
+    options?: CancellationOptions,
+  ): Promise<void>;
   getNoteList(): Promise<{ notes: NoteSummary[]; cachedAt: number } | null>;
   putFolder(
     folder: FolderAccess,
-    options?: { asDriveRoot?: boolean },
+    options?: { asDriveRoot?: boolean } & CancellationOptions,
   ): Promise<void>;
   getFolder(
     id: string | null,
@@ -309,8 +312,9 @@ function commitFolderRecord(
   database: IDBDatabase,
   record: FolderRecord,
   userId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  return commitStoreRecord(database, FOLDER_STORE, record, userId);
+  return commitStoreRecord(database, FOLDER_STORE, record, userId, signal);
 }
 
 function readFolderRecord(
@@ -353,8 +357,9 @@ function commitNoteListRecord(
   database: IDBDatabase,
   record: NoteListRecord,
   userId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  return commitStoreRecord(database, NOTE_LIST_STORE, record, userId);
+  return commitStoreRecord(database, NOTE_LIST_STORE, record, userId, signal);
 }
 
 function commitStoreRecord(
@@ -362,18 +367,21 @@ function commitStoreRecord(
   storeName: string,
   record: FolderRecord | NoteListRecord,
   userId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  return commitStoreRecords(database, [{ record, storeName }], userId);
+  return commitStoreRecords(database, [{ record, storeName }], userId, signal);
 }
 
 function commitStoreRecords(
   database: IDBDatabase,
   records: StoreRecord[],
   userId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let transaction: IDBTransaction;
     try {
+      throwIfAborted(signal);
       transaction = database.transaction(
         [...new Set(records.map(({ storeName }) => storeName))],
         "readwrite",
@@ -394,9 +402,11 @@ function commitStoreRecords(
         // The terminal event has already won.
       }
     };
+    const onAbort = () => abort();
     const finish = (callback: () => void) => {
       if (!settled) {
         settled = true;
+        signal?.removeEventListener("abort", onAbort);
         operations.delete(abort);
         if (!operations.size) {
           pendingUserOperations.delete(userId);
@@ -405,6 +415,7 @@ function commitStoreRecords(
       }
     };
     operations.add(abort);
+    signal?.addEventListener("abort", onAbort, { once: true });
     transaction.oncomplete = () => finish(resolve);
     transaction.onerror = () => {
       // The abort event is the single terminal rejection boundary.
@@ -418,6 +429,7 @@ function commitStoreRecords(
         ),
       );
     try {
+      throwIfAborted(signal);
       for (const { storeName, record } of records) {
         transaction.objectStore(storeName).put(record);
       }
@@ -869,6 +881,7 @@ export async function openOfflineCache(
       if (closed) {
         throw new Error("Offline cache is closed");
       }
+      throwIfAborted(options.signal);
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
       const cachedAt = Date.now();
@@ -893,9 +906,10 @@ export async function openOfflineCache(
             },
           ],
           userId,
+          options.signal,
         );
       } else {
-        await commitFolderRecord(database, record, userId);
+        await commitFolderRecord(database, record, userId, options.signal);
       }
     },
 
@@ -949,10 +963,11 @@ export async function openOfflineCache(
       }
     },
 
-    async putNoteList(notes) {
+    async putNoteList(notes, options = {}) {
       if (closed) {
         throw new Error("Offline cache is closed");
       }
+      throwIfAborted(options.signal);
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
       await commitNoteListRecord(
@@ -964,6 +979,7 @@ export async function openOfflineCache(
           userId,
         },
         userId,
+        options.signal,
       );
     },
   };
