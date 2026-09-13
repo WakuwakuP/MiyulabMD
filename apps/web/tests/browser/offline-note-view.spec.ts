@@ -65,6 +65,12 @@ async function verifyCachedNoteView(
   await expect(
     page.getByText("通信なしでも読みたい本文。", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { exact: true, name: "Edit" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { exact: true, name: "Edit" }),
+  ).toBeEnabled();
 
   // Wait for successful caching through its public API, without depending on
   // database names, object stores, OPFS paths, or background write timing.
