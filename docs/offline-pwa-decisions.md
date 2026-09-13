@@ -1043,6 +1043,44 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **検証**：既定browserは60件。新テストは外部fetchとnative DB close境界を使い、
   snapshotが失われないこととreaderが取消理由で拒否することを同時に確認する。
 
+### D52–D58：Home自動保存候補の親レビュー・採用判定
+
+- 親が各修正diffと最終return直前の同期guardを確認し、候補runnerの`all`を独立実行。
+  型チェック・Biome・browser60件すべて成功した。
+- 実画面で、オンラインに開いたroot／child／note-listがテストからの手動seedなしに保存され、
+  通信不能後のreloadで同じdirectoryをreadonly表示できることを確認した。
+- viewer変更時の旧私有行の除去、要求開始時の入力snapshot、非network modeの拒否、
+  保存警告と回復後の消去、pending writeのreason保持、commit後の取消とデータ維持を含む。
+- 採用候補SHA256：
+  - `api.ts`: `3e7cdbde8d16e9f5bd70f4b214a01294829bf4fd0db131330e91e3902c241534`
+  - `offline-cache.ts`: `a60ebcb6df42d52f6678b0e79d7f1b0286ecec33374d886863b5b9e1803fa925`
+  - `src/pages/HomePage.tsx`: `2eac5e8bdfcecaccbb75dc90c57ec6ff3da5d885a7a3f35ee27814ea214db571`
+  - `src/lib/home-metadata-reader.ts`: `75bc316055ce4afaa8cba0c188a1f5b135dd5171bb3d6373b55e752ce86e27eb`
+- 上記4ファイルのライブ反映を承認する。cacheの候補説明先頭1行だけはライブへ含めず、
+  その他は完全一致させ、通常runnerでも検証する。
+- この段階は可視directoryの自動保存であり、全体prefetch、folder拒否の永続無効化、
+  authenticated時の503 fallback、添付画像・容量整理・SW起動・本番運用検証は残る。
+  PWA全体の完成や公開運用可能という判定にはしない。
+
+## D59：folderの拒否から子・ノート全体の拒否を推測しない
+
+- **状態**：後続の拒否キャッシュ処理のため、scoutがWorkerの実際の権限モデルを調査。
+  まだfolder拒否の実装・テストは行っていない。
+- **確認したドメイン**：`resolveNoteAccess`はnoteの明示scope／grantを独立に評価し、
+  子folderも祖先のpolicyを上書きできる。あるfolderの403／404は、その子や直接公開された
+  noteすべての拒否を意味しない。folderルートは権限不足も404で返す。
+- 非ownerにはfolder path／grants／sourceFolderを隠し、visibleCrumbsは閲覧できない
+  祖先を見つけた時点で、それまでのcrumbsを切り捨てる。parentIdも見えるcrumbsから構成する。
+- **選択肢A**：対象folderと、その名前・path・crumb・parentリンクを表示する既知の
+  キャッシュ参照を無効化／非表示にする。独立した子folder／noteは別の確認結果に従う。
+- **選択肢B**：subtree全体を拒否する。独立grantや公開noteを壊すため選ばない。
+  C＝ユーザー全cacheを通常のfolder拒否だけで停止する案も過大なため選ばない。
+- **推奨**：A。rootのnull route aliasは正規folder IDへ対応させ、通常の文字列IDと
+  混同しない。拒否の永続化に失敗した場合のfail-closed対応は、通常の対象範囲とは区別する。
+- **次の検証対象**：確認済みfolder拒否後のcached fallback防止、親のchildren／crumbsから
+  対象を出さないこと、独立したpublic note／子policyを巻き添えにしないこと。
+  自動保存スライスのテスト成功を、この未接続の拒否処理の完了として扱わない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

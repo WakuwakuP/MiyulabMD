@@ -97,3 +97,23 @@
   changed. Completion behavior, abort registration, synchronous-put handling,
   cleanup, schema, and all live sources remain unchanged. Final reader
   publication cancellation is deferred to a later test.
+
+## D58 final-publication cancellation guard
+
+- **Status:** Candidate-only implementation from checkpoint `366bc74`; not
+  adopted into `apps/web/src`.
+- **Background:** After `saveHomeMetadata` completed, native database close could
+  run its final cancellation callback before `readHomeMetadata` returned. The
+  committed root/list snapshots were correct and intact, but the reader still
+  resolved its snapshot instead of rejecting the custom cancellation reason.
+- **Choice:** Reuse the existing `throwIfCancelled(signal, isCurrentOwner)`
+  directly after the awaited metadata save and immediately before `return
+  snapshot`.
+- **Reason:** This closes the final publication boundary without adding an
+  await, rolling back committed data, deleting snapshots, or changing successful
+  storage terminal outcomes. Existing network success, warning, mode, and
+  defensive-viewer behavior remain unchanged.
+- **Scope:** Only candidate `src/lib/home-metadata-reader.ts` and these two
+  candidate records are changed. Live sources, tests, runner, API, cache, and
+  Home files remain unchanged. Parent-provided D58 RED coverage is expected to
+  turn green; independent validation remains required before adoption.

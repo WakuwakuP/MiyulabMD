@@ -173,3 +173,35 @@ Both parent-provided D57 RED cases are green: cancelling a pending folder save
 and cancelling a pending note-list save rejects with the exact custom
 `AbortController` reason by identity and preserves the prior snapshot. The
 candidate remains under parent review and is not adopted into live sources.
+
+## D58 final-publication cancellation guard validation
+
+Validation was run serially from checkpoint `366bc74`; no commit or restore was
+made. Only candidate `src/lib/home-metadata-reader.ts` and the two allowed
+candidate records were changed. Live sources remain unchanged.
+
+### Commands and exact results
+
+1. The initial targeted browser command — exit `1`; `ERR_MODULE_NOT_FOUND:
+   vite`.
+2. `pnpm install --frozen-lockfile` — exit `0`; `625` packages installed.
+3. `pnpm --filter @miyulabmd/web test:browser:install` — exit `0`; Chromium
+   installed.
+4. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-drive-view.spec.ts` —
+   exit `0`; `14 passed`, `0 failed`.
+5. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all` —
+   exit `0`; `16 files` checked, `60 passed`, `0 failed`.
+6. `pnpm --filter @miyulabmd/web test` — exit `0`; `117 passed`, `0 failed`,
+   `0 skipped`.
+7. `git diff --check` — exit `0`.
+8. `git diff --quiet -- apps/web/src` — exit `0`; live source unchanged.
+
+Candidate SHA-256 for `src/lib/home-metadata-reader.ts` after D58:
+`75bc316055ce4afaa8cba0c188a1f5b135dd5171bb3d6373b55e752ce86e27eb`.
+
+The D58 cancellation-after-metadata-commit case rejects the custom reason by
+identity while preserving the committed root/list snapshots. The live
+`apps/web/src` tree has no changes (`git diff --quiet -- apps/web/src` exit
+`0`). The guard is deliberately synchronous and final: it reuses the existing
+ownership/cancellation check after the awaited save, adds no later await, and
+does not roll back or delete committed snapshots.

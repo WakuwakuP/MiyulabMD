@@ -136,5 +136,6 @@ export async function readHomeMetadata({
         };
 
   await saveHomeMetadata(snapshot, viewer, folderId, signal, isCurrentOwner);
+  throwIfCancelled(signal, isCurrentOwner);
   return snapshot;
 }
