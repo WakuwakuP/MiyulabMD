@@ -1916,6 +1916,24 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - これは同じページの公開前順序の検証。別タブ間での拒否世代の同期など、
   既存の別課題まで解決したとはしない。次にsubscriber中断と値の独立性を検証する。
 
+## D103：共有結果の失敗経路もsubscriberごとに完結させる
+
+- 状態：親の追加4ケースで2成功／2失敗を確認、候補修正へ進む。
+- 成功した確認：1人の中断は他subscriberを止めず理由を保持する。異なるviewerは
+  別HTTPになる。全員中断でtransportがabortし、同キーの新groupを旧cleanupが
+  削除しない。settle後は新しいHTTPになる。
+- RED 1：HTTP403のApiResultオブジェクトはそのまま共有され、一方のerror文字列を
+  変更するともう一方にも混ざった。成功だけでなく失敗の結果containerも独立させる。
+- RED 2：最初の成功結果コピーに例外を注入すると、両subscriberがpendingのままで
+  unhandled rejectionが発生した。例外の観測はtest内で記録し、空配列を期待している
+  ため、preventDefaultで失敗を隠してはいない。
+- 推奨：subscriberごとのコピー失敗をそのsubscriberへrejectし、他のsettlementを
+  続ける。全経路でlistenerとsubscriber setを片付け、settlement callbackから
+  未処理のrejectionを漏らさない。ネットワークErrorの型とcauseは維持する。
+- 取得キー、refcount／中断方針、API呼び出し側、storage／拒否処理は変えない。
+  テストのBiome指摘は親が修正した。次の修正対象はcandidate note-requestと
+  専用判断／検証記録だけとする。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
