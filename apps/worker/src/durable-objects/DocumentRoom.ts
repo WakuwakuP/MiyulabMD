@@ -47,6 +47,10 @@ import {
   planInsert,
   planReplace,
 } from "./markdown-edit.ts";
+import {
+  SnapshotPersistence,
+  STORAGE_YJS_KEY,
+} from "./snapshot-persistence.ts";
 import { applyTaskCheckbox } from "./task-checkbox.ts";
 
 /** y-websocket 互換のトップレベルメッセージ種別。 */
@@ -54,9 +58,7 @@ const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
 const MESSAGE_QUERY_AWARENESS = 3;
 
-const STORAGE_YJS_KEY = "yjs-update";
 const STORAGE_NOTE_ID_KEY = "note-id";
-const SNAPSHOT_DEBOUNCE_MS = 3000;
 
 type WsAttachment = {
   canEdit: boolean;
@@ -113,7 +115,16 @@ export class DocumentRoom extends DurableObject<Env> {
   private doc: Y.Doc | null = null;
   private awareness: awarenessProtocol.Awareness | null = null;
   private loading: Promise<void> | null = null;
-  private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly snapshots = new SnapshotPersistence(
+    this.ctx.storage,
+    async (markdown) => {
+      const noteId = await this.ctx.storage.get<string>(STORAGE_NOTE_ID_KEY);
+      if (!noteId) {
+        throw new Error("Cannot persist snapshot without note ID");
+      }
+      await persistMarkdownSnapshot(this.env, noteId, markdown);
+    },
+  );
   private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private historyPending = new Map<string, PendingHistorySession>();
   private historyMarkdown = new Map<string, string>();
@@ -289,7 +300,7 @@ export class DocumentRoom extends DurableObject<Env> {
     await this.ensureInitialized(noteId);
     const ytext = this.requireDoc().getText("markdown");
     applyTextDiff(ytext, markdown, APPLY_MARKDOWN_ORIGIN);
-    this.scheduleSnapshotPersist();
+    await this.persistYjsState(this.requireDoc());
   }
 
   async getMarkdown(noteId?: string): Promise<string> {
@@ -381,7 +392,7 @@ export class DocumentRoom extends DurableObject<Env> {
 
     applyTextDiff(ytext, plan.next, APPLY_EDIT_ORIGIN);
     this.touchAgentPresence(input.agent, plan.cursor);
-    this.scheduleSnapshotPersist();
+    await this.persistYjsState(this.requireDoc());
     await this.recordApplyEditHistory(input, plan.cursor, plan.next);
 
     return {
@@ -403,7 +414,7 @@ export class DocumentRoom extends DurableObject<Env> {
     const current = ytext.toString();
     const cursor = cursorAfterSet(current, markdown);
     applyTextDiff(ytext, markdown, APPLY_EDIT_ORIGIN);
-    this.scheduleSnapshotPersist();
+    await this.persistYjsState(this.requireDoc());
     const session = sessionFromApplyEdit(actor, cursor, "restore", Date.now());
     await this.persistHistorySession(session, markdown).catch(() => undefined);
     return {
@@ -465,7 +476,7 @@ export class DocumentRoom extends DurableObject<Env> {
     });
 
     doc.on("update", (update: Uint8Array, origin: unknown) => {
-      void this.onDocUpdate(update, origin);
+      this.ctx.waitUntil(this.onDocUpdate(update, origin));
     });
 
     awareness.on("update", (changes: AwarenessChanges, origin: unknown) => {
@@ -488,12 +499,11 @@ export class DocumentRoom extends DurableObject<Env> {
 
     await this.persistYjsState(doc);
     this.broadcastSyncUpdate(update, origin);
-    this.scheduleSnapshotPersist();
   }
 
   private async persistYjsState(doc: Y.Doc): Promise<void> {
     const merged = Y.encodeStateAsUpdate(doc);
-    await this.ctx.storage.put(STORAGE_YJS_KEY, merged);
+    await this.snapshots.persist(merged, doc.getText("markdown").toString());
   }
 
   private broadcastSyncUpdate(update: Uint8Array, origin: unknown): void {
@@ -623,25 +633,12 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
-  private scheduleSnapshotPersist(): void {
-    if (this.snapshotTimer !== null) {
-      clearTimeout(this.snapshotTimer);
-    }
-
-    this.snapshotTimer = setTimeout(() => {
-      this.snapshotTimer = null;
-      void this.flushSnapshotToD1();
-    }, SNAPSHOT_DEBOUNCE_MS);
+  async alarm(): Promise<void> {
+    await this.flushSnapshotToD1();
   }
 
   private async flushSnapshotToD1(): Promise<void> {
-    const noteId = await this.ctx.storage.get<string>(STORAGE_NOTE_ID_KEY);
-    if (!(noteId && this.doc)) {
-      return;
-    }
-
-    const markdown = this.doc.getText("markdown").toString();
-    await persistMarkdownSnapshot(this.env, noteId, markdown);
+    await this.snapshots.flush();
   }
 
   private onMarkdownHistory(

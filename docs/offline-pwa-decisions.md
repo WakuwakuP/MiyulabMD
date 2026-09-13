@@ -2110,6 +2110,19 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   明示追加した。別タブpurgeの永続fenceは専任担当が実装中で、上記focused成功を
   未解決ケースも含めた全体GREENと読み替えない。
 
+## D114：DocumentRoomの永続alarmと実配信経路の独立確認
+
+- 揮発的な3秒timerだけに依存せず、Yjs state・pending markdown revision・
+  alarmをDO storage transactionで保存する。flush前にretry alarmを設定し、
+  D1成功後は実際に保存したrevisionだけを消す。より新しいpendingを消さない。
+- parent reviewでBiome25件を検出して修正を依頼し、ブロック・import/key順・
+  テストdoubleのPromise semanticsを保持してlintを通した。
+- 親はWorker72件・型検査・実Worker全4件を独立確認した。実WebSocketから
+  差分Yjs updateを送り、3秒debounce後に実D1-backed APIの本文とtitleが更新された。
+  online認証/SSR/APIとproduction SWのoffline本文復元も同じrunnerで成功。
+- 実actor eviction/crashの注入はまだ行っておらず、再構築とretryの証拠は
+  helperのtransactional unit testである。保存確認のclient通知は後続必須作業。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
