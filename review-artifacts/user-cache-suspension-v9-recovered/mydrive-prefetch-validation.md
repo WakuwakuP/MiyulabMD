@@ -94,3 +94,48 @@ Post-change candidate file SHA-256 values (computed with Node
   `1d844664a3b4268b04f31b7ba27542adb2f758e04075031a0a4d02204b33faee8`
 - `api-transport.ts`:
   `44f5f6d256186257a4bc2a0425e33a8bfbeba41339bbccd2635a118b566f9977`
+# D82 refactor validation
+
+The source-only change is limited to `src/lib/mydrive-prefetch.ts` plus this
+decision/validation documentation. No live implementation, tests, runner,
+API, AppShell, storage, or PWA files were changed.
+
+Focused serial prefetch validation was attempted with:
+
+```text
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser tests/browser/mydrive-prefetch.spec.ts mydrive-prefetch-ownership.spec.ts mydrive-prefetch-denial.spec.ts mydrive-prefetch-stops.spec.ts
+```
+
+It could not start in this worktree because the frozen project dependencies
+are not installed: Node reported `ERR_MODULE_NOT_FOUND` for package `vite`
+imported by `check-offline-candidate.mjs`. Therefore no test pass count is
+claimed here. Parent-side candidate-all, live-unit, Biome, and diff checks
+remain required before adoption.
+
+## D82 independent parent verification
+
+Parent ran the candidate runner with installed dependencies. Its first
+typecheck failed with TS18047 at the cache-open callback: narrowing
+`ownedViewer.user` did not survive capture by the callback. Parent captured
+the already-validated user ID in a const, removed the duplicate root check
+(the folder acquisition routine owns that check), and applied the local
+formatting corrections through literal patches.
+
+```text
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all --workers=1
+  exit 0, typecheck passed, Biome checked 17 files, 74 passed
+```
+
+The 74-case suite includes the seven prefetch cases and both compound-cache
+cancellation cases. An unmocked AppShell fixture tree request logged a
+localhost proxy connection error; its test still passed. This is recorded,
+not presented as production backend coverage or as a fix for the earlier
+intermittent parallel Home root-link timeout.
+
+Final parent-reviewed candidate source SHA-256:
+`63f06eb02b25c61e7b0f57284b830fd00748cdd9bd777dfa0cee1edf2b123f3f`.
+
+Correction to the earlier D79 API hash transcription: the actual `api.ts`
+SHA-256 printed by the parent runner is
+`1d844664a3b4268b04f317ba27542adb2f758e04075031a0a4d02204b33faee8`.
+The earlier longer string in this record is a typo, not another code version.

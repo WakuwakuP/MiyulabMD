@@ -50,3 +50,28 @@ close failure is a storage stop, while abort observed at entry, between I/O
 operations, or during close has cancellation priority. No rollback or
 compensating deletion is attempted, so completed transactions remain visible
 and no later note bodies are requested after a stop.
+
+## D82: Separate acquisition flow from lifecycle ownership
+
+The previous implementation encoded the current I/O boundary in a mutable
+`operation` label and held a partially assigned result through deeply nested
+response branches. The refactor uses two private acquisition routines with
+early returns and a small `prefetchIo` helper. Each await declares its boundary
+(`network` or `storage`) at the call site; the helper performs the common
+pre-I/O cancellation check and wraps failures with that boundary. The public
+function alone owns the viewer snapshot, cache assignment, one `finally`
+close, and the final cancellation override.
+
+The alternatives were (A) retain the nested state/result structure, (B) add a
+generic scheduler or state machine, or (C) use focused acquisition routines
+and a boundary-tagging I/O helper. A preserves behavior but keeps the
+mutable-state and review burden. B is disproportionate to this sequential
+workflow and would obscure its ordering. C was selected because it makes
+network/storage classification local without changing the public result,
+sequential order, ownership snapshot, or cache lifetime contract.
+
+The helper intentionally checks before each operation rather than after it:
+the public cache assignment must remain observable so an abort racing cache
+open still reaches the sole `finally` close. Cancellation is checked again
+immediately after assignment and at finalization; the cache API also receives
+the signal for in-flight storage termination.
