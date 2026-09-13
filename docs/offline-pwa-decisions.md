@@ -478,6 +478,30 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **後続テスト**：既存offline-note-viewに加え、me成功＋ノートだけ503でも
   cache由来としてreadonlyになることを確認し、authだけで許可する回帰を防ぐ。
 
+## D38：AppShellの閲覧ポリシーを更新APIへ接続する
+
+- **状態**：推奨案を選択、親テストRED。
+- **選択前チェックポイント**：`35dc6f5`（所有権付きpolicyのライブ採用）。
+- **選択肢A**：AppShellが一つのviewing controllerを持ち、同じcontrollerを
+  Outlet contextと共通API dispatchへ渡す。B＝更新APIごとにreadonlyフラグを持つ。
+  C＝ブラウザ全体のglobal fetchを置き換える。
+- **採用**：A。現在の実データsourceを同じ経路で判定し、個別フラグの漏れや
+  無関係な第三者通信への影響を避ける。保存先のviewerをglobalから取得することはしない。
+- **HTTP境界**：GET/HEAD/OPTIONSは読み取りとして維持し、それ以外のAPI送信は
+  共通の`runMutation`を送信直前に通す。URL・body・headers・credentials・結果形式を変えない。
+  許可された操作のネットワーク／中止エラーはそのまま扱い、サーバー側権限検証は維持する。
+- **binding**：AppShellが既存viewerRefを読むcontrollerを一度だけ作り、
+  layout effectでdispatchに登録・解除する。contextにも同じ`viewing`を公開する。
+  古いcleanupは既存のbinding tokenで新しい登録を消さない。
+- **検証**：実AppShellの公開contextを使うfixtureへsource切替コントロールを追加。
+  認証済みの通常更新成功、cache sourceで9更新操作をHTTP送信前に拒否、
+  読み取り継続、networkへ戻した後の更新、cached viewer再起動後の拒否を要求する。
+  現状はviewingが未接続で`hasViewing:false`となりRED。
+- **確認した既存経路**：タスクチェックは既に`updateTaskCheckbox`経由であり、
+  UI hookに別のfetch guardを重複追加する必要はない。
+- **範囲**：この接続後にEditorから実際の読込結果をpublishする。ノート画面全体の
+  オフライン閲覧が、このスライスだけで完成するとは扱わない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

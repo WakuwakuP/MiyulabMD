@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useOutletContext } from "react-router";
 import { AppShell } from "../../../src/components/layout/AppShell.tsx";
@@ -7,14 +7,43 @@ import { ThemeProvider } from "../../../src/hooks/use-theme.ts";
 
 function ViewerProbe() {
   const context = useOutletContext<AppShellContext>();
+  const scope = useRef<{ dispose: () => void } | null>(null);
+  useEffect(() => () => scope.current?.dispose(), []);
+  const showSource = (source: "cache" | "network") => {
+    if (!context.viewing) {
+      return;
+    }
+    const previous = scope.current;
+    const next = context.viewing.beginView(context.viewer);
+    next.publish({ source, viewer: context.viewer });
+    scope.current = next;
+    previous?.dispose();
+  };
   return (
-    <output aria-label="Viewer context">
-      {JSON.stringify({
-        user: context.user,
-        userLoading: context.userLoading,
-        viewer: context.viewer ?? null,
-      })}
-    </output>
+    <>
+      <output aria-label="Viewer context">
+        {JSON.stringify({
+          hasViewing: Boolean(context.viewing),
+          user: context.user,
+          userLoading: context.userLoading,
+          viewer: context.viewer ?? null,
+        })}
+      </output>
+      <button
+        disabled={!context.viewing || context.userLoading}
+        onClick={() => showSource("cache")}
+        type="button"
+      >
+        Use cached viewing
+      </button>
+      <button
+        disabled={!context.viewing || context.userLoading}
+        onClick={() => showSource("network")}
+        type="button"
+      >
+        Use network viewing
+      </button>
+    </>
   );
 }
 

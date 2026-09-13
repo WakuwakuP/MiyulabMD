@@ -246,6 +246,7 @@ async function browser() {
       ...(specs.length
         ? specs
         : [
+            "mutation-api-access.spec.ts",
             "viewing-access.spec.ts",
             "app-shell-viewer.spec.ts",
             "cached-viewer-note-read.spec.ts",
