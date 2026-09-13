@@ -878,6 +878,21 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - root保存を明示するAPIはできるが、通常のネットワーク取得からそれを呼ぶ接続と
   バックグラウンドprefetchはまだ別のスライスとして残る。
 
+### 正規root参照のライブ反映・親検証
+
+- 採用前チェックポイントは`853d2c5`。親がライブ2ファイルと候補を比較し、
+  cache先頭の候補説明コメント1行を除いて完全一致することを確認した。
+- ライブ`offline-cache.ts`のSHA256は
+  `f8e430e72880354d5045fe54e96eb335f9710a23213367ad1889ea9abb4c8920`、
+  `CachedDriveView.tsx`は上記候補と同じ。
+- 親が通常runnerで順番に実行し、すべてexit 0：
+  - `pnpm --filter @miyulabmd/web test:browser`：51件成功。
+  - `pnpm --filter @miyulabmd/web test`：117件成功、失敗0件。
+  - `pnpm --filter @miyulabmd/web typecheck`、`build`、`git diff --check`：成功。
+- buildの既存chunk警告は残る（最大約2,293 kB、gzip約741 kB）。
+  キャッシュ書込を呼ぶネットワーク取得の接続は次の工程であり、ここでは
+  ルート参照・正規folder保存・再読込時の整合性を公開APIと実画面で確認した。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
