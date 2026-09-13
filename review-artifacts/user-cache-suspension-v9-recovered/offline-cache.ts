@@ -378,9 +378,6 @@ function commitStoreRecords(
         [...new Set(records.map(({ storeName }) => storeName))],
         "readwrite",
       );
-      for (const { storeName, record } of records) {
-        transaction.objectStore(storeName).put(record);
-      }
     } catch (error) {
       reject(error);
       return;
@@ -389,6 +386,7 @@ function commitStoreRecords(
       pendingUserOperations.get(userId) ?? new Set<() => void>();
     pendingUserOperations.set(userId, operations);
     let settled = false;
+    let putError: unknown;
     const abort = () => {
       try {
         transaction.abort();
@@ -413,8 +411,20 @@ function commitStoreRecords(
     };
     transaction.onabort = () =>
       finish(() =>
-        reject(transaction.error ?? new DOMException("Transaction aborted")),
+        reject(
+          putError ??
+            transaction.error ??
+            new DOMException("Transaction aborted"),
+        ),
       );
+    try {
+      for (const { storeName, record } of records) {
+        transaction.objectStore(storeName).put(record);
+      }
+    } catch (error) {
+      putError = error;
+      abort();
+    }
   });
 }
 

@@ -106,3 +106,28 @@ post-entry hashes are corrected here: `drive-offline-decisions.md`
 `439f358a47343ae43b25cb2a0123bbd11bfcd6a7260518f662473e734d3c40e0` and
 `drive-offline-validation.md`
 `8437ebceb78099bdeda4515ac6a3d28864d32c11771d4760aeee0528971f08df`.
+
+## D51 validation
+
+Commands were run serially from `HEAD 882b786` in the candidate worktree:
+
+- The focused candidate browser command initially exited **1** because
+  dependencies were absent (`ERR_MODULE_NOT_FOUND: vite`).
+- `pnpm install --frozen-lockfile` exited **0**; **625** packages installed.
+- `pnpm --filter @miyulabmd/web test:browser:install` exited **0**; Chromium
+  and its Playwright support binaries were installed.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser offline-folder-cache.spec.ts offline-drive-view.spec.ts`
+  exited **0**: **9 passed**, including both D51 failed-root-replacement cases.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all`
+  exited **0**: **51 passed**; candidate typecheck and Biome checks covered
+  **15 files** with no fixes applied.
+- `pnpm --filter @miyulabmd/web test` exited **0**: **117 passed**, **0 failed**.
+- `git diff --check` exited **0**.
+
+The candidate `offline-cache.ts` SHA-256 after the code edit and before this
+append was
+`55f148026381a0d91c5bc6cff35f1ac04d626c9fcc78826e288cd03397da8634`.
+The live `apps/web/src/lib/offline-cache.ts` remained unchanged at
+`f8c004b8d3ce250f23571b44efc136e1f36efe006b66ed42122e3fef861648d3`.
+Only the permitted candidate source and the two append-only review records
+were modified.

@@ -87,3 +87,23 @@ snapshot (which could diverge in body and `cachedAt`). Root detection in the
 cached view also recognizes `locked` root snapshots, allowing direct canonical
 ID routes without an invalid parent link. No database version, store, schema,
 test, runner, or live `apps/web/src` file was changed.
+
+## D51 atomic multi-store commit lifecycle
+
+The D50 multi-store root replacement queued the folder write before a native
+IndexedDB `put` failure in the metadata store. Because the synchronous catch
+rejected without aborting the transaction, the earlier folder write could
+commit while the reference remained unchanged.
+
+The chosen correction keeps one transaction for both the canonical folder and
+root reference, but separates transaction-creation failure from write failure.
+Terminal handlers and the `pendingUserOperations` registry are established
+before any `put` is queued. A synchronous `put` error is retained and causes an
+immediate transaction abort; rejection and registry cleanup occur only through
+the actual `abort` or `complete` event. Completion remains authoritative, with
+no compensating delete or alias reset. Existing single-store callers and the
+D50 multi-store caller continue using the same helper.
+
+No schema, API, denial, read, OPFS, note, live source, test, runner, or other
+candidate file was changed. The candidate remains unrecovered for independent
+parent review and adoption.
