@@ -174,3 +174,57 @@ test("a metadata read saves under the viewer captured before awaiting the networ
   expect(snapshots.aliceFolder).toEqual(folder);
   expect(snapshots.aliceNotes).toEqual([aliceNote]);
 });
+
+for (const mode of ["cached", "unavailable"] as const) {
+  test(`the network metadata reader rejects ${mode} viewers without sending requests`, async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/storage.html");
+    const result = await page.evaluate(async (mode) => {
+      const moduleUrl = "/src/lib/home-metadata-reader.ts";
+      const { HomeMetadataError, readHomeMetadata } = await import(moduleUrl);
+      let requests = 0;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (input) => {
+        requests += 1;
+        const pathname = new URL(
+          input instanceof Request ? input.url : String(input),
+          location.origin,
+        ).pathname;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              pathname === "/api/notes" ? { notes: [] } : { folders: [] },
+            ),
+          ),
+        );
+      };
+      try {
+        await readHomeMetadata({
+          folderId: undefined,
+          isCurrentOwner: () => true,
+          signal: new AbortController().signal,
+          viewer: {
+            cacheViewerId: mode === "cached" ? "alice" : null,
+            mode,
+            user: null,
+          },
+        });
+        return { rejected: false, requests, status: undefined };
+      } catch (error) {
+        return {
+          rejected: true,
+          requests,
+          status: error instanceof HomeMetadataError ? error.status : undefined,
+        };
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }, mode);
+    expect(result).toEqual({
+      rejected: true,
+      requests: 0,
+      status: undefined,
+    });
+  });
+}

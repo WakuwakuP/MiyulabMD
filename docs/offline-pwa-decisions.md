@@ -974,6 +974,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **範囲**：この修正でmode入口の拒否、storage警告表示、signal.reasonまで解決したとは
   扱わず、それぞれ次の検証対象として残す。自動保存候補はまだ未採用。
 
+## D55：network metadata readerは非network viewerを入口で拒否する
+
+- **状態**：D54のdefensive snapshot diffを親が確認。担当は54件成功を報告した。
+  次の入口契約テストでcached／unavailableの双方がREDとなった。
+- **再現**：readerをcachedまたはunavailable viewerで直接呼ぶと、現在はguestのように
+  `/api/notes`とpublic foldersへ2件要求し、成功を返す。期待は拒否・要求0件
+  （親の2ケースとも失敗）。Homeの分岐だけに依存しており共有reader自身が契約を守らない。
+- **選択肢A**：snapshot化・既存の取消確認後、HTTP要求を作る前にmodeを検査する。
+  authenticated／guestのnetwork取得だけ許可し、それ以外はローカルな利用不可エラーにする。
+- **選択肢B**：呼出側が必ず正しく分岐することに依存する。将来prefetch等で同じ誤用を
+  繰り返すため選ばない。C＝非network viewerをguestへ変換する案も、未検証キャッシュ区分を
+  公開network取得へすり替えるため選ばない。
+- **採用**：A。実際にHTTP要求を行っていないので401／403等のstatusを捏造しない。
+  既存のsignal.reasonとowner取消確認は維持し、guest/authenticatedの通常取得は変えない。
+- **検証**：追加2件を含む既定56 browserを確認する。保存警告とmetadata write取消の
+  境界は引き続き別のテストで確認し、現候補はまだライブ未採用。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

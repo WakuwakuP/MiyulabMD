@@ -58,3 +58,26 @@ records are modified.
 Final post-record verification: `git diff --check` exit `0`, live
 `apps/web/src` diff check exit `0`, and the candidate Home SHA256 remained
 `6ed55396207a23917eb39fa70a801acee70a94b9f5ee4b2b93da9cbd143d8f51`.
+
+## D54 viewer snapshot validation
+
+Validation was run serially from checkpoint `a02ddf2`, with no live source
+changes and no commit or restore.
+
+### Commands and results
+
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-drive-view.spec.ts` — initial exit `1` because `vite` was missing (`ERR_MODULE_NOT_FOUND`).
+- `pnpm install --frozen-lockfile` — exit `0`; 625 packages installed.
+- The same targeted browser command — exit `1` because the Playwright Chromium executable was missing; no browser cases completed.
+- `pnpm --filter @miyulabmd/web test:browser:install` — exit `0`.
+- The same targeted browser command — exit `0`; `8 passed`, `0 failed`.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all` — exit `0`; 16 files checked, `54 passed`, `0 failed`.
+- `pnpm --filter @miyulabmd/web test` — exit `0`; `117 passed`, `0 failed`, `0 skipped`.
+- `git diff --check` — exit `0`.
+- `git diff --quiet -- apps/web/src` — exit `0`; no live source edits.
+
+The final candidate SHA-256 for
+`src/lib/home-metadata-reader.ts` is
+`35a5bee95addd05383266bd70d6ab1fafb38cc6e9845065a6eca59324bf704cf`.
+The targeted D54 regression passed: mutating the caller's viewer during the
+paused Alice request did not redirect the completed save into Bob's cache.

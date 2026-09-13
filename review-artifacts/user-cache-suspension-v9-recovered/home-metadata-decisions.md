@@ -25,3 +25,17 @@
   state before the new viewer's request resolves.
 - CachedDriveView's existing folder-and-viewer key and all live application
   sources remain unchanged. This is a review candidate, not an adoption.
+
+## D54 viewer snapshot capture
+
+- Candidate-only implementation: `readHomeMetadata` synchronously copies the
+  incoming `ViewerContext` and its nested `user` before starting network work.
+  All branch selection and `saveHomeMetadata` ownership checks use that owned
+  snapshot.
+- This prevents a caller that reuses and mutates the original viewer object
+  while requests are pending from redirecting Alice's completed metadata save
+  into Bob's cache. The snapshot does not freeze or mutate caller state, and
+  existing signal/current-owner cancellation checks remain unchanged.
+- Scope is limited to `src/lib/home-metadata-reader.ts`; mode gating, warning UI,
+  and cancellation-reason behavior remain later review items. The candidate is
+  not adopted into live `apps/web/src`.

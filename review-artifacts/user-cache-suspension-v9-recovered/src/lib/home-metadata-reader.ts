@@ -94,11 +94,15 @@ async function saveHomeMetadata(
 }
 
 export async function readHomeMetadata({
-  viewer,
+  viewer: inputViewer,
   folderId,
   signal,
   isCurrentOwner,
 }: ReadHomeMetadataOptions): Promise<HomeMetadataSnapshot> {
+  const viewer: ViewerContext = {
+    ...inputViewer,
+    user: inputViewer.user ? { ...inputViewer.user } : null,
+  };
   throwIfCancelled(signal, isCurrentOwner);
   const notesPromise = fetchNotes({ signal });
   const folderPromise =
