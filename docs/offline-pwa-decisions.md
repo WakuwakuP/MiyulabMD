@@ -665,6 +665,24 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 本段階はノート閲覧の接続であり、Service Workerからのオフライン起動、
   フォルダUI、自動prefetch、容量管理まで完了したことにはしない。
 
+### ノート画面のライブ反映・親検証
+
+- 採用前チェックポイント：`ed5aa75`。反映対象はライブの`EditorPage.tsx`、
+  `editor-page.ts`、`viewing-access.ts`の3ファイルだけとし、上記候補SHA256と
+  バイト単位で一致することを親が確認した。
+- 候補overlayを使わず、親が通常のコマンドを順番に実行：
+  - `pnpm --filter @miyulabmd/web test:browser`：44件成功。
+  - `pnpm --filter @miyulabmd/web test`：117件成功、失敗0件。
+  - `pnpm --filter @miyulabmd/web typecheck`：exit 0。
+  - `pnpm --filter @miyulabmd/web build`：exit 0。
+  - `git diff --check`：exit 0。
+- buildの大きなchunk警告は残る（最大約2,290 kB、gzip約740 kB）。
+  この変更で警告を隠したり、無関係なbundle分割を行ったりはしていない。
+- 確認できたのはAPIが通信不能／503のときのキャッシュ本文の実画面表示、
+  readonly・日時表示・更新禁止・共同編集未接続と、正常なオンライン編集の開始。
+  Viteからアプリ資産を配信しているテストであり、ネットワークなしのアプリ起動や
+  実サーバーとの共同編集同期まで検証したという意味ではない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

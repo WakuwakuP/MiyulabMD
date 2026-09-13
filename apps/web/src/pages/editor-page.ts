@@ -225,22 +225,37 @@ export function syncCollabUser(
   applyAwarenessUser(collab.awareness, user);
 }
 
+type MutationSetters = {
+  isCurrent: () => boolean;
+  setSaveError: (error: string | null) => void;
+  setNote: (note: Note) => void;
+};
+
 export async function persistEditorAccess(
   note: Note | null,
   next: AccessDraft,
-  setters: {
-    setAccessDraft: (draft: AccessDraft) => void;
-    setSaveError: (error: string | null) => void;
-    setNote: (note: Note) => void;
-  },
+  setters: MutationSetters & { setAccessDraft: (draft: AccessDraft) => void },
 ) {
-  if (!note) {
+  if (!(note && setters.isCurrent())) {
     return;
   }
   setters.setAccessDraft(next);
   setters.setSaveError(null);
 
-  const result = await updateNote(note.id, noteAccessPatch(next));
+  let result: Awaited<ReturnType<typeof updateNote>>;
+  try {
+    result = await updateNote(note.id, noteAccessPatch(next));
+  } catch (error) {
+    if (setters.isCurrent()) {
+      setters.setSaveError(
+        error instanceof Error ? error.message : "保存できませんでした。",
+      );
+    }
+    return;
+  }
+  if (!setters.isCurrent()) {
+    return;
+  }
   if (!result.ok) {
     setters.setSaveError(result.error);
     setters.setAccessDraft(draftFromNote(note));
@@ -255,14 +270,12 @@ export async function persistEditorFolder(
   note: Note | null,
   folder: string,
   normalizeFolder: (value: string) => string,
-  setters: {
+  setters: MutationSetters & {
     setFolder: (folder: string) => void;
-    setSaveError: (error: string | null) => void;
-    setNote: (note: Note) => void;
     setAccessDraft: (draft: AccessDraft) => void;
   },
 ) {
-  if (!note) {
+  if (!(note && setters.isCurrent())) {
     return;
   }
   const next = normalizeFolder(folder);
@@ -270,7 +283,20 @@ export async function persistEditorFolder(
     return;
   }
 
-  const result = await updateNote(note.id, { folder: next });
+  let result: Awaited<ReturnType<typeof updateNote>>;
+  try {
+    result = await updateNote(note.id, { folder: next });
+  } catch (error) {
+    if (setters.isCurrent()) {
+      setters.setSaveError(
+        error instanceof Error ? error.message : "保存できませんでした。",
+      );
+    }
+    return;
+  }
+  if (!setters.isCurrent()) {
+    return;
+  }
   if (!result.ok) {
     setters.setFolder(note.folder);
     setters.setSaveError(result.error);
