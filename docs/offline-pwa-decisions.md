@@ -1978,6 +1978,22 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 既存のfail-closed拒否catchは変更しない。別タブ間の拒否世代の同期などの
   既存未完了事項を、この共有修正で解決したとはしない。
 
+## D106：世代付きノート取得共有の本体検証
+
+- 状態：親がD105の6ファイルをliteral patchで配置し、候補とのbyte一致を確認した。
+  candidateコメントを除いたライブSHA256は次のとおり：
+  - note-read-session.ts：`8cc0a4d634f2c655f12f5db703b547212565896346bebd548750baed466dbab1`
+  - offline-cache.ts：`8f1544abf39386d9ab763ddb28d3722ca03c31201d54781bcef97ede182c6374`
+  その他4ファイルはD105の候補SHAと同一。
+- 本体で直列実行：app+SW typecheck、browser91件、unit117件、production buildと
+  PWA8件、Biome6ファイル、diffcheckが全て成功した。除外した試験はない。
+- 同じ世代の共有、subscriber個別の中断、値／失敗結果の独立、旧cleanupの抑止、
+  copy失敗のsettlement、拒否後の旧transport再利用防止を含む。
+- precacheは119 entries、3281.86 KiB。main chunk約2.30MBの既存警告は継続する。
+- READMEに共有の限定範囲を追記した。ホバーや一覧／フォルダまで統合済みとはせず、
+  別タブのHTTP／拒否世代同期、alias、保存そのものの重複統合なども未完了のまま。
+  仕様全体や実配信環境での検証が完了したとはしない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

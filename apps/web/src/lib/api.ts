@@ -19,6 +19,7 @@ import { apiFetch as fetch } from "./api-fetch.ts";
 import { ApiHttpError, requestJson } from "./api-transport.ts";
 import { notifyArticleChanged } from "./article-changed.ts";
 import type { OgPreview } from "./embeds.ts";
+import { fetchNoteRequest } from "./note-request.ts";
 
 const fetchOpts: RequestInit = { credentials: "include" };
 
@@ -90,12 +91,9 @@ export async function fetchNotes(
 
 export function fetchNote(
   id: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; viewerId?: string } = {},
 ): Promise<ApiResult<Note>> {
-  return requestJson<Note>(`/api/notes/${id}`, {
-    ...fetchOpts,
-    signal: options.signal,
-  });
+  return fetchNoteRequest(id, options);
 }
 
 export async function updateTaskCheckbox(
