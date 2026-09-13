@@ -22,6 +22,8 @@ type Props = {
   openMenuId?: string | null;
   pending?: boolean;
   placeholder?: boolean;
+  readonly?: boolean;
+  listingIncomplete?: boolean;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
 };
 
@@ -67,6 +69,8 @@ export function NoteTree({
   openMenuId = null,
   pending = false,
   placeholder = false,
+  readonly = false,
+  listingIncomplete = false,
   onItemMenu,
 }: Props) {
   const items = showAllNotes
@@ -94,7 +98,11 @@ export function NoteTree({
               "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
               isDriveRoot ? "cursor-default text-muted" : "cursor-pointer",
             )}
-            onPointerEnter={() => prefetchFolder()}
+            onPointerEnter={() => {
+              if (!readonly) {
+                prefetchFolder();
+              }
+            }}
             to="/"
           >
             {MY_DRIVE_NAME}
@@ -112,14 +120,21 @@ export function NoteTree({
                   "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
                   current ? "cursor-default text-muted" : "cursor-pointer",
                 )}
-                onContextMenu={(event) =>
-                  handleRowMenu(event, {
-                    id: crumb.id,
-                    kind: "folder",
-                    name: crumb.name,
-                  })
+                onContextMenu={
+                  readonly
+                    ? undefined
+                    : (event) =>
+                        handleRowMenu(event, {
+                          id: crumb.id,
+                          kind: "folder",
+                          name: crumb.name,
+                        })
                 }
-                onPointerEnter={() => prefetchFolder(crumb.id)}
+                onPointerEnter={() => {
+                  if (!readonly) {
+                    prefetchFolder(crumb.id);
+                  }
+                }}
                 to={folderUrl(crumb.id)}
               >
                 {crumb.name}
@@ -133,7 +148,7 @@ export function NoteTree({
         <Link
           className="mb-3 block border-0 bg-transparent p-0 font-inherit text-accent no-underline"
           onPointerEnter={() => {
-            if (parentId) {
+            if (parentId && !readonly) {
               prefetchFolder(parentId);
             }
           }}
@@ -144,9 +159,9 @@ export function NoteTree({
       )}
 
       {placeholder && <ListSkeleton />}
-      {!placeholder && folders.length === 0 && items.length === 0 && (
-        <p>このフォルダは空です。</p>
-      )}
+      {!(placeholder || listingIncomplete) &&
+        folders.length === 0 &&
+        items.length === 0 && <p>このフォルダは空です。</p>}
       {!placeholder && (folders.length > 0 || items.length > 0) && (
         <DriveList
           className={cn(
@@ -174,8 +189,15 @@ export function NoteTree({
                   ) : undefined
                 }
                 name={folder.name}
-                onMenu={(event) => handleRowMenu(event, target)}
-                onPointerEnter={() => prefetchFolder(folder.id)}
+                onMenu={
+                  readonly ? undefined : (event) => handleRowMenu(event, target)
+                }
+                onPointerEnter={() => {
+                  if (!readonly) {
+                    prefetchFolder(folder.id);
+                  }
+                }}
+                readonly={readonly}
               />
             );
           })}
@@ -194,8 +216,15 @@ export function NoteTree({
                   />
                 }
                 name={note.title}
-                onMenu={(event) => handleRowMenu(event, target)}
-                onPointerEnter={() => prefetchNote(note.id)}
+                onMenu={
+                  readonly ? undefined : (event) => handleRowMenu(event, target)
+                }
+                onPointerEnter={() => {
+                  if (!readonly) {
+                    prefetchNote(note.id);
+                  }
+                }}
+                readonly={readonly}
               />
             );
           })}

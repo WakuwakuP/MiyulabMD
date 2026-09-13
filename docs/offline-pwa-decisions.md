@@ -790,6 +790,19 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   folder/list自動保存、authenticated時の503 fallback、MyDrive全体prefetchは後続。
   テストの保存元は公開cache APIによるfixtureであり、自動保存済みとは報告しない。
 
+### マイドライブ探索のライブ反映・親検証
+
+- 採用前の判断は`1593a44`に保存した。親がライブ5ファイルすべてを候補と`cmp`し、
+  バイト一致を確認した。変更は既存3ファイルと新規reader／CachedDriveViewだけ。
+- 候補overlayなしの通常runnerで親が再検証：
+  - `pnpm --filter @miyulabmd/web test:browser`：48件成功。
+  - `pnpm --filter @miyulabmd/web test`：117件成功、失敗0件。
+  - `pnpm --filter @miyulabmd/web typecheck`：exit 0。
+  - `pnpm --filter @miyulabmd/web build`：exit 0。
+  - `git diff --check`：exit 0。
+- Viteの大きなchunk警告は既存どおり残る（最大約2,293 kB、gzip約741 kB）。
+  デプロイ、SWによる完全オフライン起動、実APIからのfolder全体保存はまだ検証していない。
+
 ## D50：オンライン取得を接続する前にMyDriveルートの実IDを扱う
 
 - **状態**：後続のオンライン保存スライスに必要な契約差分を確認。まだ実装・検証していない。

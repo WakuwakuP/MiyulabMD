@@ -23,6 +23,7 @@ import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { peekFolder, peekNotes } from "../lib/list-cache.ts";
+import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
   type ConfirmState,
   confirmCopy,
@@ -285,7 +286,7 @@ function HomePageView({
   );
 }
 
-export function HomePage() {
+function NetworkHomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
   const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
@@ -488,4 +489,28 @@ export function HomePage() {
       visibleFolder={visibleFolder}
     />
   );
+}
+
+export function HomePage() {
+  const { folderId } = useParams();
+  const { userLoading, viewer } = useOutletContext<AppShellContext>();
+
+  if (userLoading) {
+    return <NetworkHomePage />;
+  }
+  if (viewer.mode === "cached" && viewer.cacheViewerId !== null) {
+    return (
+      <CachedDriveView
+        key={JSON.stringify([viewer.cacheViewerId, folderId ?? null])}
+      />
+    );
+  }
+  if (viewer.mode === "unavailable") {
+    return (
+      <p role="status">
+        閲覧者を確認できないため、この画面を表示できません。しばらくしてから再試行してください。
+      </p>
+    );
+  }
+  return <NetworkHomePage />;
 }

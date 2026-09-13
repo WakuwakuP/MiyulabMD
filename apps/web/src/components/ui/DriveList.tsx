@@ -31,14 +31,16 @@ export function DriveRow({
   menuOpen,
   onMenu,
   onPointerEnter,
+  readonly = false,
 }: {
   href: string;
   name: string;
   icon: ReactNode;
   meta?: ReactNode;
   menuOpen: boolean;
-  onMenu: (event: MouseEvent) => void;
+  onMenu?: (event: MouseEvent) => void;
   onPointerEnter?: () => void;
+  readonly?: boolean;
 }) {
   return (
     <li
@@ -46,7 +48,7 @@ export function DriveRow({
         "group flex items-center border-b border-border p-0 last:border-b-0 hover:bg-surface",
         menuOpen && "bg-surface",
       )}
-      onContextMenu={onMenu}
+      onContextMenu={readonly ? undefined : onMenu}
     >
       <Link
         className="flex min-h-12 min-w-0 flex-1 items-center gap-[0.7rem] px-[0.9rem] py-[0.55rem] text-inherit no-underline"
@@ -59,19 +61,21 @@ export function DriveRow({
         </span>
       </Link>
       {meta ? <span className="mr-1 shrink-0">{meta}</span> : null}
-      <IconButton
-        aria-expanded={menuOpen}
-        aria-haspopup="menu"
-        aria-label={`${name} の操作`}
-        className={cn(
-          "mr-[0.4rem] size-9 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
-          menuOpen && "opacity-100",
-        )}
-        onClick={onMenu}
-        onContextMenu={onMenu}
-      >
-        <MoreIcon />
-      </IconButton>
+      {!readonly && (
+        <IconButton
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          aria-label={`${name} の操作`}
+          className={cn(
+            "mr-[0.4rem] size-9 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100",
+            menuOpen && "opacity-100",
+          )}
+          onClick={onMenu}
+          onContextMenu={onMenu}
+        >
+          <MoreIcon />
+        </IconButton>
+      )}
     </li>
   );
 }
