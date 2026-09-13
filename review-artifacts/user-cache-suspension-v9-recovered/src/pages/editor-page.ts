@@ -172,6 +172,7 @@ export function bindEditorCollab(input: {
   setCollab: (session: YjsSession | null) => void;
   setCollabReady: (ready: boolean) => void;
   setMarkdown: (markdown: string) => void;
+  setCollabWritable: (writable: boolean) => void;
 }) {
   if (!(input.noteId && input.hydrated) || input.userLoading) {
     return;
@@ -195,13 +196,17 @@ export function bindEditorCollab(input: {
   input.setCollabReady(false);
 
   const onSynced = (synced: boolean) => {
+    input.setCollabWritable(session.provider.wsconnected && synced);
     onCollabSynced(synced, session, input.setCollabReady, input.setMarkdown);
   };
+  const onStatus = () => {
+    input.setCollabWritable(editorSessionWritable(session));
+  };
 
+  session.provider.on("sync", onSynced);
+  session.provider.on("status", onStatus);
   if (session.provider.synced) {
     onSynced(true);
-  } else {
-    session.provider.on("sync", onSynced);
   }
 
   const onMarkdownChange = () => {
@@ -210,8 +215,13 @@ export function bindEditorCollab(input: {
   session.yMarkdown.observe(onMarkdownChange);
   input.unbindRef.current = () => {
     session.provider.off("sync", onSynced);
+    session.provider.off("status", onStatus);
     session.yMarkdown.unobserve(onMarkdownChange);
   };
+}
+
+export function editorSessionWritable(session: YjsSession | null): boolean {
+  return !session || (session.provider.wsconnected && session.provider.synced);
 }
 
 export function syncCollabUser(
@@ -226,6 +236,8 @@ export function syncCollabUser(
 }
 
 type MutationSetters = {
+  // Dispatch permission is transient; completion ownership survives a pause.
+  canStart: () => boolean;
   isCurrent: () => boolean;
   setSaveError: (error: string | null) => void;
   setNote: (note: Note) => void;
@@ -236,7 +248,7 @@ export async function persistEditorAccess(
   next: AccessDraft,
   setters: MutationSetters & { setAccessDraft: (draft: AccessDraft) => void },
 ) {
-  if (!(note && setters.isCurrent())) {
+  if (!(note && setters.isCurrent() && setters.canStart())) {
     return;
   }
   setters.setAccessDraft(next);
@@ -247,6 +259,7 @@ export async function persistEditorAccess(
     result = await updateNote(note.id, noteAccessPatch(next));
   } catch (error) {
     if (setters.isCurrent()) {
+      setters.setAccessDraft(draftFromNote(note));
       setters.setSaveError(
         error instanceof Error ? error.message : "保存できませんでした。",
       );
@@ -275,7 +288,7 @@ export async function persistEditorFolder(
     setAccessDraft: (draft: AccessDraft) => void;
   },
 ) {
-  if (!(note && setters.isCurrent())) {
+  if (!(note && setters.isCurrent() && setters.canStart())) {
     return;
   }
   const next = normalizeFolder(folder);
@@ -288,6 +301,7 @@ export async function persistEditorFolder(
     result = await updateNote(note.id, { folder: next });
   } catch (error) {
     if (setters.isCurrent()) {
+      setters.setFolder(note.folder);
       setters.setSaveError(
         error instanceof Error ? error.message : "保存できませんでした。",
       );

@@ -47,6 +47,7 @@ import {
   bindEditorCollab,
   changeEditorMode,
   editorGridClass,
+  editorSessionWritable,
   ownerLabelFor,
   persistEditorAccess,
   persistEditorFolder,
@@ -180,6 +181,7 @@ function EditorShareDialog({
   noteId,
   user,
   accessDraft,
+  canEdit,
   isOwner,
   saveError,
   onChange,
@@ -190,6 +192,7 @@ function EditorShareDialog({
   noteId: string;
   user: AppShellContext["user"];
   accessDraft: AccessDraft;
+  canEdit: boolean;
   isOwner: boolean;
   saveError: string | null;
   onChange: (next: AccessDraft) => void;
@@ -200,7 +203,7 @@ function EditorShareDialog({
   }
   return (
     <ShareModal
-      disabled={!isOwner}
+      disabled={!(isOwner && canEdit)}
       error={saveError}
       inheritLabel="ディレクトリの設定に従う"
       linkUrl={`${window.location.origin}/n/${noteId}`}
@@ -304,6 +307,7 @@ function EditorWorkspace({
       </div>
       <EditorShareDialog
         accessDraft={accessDraft}
+        canEdit={canEdit}
         headingTitle={headingTitle}
         isOwner={isOwner}
         noteId={note.id}
@@ -327,6 +331,7 @@ function EditorWorkspace({
 function EditorPageView({
   loading,
   loadError,
+  paused,
   readSource,
   cachedAt,
   note,
@@ -335,6 +340,7 @@ function EditorPageView({
 }: {
   loading: boolean;
   loadError: string | null;
+  paused: boolean;
   readSource: "pending" | "network" | "cache";
   cachedAt: number | null;
   note: Note | null;
@@ -360,6 +366,12 @@ function EditorPageView({
         <p className="px-5 py-2" role="status">
           オフラインキャッシュを表示中（保存日時:{" "}
           {new Date(cachedAt).toLocaleString("ja-JP")})。閲覧のみです。
+        </p>
+      )}
+      {paused && (
+        <p className="px-5 py-2" role="status">
+          共同編集の接続が切れました。入力済みの内容はこの画面に保持しています。
+          再接続・再同期が完了するまで編集できません。
         </p>
       )}
       {workspace}
@@ -460,6 +472,7 @@ export function EditorPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
+  const [collabWritable, setCollabWritable] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
@@ -498,6 +511,10 @@ export function EditorPage() {
   const awareness = collab?.awareness;
   const yMarkdown = collab?.yMarkdown;
   const ready = Boolean(yMarkdown && awareness && collabReady);
+  // Read readiness is sticky for this session: a disconnect must not unmount
+  // the editor or replace its local document with the network/cache snapshot.
+  const paused = ready && !collabWritable;
+  const canMutate = canEdit && !paused;
 
   useLayoutEffect(() => {
     hydratedRef.current = false;
@@ -633,6 +650,7 @@ export function EditorPage() {
       sessionRef,
       setCollab,
       setCollabReady,
+      setCollabWritable,
       setMarkdown,
       unbindRef: unbindCollabRef,
       user,
@@ -656,11 +674,13 @@ export function EditorPage() {
   useEffect(() => {
     bindEditorHeader({
       awareness,
-      canEdit,
+      canEdit: canMutate,
+      canStart: () => editorSessionWritable(sessionRef.current),
       folder,
       isCurrent: () => viewScope?.isCurrent() === true,
       isOwner: flags.isOwner,
       note,
+      paused,
       readSource,
       setAccessDraft,
       setFolder,
@@ -676,10 +696,11 @@ export function EditorPage() {
   }, [
     note,
     viewMode,
-    canEdit,
+    canMutate,
     awareness,
     folder,
     flags.isOwner,
+    paused,
     readSource,
     setHeader,
     viewScope,
@@ -692,6 +713,7 @@ export function EditorPage() {
       loadError={loadError}
       loading={loading}
       note={note}
+      paused={paused}
       readSource={readSource}
       workspace={
         currentReadState?.phase === "success" && note && accessDraft ? (
@@ -700,7 +722,7 @@ export function EditorPage() {
             articleIssues={articleIssues}
             articleSource={articleSource}
             awareness={awareness}
-            canEdit={canEdit}
+            canEdit={canMutate}
             headingTitle={headingTitle}
             historyOpen={historyOpen}
             isOwner={flags.isOwner}
@@ -710,6 +732,7 @@ export function EditorPage() {
             onCloseShare={() => setShareOpen(false)}
             onPersistAccess={(next) => {
               void persistEditorAccess(note, next, {
+                canStart: () => editorSessionWritable(sessionRef.current),
                 isCurrent: () => viewScope?.isCurrent() === true,
                 setAccessDraft,
                 setNote,
@@ -739,6 +762,7 @@ function bindEditorHeader(input: {
   folder: string;
   viewMode: EditorMode;
   canEdit: boolean;
+  paused: boolean;
   readSource: "pending" | "network" | "cache";
   awareness: YjsSession["awareness"] | undefined;
   isOwner: boolean;
@@ -746,6 +770,7 @@ function bindEditorHeader(input: {
   setMode: (mode: EditorMode) => void;
   setFolder: (folder: string) => void;
   setSaveError: (error: string | null) => void;
+  canStart: () => boolean;
   isCurrent: () => boolean;
   setNote: (note: Note) => void;
   setAccessDraft: (draft: AccessDraft) => void;
@@ -767,7 +792,7 @@ function bindEditorHeader(input: {
       />
     ),
     end:
-      input.readSource === "cache" ? undefined : (
+      input.readSource === "cache" || input.paused ? undefined : (
         <EditorHeaderEnd
           awareness={input.awareness}
           folder={input.folder}
@@ -779,6 +804,7 @@ function bindEditorHeader(input: {
               input.folder,
               normalizeFolder,
               {
+                canStart: input.canStart,
                 isCurrent: input.isCurrent,
                 setAccessDraft: input.setAccessDraft,
                 setFolder: input.setFolder,

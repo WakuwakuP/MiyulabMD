@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
 for (const trigger of ["online", "visibilitychange"] as const) {
-  test(`a ${trigger} burst resumes interrupted startup prefetch only once`, async ({
+  test(`a ${trigger} burst schedules one cycle after startup's transient retry`, async ({
     page,
   }) => {
     const rootId = "alice-root";
@@ -69,15 +69,8 @@ for (const trigger of ["online", "visibilitychange"] as const) {
     await page.goto("/");
     await firstFailure;
     await expect(page.getByRole("link", { name: owned.title })).toBeVisible();
-    expect(cycles).toBe(1);
-    expect(bodies).toBe(0);
-
-    await page.evaluate((trigger) => {
-      const target = trigger === "online" ? window : document;
-      for (let index = 0; index < 3; index += 1) {
-        target.dispatchEvent(new Event(trigger));
-      }
-    }, trigger);
+    // The first transient failure is retried inside the startup cycle. Wait
+    // for its actual cached body, rather than racing that retry with UI paint.
     await expect
       .poll(
         () =>
@@ -95,6 +88,23 @@ for (const trigger of ["online", "visibilitychange"] as const) {
       )
       .toBe(owned.markdown);
     expect(cycles).toBe(2);
+    expect(bodies).toBe(1);
+    await page.evaluate((trigger) => {
+      const target = trigger === "online" ? window : document;
+      for (let index = 0; index < 3; index += 1) {
+        target.dispatchEvent(new Event(trigger));
+      }
+    }, trigger);
+    await expect.poll(() => cycles).toBe(3);
+    const observationWindow = await page.evaluate(async () => {
+      const moduleUrl = "/src/lib/mydrive-prefetch-coordinator.ts";
+      const { PREFETCH_DEBOUNCE_MS, PREFETCH_MIN_INTERVAL_MS } = await import(
+        moduleUrl
+      );
+      return PREFETCH_DEBOUNCE_MS + PREFETCH_MIN_INTERVAL_MS + 100;
+    });
+    await page.waitForTimeout(observationWindow);
+    expect(cycles).toBe(3);
     expect(bodies).toBe(1);
     await expect(
       page.getByRole("button", { name: "新規ノート" }),

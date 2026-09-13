@@ -2092,6 +2092,24 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   切断／remote resyncで失わない必要があり、実Chromium再現と修正を担当に依頼した。
   検証済みの通常入力だけを根拠にC7全体完了とはしない。
 
+## D113：候補の統合確認と再試行テストの契約更新
+
+- short ID解決・両識別子の拒否とShare候補を組み合わせ、親の関連16件が成功。
+  保存領域と世代はuser単位を保ち、片方の識別子だけで拒否を回避できない。
+- C7の追加IME・送信済みHTTP応答の修正後、親の関連14件が成功。
+  既に受け付けたPM本文をpause境界で保持し、HTTPの新規dispatch許可と
+  同じviewへの完了反映を分離する。candidate型検査・Biomeも親確認済み。
+- C6は通信例外／5xxだけを最大2試行・500ms間隔で再試行し、連続失敗4回で停止。
+  認証・quota/storage・中止はその規則へ混ぜない。停止後30秒cooldownを設け、
+  次cycleは一覧から候補を作り直す。親の関連19件が成功した。
+- 旧triggerテストはHTTP request数をcycle数と呼び、初回失敗後のUI描画速度次第で
+  新しいcycle内retryと競合していた。親は初回retry後の本文保存を待ってから
+  trigger burstを発生させ、追加cycleが1回、本文の不要再取得が0回であることを
+  scheduling deadlineを越えて検証する形へ変更した。成功条件を削除していない。
+- default candidate runnerへShare、resilience、metadata retryとcross-tab purgeを
+  明示追加した。別タブpurgeの永続fenceは専任担当が実装中で、上記focused成功を
+  未解決ケースも含めた全体GREENと読み替えない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
