@@ -9,6 +9,7 @@ async function mockEditorApis(
   let noteReads = 0;
   const second = {
     ...note,
+    folder: "second-folder",
     id: "note-2",
     markdown: "# Second\n\nSecond body",
     shortId: "short-2",
@@ -113,4 +114,110 @@ test("an unavailable viewer cannot initiate a note read or editing", async ({
   await expect(
     page.getByRole("button", { exact: true, name: "Edit" }),
   ).toHaveCount(0);
+});
+
+async function nextFrames(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+}
+
+for (const outcome of ["success", "failure"] as const) {
+  test(`a late folder ${outcome} cannot change the next note or seed legacy cache`, async ({
+    page,
+  }) => {
+    const { second } = await mockEditorApis(page);
+    let started: () => void = () => {
+      // Assigned synchronously below.
+    };
+    const mutationStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let release: (() => Promise<void>) | undefined;
+    await page.route(`**/api/notes/${note.id}`, (route) => {
+      if (route.request().method() !== "PATCH") {
+        return route.fallback();
+      }
+      release = () =>
+        outcome === "success"
+          ? route.fulfill({ json: { ...note, folder: "late-old-folder" } })
+          : route.fulfill({
+              json: { error: "Old save failed" },
+              status: 500,
+            });
+      started();
+    });
+    await page.goto(`/n/${note.id}`);
+    await expect(page.getByText("通信なしでも読みたい本文。")).toBeVisible();
+    await page.getByRole("button", { exact: true, name: "フォルダ" }).click();
+    await page.getByLabel("ノートのフォルダ").fill("requested-folder");
+    await nextFrames(page);
+    await page.getByLabel("ノートのフォルダ").press("Tab");
+    await mutationStarted;
+
+    await page.evaluate((id) => {
+      history.pushState(history.state, "", `/n/${id}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, second.id);
+    await expect(page.getByText("Second body", { exact: true })).toBeVisible();
+    if (!release) {
+      throw new Error("Folder mutation was not captured");
+    }
+    const response = page.waitForResponse(
+      (value) =>
+        value.request().method() === "PATCH" &&
+        new URL(value.url()).pathname === `/api/notes/${note.id}`,
+    );
+    await release();
+    await (await response).finished();
+    await nextFrames(page);
+    await page.getByRole("button", { exact: true, name: "フォルダ" }).click();
+    await expect(page.getByLabel("ノートのフォルダ")).toHaveValue(
+      second.folder,
+    );
+    await expect(
+      page.getByText("Old save failed", { exact: true }),
+    ).toHaveCount(0);
+    const stale = await page.evaluate(async (id) => {
+      const moduleUrl = "/src/lib/note-cache.ts";
+      const { peekNote } = await import(moduleUrl);
+      return peekNote(id) ?? null;
+    }, note.id);
+    expect(stale).toBeNull();
+  });
+}
+
+test("an open share dialog is not carried into another cached note", async ({
+  page,
+}) => {
+  const { second } = await mockEditorApis(page);
+  await page.route(`**/api/notes/${second.id}`, (route) =>
+    route.fulfill({ json: { error: "Unavailable" }, status: 503 }),
+  );
+  await page.goto(`/n/${note.id}`);
+  await expect(page.getByText("通信なしでも読みたい本文。")).toBeVisible();
+  await page.evaluate(async (cachedNote) => {
+    const moduleUrl = "/src/lib/offline-cache.ts";
+    const { openOfflineCache } = await import(moduleUrl);
+    const cache = await openOfflineCache({ userId: "alice" });
+    try {
+      await cache.putNote(cachedNote);
+    } finally {
+      cache.close();
+    }
+  }, second);
+  await page.getByRole("button", { exact: true, name: "共有" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.evaluate((id) => {
+    history.pushState(history.state, "", `/n/${id}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, second.id);
+  await expect(page.getByText("Second body", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "キャッシュ" }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });

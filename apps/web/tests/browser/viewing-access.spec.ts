@@ -36,6 +36,7 @@ test("only the current owned viewing scope can grant mutation access", async ({
     try {
       results.root = attempt();
       const first = viewing.beginView(viewer);
+      results.firstCurrent = first.isCurrent();
       results.pending = attempt();
       results.firstPublished = first.publish({
         source: "network",
@@ -44,6 +45,7 @@ test("only the current owned viewing scope can grant mutation access", async ({
       results.firstNetwork = attempt();
 
       const second = viewing.beginView(viewer);
+      results.firstReplaced = first.isCurrent();
       first.dispose();
       results.afterOldDispose = attempt();
       results.stalePublish = first.publish({
@@ -70,6 +72,7 @@ test("only the current owned viewing scope can grant mutation access", async ({
         user: { displayName: "Bob", email: "bob@example.test", id: "bob" },
       };
       results.changedViewer = attempt();
+      results.ownerInvalidated = second.isCurrent();
       results.oldViewerPublish = second.publish({
         source: "network",
         viewer: structuredClone(alice),
@@ -78,6 +81,7 @@ test("only the current owned viewing scope can grant mutation access", async ({
       bobView.publish({ source: "network", viewer: structuredClone(viewer) });
       results.bob = attempt();
       const stale = viewing.beginView(alice);
+      results.staleCurrent = stale.isCurrent();
       results.staleBeginPublish = stale.publish({
         source: "network",
         viewer: structuredClone(alice),
@@ -92,6 +96,7 @@ test("only the current owned viewing scope can grant mutation access", async ({
       unbindNew();
       results.afterUnbind = attempt();
       bobView.dispose();
+      results.disposed = bobView.isCurrent();
       return results;
     } finally {
       unbindOld();
@@ -108,13 +113,18 @@ test("only the current owned viewing scope can grant mutation access", async ({
     bob: "allowed",
     cachePublished: true,
     changedViewer: "blocked",
+    disposed: false,
+    firstCurrent: true,
     firstNetwork: "allowed",
     firstPublished: true,
+    firstReplaced: false,
     networkAgain: "allowed",
     oldViewerPublish: false,
+    ownerInvalidated: false,
     pending: "blocked",
     root: "allowed",
     staleBeginPublish: false,
+    staleCurrent: false,
     stalePublish: false,
     unbound: "blocked",
   });
