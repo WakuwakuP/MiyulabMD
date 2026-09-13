@@ -43,3 +43,14 @@ offline acceptance cases by deleting those capabilities violates D41's
 requirement to preserve the online editing UX. The replacement must instead
 start from the complete 656-line `EditorPage.tsx` and make only the owned-read,
 provenance/capability, and cache-status changes.
+
+## D42 adoption notes
+
+The complete page now starts with no legacy cache/SSR note state. After
+`userLoading` settles it creates a viewer-owned read session and a viewing
+scope, and keeps both alive for the display lifetime. The result publishes
+source and viewer association before it can update the page; stale results
+are ignored. Cache results remain preview-only, suppress collaboration and
+mutation-oriented header controls, and expose the persisted `cachedAt` value
+in one accessible status message. A cache miss has a local-cache explanation,
+while server failures retain their cache warning.

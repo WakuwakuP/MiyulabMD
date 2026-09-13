@@ -37,11 +37,13 @@ import {
   dismissStaleSsrPreview,
   removeSsrPreview,
 } from "../lib/note-bootstrap.ts";
-import { loadNote, noteFromCaches } from "../lib/note-cache.ts";
 import {
-  applyEditorNoteLoad,
+  createNoteReadSession,
+  type NoteReadResult,
+  OfflineNoteUnavailableError,
+} from "../lib/note-read-session.ts";
+import {
   applySplitScroll,
-  beginEditorNoteLoad,
   bindEditorCollab,
   changeEditorMode,
   editorGridClass,
@@ -325,12 +327,16 @@ function EditorWorkspace({
 function EditorPageView({
   loading,
   loadError,
+  readSource,
+  cachedAt,
   note,
   accessDraft,
   workspace,
 }: {
   loading: boolean;
   loadError: string | null;
+  readSource: "pending" | "network" | "cache";
+  cachedAt: number | null;
   note: Note | null;
   accessDraft: AccessDraft | null;
   workspace: ReactNode;
@@ -348,7 +354,17 @@ function EditorPageView({
   if (!(note && accessDraft)) {
     return null;
   }
-  return workspace;
+  return (
+    <>
+      {readSource === "cache" && cachedAt !== null && (
+        <p className="px-5 py-2" role="status">
+          オフラインキャッシュを表示中（保存日時:{" "}
+          {new Date(cachedAt).toLocaleString("ja-JP")})。閲覧のみです。
+        </p>
+      )}
+      {workspace}
+    </>
+  );
 }
 
 function EditorHeaderEnd({
@@ -410,16 +426,18 @@ function articleIssuesFor(
 
 export function EditorPage() {
   const { id = "" } = useParams();
-  const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
-  const cached = noteFromCaches(id);
-  const [note, setNote] = useState<Note | null>(() => cached ?? null);
-  const [markdown, setMarkdown] = useState(() => cached?.markdown ?? "");
-  const [folder, setFolder] = useState(() => cached?.folder ?? "");
-  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(() =>
-    cached ? draftFromNote(cached) : null,
-  );
+  const { user, userLoading, viewer, viewing, setHeader } =
+    useOutletContext<AppShellContext>();
+  const [note, setNote] = useState<Note | null>(null);
+  const [markdown, setMarkdown] = useState("");
+  const [folder, setFolder] = useState("");
+  const [accessDraft, setAccessDraft] = useState<AccessDraft | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(() => !cached);
+  const [loading, setLoading] = useState(true);
+  const [readSource, setReadSource] = useState<"pending" | "network" | "cache">(
+    "pending",
+  );
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
@@ -436,7 +454,9 @@ export function EditorPage() {
   const noteId = note?.id;
   const userId = user?.id;
   const flags = ownerFlags(user, note);
-  const viewMode: EditorMode = flags.canEdit ? mode : "preview";
+  const readReady = readSource !== "pending" && !loading;
+  const canEdit = flags.canEdit && readSource === "network" && readReady;
+  const viewMode: EditorMode = canEdit ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
   const articleSource = matchArticleSource(folder, articleSources);
@@ -447,38 +467,86 @@ export function EditorPage() {
 
   useEffect(() => {
     dismissStaleSsrPreview(id);
-    const setters = {
-      hydratedRef,
-      setAccessDraft,
-      setCollab,
-      setCollabReady,
-      setFolder,
-      setLoadError,
-      setLoading,
-      setMarkdown,
-      setMode,
-      setNote,
-      setSaveError,
-      setSplitScroll,
-    };
-    const hit = beginEditorNoteLoad(id, setters);
+    if (userLoading) {
+      setLoading(true);
+      setReadSource("pending");
+      return;
+    }
+    const session = createNoteReadSession(viewer);
+    const scope = viewing.beginView(viewer);
     let cancelled = false;
-    void loadNote(id, Boolean(hit)).then((result) => {
-      applyEditorNoteLoad(result, id, hit, cancelled, setters);
-    });
+    setLoading(true);
+    setReadSource("pending");
+    setLoadError(null);
+    setNote(null);
+    setAccessDraft(null);
+    setMarkdown("");
+    setFolder("");
+    void session.read(id).then(
+      (result: NoteReadResult) => {
+        if (
+          cancelled ||
+          !scope.publish({
+            source: result.ok ? result.source : "network",
+            viewer: result.viewer,
+          })
+        ) {
+          return;
+        }
+        if (!result.ok) {
+          setNote(null);
+          setAccessDraft(null);
+          setReadSource("network");
+          setCachedAt(null);
+          setLoadError(
+            result.cacheWarning
+              ? `${result.error} ${result.cacheWarning}`
+              : result.error,
+          );
+          setLoading(false);
+          return;
+        }
+        setNote(result.data);
+        setMarkdown(result.data.markdown);
+        setFolder(result.data.folder);
+        setAccessDraft(draftFromNote(result.data));
+        setReadSource(result.source);
+        setCachedAt(result.cachedAt);
+        setLoading(false);
+      },
+      (error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setNote(null);
+        setAccessDraft(null);
+        setReadSource("network");
+        setCachedAt(null);
+        setLoading(false);
+        let message = "ノートを読み込めませんでした。";
+        if (error instanceof OfflineNoteUnavailableError) {
+          message = "このノートはオフラインキャッシュに保存されていません。";
+        } else if (error instanceof Error) {
+          message = error.message;
+        }
+        setLoadError(message);
+      },
+    );
     return () => {
       cancelled = true;
+      session.dispose();
+      scope.dispose();
     };
-  }, [id]);
+  }, [id, userLoading, viewer, viewing]);
 
   useEffect(() => subscribeArticleSources(user, setArticleSources), [user]);
 
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);
-    if (!loading && markdown) {
+    if (!loading) {
       removeSsrPreview();
     }
-  }, [id, loading, markdown]);
+  }, [id, loading]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -503,7 +571,7 @@ export function EditorPage() {
   useEffect(() => {
     bindEditorCollab({
       hydrated: hydratedRef.current,
-      noteId,
+      noteId: canEdit ? noteId : undefined,
       sessionRef,
       setCollab,
       setCollabReady,
@@ -513,7 +581,7 @@ export function EditorPage() {
       userLoading,
       viewMode,
     });
-  }, [noteId, userLoading, viewMode, user]);
+  }, [noteId, userLoading, viewMode, user, canEdit]);
 
   useEffect(() => {
     syncCollabUser(collab, user);
@@ -530,10 +598,11 @@ export function EditorPage() {
   useEffect(() => {
     bindEditorHeader({
       awareness,
-      canEdit: flags.canEdit,
+      canEdit,
       folder,
       isOwner: flags.isOwner,
       note,
+      readSource,
       setAccessDraft,
       setFolder,
       setHeader,
@@ -548,19 +617,22 @@ export function EditorPage() {
   }, [
     note,
     viewMode,
-    flags.canEdit,
+    canEdit,
     awareness,
     folder,
     flags.isOwner,
+    readSource,
     setHeader,
   ]);
 
   return (
     <EditorPageView
       accessDraft={accessDraft}
+      cachedAt={cachedAt}
       loadError={loadError}
       loading={loading}
       note={note}
+      readSource={readSource}
       workspace={
         note && accessDraft ? (
           <EditorWorkspace
@@ -568,7 +640,7 @@ export function EditorPage() {
             articleIssues={articleIssues}
             articleSource={articleSource}
             awareness={awareness}
-            canEdit={flags.canEdit}
+            canEdit={canEdit}
             headingTitle={headingTitle}
             historyOpen={historyOpen}
             isOwner={flags.isOwner}
@@ -606,6 +678,7 @@ function bindEditorHeader(input: {
   folder: string;
   viewMode: EditorMode;
   canEdit: boolean;
+  readSource: "pending" | "network" | "cache";
   awareness: YjsSession["awareness"] | undefined;
   isOwner: boolean;
   setHeader: AppShellContext["setHeader"];
@@ -631,25 +704,31 @@ function bindEditorHeader(input: {
         value={input.viewMode}
       />
     ),
-    end: (
-      <EditorHeaderEnd
-        awareness={input.awareness}
-        folder={input.folder}
-        folderId={input.note.folderId}
-        isOwner={input.isOwner}
-        onFolderBlur={() => {
-          void persistEditorFolder(input.note, input.folder, normalizeFolder, {
-            setAccessDraft: input.setAccessDraft,
-            setFolder: input.setFolder,
-            setNote: input.setNote,
-            setSaveError: input.setSaveError,
-          });
-        }}
-        onFolderChange={input.setFolder}
-        onHistory={() => input.setHistoryOpen(true)}
-        onShare={() => input.setShareOpen(true)}
-      />
-    ),
+    end:
+      input.readSource === "cache" ? undefined : (
+        <EditorHeaderEnd
+          awareness={input.awareness}
+          folder={input.folder}
+          folderId={input.note.folderId}
+          isOwner={input.isOwner}
+          onFolderBlur={() => {
+            void persistEditorFolder(
+              input.note,
+              input.folder,
+              normalizeFolder,
+              {
+                setAccessDraft: input.setAccessDraft,
+                setFolder: input.setFolder,
+                setNote: input.setNote,
+                setSaveError: input.setSaveError,
+              },
+            );
+          }}
+          onFolderChange={input.setFolder}
+          onHistory={() => input.setHistoryOpen(true)}
+          onShare={() => input.setShareOpen(true)}
+        />
+      ),
     folder: input.folder,
     layout: "editor",
   });

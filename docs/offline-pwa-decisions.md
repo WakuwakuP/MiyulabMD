@@ -581,6 +581,35 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   であることを確認した。強化した2ケースはオンラインEdit条件を通過し、
   永続キャッシュがnullのままという本来の未実装箇所でREDになった。
 
+## D43：Editorの成功・失敗とhydrationを一貫させる
+
+- **状態**：候補レビューで不採用箇所を特定、親テストREDから補修する。
+- **選択前チェックポイント**：`8d9ff16`（完全なオンラインEditorを保持した出発点）。
+- **背景**：38件成功の候補で、成功時にhydratedRefがtrueにならずオンライン共同編集が
+  開始できなかった。またHTTP失敗をnetworkとしてscopeへpublishし、更新gateが開いていた。
+- **採用方針**：成功時だけ現在の読込をhydratedにし、loading・失敗はpendingとして更新を拒否。
+  元と同じく新しいnoteへ移る際はpreviewから始める。ボタンを置くだけで編集保持とは扱わない。
+- **検証**：親がeditor-read-lifecycleを追加。候補ではEdit後の接続数が0でRED、
+  403表示後のupdateNoteもReadOnlyViewingErrorにならずRED。
+  オンライン接続・note変更のテストは元のライブEditorでは成功したため、fixtureの誤りではない。
+- **範囲**：WebSocketは外部境界で受け止め、接続開始とnote遷移を検証する。
+  実サーバーとのYjs同期全体や切断中draft保存を検証済みとは扱わない。
+
+## D44：現在のid/viewerに結びついた読込状態から表示可否を導出する
+
+- **状態**：推奨案を選択、D43とともに補修へ進む。
+- **選択肢A**：`{id, ownerViewer, result}`等の一つの読込状態を保持し、
+  現在のid/viewerと一致する成功結果からsource・cachedAt・編集可否を導出する。
+  B＝readSource、cachedAt、loadingだけを独立に更新し続ける。
+- **採用**：A。Bではルート/viewer変更直後のrenderに前のnetwork状態が残り、
+  effectでリセットする前に古いnoteの権限やcollaboration条件を使う余地がある。
+- **失敗経路**：throwされたエラーもcancelledだけでなくscope所有権を確認してからUIへ反映。
+  unavailable viewerはNoteReadSessionへ進めず、閲覧情報を確認できない旨を表示する。
+- **検証**：unavailable viewerのテストを追加し、現在の候補は適切な説明を出さずRED。
+  補修後はノートAPI要求0件・本文なし・Editなしを要求する。既定候補検証は41件となる。
+- **制約**：編集用markdown状態や既存オンラインUIは維持し、読込状態の所有権と混同しない。
+  キャッシュ用の表示を追加するためにオンライン機能を削除しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
