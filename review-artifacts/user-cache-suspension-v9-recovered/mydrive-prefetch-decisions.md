@@ -35,3 +35,18 @@ denial then permits the loop to acquire later independent notes. A failure to
 persist that denial is a storage stop, rather than a broad reclassification of
 other errors. Successful body writes clear the denial with the read's original
 ordering token, so an older revalidation cannot clear a later denial.
+
+## D79: Keep acquisition failures at their actual I/O boundary
+
+The prefetch cycle tracks whether its current awaited operation is network or
+storage. Generic IndexedDB exceptions are therefore storage stops even when a
+cache handle exists; transport exceptions remain network stops. Notes-list HTTP
+errors use an Error-compatible status-bearing error, preserving the existing
+`fetchNotes(): NoteSummary[]` success contract while classifying HTTP 401 as
+authentication expiry.
+
+The result is held until the single `cache.close()` in `finally` completes. A
+close failure is a storage stop, while abort observed at entry, between I/O
+operations, or during close has cancellation priority. No rollback or
+compensating deletion is attempted, so completed transactions remain visible
+and no later note bodies are requested after a stop.

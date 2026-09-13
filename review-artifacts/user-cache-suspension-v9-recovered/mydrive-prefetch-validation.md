@@ -62,3 +62,35 @@ attempt before the permitted local browser install failed before tests ran
 because Chromium was missing; it was rerun successfully after installing the
 worktree-local browser. Candidate `src/lib/mydrive-prefetch.ts` SHA-256:
 `760f549c0019e0b43d31120c1e408b3f968baff0e7db2d93b05102cb6e6ded15`.
+
+## D79 validation
+
+The first requested candidate-focused command could not start because the
+worktree lacked dependencies: `node apps/web/scripts/check-offline-candidate.mjs
+review-artifacts/user-cache-suspension-v9-recovered browser
+tests/browser/mydrive-prefetch.spec.ts mydrive-prefetch-ownership.spec.ts
+mydrive-prefetch-denial.spec.ts mydrive-prefetch-stops.spec.ts` failed before
+tests with `ERR_MODULE_NOT_FOUND: Cannot find package 'vite'`. Dependencies are
+not installed, so Chromium/test counts, the candidate-all 74 expectation, and
+the live 117-unit expectation remain unverified for this change. The
+standalone `pnpm exec biome check` also could not run because `biome` was
+unavailable. After `pnpm install --frozen-lockfile --offline` and the permitted
+worktree-local `pnpm --filter @miyulabmd/web run test:browser:install`, the
+same focused command completed with `7 passed (5.6s)`. Candidate `all`
+completed with `74 passed (19.9s)`, including typecheck and Biome. Live web
+unit tests completed with `117 passed, 0 failed`.
+
+`git diff --check` passed. The focused candidate scope is the four
+`mydrive-prefetch*.spec.ts` files (7 tests total: startup 1, ownership 1,
+denial 2, stops 3); no tests or runner files were changed. D78 denial behavior
+and D77 viewer snapshot remain untouched.
+
+Post-change candidate file SHA-256 values (computed with Node
+`crypto.createHash("sha256")`):
+
+- `src/lib/mydrive-prefetch.ts`:
+  `b7f4a7d69fa1264278c258deda491eb9fc4018b0edb5d80e1a4137803d09e6fe`
+- `api.ts`:
+  `1d844664a3b4268b04f31b7ba27542adb2f758e04075031a0a4d02204b33faee8`
+- `api-transport.ts`:
+  `44f5f6d256186257a4bc2a0425e33a8bfbeba41339bbccd2635a118b566f9977`
