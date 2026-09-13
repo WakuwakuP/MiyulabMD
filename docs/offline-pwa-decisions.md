@@ -2123,6 +2123,17 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 実actor eviction/crashの注入はまだ行っておらず、再構築とretryの証拠は
   helperのtransactional unit testである。保存確認のclient通知は後続必須作業。
 
+## D115：添付画像の実表示RED
+
+- 親の `offline-image-view.spec.ts` は、実PNGをonline表示し、HTTP cacheを無効化、
+  APIを遮断してreloadした後の本文・画像を確認する。本文のcached表示は成功したが、
+  添付画像のnaturalWidthが1から0となりRED。保存済み本文だけで画像対応済みとはしない。
+- shared packageの画像参照parserと、既存R2取得APIの権限契約を再利用する。
+  外部画像は非目標であり、SWのAPI runtime cacheへ私的画像を入れる案は採らない。
+  userスコープのOPFS/IDB参照とcached previewの解決を接続する必要がある。
+- cache coreはcross-tab fenceの担当が作業中なので、同じ保存層の並行変更はしない。
+  このREDは画像保存・表示の次の縦切りの受け入れ基準として保持する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
