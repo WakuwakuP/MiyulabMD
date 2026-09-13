@@ -1821,6 +1821,25 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 対象はcandidate AppShellと専用記録。別タブ認証変更の検出や再認証後の
   全ての競合まで完了とはせず、後続の失敗・所有者交代試験を行う。
 
+## D98：同じ未認証viewerの再確認で閲覧状態を壊さない
+
+- 状態：D97の同一／別ユーザー復帰2件は親も成功。追加の503後の閲覧維持試験がRED。
+- 背景：resolverが同じcached userを返しても、D97は新しいViewerContextオブジェクトを
+  無条件で公開する。Editorの所有寿命が置き換わり、表示が再生成されて文字選択が消えた。
+- 親試験は実際のSelection APIで本文を選択し、初期選択が存在することを確認する。
+  最初の再確認を503にし、次の再確認応答を保留する。public recovery eventで
+  次の要求が始まったこと（前要求のsettleとsingle-flight解除）を確認した後、
+  同じ選択が残ることを要求する。結果exit 1：初期選択は存在したが、その後は空文字。
+  DOMのprivate属性やcoordinator内部状態に依存して成功を作らない。
+- 推奨：cached／unavailableなど、userがnullでmodeとcacheViewerIdが変わらない
+  結果では、既存viewerRefとReact stateのオブジェクトを両方維持する。
+  片方だけ保持してviewing scopeの所有判定を壊さない。初回loading解除は維持する。
+- authenticatedへの復帰、cache ID変更、mode変更は従来どおり公開する。
+  JSON文字列化による同一判定、全ユーザーの更新抑制、Editorの再実装は選ばない。
+- scopeはcandidate AppShellと専用記録のみ。generation／abort／requestRef cleanupや
+  resolverのHTTP意味を変更せず、失敗後にも再試行できることを維持する。
+  重複発行した試験の回数を証拠に数えず、表示されたREDの内容を根拠とする。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

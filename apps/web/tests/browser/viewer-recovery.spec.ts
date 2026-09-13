@@ -147,3 +147,109 @@ for (const verifiedUser of ["alice", "bob"] as const) {
     }
   });
 }
+
+test("failed verification preserves cached reading state and permits a later retry", async ({
+  page,
+}) => {
+  const text = "選択しているキャッシュ本文を維持します。";
+  await page.goto("/tests/browser/fixtures/storage.html");
+  await page.evaluate(
+    async ({ note, text }) => {
+      const storageUrl = "/src/lib/offline-cache.ts";
+      const { openOfflineCache, persistCachedViewerId } = await import(
+        storageUrl
+      );
+      await persistCachedViewerId("alice");
+      const cache = await openOfflineCache({ userId: "alice" });
+      try {
+        await cache.putNote({ ...note, markdown: text });
+      } finally {
+        cache.close();
+      }
+    },
+    { note, text },
+  );
+  let online = false;
+  let recoveries = 0;
+  const releaseRetry = Promise.withResolvers<void>();
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/me") {
+      if (!online) {
+        return route.abort("internetdisconnected");
+      }
+      recoveries += 1;
+      if (recoveries === 1) {
+        return route.fulfill({ json: { error: "Try later" }, status: 503 });
+      }
+      await releaseRetry.promise;
+      return route.fulfill({
+        json: {
+          user: {
+            displayName: "Alice",
+            email: "alice@example.test",
+            id: "alice",
+          },
+        },
+      });
+    }
+    if (path === "/api/auth/config") {
+      return route.fulfill({ json: { access: false, mock: true } });
+    }
+    if (path === `/api/notes/${note.id}`) {
+      return route.fulfill({ json: { ...note, markdown: text } });
+    }
+    return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+  });
+  try {
+    await page.goto(`/n/${note.id}`);
+    const body = page.getByText(text, { exact: true });
+    await expect(body).toBeVisible();
+    await body.evaluate((element) => {
+      const selection = window.getSelection();
+      if (!selection) {
+        throw new Error("Selection API unavailable");
+      }
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+      text,
+    );
+    online = true;
+    const failed = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/me" &&
+        response.status() === 503,
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await (await failed).finished();
+
+    // Retry only through public recovery events. The held second response also
+    // establishes that the first request has settled and released single-flight.
+    await expect
+      .poll(async () => {
+        await page.evaluate(() =>
+          document.dispatchEvent(new Event("visibilitychange")),
+        );
+        return recoveries;
+      })
+      .toBe(2);
+    await body.scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+      text,
+    );
+    await expect(
+      page.getByRole("button", { exact: true, name: "Edit" }),
+    ).toHaveCount(0);
+
+    releaseRetry.resolve();
+    await expect(
+      page.getByRole("button", { exact: true, name: "Edit" }),
+    ).toBeEnabled();
+  } finally {
+    releaseRetry.resolve();
+  }
+});
