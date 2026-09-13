@@ -437,6 +437,44 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **結果**：実ポート一致チェックを含む候補のローカル読込テストが1件成功し、
   ランナーとfixture/testのBiome・diff-checkも成功した。
 
+## D36：更新dispatchへ所有権付き閲覧スコープを渡す
+
+- **状態**：公開APIを決め、親テストREDから実装へ進む。
+- **選択前チェックポイント**：`d755e26`（AppShell viewer contextのライブ採用）。
+- **背景**：更新APIが現在のデータのcache/network由来を参照する必要がある。
+  古い画面の遅い結果やcleanupが、新しい画面・viewerの許可状態を変更してはいけない。
+- **選択肢A**：AppShellのviewer getterと、現在の閲覧スコープの明示的な結果を
+  共通dispatchの判定へ渡す。B＝各更新APIへ独立のreadonlyフラグを追加。
+  C＝認証済みかどうかだけで更新を許可する。
+- **採用**：A。既存の`createMutationGate`のルールを再利用し、
+  出所の推測やフラグの付け忘れを避ける。キャッシュの保存先決定には使わない。
+- **公開契約**：`createViewingAccess(readViewer)`は`getAccess`と`beginView(ownerViewer)`を返す。
+  スコープは`publish(access): boolean`と`dispose()`を持つ。新しいスコープはpendingから始める。
+  古い／別viewerのスコープは新しい状態を置換できず、古いdisposeも現在のスコープを消せない。
+- **データ境界**：閲覧結果のviewer/sourceをスナップショットとして保持し、
+  呼び出し側が渡した値や取得した値を書き換えても権限状態を変更できないようにする。
+  読み取り結果のviewerは複製されるため、publish時は所有者のidentity/mode/cache所属を照合する。
+- **binding契約**：`bindMutationAccess(getAccess)`は解除関数を返し、
+  古い解除関数が新しいbindingを消さない。`runMutation(operation)`は最新bindingから
+  既存gateで判定し、binding不在ならReadOnlyViewingErrorで実行を拒否する。
+- **スコープ外**：閲覧スコープがない一般画面では、確認済みviewerのnetwork操作を許可する。
+  cached/unavailable viewerは既存gateにより拒否される。サーバーの権限検証の代用ではない。
+- **検証**：`viewing-access.spec.ts`を作成し、新モジュールが存在しないためREDを確認。
+  pending、cache、viewer変更、古いpublish/dispose、入力値変更、古いbinding解除をpublic APIで検証する。
+- **範囲**：このスライスはpolicyモジュールのみ。API・AppShell・Editorへの接続は後続。
+
+## D37：既存Editorの状態を維持して読み取り専用へ接続する
+
+- **状態**：実装方向を選択、D36後に画面・API接続のテストへ進む。
+- **選択肢A**：既存Editorの読込をセッションへ接続し、同じ結果からpreview・編集可否・
+  collaboration・更新dispatchを制御する。B＝別のreadonlyページを作り、Editorと切り替える。
+- **採用**：A。既存のMarkdown previewと編集状態を再利用し、切断時の画面切替で
+  入力済みdraftを捨てる構造を避ける。処理の見通しが悪ければ小さなhookへ分ける。
+- **注意**：最初の主要対象は既存の`/n/:id`。`/s/:id`は実際にはSharePageへ向かう別経路で、
+  Editorへ勝手に変更しない。短縮ID・別名の扱いは仕様の確認項目に沿って後続で検証する。
+- **後続テスト**：既存offline-note-viewに加え、me成功＋ノートだけ503でも
+  cache由来としてreadonlyになることを確認し、authだけで許可する回帰を防ぐ。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
