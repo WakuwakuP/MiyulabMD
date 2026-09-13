@@ -529,12 +529,13 @@ function projectDeniedFolder(
   if (deniedCrumbIndex < 0) {
     return { ...folder, children };
   }
+  const crumbs = folder.crumbs.slice(deniedCrumbIndex + 1);
   return {
     ...folder,
     children: children.map(({ folder: _folder, ...child }) => child),
-    crumbs: folder.crumbs.slice(deniedCrumbIndex + 1),
+    crumbs,
     folder: undefined,
-    parentId: null,
+    parentId: crumbs.length >= 2 ? (crumbs.at(-2)?.id ?? null) : null,
     sourceFolder: null,
   };
 }

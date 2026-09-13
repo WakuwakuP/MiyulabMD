@@ -166,3 +166,84 @@ test("a deeper allowed descendant retains its nearest visible parent and cache t
   expect(snapshots.after?.folder.parentId).toBe("child");
   expect(snapshots.after?.cachedAt).toBe(snapshots.before?.cachedAt);
 });
+
+for (const target of ["denied", "grandchild"] as const) {
+  test(`a pending ${target} read applies a denial committed before it returns`, async ({
+    page,
+  }) => {
+    const hidden = { id: "denied", name: "Hidden ancestor" };
+    const visible = { id: "child", name: "Visible parent" };
+    const leaf = { id: "grandchild", name: "Visible leaf" };
+    const denied = sharedFolder("denied", hidden.name, null, [hidden]);
+    const descendant = sharedFolder("grandchild", leaf.name, "child", [
+      hidden,
+      visible,
+      leaf,
+    ]);
+    await page.goto("/tests/browser/fixtures/storage.html");
+    const snapshot = await page.evaluate(
+      async ({ target, denied, descendant }) => {
+        const moduleUrl = "/src/lib/offline-cache.ts";
+        const { openOfflineCache } = await import(moduleUrl);
+        const cache = await openOfflineCache({ userId: "alice" });
+        await cache.putFolder(denied);
+        await cache.putFolder(descendant);
+        let reading: () => void = () => {
+          // Assigned synchronously below.
+        };
+        let release: () => void = () => {
+          // Assigned synchronously below.
+        };
+        const started = new Promise<void>((resolve) => {
+          reading = resolve;
+        });
+        const released = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const originalGet = IDBObjectStore.prototype.get;
+        const success = Object.getOwnPropertyDescriptor(
+          IDBRequest.prototype,
+          "onsuccess",
+        );
+        if (!success?.set) {
+          throw new Error("Native IndexedDB success boundary unavailable");
+        }
+        IDBObjectStore.prototype.get = function (
+          this: IDBObjectStore,
+          ...args: Parameters<IDBObjectStore["get"]>
+        ) {
+          const request = originalGet.apply(this, args);
+          if (this.name === "folders") {
+            Object.defineProperty(request, "onsuccess", {
+              set(handler: (event: Event) => void) {
+                success.set?.call(request, (event: Event) => {
+                  reading();
+                  void released.then(() => handler.call(request, event));
+                });
+              },
+            });
+          }
+          return request;
+        };
+        try {
+          const pending = cache.getFolder(target);
+          await started;
+          await cache.denyFolder("denied");
+          release();
+          return await pending;
+        } finally {
+          release();
+          IDBObjectStore.prototype.get = originalGet;
+          cache.close();
+        }
+      },
+      { denied, descendant, target },
+    );
+    if (target === "denied") {
+      expect(snapshot).toBeNull();
+    } else {
+      expect(snapshot?.folder.crumbs).toEqual([visible, leaf]);
+      expect(snapshot?.folder.parentId).toBe("child");
+    }
+  });
+}

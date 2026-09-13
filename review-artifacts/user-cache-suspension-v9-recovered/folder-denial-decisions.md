@@ -21,3 +21,14 @@ descendant is detached from the denied ancestry.
 
 This slice intentionally does not add schema/version changes, root-alias
 handling, marker clearing, physical cleanup, or network integration.
+
+## D62 nearest visible parent
+
+The D60 projection now derives `parentId` from the second-to-last projected
+crumb when at least two visible crumbs remain. This preserves an independently
+allowed child's identity as the nearest visible parent of a deeper allowed
+descendant, while retaining `null` for a direct child of a denied ancestor.
+The projected crumbs are computed once and used for both the returned crumbs
+and parent derivation. Denied target/children filtering, hidden path and
+`sourceFolder` cleanup, user/sibling isolation, and original `cachedAt` values
+are unchanged. The separate read-overlap denial race remains out of scope.
