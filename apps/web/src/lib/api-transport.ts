@@ -1,3 +1,5 @@
+import { apiFetch } from "./api-fetch.ts";
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
@@ -63,7 +65,7 @@ export async function requestJson<T>(
 
   let response: Response;
   try {
-    response = await fetch(input, init);
+    response = await apiFetch(input, init);
   } catch (error) {
     rethrowTransportError(error, signal);
   }

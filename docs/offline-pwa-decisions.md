@@ -480,7 +480,7 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 
 ## D38：AppShellの閲覧ポリシーを更新APIへ接続する
 
-- **状態**：推奨案を選択、親テストRED。
+- **状態**：D39・D40の修正後にライブ採用・親検証済み。
 - **選択前チェックポイント**：`35dc6f5`（所有権付きpolicyのライブ採用）。
 - **選択肢A**：AppShellが一つのviewing controllerを持ち、同じcontrollerを
   Outlet contextと共通API dispatchへ渡す。B＝更新APIごとにreadonlyフラグを持つ。
@@ -501,6 +501,9 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   UI hookに別のfetch guardを重複追加する必要はない。
 - **範囲**：この接続後にEditorから実際の読込結果をpublishする。ノート画面全体の
   オフライン閲覧が、このスライスだけで完成するとは扱わない。
+- **結果**：親が候補36件を確認後、5つのライブファイルと候補の全bytes一致を確認。
+  ライブ36ブラウザ、117unit（API read/cancel testsを含む）、型チェック、
+  Webビルド、対象Biome・diff-checkが成功。ビルドの大きなchunk警告は継続。
 
 ## D39：誤ったfixtureに合わせてAPI契約を広げない
 
@@ -522,7 +525,7 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 
 ## D40：readonlyでも明示的なログアウトを維持する
 
-- **状態**：候補で修正、親の回帰確認GREEN。
+- **状態**：ライブ採用済み。親の回帰確認GREEN。
 - **背景**：共通API送信gateにより、既存`logout()`のPOST `/auth/logout`まで
   ReadOnlyViewingErrorになっていた。閲覧専用状態からのログアウトを阻害してはいけない。
 - **選択肢A**：明示的な`logout()`だけは元のnative fetch経路を維持する。

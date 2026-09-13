@@ -34,3 +34,12 @@ AppShellContext.ts fbe558c87902316fed25b6ed9d9f48dcbf9c7be9f8aeca3792c5412bf7fe4
 
 ライブ反映後は通常のsourceを読む検証を別途行う。Editorの実際のsource公開、
 ログアウト時のキャッシュ消去、Service Workerなどは後続であり、完成扱いにしない。
+
+## ライブ採用後の確認
+
+親が上記5ファイルをライブへ反映し、すべて候補と同一bytesであることを確認した。
+通常のbrowserコマンドへ19specを指定して36件成功。
+Web unit117件（API通信・取消のNodeテストを含む）、型チェック、Webビルド、
+対象Biome、diff-checkも成功した。
+
+更新dispatchとAppShell bindingとして採用済み。Editorの読込結果公開は次のスライス。

@@ -15,6 +15,7 @@ import type {
   PermissionPreset,
   SessionUser,
 } from "@miyulabmd/shared";
+import { apiFetch as fetch } from "./api-fetch.ts";
 import { requestJson } from "./api-transport.ts";
 import { notifyArticleChanged } from "./article-changed.ts";
 import type { OgPreview } from "./embeds.ts";
@@ -405,7 +406,7 @@ export async function deleteNote(id: string): Promise<ApiResult<void>> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch("/auth/logout", { ...fetchOpts, method: "POST" });
+  await globalThis.fetch("/auth/logout", { ...fetchOpts, method: "POST" });
 }
 
 export type ApiTokenSummary = {
