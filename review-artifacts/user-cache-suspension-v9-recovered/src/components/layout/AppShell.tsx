@@ -10,6 +10,7 @@ import {
 import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
+import { prefetchMyDrive } from "../../lib/mydrive-prefetch.ts";
 import {
   resolveViewerContext,
   type ViewerContext,
@@ -95,6 +96,33 @@ export function AppShell() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (
+      viewer.mode !== "authenticated" ||
+      !viewer.user ||
+      viewer.cacheViewerId !== viewer.user.id
+    ) {
+      return;
+    }
+    const snapshot = {
+      cacheViewerId: viewer.cacheViewerId,
+      mode: viewer.mode,
+      user: viewer.user,
+    } satisfies ViewerContext;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void prefetchMyDrive(snapshot, { signal: controller.signal }).catch(
+        () => {
+          // Prefetch is best effort; its public result classifies expected stops.
+        },
+      );
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [viewer]);
 
   useEffect(() => {
     let active = true;

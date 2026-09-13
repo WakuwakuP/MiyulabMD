@@ -64,3 +64,18 @@ timeout and the compound test's `AbortError` when its delayed note-list
 transaction is held open while `denyFolder` commits; those results are recorded
 exactly in the companion validation record rather than being hidden or worked
 around here.
+
+## D76 cancellation correction
+
+The D76 candidate correction reuses one `ensureReadIsCurrent` guard for the
+signal, current-owner callback, and user-suspension condition. It runs after
+the note-list read and before starting the folder read, preventing a cancelled
+compound read from starting its next storage operation. The assembled result is
+held until the `finally`-owned `cache.close()` completes; the same guard then
+runs immediately before the final return. There is no await after close.
+
+Signal cancellation still throws the exact `signal.reason` object. The
+list-first/folder-last order, D63 denial projection, timestamps, missing flags,
+and single close boundary are unchanged. No deletion, compensation write,
+additional cache close, or error weakening was added. This remains a
+candidate-only correction and does not address the separate prefetch test.

@@ -99,6 +99,48 @@ worktree changes under `review-artifacts/pwa-shell` were not touched. Live
 This candidate is preserved for parent review and is not adopted into the live
 implementation.
 
+## D76 cancellation correction validation
+
+Commands were run serially after the permitted frozen dependency and Chromium
+installation steps:
+
+```text
+pnpm install --frozen-lockfile
+  exit 0, 855 packages
+pnpm --filter @miyulabmd/web test:browser:install
+  exit 0
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser cached-drive-lifecycle.spec.ts
+  exit 0, 2 passed
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser offline-folder-denial.spec.ts
+  exit 0, 5 passed
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser offline-drive-view.spec.ts
+  exit 0, 6 passed
+node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all --grep-invert 'authenticated startup prepares unvisited MyDrive'
+  exit 0, 67 passed (the unrelated prefetch RED test was deliberately excluded)
+pnpm --filter @miyulabmd/web test
+  exit 0, 117 passed
+git diff --check
+  exit 0
+```
+
+The first focused lifecycle attempt before installation exited 1 because the
+Playwright Chromium executable was absent; no test failure was inferred from
+that environment error. The final focused runs above were serial. A duplicate
+drive-view invocation was also issued concurrently during investigation and
+is not counted as the validation run.
+
+Final candidate SHA-256:
+
+```text
+review-artifacts/user-cache-suspension-v9-recovered/src/lib/cached-drive-reader.ts
+fb0f5b581bef32a53382dce246445cf890130249d04b8c2b15ee008dd02d99c5
+```
+
+Diff scope is limited to the permitted candidate reader and append-only
+changes to these two folder-denial records. No live source, tests, runner,
+PWA, API, storage, prefetch helper, delete, staging, restore, or commit was
+changed.
+
 ## D72 compound-reader validation
 
 The requested commands were run serially after the candidate-only reader

@@ -218,8 +218,13 @@ export async function updateNote(
   return { data: (await res.json()) as Note, ok: true };
 }
 
-export async function fetchFolderTree(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/tree", fetchOpts);
+export async function fetchFolderTree(
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiResult<FolderRecord[]>> {
+  const res = await fetch("/api/folders/tree", {
+    ...fetchOpts,
+    signal: options.signal,
+  });
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
