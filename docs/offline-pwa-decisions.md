@@ -1784,6 +1784,18 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   browser81／unit117／PWA8等を再検証する。Yjs保存確認や別タブへの変更通知まで
   完了とはしない。
 
+## D96：drive更新通知の本体検証
+
+- 状態：親がD95の3ファイルをliteral patchで本体へ配置し、候補とのbyte一致を
+  確認した。APIの同期mutation guardとResponseを維持し、イベントはpayloadなし。
+- 本体で直列実行した結果：app+SW typecheck成功、browser81件成功（除外なし）、
+  unit117件成功、production buildとPWA8件成功、Biome3ファイル成功、
+  diffcheck成功。SSR probeはD95、実ブラウザ境界試験は本体suiteにも含まれる。
+- precacheは119 entries、3279.82 KiB。main chunk約2.30MBの既存警告は継続する。
+- READMEに同じ画面内のHTTP更新成功後の再確認を追記し、Yjs保存確認後や別タブへの
+  変更通知まで含むものではないことを未完了項目として明示した。
+  キャッシュを最新に保つ保証や全件保存の完了を宣言しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
