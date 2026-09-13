@@ -86,3 +86,71 @@ test("keyboard navigation joins an in-flight background note request", async ({
     release.resolve();
   }
 });
+
+test("a read after denial cannot join the older transport and restore its cached body", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(async (note) => {
+    const cacheUrl = "/src/lib/offline-cache.ts";
+    const sessionUrl = "/src/lib/note-read-session.ts";
+    const { openOfflineCache } = await import(cacheUrl);
+    const { createNoteReadSession } = await import(sessionUrl);
+    const cache = await openOfflineCache({ userId: "alice" });
+    await cache.putNote(note);
+    const viewer = {
+      cacheViewerId: "alice",
+      mode: "authenticated",
+      user: {
+        displayName: "Alice",
+        email: "alice@example.test",
+        id: "alice",
+      },
+    };
+    const oldReader = createNoteReadSession(viewer);
+    const newReader = createNoteReadSession(viewer);
+    const firstStarted = Promise.withResolvers<void>();
+    const oldResponse = Promise.withResolvers<Response>();
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = () => {
+      requests += 1;
+      if (requests === 1) {
+        firstStarted.resolve();
+        return oldResponse.promise;
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "Still forbidden" }), {
+          status: 403,
+        }),
+      );
+    };
+    try {
+      const old = oldReader.read(note.id).then(
+        (value: { ok: boolean }) => value.ok,
+        () => false,
+      );
+      await firstStarted.promise;
+      await cache.denyNote(note.id);
+      const fresh = newReader.read(note.id);
+      oldResponse.resolve(new Response(JSON.stringify(note)));
+      const [oldPublished, newResult] = await Promise.all([old, fresh]);
+      return {
+        cached: await cache.getNote(note.id),
+        newResult,
+        oldPublished,
+        requests,
+      };
+    } finally {
+      oldResponse.resolve(new Response(JSON.stringify(note)));
+      globalThis.fetch = originalFetch;
+      oldReader.dispose();
+      newReader.dispose();
+      cache.close();
+    }
+  }, note);
+  expect(result.newResult).toMatchObject({ ok: false, status: 403 });
+  expect(result.oldPublished).toBe(false);
+  expect(result.cached).toBeNull();
+  expect(result.requests).toBe(2);
+});

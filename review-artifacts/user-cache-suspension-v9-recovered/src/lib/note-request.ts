@@ -23,7 +23,15 @@ type Entry = {
 const inFlightByViewer = new Map<string, Map<string, Entry>>();
 
 function copyResult(result: ApiResult<Note>): ApiResult<Note> {
-  return result.ok ? { data: structuredClone(result.data), ok: true } : result;
+  return result.ok
+    ? { data: structuredClone(result.data), ok: true }
+    : { error: result.error, ok: false, status: result.status };
+}
+
+function cleanupSubscriber(subscriber: Subscriber): void {
+  if (subscriber.onAbort) {
+    subscriber.signal?.removeEventListener("abort", subscriber.onAbort);
+  }
 }
 
 function removeEntry(viewerId: string, id: string, entry: Entry): void {
@@ -63,26 +71,27 @@ function shareNoteRequest(
       subscribers: new Set(),
     };
     byNote.set(id, entry);
-    entry.promise.then(
+    const currentEntry = entry;
+    currentEntry.promise.then(
       (result) => {
-        removeEntry(viewerId, id, entry as Entry);
-        for (const subscriber of entry?.subscribers ?? []) {
-          if (subscriber.onAbort) {
-            subscriber.signal?.removeEventListener("abort", subscriber.onAbort);
+        removeEntry(viewerId, id, currentEntry);
+        for (const subscriber of currentEntry.subscribers) {
+          cleanupSubscriber(subscriber);
+          try {
+            subscriber.resolve(copyResult(result));
+          } catch (error) {
+            subscriber.reject(error);
           }
-          subscriber.resolve(copyResult(result));
         }
-        entry?.subscribers.clear();
+        currentEntry.subscribers.clear();
       },
       (error) => {
-        removeEntry(viewerId, id, entry as Entry);
-        for (const subscriber of entry?.subscribers ?? []) {
-          if (subscriber.onAbort) {
-            subscriber.signal?.removeEventListener("abort", subscriber.onAbort);
-          }
+        removeEntry(viewerId, id, currentEntry);
+        for (const subscriber of currentEntry.subscribers) {
+          cleanupSubscriber(subscriber);
           subscriber.reject(error);
         }
-        entry?.subscribers.clear();
+        currentEntry.subscribers.clear();
       },
     );
   }

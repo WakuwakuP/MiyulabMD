@@ -17,3 +17,20 @@
 - **中断規則**：一人の中断は他の subscriber に伝播しない。全員が中断した場合
   のみ underlying request を abort し、entry を直ちに削除する。settle 後は entry
   を保持せず、古い cleanup は後続の同じ key を削除しない。
+
+## D103：共有結果の失敗経路も subscriber ごとに完結させる
+
+- **状態**：候補実装済み。ライブソースには反映しない。
+- **背景**：共有結果の HTTP 403 container が subscriber 間で共有されると、一方の
+  `error` 変更が他方へ漏れる。また成功結果の `structuredClone` が失敗すると、
+  settlement callback 自体が reject し、subscriber が pending のままになる。
+- **選択**：成功結果のコピー失敗は該当 subscriber だけを同じ例外で reject し、
+  他の subscriber の settlement を継続する。失敗結果も subscriber ごとに新しい
+  container を作る。settlement の全経路で abort listener と subscriber Set を
+  清掃する。
+- **理由**：結果値の isolation と個別中断の契約を失敗経路にも一貫して適用しつつ、
+  ネットワーク Error の class／cause は transport の reject 値をそのまま渡せるため。
+- **対象外**：request key、refcount／中断規則、API caller、storage、拒否処理、
+  新しい API や fresh-bypass flag の追加。
+- **検証**：subscriber sharing／isolation／cancellation、note denial entry-ordering
+  ／ordering の focused specs を候補で直列実行する。

@@ -1934,6 +1934,29 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   テストのBiome指摘は親が修正した。次の修正対象はcandidate note-requestと
   専用判断／検証記録だけとする。
 
+## D104：共有HTTPにも既存の拒否世代を適用する
+
+- 状態：D103後の親candidate全体90件は成功したが、追加の拒否後join試験がRED。
+  取得共有は未採用のまま修正を続ける。
+- 親試験は古いHTTP200を保留し、public cache.denyNoteを確定後、新しいsessionで
+  同じノートを読む。サーバーは次の要求に403を返す設定だが、現候補は古いgroupへ
+  参加してHTTPを発生させず、古い200を新しい世代の保存・拒否解除に利用した。
+  結果exit 1：期待false/status403に対してok=true。これは実装の新しい競合であり、
+  D102のfixture待機点変更だけでは検証できていなかった。
+- 推奨：既存のnote拒否世代を小さなI/O非依存moduleへ抽出し、storageとHTTP共有が
+  同じ値を参照する。offline-cacheの既存exportは互換維持する。
+  Entry作成時の世代と新しいjoin時の世代が異なれば、新しいHTTP groupを作る。
+  旧groupのcleanupが新groupを削除しない既存identity条件を維持する。
+- 比較：callerに新しいepoch指定やtest専用のfresh設定を要求すると指定漏れが出る。
+  network helperからIDB/OPFS全体へ依存する案も避け、世代だけを共有する。
+  beginは世代を増やさず、拒否入口だけが増やす既存意味を変えない。
+- reviewerの「dispose時は拒否catchでuser suspensionを省く」提案は撤回された。
+  そのcatchは403/404観測後に拒否永続化できない場合であり、単にabortとして
+  無視すると古いキャッシュが読める。fail-closedを維持し、この行は変更しない。
+- 対象はcandidateの世代module／offline-cache／note-requestと専用記録。
+  永続marker形式、schema version、sessionの公開条件、別タブの世代同期や
+  alias対応は変更しない。親が新しい91件を確認してから採用を判断する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
