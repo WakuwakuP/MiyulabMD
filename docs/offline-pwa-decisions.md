@@ -1994,6 +1994,27 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   別タブのHTTP／拒否世代同期、alias、保存そのものの重複統合なども未完了のまま。
   仕様全体や実配信環境での検証が完了したとはしない。
 
+## D107：残作業全体の完了管理と独立部分の並行化
+
+- 利用者から、残っているタスク全ての完了まで進める指示を受けた。
+  `docs/offline-pwa-completion.md` を完了判定の一覧とし、仕様上の非目標は追加しない。
+- 調査で、過去の短い進捗表から漏れていた明示logout/user切替時の削除、
+  端末cache削除UI、オンライン編集中の切断、`/s`、実Worker検証も必須と確認した。
+- cache core・認証・画像refは共有interfaceが必要なので、同じファイルを複数担当に
+  同時編集させない。独立したMarkdownの画像参照抽出や実配信test harness等から
+  並行化する。未完了項目をさらに恒久的な「対象外」へ移して終了しない。
+- 画像参照抽出の最初のREDをshared Markdown packageへ追加した。
+  inline/reference画像、raw HTML、重複、frontmatter、code fence、unsafe srcを
+  実際のparser/sanitizer規則で区別する。現状はcollectImageUrls exportがなくexit 1。
+- 推奨：shared Markdown packageにcollectImageUrlsを追加する。app固有URLの判定は
+  Web側に残し、抽出器はレンダリングと同じMarkdown/raw HTML/sanitize規則を使う。
+  OGリンクや正規表現を画像parserとして代用しない。
+- この共有packageの未接続な追加は通常のisolated worker変更として実装し、
+  package全test/typecheckと親レビュー後にcommitする。Web候補runnerでは
+  shared packageのoverlayを扱えないため、不要な別runnerは増やさない。
+- デプロイ等の外部操作は、必要な承認を確認してから行う。ローカルの実Workerを
+  使った本番相当の受け入れ検証は先に進める。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
