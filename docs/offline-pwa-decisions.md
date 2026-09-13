@@ -1098,6 +1098,28 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   対象を出さないこと、独立したpublic note／子policyを巻き添えにしないこと。
   自動保存スライスのテスト成功を、この未接続の拒否処理の完了として扱わない。
 
+## D60：folder拒否の保存・読込primitiveを先に実装する
+
+- **状態**：親が公開cache APIのテストを先に追加し、`denyFolder`未実装でRED確認。
+  選択前のライブcheckpointは`5d5c1f3`（Home自動保存を含む60 browser／117 unit成功）。
+- **公開契約**：まず正規folder IDを受ける`denyFolder(id: string)`を追加する。
+  ユーザー別の永続markerを既存metadata storeへ記録する。rootのroute aliasの解決、
+  HTTP拒否との接続、再検証による解除は後続のテストで扱う。
+- **選択肢A**：markerを読込時に適用し、対象folderはnull、親childrenの対象entryは除外する。
+  独立した子folderは残し、拒否されたancestorまでのcrumb prefixと無効なparentリンクを隠す。
+  元のcachedAtを維持し、通常の`putFolder`では拒否を解除しない。
+- **選択肢B**：folder recordの削除だけで拒否を表現する。古いputや別の参照で復活しやすく、
+  「未取得」と「確認済み拒否」も区別できなくなるため選ばない。
+  C＝全子folder／noteを削除する案はD59の実権限モデルと矛盾する。
+- **採用**：A。metadataをユーザーprefixでまとめて読める形を推奨し、
+  各crumbごとの大量のDB往復や全ユーザーのmarker走査を避ける。schema versionは増やさない。
+  物理cleanupと拒否の有効性を混同せず、note本文・一覧や他ユーザーに通常拒否を波及させない。
+- **親テスト**：保存→deny→古いfolderを再put→reload後に、対象と親リンクが隠れ、
+  独立child・sibling・直接公開note・他ユーザーのsnapshotが残ることを要求する。
+  visibleCrumbsと同じく拒否ancestor以前のprefixも切り捨てる。既定browserは61件。
+- **制約**：これは保存primitiveであり、networkからの拒否処理が接続済みという意味ではない。
+  I/O失敗・競合・解除なども後続で検証するため、このテストだけで採用しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

@@ -246,6 +246,7 @@ async function browser() {
       ...(specs.length
         ? specs
         : [
+            "offline-folder-denial.spec.ts",
             "home-metadata.spec.ts",
             "offline-drive-view.spec.ts",
             "editor-read-lifecycle.spec.ts",
