@@ -790,6 +790,27 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   folder/list自動保存、authenticated時の503 fallback、MyDrive全体prefetchは後続。
   テストの保存元は公開cache APIによるfixtureであり、自動保存済みとは報告しない。
 
+## D50：オンライン取得を接続する前にMyDriveルートの実IDを扱う
+
+- **状態**：後続のオンライン保存スライスに必要な契約差分を確認。まだ実装・検証していない。
+- **発見**：Workerの`resolveFolderAccess`は`ensureFolderRow`でMyDriveルートにも
+  UUIDを付けて返す。`/api/folders`のrootレスポンスは必ずしも`id:null`ではない。
+  子folderのparentIdとroot直下のnote.folderIdもその実IDを参照する。
+- 現在のcached探索fixtureはnull-IDのroot snapshotであり、その成功は
+  実APIレスポンスを自動保存した際のroot解決を保証しない。D47–D49の範囲を広げて
+  検証済みと報告しない。
+- **選択肢A**：rootの保存時だけfolder.idをnullへ書き換える。
+  noteの所属・子の親・直接`/f/:id`への参照が崩れるため選ばない。
+- **選択肢B**：root snapshotを通常folderと別々に複製し続ける。
+  同じfolderの異なる版を保持する余地が増えるため推奨しない。
+- **推奨方針**：正規folder IDは維持し、ユーザー単位のroot参照を明示的に保存する。
+  rootとして取得したことを保存呼出側が指定し、folder本体とroot参照を同じIDB
+  transactionで確定する。画面の`/`と`/f/:実ID`は同じ正規snapshotを読む。
+  既存のnull-ID snapshot／文字列`root`との区別は維持する。
+- **次のテスト**：実APIと同じ非null root IDを持つレスポンスから保存し、root直下note、
+  子folder→親への復帰と直接URLが同じsnapshotを参照することを先に要求する。
+  自動prefetchの実装前にこの契約を確定する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
