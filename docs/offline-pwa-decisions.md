@@ -2077,6 +2077,21 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   shortId経由readの追加だけでC4完了とせず、canonical／shortIdを同じ対象として
   拒否・世代・解除に扱う規則を次の修正で検証する。記事alias対応とは混同しない。
 
+## D112：実Worker受け入れと切断候補の追加レビュー
+
+- `test-worker.mjs` はproduction Web assetsと実local Wrangler/D1/R2/DO/OGを
+  一時領域で起動し、実認証・API・SSR・WebSocketを検証する。生成session keyは
+  runtime環境変数だけに置き、利用者のsecretや既存開発DBは使わない。
+  親がonline2件と失敗時cleanup1件を独立確認した。
+- 親はproduction SWを有効にしたcanonical noteのoffline reloadを追加し1件成功。
+  SSR本文をshellへ保存せず、永続cacheからreadonly表示し、新規Yjs接続がない。
+  全URL／画像／複数タブの受け入れは続けて追加する。
+- C7切断候補のsource/rich/splitと既存読取・mutation系12件は親確認で成功したが、
+  fresh reviewで2つの境界が見つかった。同期中に送信済みのHTTP更新は、切断後も
+  同じviewなら応答を反映し、新規要求の許可と混同しない。IME中のPM未flush本文は
+  切断／remote resyncで失わない必要があり、実Chromium再現と修正を担当に依頼した。
+  検証済みの通常入力だけを根拠にC7全体完了とはしない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
