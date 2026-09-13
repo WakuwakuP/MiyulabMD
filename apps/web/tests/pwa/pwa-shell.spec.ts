@@ -186,6 +186,40 @@ test("online note SSR passes through but is never stored as the offline shell", 
   ).toBeVisible();
 });
 
+test("shared note navigation reloads only the pure shell offline", async ({
+  page,
+  context,
+}) => {
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+  await page.route("**/api/**", (route) => route.abort("internetdisconnected"));
+  await page.route("https://fonts.googleapis.com/**", (route) => route.abort());
+  await page.goto("/");
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration("/");
+        return registration?.active?.state;
+      }),
+    )
+    .toBe("activated");
+  const online = await page.goto("/s/pwa-ssr-fixture");
+  expect(await online?.text()).toContain("PWA_PRIVATE_SSR_SENTINEL");
+  await expect
+    .poll(() =>
+      page.evaluate(() => Boolean(navigator.serviceWorker.controller)),
+    )
+    .toBe(true);
+  await context.setOffline(true);
+  const offline = await page.reload({ waitUntil: "domcontentloaded" });
+  expect(offline?.fromServiceWorker()).toBe(true);
+  expect(await offline?.text()).not.toContain("PWA_PRIVATE_SSR_SENTINEL");
+  await expect(
+    page.getByRole("link", { exact: true, name: "MiyulabMD ホーム" }),
+  ).toBeVisible();
+});
+
 test("activation removes only obsolete app precaches for the same scope", async ({
   page,
   context,
@@ -353,7 +387,7 @@ test("API auth socket and unsupported routes never receive an offline shell", as
     "/ws/notes/probe",
     "/mcp",
     "/openapi.json",
-    "/s/shared-probe",
+    "/s/shared-probe/unsupported-child",
     "/unsupported-route",
   ]) {
     const probe = await context.newPage();

@@ -63,6 +63,7 @@ self.addEventListener("message", (event) => {
       response.end();
       return true;
     }
+    case "/s/pwa-ssr-fixture":
     case "/n/pwa-ssr-fixture": {
       const shell = await readFile(
         path.join(webRoot, "dist/index.html"),

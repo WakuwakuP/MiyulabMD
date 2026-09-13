@@ -2035,6 +2035,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 同じcache coreを並行編集せず、専任workerがこの基盤を実装する。
   parser追加は親がpackage21件とpackage/Web型検査を独立確認した。
 
+## D109：共有URLの純粋shell fallbackと並行する残作業
+
+- `/s/:id` は合意仕様の直接offline起動対象なので、Service Workerの対応経路に
+  canonical ID／short IDの単一segmentを追加する。記事aliasという別契約は
+  generic note APIに追加しない。ネストした未対応経路、API/auth/WSは除外を維持する。
+- 親の本番buildテストは、HTTP cacheを無効化し、onlineのprivate SSR sentinelを
+  受け取った後のoffline reloadでRED (`ERR_INTERNET_DISCONNECTED`)。
+  経路追加後は純粋shellだけを返し、SSR本文を保存しない。既存8件を含めPWA9件成功。
+  これはShare本文の永続cache接続とは別で、その候補実装は並行して検証中。
+- 実Worker/auth/API/SSRのローカル受け入れ環境と、Yjs切断時に既存bufferを
+  保持したまま新規入力を止める候補を独立担当に分けた。外部deployはしていない。
+- D108親検証では型推論の欠落、formatter、通常suspension時のopen契約変更を
+  修正した。既存denial/suspensionとclearのfocused8件が成功した後、
+  同時clear・失敗後retryの1件も成功。さらにレビューから作った2件はRED：
+  保留中OPFS書込によるuser directory復活、保留中viewer ID保存によるidentity復活。
+  cache基盤はこの修正と再検証が終わるまで本体へ反映しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

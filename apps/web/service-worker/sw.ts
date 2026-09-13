@@ -43,7 +43,7 @@ serviceWorkerScope.addEventListener("activate", (event) => {
 const isShellNavigation = (pathname: string) =>
   pathname === "/" ||
   /^\/f\/[^/]+\/?$/.test(pathname) ||
-  /^\/n\/[^/]+\/?$/.test(pathname);
+  /^\/(?:n|s)\/[^/]+\/?$/.test(pathname);
 
 const shellFallback = async (): Promise<Response> =>
   (await matchPrecache("/index.html")) ?? Response.error();
