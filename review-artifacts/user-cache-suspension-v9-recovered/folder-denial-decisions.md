@@ -32,3 +32,16 @@ The projected crumbs are computed once and used for both the returned crumbs
 and parent derivation. Denied target/children filtering, hidden path and
 `sourceFolder` cleanup, user/sibling isolation, and original `cachedAt` values
 are unchanged. The separate read-overlap denial race remains out of scope.
+
+## D63 read-order correction
+
+The folder record is now read before the user-scoped denial markers. The marker
+scan is the final storage boundary before projection, so a denial committed
+while the native folder read is pending hides the target or removes the
+denied ancestor from a descendant's projected crumbs. Existing closed,
+suspension, lifetime, null-root, nearest-visible-parent, and original
+`cachedAt` behavior remains unchanged. A missing folder record returns `null`
+without inventing a timestamp.
+
+This is candidate-only and remains unadopted. Composite reader and HTTP denial
+wiring are separate future slices.

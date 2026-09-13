@@ -167,6 +167,104 @@ test("a deeper allowed descendant retains its nearest visible parent and cache t
   expect(snapshots.after?.cachedAt).toBe(snapshots.before?.cachedAt);
 });
 
+test("a compound drive read applies folder denial while its note list is pending", async ({
+  page,
+}) => {
+  const hidden = { id: "denied", name: "Hidden ancestor" };
+  const visible = { id: "child", name: "Visible parent" };
+  const leaf = { id: "grandchild", name: "Visible leaf" };
+  const folder = sharedFolder("grandchild", leaf.name, "child", [
+    hidden,
+    visible,
+    leaf,
+  ]);
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const snapshot = await page.evaluate(async (folder) => {
+    const storageUrl = "/src/lib/offline-cache.ts";
+    const readerUrl = "/src/lib/cached-drive-reader.ts";
+    const { openOfflineCache } = await import(storageUrl);
+    const { readCachedDrive } = await import(readerUrl);
+    const cache = await openOfflineCache({ userId: "alice" });
+    await cache.putFolder(folder);
+    await cache.putNoteList([]);
+    const before = await cache.getFolder(folder.id);
+    const started = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    const folderScanned = Promise.withResolvers<void>();
+    let folderReadStarted = false;
+    const originalGet = IDBObjectStore.prototype.get;
+    const originalCursor = IDBObjectStore.prototype.openCursor;
+    const success = Object.getOwnPropertyDescriptor(
+      IDBRequest.prototype,
+      "onsuccess",
+    );
+    if (!success?.set) {
+      throw new Error("Native IndexedDB success boundary unavailable");
+    }
+    IDBObjectStore.prototype.get = function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore["get"]>
+    ) {
+      const request = originalGet.apply(this, args);
+      if (this.name === "folders") {
+        folderReadStarted = true;
+      }
+      if (this.name === "note-lists") {
+        Object.defineProperty(request, "onsuccess", {
+          set(handler: (event: Event) => void) {
+            success.set?.call(request, (event: Event) => {
+              started.resolve();
+              void released.promise.then(() => handler.call(request, event));
+            });
+          },
+        });
+      }
+      return request;
+    };
+    IDBObjectStore.prototype.openCursor = function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore["openCursor"]>
+    ) {
+      const request = originalCursor.apply(this, args);
+      if (this.name === "metadata") {
+        Object.defineProperty(request, "onsuccess", {
+          set(handler: (event: Event) => void) {
+            success.set?.call(request, (event: Event) => {
+              handler.call(request, event);
+              if (!request.result) {
+                folderScanned.resolve();
+              }
+            });
+          },
+        });
+      }
+      return request;
+    };
+    try {
+      const pending = readCachedDrive("alice", folder.id);
+      await started.promise;
+      // Parallel readers may already hold a folder snapshot. A reader that
+      // deliberately reads folders last need not start that read yet.
+      if (folderReadStarted) {
+        await folderScanned.promise;
+      }
+      await cache.denyFolder("denied");
+      released.resolve();
+      return { after: await pending, before };
+    } finally {
+      released.resolve();
+      IDBObjectStore.prototype.get = originalGet;
+      IDBObjectStore.prototype.openCursor = originalCursor;
+      cache.close();
+    }
+  }, folder);
+  expect(snapshot.after.folder?.crumbs).toEqual([visible, leaf]);
+  expect(snapshot.after.folder?.parentId).toBe("child");
+  expect(snapshot.after.folderCachedAt).toBe(snapshot.before?.cachedAt);
+  expect(snapshot.after.notes).toEqual([]);
+  expect(snapshot.after.notesMissing).toBe(false);
+});
+
 for (const target of ["denied", "grandchild"] as const) {
   test(`a pending ${target} read applies a denial committed before it returns`, async ({
     page,

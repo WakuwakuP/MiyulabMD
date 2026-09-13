@@ -852,18 +852,19 @@ export async function openOfflineCache(
       if (isUserSuspended(userId)) {
         return null;
       }
-      const deniedFolderIds = await readDeniedFolderIds(database, userId);
-      if (id !== null && deniedFolderIds.has(id)) {
-        return null;
-      }
       const record = await readFolderForRoute(database, userId, id);
       if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
         return null;
       }
-      const folder = record
-        ? projectDeniedFolder(record.folder, deniedFolderIds)
-        : null;
-      return folder ? { cachedAt: record?.cachedAt ?? 0, folder } : null;
+      const deniedFolderIds = await readDeniedFolderIds(database, userId);
+      if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
+        return null;
+      }
+      if (!record) {
+        return null;
+      }
+      const folder = projectDeniedFolder(record.folder, deniedFolderIds);
+      return folder ? { cachedAt: record.cachedAt, folder } : null;
     },
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: lifetime and denial guards are intentionally explicit.
