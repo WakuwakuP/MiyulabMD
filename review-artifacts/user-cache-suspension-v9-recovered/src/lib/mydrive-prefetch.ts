@@ -130,12 +130,20 @@ export async function prefetchMyDrive(
       const orderingToken = cache.beginNoteRead(summary.id);
       const result = await fetchNote(summary.id, { signal });
       if (!result.ok) {
-        if (isAuthStatus(result.status)) {
+        if (result.status === 401) {
           return stopped("auth", counts);
+        }
+        if (result.status === 403 || result.status === 404) {
+          try {
+            await cache.denyNote(summary.id);
+          } catch {
+            return stopped("storage", counts);
+          }
         }
         continue;
       }
       await cache.putNote(result.data, { orderingToken, signal });
+      await cache.clearNoteDenial(summary.id, orderingToken);
       counts.notes += 1;
     }
     return { ...counts, status: "success" };

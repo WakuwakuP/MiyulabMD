@@ -40,3 +40,25 @@ combined suite when the two D76 lifecycle cases are present.
 - Live web unit command `pnpm --filter @miyulabmd/web test`: 117 passed,
   0 failed.
 - `git diff --check`: passed.
+
+## D78 validation
+
+- Candidate focused browser command:
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser mydrive-prefetch-denial.spec.ts mydrive-prefetch-ownership.spec.ts mydrive-prefetch.spec.ts`
+- Candidate all command:
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all`
+- Live web unit command: `pnpm --filter @miyulabmd/web test`
+- `git diff --check`: passed.
+
+The focused denial coverage exercises both 403 and 404, confirms the old body
+is no longer readable, verifies independent acquisition is not auth-stopped,
+and verifies a later successful network revalidation restores the note. Results
+and candidate hashes are recorded below after the serial validation run.
+
+Serial results: focused browser `4 passed (5.2s)`; candidate `all` `71 passed
+(16.6s)` (including typecheck, Biome, and browser validation); live web unit
+`117 passed, 0 failed`; `git diff --check` passed. The first focused browser
+attempt before the permitted local browser install failed before tests ran
+because Chromium was missing; it was rerun successfully after installing the
+worktree-local browser. Candidate `src/lib/mydrive-prefetch.ts` SHA-256:
+`760f549c0019e0b43d31120c1e408b3f968baff0e7db2d93b05102cb6e6ded15`.

@@ -25,3 +25,13 @@ opening, and note target filtering all use that owned snapshot. This prevents a
 caller mutation of `cacheViewerId` or `user.id` after entry from switching an
 in-flight Alice prefetch to Bob, without mutating or freezing the caller and
 without introducing mutable global ownership state.
+
+## D78: Persist note denials without stopping independent acquisition
+
+The note branch treats only HTTP 401 as an authentication stop. HTTP 403 and
+404 call the existing public `cache.denyNote(summary.id)` entry point, which
+advances the denial generation and persists the durable denial; a successful
+denial then permits the loop to acquire later independent notes. A failure to
+persist that denial is a storage stop, rather than a broad reclassification of
+other errors. Successful body writes clear the denial with the read's original
+ordering token, so an older revalidation cannot clear a later denial.
