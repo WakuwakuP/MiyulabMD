@@ -9,6 +9,14 @@ export function pwaHttpFixture(webRoot) {
       server.middlewares.use(async (request, response, next) => {
         try {
           const url = new URL(request.url ?? "/", "http://fixture.local");
+          if (request.method === "GET" && url.pathname === "/__pwa_seed") {
+            response.setHeader("Content-Type", "text/html; charset=utf-8");
+            response.setHeader("Cache-Control", "no-store");
+            response.end(
+              "<!doctype html><title>PWA storage fixture</title><p>Ready</p>",
+            );
+            return;
+          }
           if (
             request.method === "GET" &&
             url.pathname === "/n/pwa-ssr-fixture"

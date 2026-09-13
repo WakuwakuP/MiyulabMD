@@ -1213,6 +1213,25 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   認証・cache.default・deploy更新まで検証したという意味ではない。API等の除外、他cache保護、
   update中の既存画面維持は次の独立テストで確認する。PWA候補はまだ未採用。
 
+## D65：古いshell precacheの回収はprefixとscopeを厳密に限定する
+
+- **状態**：独立レビューのcleanup指摘を親がテストで再現。PWAテストは別枠で3件となる。
+- **親テスト**：app起動前の専用HTTP fixtureで、同scopeの旧miyulabmd precache、
+  foreign precache、別scopeのmiyulabmd precache、無関係なdata cacheを作る。
+  activation後、旧app cacheだけが消えることを要求する。現在は旧app cacheが残るためRED。
+- **調査**：Workbox 7.4.1の`cleanupOutdatedCaches`実装は`-precache-`とscopeの部分一致で
+  削除候補を選び、app prefixを検査しない。名前だけで「scoped」とみなして呼ぶと、
+  foreign cacheや別scopeのcacheを巻き込む可能性があるためそのまま使わない。
+- **選択肢A**：activate時、既知の`miyulabmd-precache-`prefixと現在registration.scopeの
+  正確なsuffixを持つ旧cacheだけを削除し、現在の`cacheNames.precache`は除外する。
+- **選択肢B**：汎用helper／全cache削除に任せる。保護対象を巻き込むため選ばない。
+  C＝旧cacheを永遠に残す案も不要な容量消費を増やすため選ばない。
+- **採用**：A。通常の待機→activationを使い、skipWaiting／claim／強制reloadは追加しない。
+  現在のshellを残し、offline reloadが引き続き成功することも同じテストで確認する。
+- レビューのsame-origin指摘は実navigation／redirectで別途確認し、未再現のP1として
+  断定しない。SVG iconも対象Chromiumで検証してから形式を変える。通常のSW型チェックへの
+  接続は、採用前に別途整える。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
