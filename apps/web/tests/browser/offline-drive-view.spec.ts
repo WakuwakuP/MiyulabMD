@@ -397,13 +397,18 @@ test("online Home visits automatically save directory snapshots for readonly rel
   };
   const docNote: NoteSummary = { ...note, title: "オンラインで開いた資料" };
   let offline = false;
-  const offlineDataRequests: string[] = [];
+  const requestsByDocument: { path: string; loaderId: string }[] = [];
+  const session = await page.context().newCDPSession(page);
+  await session.send("Network.enable");
+  session.on("Network.requestWillBeSent", (event) => {
+    const path = new URL(event.request.url).pathname;
+    if (offline && /^\/api\/(?:notes|folders)(?:\/|$)/.test(path)) {
+      requestsByDocument.push({ loaderId: event.loaderId, path });
+    }
+  });
   await page.route("**/api/**", (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (offline) {
-      if (/^\/api\/(?:notes|folders)(?:\/|$)/.test(pathname)) {
-        offlineDataRequests.push(pathname);
-      }
       return route.abort("internetdisconnected");
     }
     switch (pathname) {
@@ -461,6 +466,18 @@ test("online Home visits automatically save directory snapshots for readonly rel
       rootId,
     });
 
+  // A slow shell response keeps the previous authenticated document alive
+  // while reload is in progress. Its background request is not a cached-view
+  // request; record Chromium loader IDs to establish the lifetime boundary.
+  const { frameTree: previousDocument } =
+    await session.send("Page.getFrameTree");
+  await page.route("**/f/docs", async (route) => {
+    if (offline && route.request().isNavigationRequest()) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    await route.continue();
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
   offline = true;
   await page.reload();
   await expect(page.getByRole("link", { name: docNote.title })).toBeVisible();
@@ -469,5 +486,19 @@ test("online Home visits automatically save directory snapshots for readonly rel
   await page.getByRole("link", { name: "上のフォルダへ" }).click();
   await expect(page).toHaveURL(`/f/${rootId}`);
   await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
-  expect(offlineDataRequests).toEqual([]);
+  const { frameTree } = await session.send("Page.getFrameTree");
+  const cachedDocumentId = frameTree.frame.loaderId;
+  expect(cachedDocumentId).not.toBe(previousDocument.frame.loaderId);
+  expect(
+    requestsByDocument.every(
+      ({ loaderId }) =>
+        loaderId === previousDocument.frame.loaderId ||
+        loaderId === cachedDocumentId,
+    ),
+  ).toBe(true);
+  expect(
+    requestsByDocument
+      .filter(({ loaderId }) => loaderId === cachedDocumentId)
+      .map(({ path }) => path),
+  ).toEqual([]);
 });

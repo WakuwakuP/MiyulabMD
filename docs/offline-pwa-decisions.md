@@ -1616,6 +1616,25 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - D85の限定範囲を維持する。再認証・定期／変更後trigger・複数タブ排他・
   通常取得との統合・添付画像・容量整理・フォルダHTTP拒否接続などは未完了。
 
+## D87：再読み込み前後の通信をdocument寿命で区別する
+
+- 状態：D86本体反映後の試験失敗を切り分け、親が本体全体を再検証した。
+- 担当の初回browserは76成功／1失敗。失敗したauto-save試験は、API通信断の
+  fixtureフラグを立てた瞬間から全リクエストを数え、`/api/folders/tree` を1件検出した。
+- 親はonline通知と遅いshell応答（1500ms）のfixtureで再現し、ChromiumのloaderIdを
+  記録した。該当tree要求のloaderIdは再読み込み後のdocumentとは異なっており、
+  新しいcached画面ではなく、まだ存在する旧authenticated documentの要求だった。
+  元の空配列assertionはこの再現でも失敗した。実装のcached-mode違反とは区別する。
+- テストの観測をdocument単位へ修正した。旧／新以外のloaderIdを認めず、
+  新しいcached documentのデータ要求は引き続き0件を要求する。待ち時間後に
+  ログを消す方法や、リクエストの種類を除外する方法は使わない。
+  初めからcached viewerで起動する別試験の「全データ要求0件」も維持する。
+- sourceの修正・候補再配置は不要だった。親は2ライブファイルの候補byte一致を確認し、
+  app+SW typecheck、browser77件、unit117件、production PWA8件、diffcheckが全て成功。
+  本番precacheは119 entries、3278.83 KiB。main chunk約2.30MBの既存警告は継続。
+- READMEには認証済み寿命内の復帰対応と、cachedモードからの再認証には現状
+  reloadが必要な点を明示した。D86の未完了範囲を拡大解釈しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
