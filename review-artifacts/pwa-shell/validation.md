@@ -51,3 +51,35 @@ for this slice.
 - **Remaining review boundaries:** Same-origin navigation/redirect behavior,
   icon/typecheck review, and the separate dev data suite were not changed or
   claimed by this checkpoint.
+
+## D66/D67 hardening checkpoint
+
+- **Checkpoint:** `372103c`.
+- **Candidate runner:** `node apps/web/scripts/check-pwa-candidate.mjs review-artifacts/pwa-shell`
+-  — exit `0`; Biome, app/SW typecheck, production build, and all PWA checks
+  completed successfully.
+- **PWA browser regression:** `4 passed`, `0 failed`, `0 skipped` (8.5 seconds).
+  This includes boot, SSR privacy, scoped cleanup, and foreign navigation/
+  redirect preservation.
+- **Production precache:** `119 entries (3274.18 KiB)`.
+- **Live-input and candidate-byte invariant:** passed; the runner reported live
+  inputs and candidate bytes unchanged.
+- **Live unit regression:** `pnpm --filter @miyulabmd/web test` — exit `0`;
+  `117 passed`, `0 failed`, `0 skipped` (12.7 seconds).
+- **Whitespace check:** `git diff --check` — exit `0`.
+- **Final changed candidate SHA-256:** `package.json`
+  `3e1dee46174610fb6ba1941414bac77a9e87421b9aa706ca77e7a110e9d6bf66`;
+  `service-worker/sw.ts`
+  `e382cdc7a73c01973cb1f217cedf36f183339a32dfd3133a23fb97f16ba35a61`;
+  `tsconfig.sw.json`
+  `10a816b416489be05a6b7c501e4f763cd4875a664960808db8d4893f938ae4e6`.
+- **Static script/inheritance verification:** package metadata and dependency
+  groups are byte-equivalent to live; candidate `typecheck` is
+  `tsc --noEmit && tsc --noEmit -p tsconfig.sw.json`; worker config extends
+  `./tsconfig.json` and isolates `ES2022`/`WebWorker`, `types: []`, and worker
+  include. The runner typechecks both configs but does not execute the
+  candidate package script itself, so this records wiring truthfully rather
+  than claiming normal-command adoption.
+- **Change rationale:** Workbox `sameOrigin` is explicit defense-in-depth only;
+  no foreign navigation exploit was reproduced. Redirects, non-success response
+  preservation, shell fallback, and cache exclusions remain unchanged.

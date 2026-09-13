@@ -52,9 +52,10 @@ const shellFallback = async (): Promise<Response> =>
 // SSR note HTML, auth redirects, or API-derived bootstrap data in a shell
 // cache. A network error (or temporary 5xx) can use the pure precached shell.
 registerRoute(
-  ({ request, url }) =>
+  ({ request, url, sameOrigin }) =>
     request.method === "GET" &&
     request.mode === "navigate" &&
+    sameOrigin &&
     isShellNavigation(url.pathname),
   async ({ request }) => {
     try {

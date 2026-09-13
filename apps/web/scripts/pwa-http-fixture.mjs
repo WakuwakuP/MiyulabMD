@@ -1,12 +1,41 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-async function serveFixture(request, response, server, webRoot) {
+async function serveFixture(request, response, server, webRoot, state) {
+  const url = new URL(request.url ?? "/", "http://fixture.local");
+  if (
+    request.method === "POST" &&
+    /^\/__pwa_version\/[012]$/.test(url.pathname)
+  ) {
+    state.version = Number(url.pathname.at(-1));
+    response.statusCode = 204;
+    response.end();
+    return true;
+  }
   if (request.method !== "GET") {
     return false;
   }
-  const url = new URL(request.url ?? "/", "http://fixture.local");
   switch (url.pathname) {
+    case "/sw.js": {
+      const worker = await readFile(
+        state.version === 0
+          ? new URL("../tests/pwa/fixtures/legacy-sw.js", import.meta.url)
+          : path.join(webRoot, "dist/sw.js"),
+        "utf8",
+      );
+      response.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      response.setHeader("Cache-Control", "no-store");
+      // Test-only byte change and observer; the candidate's fetch/lifecycle
+      // implementation is unchanged between the two deployed variants.
+      response.end(`${worker}
+self.addEventListener("message", (event) => {
+  if (event.data === "pwa-fixture-version") {
+    event.ports[0]?.postMessage(${state.version});
+    event.ports[0]?.close();
+  }
+});`);
+      return true;
+    }
     case "/__pwa_seed":
       response.setHeader("Content-Type", "text/html; charset=utf-8");
       response.setHeader("Cache-Control", "no-store");
@@ -58,10 +87,11 @@ async function serveFixture(request, response, server, webRoot) {
 // Test-only HTTP behavior layered in front of production-preview assets.
 // This plugin is not part of the app's Vite configuration or deployed Worker.
 export function pwaHttpFixture(webRoot) {
+  const state = { version: 1 };
   return {
     configurePreviewServer(server) {
       server.middlewares.use((request, response, next) => {
-        void serveFixture(request, response, server, webRoot).then(
+        void serveFixture(request, response, server, webRoot, state).then(
           (handled) => {
             if (!handled) {
               next();

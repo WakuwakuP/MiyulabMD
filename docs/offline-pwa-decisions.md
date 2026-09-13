@@ -1254,6 +1254,59 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   typecheckコマンドで双方が対象になることを確認する。個別のCI設定を重複させるより、
   既存の標準コマンドの意味を揃える方針とする。
 
+## D68：icon形式は対象Chromiumで検証して決める
+
+- 親が生成manifestをCDPで取得し、manifestエラーなし、standalone/name/scope/start_url、
+  iconの実decode寸法、Chromiumのicon関連installabilityエラーなしを確認した。
+- 現在のSVGでテストは成功したため、未確認の推測だけでPNG生成・追加依存を増やさない。
+  iOSや手動インストールUIを含む全platformでの検証済みという意味ではない。
+
+## D69：非対象routeと更新methodはoffline shellにしない
+
+- 親がoffline状態でAPI/auth/ws/MCP/openapi、未対応の共有routeと未知routeへ実navigationし、
+  shellではなく通信失敗になることを確認した。POST `/`も失敗し、HTMLへ置換されない。
+- Source reviewでもdata runtime cacheやbackground-sync登録はない。長期間の任意の再送を
+  網羅的に試験したという主張ではなく、現在のGET/navigation限定実装を確認する。
+
+## D70：SW更新は既存画面を保持して待機する
+
+- Test HTTP serverで同じ候補workerにtest専用のversion observerとbyte差だけを付け、
+  version 1→2を切り替えるfixtureを追加した。fetch/cache/lifecycle本体は変えない。
+- 親テストで、新版がinstalled/waitingの間もcontrollerはversion 1のまま、
+  DOM上の未保存canaryとURLが維持され、自動navigationが0件であることを確認した。
+  最後の旧画面を閉じて再度開くとversion 2がcontrollerになることも成功した。
+- これは待機・activationの検証であり、異なる全asset graphや実Cloudflare edge cacheの
+  deploy切替を完全再現したものではない。
+
+## D71：旧kill switchからの移行をtest fixtureで確認する
+
+- 旧public/sw.jsの挙動をtest-only fixtureとして保存した。旧scriptが自身をunregisterして
+  画面を再読込した後、新しいproduction workerを登録し、offline起動できることを親が確認した。
+- 旧fixtureの広範囲削除を新実装へ戻していない。旧script自身が削除するcacheを新実装が
+  保護できるという主張もしない。fixtureはproduction bundleへ含めない。
+- D68〜D71を含むPWA候補runner全8件が親側で成功し、型・Biome・buildも成功、
+  live入力と候補の不変を確認した。precacheは119 entries／約3,274 KiB。
+  データ側のdev browser suiteとは別に件数を管理する。
+
+### PWA shellの親レビュー・採用判定
+
+- 同origin条件、app-prefixかつexact-scopeのcleanup、通常typecheckへのSW追加を親が確認。
+  依存versionの変更や既存proxy設定の削除はない。旧kill switchと撤去helperは削除対象。
+- 親のproduction候補テスト8件が成功したため、shell部分のライブ反映を承認する。
+  候補SHA256：
+  - package.json: `3e1dee46174610fb6ba1941414bac77a9e87421b9aa706ca77e7a110e9d6bf66`
+  - vite.config.ts: `74484246c7cdb0102fc28bcf017c9b04d7037fce7f312bdbd6828042e6fbad44`
+  - service-worker/sw.ts: `e382cdc7a73c01973cb1f217cedf36f183339a32dfd3133a23fb97f16ba35a61`
+  - src/main.tsx: `4d35a33cc9aa942474610a7ed0190e687fe755564e7f7a36298176ac8062478b`
+  - src/lib/register-service-worker.ts: `82526993f61599c037887d64dd2ea81b37aec5237881a7b268bb44b2bd74a737`
+  - tsconfig.sw.json: `10a816b416489be05a6b7c501e4f763cd4875a664960808db8d4893f938ae4e6`
+  - public/icon.svg: `135fa8ec8a30630e1c2455b83a9d0abeb767bf1f1f07d1f1c1bfe5d9598277c1`
+- ライブ反映後は通常のtypecheck／test:pwa／unitと採用済みdev browser60件を再確認する。
+  新しいfolder-denial specはまだ未採用のdata候補を対象としており、このshell反映では
+  除外対象を明示して別途管理する。テスト自体の削除・弱体化は行わない。
+- これはshellの判定であり、全MyDrive prefetch、folder拒否のHTTP接続、添付画像、
+  容量整理、logout／tab連携、実Cloudflare deploy確認まで完了したとはしない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

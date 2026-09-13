@@ -34,3 +34,22 @@
 - **Constraints:** Same-origin behavior, icon format, and ordinary service
   worker type-check integration remain separate reviews. The candidate remains
   under `review-artifacts/pwa-shell/`.
+
+## D66/D67 hardening checkpoint
+
+- **Checkpoint:** `372103c` (review-only candidate; no live adoption).
+- **Status:** Implemented and validated in the candidate; pending parent review
+  and adoption decision.
+- **D66 same-origin defense:** The parent’s real-browser checks passed for both
+  foreign `localhost` versus `127.0.0.1` navigation and same-origin navigation
+  redirected to a foreign `503`, with the foreign response preserved. This is
+  not an exploit reproduction. The candidate therefore adds Workbox’s explicit
+  `sameOrigin` predicate before pathname matching as defense-in-depth, while
+  preserving the existing redirect/4xx behavior and the no-runtime-HTML-cache
+  rule.
+- **D67 typecheck wiring:** The candidate’s normal Web `typecheck` script runs
+  the app check and then `tsconfig.sw.json`. That worker config extends the
+  common Web config and overrides only the worker `lib`, empty `types`, and
+  worker include, keeping Worker globals out of app `src`.
+- **Scope:** No icons, update policy, live files, tests, runner, dependencies,
+  lockfile, or data were changed. The candidate remains under review.
