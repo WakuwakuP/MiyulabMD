@@ -2134,6 +2134,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - cache coreはcross-tab fenceの担当が作業中なので、同じ保存層の並行変更はしない。
   このREDは画像保存・表示の次の縦切りの受け入れ基準として保持する。
 
+## D116：表示対象の先読み優先とserver応答の本人性
+
+- 背景取得は所有tree/listの発見を先に行い、適格な未取得候補から現在の
+  folder/noteを各要求の間に選び直す。実際のforeground要求はこの発見待ちや
+  背景queueで止めない。captured userは途中で変更しない。
+- 親は`/s/shortId`が優先されない追加REDを確認し、`/f`・`/n`と同じ経路規則へ
+  追加した。priority/membership/triggerの単独serial実行は8件成功。
+  一度同一検証の重複指定があったため、その結果を件数へ足さずserial再確認した。
+- 完全なroot/list更新で通常MyDriveから退出した項目が消え、未変更本文の再取得が
+  起きないことは確認した。別々のtree/detail/list応答に架空のsnapshot versionを
+  付けず、古いfolder detailへの直接アクセスの拒否はC3で扱う。
+- C2では、別タブでCookieが変わった後のAPI応答を旧userの保存先へ入れない必要が
+  ある。note.ownerIdは共有ノートの閲覧者ではなく、要求前の`/api/me`だけでも
+  その後のCookie切替との競合を解決しない。serverが当該要求で確認したviewerを
+  API応答に明示する基盤を担当へ依頼した。client入力のechoではなく、private
+  responseのcache境界を守ることを条件とする。client照合は次の接続作業。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

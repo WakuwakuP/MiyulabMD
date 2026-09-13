@@ -252,6 +252,8 @@ async function browser() {
             "mydrive-prefetch-stops.spec.ts",
             "mydrive-prefetch-resilience.spec.ts",
             "mydrive-prefetch-metadata-retry.spec.ts",
+            "mydrive-prefetch-priority.spec.ts",
+            "mydrive-prefetch-membership.spec.ts",
             "mydrive-prefetch-triggers.spec.ts",
             "mydrive-prefetch-tabs.spec.ts",
             "mydrive-prefetch-periodic.spec.ts",
