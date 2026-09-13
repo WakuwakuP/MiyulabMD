@@ -255,6 +255,7 @@ async function browser() {
             "mydrive-prefetch-periodic.spec.ts",
             "mydrive-prefetch-mutations.spec.ts",
             "drive-change-notification.spec.ts",
+            "viewer-recovery.spec.ts",
             "cached-drive-lifecycle.spec.ts",
             "offline-folder-denial.spec.ts",
             "home-metadata.spec.ts",

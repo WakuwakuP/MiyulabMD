@@ -1796,6 +1796,31 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   変更通知まで含むものではないことを未完了項目として明示した。
   キャッシュを最新に保つ保証や全件保存の完了を宣言しない。
 
+## D97：cached viewerを復帰時にサーバーで確認し直す
+
+- 状態：親の2ケースがRED、候補実装へ進む。
+- チェックポイント：`93f6037`。
+- 現状のAppShellは起動時しかviewerを解決しない。cachedモードでonlineになっても
+  `/api/me` が再実行されず、再読み込みしない限り認証を確認し直せない。
+- テストはAliceのキャッシュを表示し、online通知3回の後の本人確認応答を保留する。
+  保留中は同じ本文とreadonlyを維持し、note GETや更新を開始しない。
+  応答がAliceならその後のnote成功で通常表示へ、BobならAlice本文を即座に
+  除外してBobとしてnote権限を確認する。document再読み込みで代用しない。
+- RED：両ケースでviewer要求は初期の2回のまま、期待する追加1回が発生せずexit 1。
+  初期StrictModeの要求数は固定せず、表示安定後のbaselineとの差で検査する。
+  Biomeの整形指摘は親がliteral patchで修正した。
+- 推奨：AppShellの既存viewer解決を再利用可能な単一入口にまとめ、cached／
+  unavailableからのonlineと可視復帰時に実行する。進行中は1要求にまとめ、
+  generation／controller／activeの公開条件とsetUserによる失効を維持する。
+  既存のcached表示をloadingへ戻して隠さず、正しいserver結果が来るまでreadonly。
+- cacheViewerIdだけでauthenticatedへ昇格しない。`resolveViewerContext` の
+  HTTP／communication／保存ポリシーを複製せず、guest／既にauthenticatedな
+  画面にはこの復帰処理で不要なリセットを起こさない。auth configは独立のまま。
+- disposeでは現在の解決要求とlistenerを解除する。初回controllerだけをabortし、
+  後から始めた復帰要求を残す設計は選ばない。
+- 対象はcandidate AppShellと専用記録。別タブ認証変更の検出や再認証後の
+  全ての競合まで完了とはせず、後続の失敗・所有者交代試験を行う。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
