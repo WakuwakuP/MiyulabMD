@@ -4,9 +4,9 @@ import { openOfflineCache } from "./offline-cache.ts";
 export type CachedDriveView = {
   folder: FolderAccess | null;
   folderCachedAt: number | null;
+  folderMissing: boolean;
   notes: NoteSummary[];
   notesCachedAt: number | null;
-  folderMissing: boolean;
   notesMissing: boolean;
 };
 
@@ -14,6 +14,7 @@ export async function readCachedDrive(
   userId: string,
   folderId: string | null,
   signal?: AbortSignal,
+  isCurrent?: () => boolean,
 ): Promise<CachedDriveView> {
   const cache = await openOfflineCache({ signal, userId });
   try {
@@ -27,7 +28,7 @@ export async function readCachedDrive(
     if (signal?.aborted) {
       throw signal.reason;
     }
-    return {
+    const result = {
       folder: folder?.folder ?? null,
       folderCachedAt: folder?.cachedAt ?? null,
       folderMissing: folder === null,
@@ -35,6 +36,13 @@ export async function readCachedDrive(
       notesCachedAt: noteList?.cachedAt ?? null,
       notesMissing: noteList === null,
     };
+    if (isCurrent && !isCurrent()) {
+      throw new DOMException(
+        "Cached drive view is no longer current",
+        "AbortError",
+      );
+    }
+    return result;
   } finally {
     cache.close();
   }

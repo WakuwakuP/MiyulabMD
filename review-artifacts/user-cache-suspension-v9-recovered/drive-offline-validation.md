@@ -13,3 +13,9 @@ source files. The candidate runner's SHA-256 lines are retained in the
 validation transcript. Remaining limitation: this candidate is a focused
 cached-view implementation and needs the normal online HomePage behavior
 merged around it before adoption.
+
+## D48 repair
+
+The repair files are being staged as candidate-only sources. Validation of the
+new reader and cached view is pending completion of the full HomePage candidate
+replacement; D47's browser result must not be treated as D48 evidence.

@@ -19,3 +19,19 @@ prefetch and row menus.
 
 This candidate intentionally does not implement prefetch, service-worker
 support, online persistence, schema changes, or note body loading.
+
+## D48 repair plan
+
+D47 is rejected for replacing the complete online HomePage with a cached-only
+screen and for compressing the shared list components. The repair keeps the
+complete live HomePage as `NetworkHomePage` and adds only a small route wrapper
+that selects cached rendering after viewer resolution. Cached rendering remains
+on the existing route and reuses `NoteTree`/`DriveList` with an explicit
+readonly capability.
+
+The rejected alternatives were (1) retaining the cached-only replacement,
+which breaks authenticated and guest online behavior, and (2) duplicating the
+drive tree in a separate offline route, which risks route and markup drift.
+The chosen design preserves all normal dialogs and operations, suppresses
+menus/context handlers/prefetch only for cached rows, and uses a
+viewer-owned, abortable viewing scope for final publication.
