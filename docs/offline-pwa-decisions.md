@@ -504,7 +504,7 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 
 ## D39：誤ったfixtureに合わせてAPI契約を広げない
 
-- **状態**：fixtureを修正し、候補の不要な互換処理とlint抑制を差し戻し。
+- **状態**：親が元のAPI構造へ整え、候補36件・通常Biomeで再検証済み。
 - **選択前チェックポイント**：`09355e2`。
 - **背景**：親のmutation-api-access fixtureは `/api/notes` を裸の配列で返していたが、
   既存のAPI契約は `{ notes: [...] }`。担当は両形式を受け入れる候補へ変更してテストを通した。
@@ -516,10 +516,13 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   元の構造と書式を保ち、fetch境界接続の最小差分で通常のBiomeを通す。
 - **検証条件**：正しいfixtureでfocusと36件の候補検証を再実行する。
   先行する誤fixtureでの36件成功だけを採用根拠にしない。
+- **結果**：候補api.tsを元の545行の構造に戻し、既存との差分は
+  `apiFetch as fetch`のimportとD40のログアウト呼び出しだけになった。
+  全体lint抑制も両形式パーサーもなく、型チェック・Biome・36ブラウザが成功。
 
 ## D40：readonlyでも明示的なログアウトを維持する
 
-- **状態**：推奨案を選択、親の回帰確認RED。
+- **状態**：候補で修正、親の回帰確認GREEN。
 - **背景**：共通API送信gateにより、既存`logout()`のPOST `/auth/logout`まで
   ReadOnlyViewingErrorになっていた。閲覧専用状態からのログアウトを阻害してはいけない。
 - **選択肢A**：明示的な`logout()`だけは元のnative fetch経路を維持する。
@@ -529,6 +532,8 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **検証**：mutation-api-accessテストへcache source時とcached viewer時のログアウトを追加。
   候補では前者がReadOnlyViewingErrorで失敗することを確認した。ノート更新9種は
   引き続きHTTP送信前に拒否し、ログアウトは専用fixtureで204を返す。
+- **結果**：固定の`logout()`を`globalThis.fetch`へ戻し、拡張したテストを含む
+  36件が成功した。一般APIのgateにURL例外は加えていない。
 
 ## 今後の記録テンプレート
 
