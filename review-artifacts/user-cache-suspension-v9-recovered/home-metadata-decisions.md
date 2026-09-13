@@ -39,3 +39,19 @@
 - Scope is limited to `src/lib/home-metadata-reader.ts`; mode gating, warning UI,
   and cancellation-reason behavior remain later review items. The candidate is
   not adopted into live `apps/web/src`.
+
+## D55 network mode gate
+
+- Candidate-only implementation after the owned viewer snapshot and existing
+  `throwIfCancelled` check: `readHomeMetadata` allows network metadata reads only
+  for `authenticated` and `guest` viewers.
+- `cached` and `unavailable` viewers now throw the existing local
+  `HomeMetadataError` before either network promise is created. The error has no
+  HTTP status because no HTTP response exists.
+- This does not convert non-network viewers to `guest`, invoke a local fallback,
+  alter successful authenticated/guest reads, or change cancellation precedence.
+  Warning UI and cancellation behavior remain future review items.
+- Validation was performed from checkpoint `f591e37`, without commits or restore:
+  targeted browser `10/10`, default candidate `56/56`, and live web regression
+  `117/117` all passed. Candidate reader SHA-256:
+  `03b96c28238a35cc1548ddea7bcc477f7b2f8917424aeff3680c4ec8374ee39a`.

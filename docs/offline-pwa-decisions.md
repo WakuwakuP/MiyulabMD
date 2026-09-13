@@ -991,6 +991,24 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **検証**：追加2件を含む既定56 browserを確認する。保存警告とmetadata write取消の
   境界は引き続き別のテストで確認し、現候補はまだライブ未採用。
 
+## D56：storage保存警告を通常のHome表示へ接続する
+
+- **状態**：D55の入口guard diffを親が確認。担当は56件成功を報告した。
+  次の保存失敗UIテストでREDを確認した。
+- **再現**：native folder putをQuotaExceededErrorにし、networkのfolder/listは成功させる。
+  候補はオンラインのノート行を表示できるが、readerが返したcacheWarningをHomeが捨てるため、
+  期待する「キャッシュを保存できません」のstatusが存在しない（親テストexit 1）。
+- **選択肢A**：cacheWarningをnetwork errorと別の表示state／propとして保持し、
+  `role="status"`で通知する。通常のnetworkデータ・作成操作は維持する。
+- **選択肢B**：storage失敗をページ全体の読込エラー、またはcached readonlyへ変換する。
+  正常なオンライン表示を壊すため選ばない。C＝黙って失敗する案も利用者が保存可否を
+  区別できないため選ばない。
+- **採用**：A。新しい取得とviewer変更で古い警告を消し、成功時は
+  `snapshot.cacheWarning ?? null`に更新する。reader／API／保存処理はこの修正では変更しない。
+- **検証**：warningが見える一方で新規ノートは利用可能、cached表示とは表示されないこと、
+  容量回復を模した次のreloadで警告が消え、root snapshotが保存されることを確認する。
+  既定browserは57件。取消の終了境界は引き続き次の検証対象。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

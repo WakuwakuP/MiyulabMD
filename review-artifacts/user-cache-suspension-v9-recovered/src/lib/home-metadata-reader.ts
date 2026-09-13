@@ -104,6 +104,9 @@ export async function readHomeMetadata({
     user: inputViewer.user ? { ...inputViewer.user } : null,
   };
   throwIfCancelled(signal, isCurrentOwner);
+  if (viewer.mode !== "authenticated" && viewer.mode !== "guest") {
+    throw new HomeMetadataError("ネットワークのホーム情報を利用できません。");
+  }
   const notesPromise = fetchNotes({ signal });
   const folderPromise =
     viewer.user || folderId

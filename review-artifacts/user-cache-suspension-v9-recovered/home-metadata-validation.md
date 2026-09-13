@@ -81,3 +81,29 @@ The final candidate SHA-256 for
 `35a5bee95addd05383266bd70d6ab1fafb38cc6e9845065a6eca59324bf704cf`.
 The targeted D54 regression passed: mutating the caller's viewer during the
 paused Alice request did not redirect the completed save into Bob's cache.
+
+## D55 network mode gate validation
+
+Validation was run serially from checkpoint `f591e37`. Only the candidate reader
+and these two candidate records were changed; no commit or restore was made.
+
+### Commands and exact results
+
+- Initial targeted browser command — exit `1`; dependencies were missing
+  (`ERR_MODULE_NOT_FOUND: vite`).
+- `pnpm install --frozen-lockfile` — exit `0`; `625` packages installed.
+- `pnpm --filter @miyulabmd/web test:browser:install` — exit `0`; Chromium only.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-drive-view.spec.ts` — exit `0`; `10 passed`, `0 failed`.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all` — exit `0`; `16 files` checked and `56 passed`, `0 failed`.
+- `pnpm --filter @miyulabmd/web test` — exit `0`; `117 passed`, `0 failed`, `0 skipped`.
+- `git diff --check` — exit `0`.
+- `git diff --quiet -- apps/web/src` — exit `0`; live `apps/web/src` is unchanged.
+
+Final candidate SHA-256 for
+`src/lib/home-metadata-reader.ts`:
+`03b96c28238a35cc1548ddea7bcc477f7b2f8917424aeff3680c4ec8374ee39a`.
+
+The two D55 RED cases are green: cached and unavailable viewers reject locally
+with zero metadata requests and no fabricated HTTP status. Authenticated and
+guest successful network reads remain green. This remains a candidate for parent
+review and adoption, not a live source change.

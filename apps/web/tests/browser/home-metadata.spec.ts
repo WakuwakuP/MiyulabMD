@@ -228,3 +228,88 @@ for (const mode of ["cached", "unavailable"] as const) {
     });
   });
 }
+
+test("Home reports failed cache saves without making network data readonly", async ({
+  page,
+}) => {
+  const { markdown: _markdown, ...summary } = note;
+  const onlineNote = {
+    ...summary,
+    folderId: folder.id,
+    title: "Online note despite storage failure",
+  };
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("home-cache-write-test") === "allow") {
+      return;
+    }
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore["put"]>
+    ) {
+      if (this.name === "folders") {
+        throw new DOMException("Storage full", "QuotaExceededError");
+      }
+      return originalPut.apply(this, args);
+    };
+  });
+  await page.route("**/api/**", (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    switch (pathname) {
+      case "/api/me":
+        return route.fulfill({
+          json: {
+            user: {
+              displayName: "Alice",
+              email: "alice@example.test",
+              id: "alice",
+            },
+          },
+        });
+      case "/api/auth/config":
+        return route.fulfill({ json: { access: false, mock: true } });
+      case "/api/notes":
+        return route.fulfill({ json: { notes: [onlineNote] } });
+      case "/api/folders":
+        return route.fulfill({ json: folder });
+      default:
+        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+    }
+  });
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("link", { name: onlineNote.title }),
+  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "キャッシュを保存できません",
+  );
+  await expect(
+    page.getByRole("button", { exact: true, name: "新規ノート" }),
+  ).toBeEnabled();
+  await expect(page.getByText("キャッシュから閲覧中")).toHaveCount(0);
+
+  // Simulate space becoming available, then perform a fresh foreground read.
+  await page.evaluate(() =>
+    sessionStorage.setItem("home-cache-write-test", "allow"),
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("link", { name: onlineNote.title }),
+  ).toBeVisible();
+  await expect(page.getByText(/キャッシュを保存できません/)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const moduleUrl = "/src/lib/offline-cache.ts";
+        const { openOfflineCache } = await import(moduleUrl);
+        const cache = await openOfflineCache({ userId: "alice" });
+        try {
+          return (await cache.getFolder(null))?.folder.id;
+        } finally {
+          cache.close();
+        }
+      }),
+    )
+    .toBe(folder.id);
+});
