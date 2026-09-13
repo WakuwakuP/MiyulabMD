@@ -2066,6 +2066,17 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   コピーや重複キーを保存せず、実際のcanonical本文とcachedAtを返す。
   これはarticleのalias routingとは別の契約である。
 
+## D111：別タブclearとshort ID拒否の公開動作RED
+
+- 親は実ブラウザ2タブで、片方のclear完了後にもう片方の古いnote応答が
+  公開・保存されることを再現した（`offline-cache-tabs.spec.ts`）。
+  同一ページの世代だけでは不十分で、tab通知だけに依存せず保存時にも
+  永続的なuser世代を確認する境界が必要。clear基盤だけでC1/C2完了とはしない。
+- `NoteReadSession.read(shortId)` が403を受けた後でもcanonical本文と一覧が
+  返る逆方向の識別子問題もREDで確認した（`offline-direct-denial.spec.ts`）。
+  shortId経由readの追加だけでC4完了とせず、canonical／shortIdを同じ対象として
+  拒否・世代・解除に扱う規則を次の修正で検証する。記事alias対応とは混同しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

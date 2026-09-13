@@ -43,3 +43,50 @@ test("direct cache denial prevents an already-reading body from being returned",
   }, note);
   expect(result).toBeNull();
 });
+
+test("a short-ID HTTP denial also hides its canonical cached body and list entry", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(async (note) => {
+    const cacheUrl = "/src/lib/offline-cache.ts";
+    const sessionUrl = "/src/lib/note-read-session.ts";
+    const { openOfflineCache } = await import(cacheUrl);
+    const { createNoteReadSession } = await import(sessionUrl);
+    const cache = await openOfflineCache({ userId: "alice" });
+    const { markdown: _markdown, ...summary } = note;
+    await cache.putNote(note);
+    await cache.putNoteList([summary]);
+    const session = createNoteReadSession({
+      cacheViewerId: "alice",
+      mode: "authenticated",
+      user: {
+        displayName: "Alice",
+        email: "alice@example.test",
+        id: "alice",
+      },
+    });
+    const original = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
+    try {
+      const denied = await session.read(note.shortId);
+      return {
+        canonical: await cache.getNote(note.id),
+        list: (await cache.getNoteList())?.notes,
+        short: await cache.getNote(note.shortId),
+        status: denied.status,
+      };
+    } finally {
+      globalThis.fetch = original;
+      session.dispose();
+      cache.close();
+    }
+  }, note);
+  expect(result).toEqual({
+    canonical: null,
+    list: [],
+    short: null,
+    status: 403,
+  });
+});
