@@ -2052,6 +2052,20 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   保留中OPFS書込によるuser directory復活、保留中viewer ID保存によるidentity復活。
   cache基盤はこの修正と再検証が終わるまで本体へ反映しない。
 
+## D110：user purge再検証とshort IDの保存層契約
+
+- D108の追加2ケースを修正し、親は候補全体97件・Web unit117件・型・Biomeを
+  独立確認した。保留中OPFS書込を終端まで待ってからpurgeし、viewer ID書込は
+  DBを開く前に取得したclear世代をcommit前に確認する。同一userのclearは合流する。
+  本体への反映は検証済み3ファイルに限定し、cross-tab/UI完了とは扱わない。
+- Shareの実経路テストにより、保存済みcanonical noteをshort IDで読めないことが
+  判明した。偽のIDでseedしてテストを通す案、一覧が保存済みの場合だけページ側で
+  変換する案は採らず、保存層に同一userの現在のshortId解決を設ける。
+- 親の追加REDは、canonical ID優先、同一shortIdの別user分離、shortId変更後の
+  古い識別子の失効、canonical拒否のshortId経由適用を要求する。新しい本文の
+  コピーや重複キーを保存せず、実際のcanonical本文とcachedAtを返す。
+  これはarticleのalias routingとは別の契約である。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

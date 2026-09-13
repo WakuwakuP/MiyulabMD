@@ -136,3 +136,46 @@ test("users retain independent cached snapshots of the same note", async ({
     markdown: "Bobが取得した版",
   });
 });
+
+test("cached short IDs resolve the current user snapshot and respect canonical denial", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(async (note) => {
+    const moduleUrl = "/src/lib/offline-cache.ts";
+    const { openOfflineCache } = await import(moduleUrl);
+    const alice = await openOfflineCache({ userId: "alice" });
+    const bob = await openOfflineCache({ userId: "bob" });
+    try {
+      await alice.putNote(note);
+      await bob.putNote({
+        ...note,
+        id: "bobs-canonical",
+        markdown: "Bob's independent snapshot",
+      });
+      const original = await alice.getNote(note.id);
+      const short = await alice.getNote(note.shortId);
+      const bobShort = await bob.getNote(note.shortId);
+      await alice.putNote({ ...note, shortId: "replacement-short" });
+      const obsolete = await alice.getNote(note.shortId);
+      const replacement = await alice.getNote("replacement-short");
+      await alice.denyNote(note.id);
+      return {
+        bob: bobShort?.note.markdown,
+        denied: await alice.getNote("replacement-short"),
+        obsolete,
+        original,
+        replacement: replacement?.note.id,
+        short,
+      };
+    } finally {
+      alice.close();
+      bob.close();
+    }
+  }, note);
+  expect(result.short).toEqual(result.original);
+  expect(result.bob).toBe("Bob's independent snapshot");
+  expect(result.obsolete).toBeNull();
+  expect(result.replacement).toBe(note.id);
+  expect(result.denied).toBeNull();
+});

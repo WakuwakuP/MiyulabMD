@@ -208,3 +208,189 @@ test("cache clearing prevents an older Home snapshot from being saved or publish
   }, note);
   expect(result).toEqual({ folder: null, list: null, published: false });
 });
+
+test("failed user purge remains stopped until a successful retry", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(async (note) => {
+    const cacheUrl = "/src/lib/offline-cache.ts";
+    const {
+      clearOfflineCacheUser,
+      isOfflineCacheUserSuspended,
+      openOfflineCache,
+    } = await import(cacheUrl);
+    const cache = await openOfflineCache({ userId: "alice" });
+    await cache.putNote(note);
+    const originalRemove = FileSystemDirectoryHandle.prototype.removeEntry;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const failure = new DOMException("Purge failed", "NotAllowedError");
+    let removals = 0;
+    FileSystemDirectoryHandle.prototype.removeEntry = async function (
+      name,
+      options,
+    ) {
+      if (name === "YWxpY2U") {
+        removals++;
+        entered.resolve();
+        await release.promise;
+        throw failure;
+      }
+      return originalRemove.call(this, name, options);
+    };
+    try {
+      const first = clearOfflineCacheUser("alice");
+      const second = clearOfflineCacheUser("alice");
+      const settled = Promise.allSettled([first, second]);
+      await entered.promise;
+      const blockedDuringPurge = await openOfflineCache({
+        userId: "alice",
+      }).then(
+        (handle: { close(): void }) => {
+          handle.close();
+          return false;
+        },
+        () => true,
+      );
+      release.resolve();
+      const outcomes = await settled;
+      const stoppedAfterFailure = isOfflineCacheUserSuspended("alice");
+      FileSystemDirectoryHandle.prototype.removeEntry = originalRemove;
+      await clearOfflineCacheUser("alice");
+      const fresh = await openOfflineCache({ userId: "alice" });
+      try {
+        await fresh.putNote(note);
+        return {
+          blockedDuringPurge,
+          failures: outcomes.map(
+            (outcome) =>
+              outcome.status === "rejected" && outcome.reason === failure,
+          ),
+          recovered: (await fresh.getNote(note.id))?.note.markdown,
+          removals,
+          stoppedAfterFailure,
+        };
+      } finally {
+        fresh.close();
+      }
+    } finally {
+      release.resolve();
+      FileSystemDirectoryHandle.prototype.removeEntry = originalRemove;
+      cache.close();
+    }
+  }, note);
+  expect(result).toEqual({
+    blockedDuringPurge: true,
+    failures: [true, true],
+    recovered: note.markdown,
+    removals: 1,
+    stoppedAfterFailure: true,
+  });
+});
+
+test("a pending body write cannot recreate the purged user directory", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(async (note) => {
+    const cacheUrl = "/src/lib/offline-cache.ts";
+    const { clearOfflineCacheUser, openOfflineCache } = await import(cacheUrl);
+    const cache = await openOfflineCache({ userId: "alice" });
+    const original = navigator.storage.getDirectory.bind(navigator.storage);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let gate = true;
+    navigator.storage.getDirectory = async () => {
+      const root = await original();
+      if (gate) {
+        gate = false;
+        entered.resolve();
+        await release.promise;
+      }
+      return root;
+    };
+    try {
+      const write = cache.putNote(note).then(
+        () => true,
+        () => false,
+      );
+      await entered.promise;
+      const clearing = clearOfflineCacheUser("alice");
+      // Allow eager purge to finish, but also permit clear to await its writer.
+      await Promise.race([
+        clearing,
+        new Promise((resolve) => setTimeout(resolve, 100)),
+      ]);
+      release.resolve();
+      await clearing;
+      const published = await write;
+      let directoryExists = false;
+      try {
+        const app = await (await original()).getDirectoryHandle(
+          "miyulabmd-offline-cache-v1",
+        );
+        await app.getDirectoryHandle("YWxpY2U");
+        directoryExists = true;
+      } catch (error) {
+        if (
+          !(error instanceof DOMException && error.name === "NotFoundError")
+        ) {
+          throw error;
+        }
+      }
+      return { directoryExists, published };
+    } finally {
+      release.resolve();
+      navigator.storage.getDirectory = original;
+      cache.close();
+    }
+  }, note);
+  expect(result).toEqual({ directoryExists: false, published: false });
+});
+
+test("an old viewer identity write cannot restore a cleared user", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(async () => {
+    const cacheUrl = "/src/lib/offline-cache.ts";
+    const { clearOfflineCacheUser, persistCachedViewerId, readCachedViewerId } =
+      await import(cacheUrl);
+    await persistCachedViewerId("alice");
+    const original = indexedDB.open.bind(indexedDB);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let gate = true;
+    indexedDB.open = (...args) => {
+      const request = original(...args);
+      if (gate) {
+        gate = false;
+        Object.defineProperty(request, "onsuccess", {
+          set(handler) {
+            request.addEventListener("success", (event) => {
+              entered.resolve();
+              void release.promise.then(() => handler.call(request, event));
+            });
+          },
+        });
+      }
+      return request;
+    };
+    try {
+      const write = persistCachedViewerId("alice").then(
+        () => true,
+        () => false,
+      );
+      await entered.promise;
+      await clearOfflineCacheUser("alice");
+      release.resolve();
+      await write;
+      return await readCachedViewerId();
+    } finally {
+      release.resolve();
+      indexedDB.open = original;
+    }
+  });
+  expect(result).toBeNull();
+});

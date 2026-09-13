@@ -3,6 +3,7 @@ import type { FolderAccess, Note, NoteSummary } from "@miyulabmd/shared";
 
 import {
   beginNoteReadOrder,
+  clearUserNoteReadOrder,
   currentNoteReadGeneration,
   enterNoteDenialOrder,
   isCurrentNoteReadOrder,
@@ -90,6 +91,10 @@ type CancellationOptions = {
 const suspendedUsers = new Set<string>();
 const userLifetimes = new Map<string, number>();
 const pendingUserOperations = new Map<string, Set<() => void>>();
+const openUserCaches = new Map<string, Set<() => void>>();
+const clearLifetimes = new Map<string, number>();
+const userClearOperations = new Map<string, Promise<void>>();
+const pendingUserWrites = new Map<string, Set<Promise<void>>>();
 
 export function suspendOfflineCacheUser(userId: string): void {
   suspendedUsers.add(userId);
@@ -101,6 +106,17 @@ export function suspendOfflineCacheUser(userId: string): void {
 
 export function isOfflineCacheUserSuspended(userId: string): boolean {
   return suspendedUsers.has(userId);
+}
+
+export function captureOfflineCacheUserClearLifetime(userId: string): number {
+  return clearLifetimes.get(userId) ?? 0;
+}
+
+export function isOfflineCacheUserClearLifetimeCurrent(
+  userId: string,
+  lifetime: number,
+): boolean {
+  return captureOfflineCacheUserClearLifetime(userId) === lifetime;
 }
 
 function isUserSuspended(userId: string): boolean {
@@ -226,6 +242,113 @@ function openDatabase(signal?: AbortSignal): Promise<IDBDatabase> {
       reject(request.error);
     };
   });
+}
+
+function clearUserRecords(
+  database: IDBDatabase,
+  userId: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(
+        [NOTE_STORE, FOLDER_STORE, NOTE_LIST_STORE, METADATA_STORE],
+        "readwrite",
+      );
+      for (const storeName of [NOTE_STORE, FOLDER_STORE, NOTE_LIST_STORE]) {
+        const request = transaction.objectStore(storeName).openCursor();
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) {
+            return;
+          }
+          if ((cursor.value as { userId?: string }).userId === userId) {
+            cursor.delete();
+          }
+          cursor.continue();
+        };
+        request.onerror = () => transaction.abort();
+      }
+      const metadata = transaction.objectStore(METADATA_STORE);
+      const request = metadata.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          return;
+        }
+        const key = String(cursor.key);
+        if (
+          key === driveRootMetadataKey(userId) ||
+          key.startsWith(`${DENIED_NOTE_PREFIX}${noteListKey(userId)}:`) ||
+          key.startsWith(`${DENIED_FOLDER_PREFIX}${encodePathPart(userId)}:`)
+        ) {
+          cursor.delete();
+        }
+        cursor.continue();
+      };
+      const viewer = metadata.get(VIEWER_ID_METADATA_KEY);
+      viewer.onsuccess = () => {
+        if ((viewer.result as MetadataRecord | undefined)?.value === userId) {
+          metadata.delete(VIEWER_ID_METADATA_KEY);
+        }
+      };
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => undefined;
+    transaction.onabort = () =>
+      reject(transaction.error ?? new DOMException("Transaction aborted"));
+  });
+}
+
+async function clearUserFiles(userId: string): Promise<void> {
+  const root = await navigator.storage.getDirectory();
+  try {
+    const app = await root.getDirectoryHandle(OPFS_ROOT);
+    await app.removeEntry(encodePathPart(userId), { recursive: true });
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "NotFoundError")) {
+      throw error;
+    }
+  }
+}
+
+async function purgeOfflineCacheUser(userId: string): Promise<void> {
+  if (!userId) {
+    throw new Error("A user ID is required");
+  }
+  if (!("indexedDB" in globalThis && navigator.storage?.getDirectory)) {
+    throw new Error("Offline cache storage is unavailable");
+  }
+  clearLifetimes.set(userId, captureOfflineCacheUserClearLifetime(userId) + 1);
+  clearUserNoteReadOrder(userId);
+  suspendOfflineCacheUser(userId);
+  for (const close of openUserCaches.get(userId) ?? []) {
+    close();
+  }
+  await Promise.all(pendingUserWrites.get(userId) ?? []);
+  const database = await openDatabase();
+  try {
+    await clearUserRecords(database, userId);
+    await clearUserFiles(userId);
+    suspendedUsers.delete(userId);
+  } finally {
+    database.close();
+  }
+}
+
+export function clearOfflineCacheUser(userId: string): Promise<void> {
+  const existing = userClearOperations.get(userId);
+  if (existing) {
+    return existing;
+  }
+  const operation = purgeOfflineCacheUser(userId).finally(() => {
+    userClearOperations.delete(userId);
+  });
+  userClearOperations.set(userId, operation);
+  return operation;
 }
 
 function commitTransaction(
@@ -636,8 +759,15 @@ export async function persistCachedViewerId(
   if (!(viewerId && "indexedDB" in globalThis)) {
     throw new Error("Viewer identity storage is unavailable");
   }
+  const clearLifetime = captureOfflineCacheUserClearLifetime(viewerId);
   const database = await openDatabase(signal);
   try {
+    if (
+      userClearOperations.has(viewerId) ||
+      !isOfflineCacheUserClearLifetimeCurrent(viewerId, clearLifetime)
+    ) {
+      throw new Error("Offline cache is suspended");
+    }
     await commitTransaction(
       database,
       METADATA_STORE,
@@ -676,23 +806,32 @@ async function noteFile(
   noteId: string,
   fileName: string,
   create = false,
+  assertCurrent: () => void = () => undefined,
 ): Promise<FileSystemFileHandle> {
+  assertCurrent();
   const root = await navigator.storage.getDirectory();
+  assertCurrent();
   const appDirectory = await root.getDirectoryHandle(OPFS_ROOT, {
     create,
   });
+  assertCurrent();
   const userDirectory = await appDirectory.getDirectoryHandle(
     encodePathPart(userId),
     { create },
   );
+  assertCurrent();
   const notesDirectory = await userDirectory.getDirectoryHandle("notes", {
     create,
   });
+  assertCurrent();
   const noteDirectory = await notesDirectory.getDirectoryHandle(
     encodePathPart(noteId),
     { create },
   );
-  return noteDirectory.getFileHandle(fileName, { create });
+  assertCurrent();
+  const file = await noteDirectory.getFileHandle(fileName, { create });
+  assertCurrent();
+  return file;
 }
 
 async function writeMarkdown(
@@ -700,13 +839,13 @@ async function writeMarkdown(
   noteId: string,
   markdown: string,
   signal?: AbortSignal,
+  assertCurrent: () => void = () => throwIfAborted(signal),
 ): Promise<string> {
   const fileName = `${crypto.randomUUID()}.md`;
-  const file = await noteFile(userId, noteId, fileName, true);
-  const writable = await file.createWritable();
+  let writable: FileSystemWritableFileStream | undefined;
   let closed = false;
   const onAbort = () => {
-    if (!closed) {
+    if (writable && !closed) {
       void writable.abort().catch(() => {
         // Preserve the caller's cancellation outcome.
       });
@@ -714,14 +853,19 @@ async function writeMarkdown(
   };
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    throwIfAborted(signal);
+    const file = await noteFile(userId, noteId, fileName, true, assertCurrent);
+    writable = await file.createWritable();
+    assertCurrent();
     await writable.write(markdown);
+    assertCurrent();
     await writable.close();
     closed = true;
+    assertCurrent();
   } catch (error) {
-    await writable.abort().catch(() => {
+    await writable?.abort().catch(() => {
       // Preserve the original write or cancellation error.
     });
+    await removeUnreferencedNoteFile(userId, noteId, fileName);
     throw signal?.aborted ? signal.reason : error;
   } finally {
     signal?.removeEventListener("abort", onAbort);
@@ -760,11 +904,19 @@ export async function openOfflineCache(
     throw new Error("Offline cache storage is unavailable");
   }
 
-  const database = await openDatabase(options.signal);
   const userId = options.userId;
+  const clearLifetime = captureOfflineCacheUserClearLifetime(userId);
+  const database = await openDatabase(options.signal);
+  if (
+    userClearOperations.has(userId) ||
+    !isOfflineCacheUserClearLifetimeCurrent(userId, clearLifetime)
+  ) {
+    database.close();
+    throw new Error("Offline cache is suspended");
+  }
   let closed = false;
 
-  return {
+  const cache: OfflineCache = {
     beginNoteRead(id) {
       return currentNoteGeneration(userId, id);
     },
@@ -1014,39 +1166,60 @@ export async function openOfflineCache(
       ) {
         return;
       }
-      const fileName = await writeMarkdown(
-        userId,
-        note.id,
-        note.markdown,
-        options.signal,
-      );
-      const { markdown: _markdown, ...metadata } = note;
+      // Register before the first path await and settle only after metadata and
+      // cleanup reach their terminal outcome. Purge waits even for failed writes.
+      let finishWrite!: () => void;
+      const terminal = new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      });
+      const writes = pendingUserWrites.get(userId) ?? new Set<Promise<void>>();
+      pendingUserWrites.set(userId, writes);
+      writes.add(terminal);
       try {
-        assertUserActive(userId, lifetime);
-        if (
-          orderingToken !== undefined &&
-          orderingToken !== currentNoteGeneration(userId, note.id)
-        ) {
-          await removeUnreferencedNoteFile(userId, note.id, fileName);
-          return;
-        }
-        await commitTransaction(
-          database,
-          NOTE_STORE,
-          {
-            cachedAt: Date.now(),
-            fileName,
-            key: noteKey(userId, note.id),
-            note: metadata,
-            noteId: note.id,
-            userId,
-          },
+        const fileName = await writeMarkdown(
           userId,
+          note.id,
+          note.markdown,
           options.signal,
+          () => {
+            throwIfAborted(options.signal);
+            assertUserActive(userId, lifetime);
+          },
         );
-      } catch (error) {
-        await removeUnreferencedNoteFile(userId, note.id, fileName);
-        throw error;
+        const { markdown: _markdown, ...metadata } = note;
+        try {
+          assertUserActive(userId, lifetime);
+          if (
+            orderingToken !== undefined &&
+            orderingToken !== currentNoteGeneration(userId, note.id)
+          ) {
+            await removeUnreferencedNoteFile(userId, note.id, fileName);
+            return;
+          }
+          await commitTransaction(
+            database,
+            NOTE_STORE,
+            {
+              cachedAt: Date.now(),
+              fileName,
+              key: noteKey(userId, note.id),
+              note: metadata,
+              noteId: note.id,
+              userId,
+            },
+            userId,
+            options.signal,
+          );
+        } catch (error) {
+          await removeUnreferencedNoteFile(userId, note.id, fileName);
+          throw error;
+        }
+      } finally {
+        writes.delete(terminal);
+        if (!writes.size) {
+          pendingUserWrites.delete(userId);
+        }
+        finishWrite();
       }
     },
 
@@ -1070,4 +1243,17 @@ export async function openOfflineCache(
       );
     },
   };
+  const trackedClose = () => cache.close();
+  const caches = openUserCaches.get(userId) ?? new Set<() => void>();
+  openUserCaches.set(userId, caches);
+  caches.add(trackedClose);
+  const originalClose = cache.close;
+  cache.close = () => {
+    originalClose();
+    caches.delete(trackedClose);
+    if (!caches.size) {
+      openUserCaches.delete(userId);
+    }
+  };
+  return cache;
 }

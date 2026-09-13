@@ -4,7 +4,11 @@ import type {
   NoteSummary,
 } from "@miyulabmd/shared";
 import { fetchFolder, fetchNotes, fetchPublicFolders } from "./api.ts";
-import { openOfflineCache } from "./offline-cache.ts";
+import {
+  captureOfflineCacheUserClearLifetime,
+  isOfflineCacheUserClearLifetimeCurrent,
+  openOfflineCache,
+} from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export class HomeMetadataError extends Error {
@@ -61,6 +65,7 @@ async function saveHomeMetadata(
   folderId: string | undefined,
   signal: AbortSignal,
   isCurrentOwner: () => boolean,
+  clearLifetime: number,
 ): Promise<void> {
   if (viewer.mode !== "authenticated" || !viewer.user) {
     return;
@@ -68,6 +73,9 @@ async function saveHomeMetadata(
   if (viewer.cacheViewerId !== viewer.user.id) {
     snapshot.cacheWarning = "オフラインキャッシュを利用できません。";
     return;
+  }
+  if (!isOfflineCacheUserClearLifetimeCurrent(viewer.user.id, clearLifetime)) {
+    throw new DOMException("Home read is no longer current", "AbortError");
   }
   let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
   try {
@@ -107,6 +115,9 @@ export async function readHomeMetadata({
   if (viewer.mode !== "authenticated" && viewer.mode !== "guest") {
     throw new HomeMetadataError("ネットワークのホーム情報を利用できません。");
   }
+  const clearLifetime = viewer.user
+    ? captureOfflineCacheUserClearLifetime(viewer.user.id)
+    : 0;
   const notesPromise = fetchNotes({ signal });
   const folderPromise =
     viewer.user || folderId
@@ -135,7 +146,20 @@ export async function readHomeMetadata({
           visibleFolder: null,
         };
 
-  await saveHomeMetadata(snapshot, viewer, folderId, signal, isCurrentOwner);
+  await saveHomeMetadata(
+    snapshot,
+    viewer,
+    folderId,
+    signal,
+    isCurrentOwner,
+    clearLifetime,
+  );
   throwIfCancelled(signal, isCurrentOwner);
+  if (
+    viewer.user &&
+    !isOfflineCacheUserClearLifetimeCurrent(viewer.user.id, clearLifetime)
+  ) {
+    throw new DOMException("Home read is no longer current", "AbortError");
+  }
   return snapshot;
 }
