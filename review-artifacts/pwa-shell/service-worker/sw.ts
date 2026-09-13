@@ -1,4 +1,4 @@
-import { setCacheNameDetails } from "workbox-core";
+import { cacheNames, setCacheNameDetails } from "workbox-core";
 import {
   matchPrecache,
   type PrecacheEntry,
@@ -15,6 +15,30 @@ declare global {
 }
 
 setCacheNameDetails({ prefix: "miyulabmd" });
+
+const appPrecachePrefix = "miyulabmd-precache-";
+const serviceWorkerScope = self as unknown as ServiceWorkerGlobalScope;
+
+// Remove only superseded precaches owned by this app and registration scope.
+// The active Workbox cache is explicitly retained for clients during updates.
+serviceWorkerScope.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names
+            .filter(
+              (name) =>
+                name.startsWith(appPrecachePrefix) &&
+                name.endsWith(serviceWorkerScope.registration.scope) &&
+                name !== cacheNames.precache,
+            )
+            .map((name) => caches.delete(name)),
+        ),
+      ),
+  );
+});
 
 const isShellNavigation = (pathname: string) =>
   pathname === "/" ||

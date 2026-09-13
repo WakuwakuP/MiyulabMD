@@ -29,3 +29,25 @@ This is only the first boot/offline-shell checkpoint. SSR privacy, route
 exclusion, foreign-cache protection, and update lifecycle tests remain pending.
 The normal dev browser suite's separate folder-denial test is not claimed green
 for this slice.
+
+## D65 scoped old-precache cleanup
+
+- **Candidate runner:** `node apps/web/scripts/check-pwa-candidate.mjs review-artifacts/pwa-shell`
+  — exit `0`.
+- **PWA browser tests:** `3 passed`, `0 failed`, `0 skipped` (9.0 seconds).
+  This includes boot/offline shell, SSR privacy, and activation cleanup.
+- **Production precache:** `119 entries (3274.18 KiB)`.
+- **Live input invariant:** passed; live source/config/public/test/runner/package
+  inputs were unchanged by the candidate runner.
+- **Unit regression:** `pnpm --filter @miyulabmd/web test` — exit `0`;
+  `117 passed`, `0 failed`, `0 skipped`.
+- **Diff whitespace check:** `git diff --check` — exit `0`.
+- **Final candidate SHA-256:** `service-worker/sw.ts`
+  `310c77e0f4dc9d789add804246b188db54ecebe8711d246ff7ab9a6b2c608c4d`.
+  The other candidate hashes remain unchanged from the values recorded above.
+- **Rationale verified:** The activation test removed the exact-scope obsolete
+  `miyulabmd-precache-` cache and preserved the foreign, other-scope, and
+  unrelated sentinels, then successfully reloaded the current shell offline.
+- **Remaining review boundaries:** Same-origin navigation/redirect behavior,
+  icon/typecheck review, and the separate dev data suite were not changed or
+  claimed by this checkpoint.

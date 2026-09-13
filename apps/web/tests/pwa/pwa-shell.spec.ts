@@ -223,3 +223,40 @@ test("activation removes only obsolete app precaches for the same scope", async 
     page.getByRole("link", { exact: true, name: "MiyulabMD ホーム" }),
   ).toBeVisible();
 });
+
+test("foreign navigation and auth-style redirects are not replaced by the local shell", async ({
+  page,
+}) => {
+  await page.route("**/api/**", (route) => route.abort("internetdisconnected"));
+  await page.route("https://fonts.googleapis.com/**", (route) => route.abort());
+  await page.goto("/");
+  const origin = new URL(page.url()).origin;
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration("/");
+        return registration?.active?.state;
+      }),
+    )
+    .toBe("activated");
+  await page.reload();
+  const foreign = new URL("/n/pwa-foreign-fixture", origin);
+  foreign.hostname = "localhost";
+  const directResponse = await page.goto(foreign.href);
+  expect(directResponse?.status()).toBe(503);
+  expect(directResponse?.fromServiceWorker()).toBe(false);
+  expect(await directResponse?.text()).toContain("PWA_FOREIGN_FAILURE");
+
+  await page.goto(origin);
+  await expect
+    .poll(() =>
+      page.evaluate(() => Boolean(navigator.serviceWorker.controller)),
+    )
+    .toBe(true);
+  const redirectedResponse = await page.goto(
+    new URL("/n/pwa-redirect-fixture", origin).href,
+  );
+  await expect(page).toHaveURL(foreign.href);
+  expect(redirectedResponse?.status()).toBe(503);
+  expect(await redirectedResponse?.text()).toContain("PWA_FOREIGN_FAILURE");
+});

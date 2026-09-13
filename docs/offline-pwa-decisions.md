@@ -1232,6 +1232,28 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   断定しない。SVG iconも対象Chromiumで検証してから形式を変える。通常のSW型チェックへの
   接続は、採用前に別途整える。
 
+## D66：foreign navigationの指摘は実ブラウザ結果で扱う
+
+- **状態**：親がlocalhostと127.0.0.1を別originとして実HTTPで検証した。
+  foreignへの直接navigationと、同originからforeignの503へのredirectは、どちらも
+  foreignの応答を維持した（PWA test成功）。local shell置換という指摘は再現していない。
+- Reviewerにも結果を共有し、確認済みP1ではなくdefense-in-depthの指摘へ修正した。
+  ブラウザのnavigation制約を無視して脆弱性が実証済みとは報告しない。
+- **採用する補強**：route predicateにもWorkboxのsameOrigin判定を明示し、
+  アプリの対象originという不変条件をコード上でも保つ。redirect／4xxの既存処理は変更しない。
+- PWAテストは4件。HTTP fixtureはtest専用dispatcherへ整理し、productionには含めない。
+
+## D67：SW型チェックを通常の検証コマンドへ含める
+
+- **状態**：専用PWA runnerはappとSW双方を型チェックしているが、通常のWeb `typecheck`は
+  appのsrcだけが対象。これは候補を採用する前に埋める検証経路の不足である。
+- **採用**：候補packageのtypecheck scriptでappとtsconfig.sw.jsonを順に検証する。
+  SW configは共通設定を継承し、WebWorkerのlib／types／includeだけを分離する。
+  依存versionや通常のruntime動作は変更しない。
+- **検証**：既存の本番PWAテストとnative TypeScriptチェックを維持し、採用時にも通常の
+  typecheckコマンドで双方が対象になることを確認する。個別のCI設定を重複させるより、
+  既存の標準コマンドの意味を揃える方針とする。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
