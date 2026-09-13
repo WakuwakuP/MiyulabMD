@@ -96,3 +96,46 @@ Final SHA-256 values:
   before this hash line was appended.
 - This records candidate evidence only. Parent review and independent
   validation remain pending; no full completion claim is made.
+
+## D94 serial validation
+
+- Candidate focused browser validation:
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser tests/browser/mydrive-prefetch-mutations.spec.ts mydrive-prefetch-triggers.spec.ts mydrive-prefetch-tabs.spec.ts`
+  — to be recorded after execution.
+- Candidate complete suite, live unit regression, Biome, diff check, exact
+  commands, errors, counts, hashes, and scope are recorded below after execution.
+- This is candidate evidence only. Parent review and independent boundary tests
+  remain pending; no full completion claim is made.
+
+- Setup:
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser tests/browser/mydrive-prefetch-mutations.spec.ts mydrive-prefetch-triggers.spec.ts mydrive-prefetch-tabs.spec.ts`
+  initially failed (exit 1, `ERR_MODULE_NOT_FOUND: Cannot find package 'vite'`);
+  `pnpm install --frozen-lockfile` completed, and
+  `pnpm --filter @miyulabmd/web run test:browser:install` completed after the
+  project-local Chromium installation was absent.
+- Focused candidate browser rerun with the command above — **5 passed**, exit 0.
+- First candidate complete-suite attempt — exit 1 during typecheck:
+  `TS2345: RequestInfo is not assignable to string | URL` in candidate
+  `api-fetch.ts:22`; the subsequent Biome attempt also exited 1 for import
+  ordering, nested ternary, and formatting diagnostics. These were corrected
+  with literal patches.
+- Candidate complete suite:
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all --workers=1`
+  — **80 passed**, exit 0; candidate typecheck and Biome passed.
+- Live unit regression:
+  `pnpm --filter @miyulabmd/web test` — **117 passed, 0 failed**, exit 0.
+- Direct candidate Biome:
+  `pnpm exec biome check review-artifacts/user-cache-suspension-v9-recovered/api-fetch.ts review-artifacts/user-cache-suspension-v9-recovered/drive-changed.ts review-artifacts/user-cache-suspension-v9-recovered/src/lib/mydrive-prefetch-coordinator.ts`
+  — passed, exit 0. `git diff --check` — passed, exit 0.
+- Final SHA-256:
+  `api-fetch.ts` `33f4ad3363a793d901c843d97887a6c00115ca4a86a6b7c8709914b9f14367d9`;
+  `drive-changed.ts` `636188525b7797e8138c3db4f57f67734dfa5621138836cccfc4cf592f9deb31`;
+  candidate coordinator
+  `728306e697af0c4c91692755691580f4da55038ea4841c70639962ffb4000630`;
+  decisions `09719b340efdee8dfe194c53485e969b2ddac5106545a531875fb5087378900b`;
+  validation `7b146d18d238db4563d5c7399a95fdb78cdb5c29586f58b1737471be4889d956`.
+- Scope check: modified only the canonical flat `api-fetch.ts`, existing
+  candidate coordinator, new flat `drive-changed.ts`, and the two append-only
+  coordinator Markdown records. Live sources, tests, runner, transport, API,
+  storage, AppShell, PWA, and other candidates were not edited. Parent review
+  and boundary tests remain pending; no full completion claim is made.

@@ -56,3 +56,20 @@
   unchanged.
 - **Deferred:** No parallel acquisition path, auth promotion, API mutation
   triggers, normal-request integration, or cross-tab identity handling is added.
+
+## D94
+
+- **Status:** Candidate implementation added; parent review and validation remain
+  pending.
+- **Scope:** A payload-free `drive-changed` event is emitted by the canonical
+  `apiFetch` boundary after successful, non-redirected 2xx mutations to the
+  same-origin `/api/notes` or `/api/folders` segment prefixes. The existing
+  coordinator subscribes to that event and reuses `requestCycle`; disposal
+  removes the subscription.
+- **Safety:** Method precedence, mutation gating, transport errors, response
+  identity, and response body usability remain unchanged. Reads, failed or
+  redirected responses, aborts, unrelated profile requests, foreign origins,
+  and server-side calls do not notify. The event module has no coordinator or
+  fetch dependency, avoiding a cycle.
+- **Deferred:** Parent boundary tests, adoption into live sources, and broader
+  normal-request or cross-tab integration remain outside this candidate.

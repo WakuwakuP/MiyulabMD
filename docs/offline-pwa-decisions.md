@@ -1758,6 +1758,32 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   検証証拠に数えない。これはHTTP更新通知であり、Yjsのサーバー保存確認、
   別タブ認証変更、通常取得統合、画像／容量／フォルダHTTP拒否までは扱わない。
 
+## D95：drive更新通知の境界を検証して限定採用する
+
+- 状態：D94を親が読み、追加境界試験を含むcandidate typecheck／Biomeと81件成功。
+- 追加試験はGET/HEAD/OPTIONS、Requestのmethod上書き、URL／文字列、
+  segment-prefixに似た別経路、profile、他origin、HTTP失敗／中断、
+  native redirect後の2xxを扱う。対象更新だけ通知し、bodyを呼び出し側で読める。
+  cache viewing時は既存の同期ReadOnlyViewingErrorを保ち、通信を開始しない。
+- 最初のredirect fixtureは2段目のPlaywright routeが適用されず、未接続Workerへ
+  到達して500になった。親が実際にViteから配信される既存HTMLをredirect先にし、
+  nativeなredirected=true／200／body保持を検証した。アプリの認証backendを
+  実行したとはしない。型なし配列と整形指摘もtest側で修正した。
+- Nodeのwindowなし環境でもcandidateの購読・通知・解除がthrowせず、listenerが
+  呼ばれないことを直接probeした。artifact直import時のmodule-type警告は記録し、
+  そのためにroot package設定を変更しない。
+- 依存循環を避ける独立イベントmoduleを使い、coordinatorのdisposeで購読解除する。
+  新moduleは担当がflat `drive-changed.ts` として配置したが、既存runnerの
+  正規化規則で `src/lib/drive-changed.ts` に一意に対応するため、その配置を採用する。
+- 承認対象SHA256：
+  - api-fetch.ts：`33f4ad3363a793d901c843d97887a6c00115ca4a86a6b7c8709914b9f14367d9`
+  - drive-changed.ts：`636188525b7797e8138c3db4f57f67734dfa5621138836cccfc4cf592f9deb31`
+  - mydrive-prefetch-coordinator.ts：
+    `728306e697af0c4c91692755691580f4da55038ea4841c70639962ffb4000630`
+- 親がこの小さい承認済み差分をliteral patchで本体に配置し、byte一致と通常の
+  browser81／unit117／PWA8等を再検証する。Yjs保存確認や別タブへの変更通知まで
+  完了とはしない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

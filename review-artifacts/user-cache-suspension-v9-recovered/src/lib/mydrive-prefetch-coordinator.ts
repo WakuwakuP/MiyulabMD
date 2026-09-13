@@ -1,3 +1,4 @@
+import { onDriveChanged } from "./drive-changed.ts";
 import { prefetchMyDrive } from "./mydrive-prefetch.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
@@ -116,6 +117,7 @@ export function attachMyDrivePrefetchCoordinator(
       requestCycle();
     }
   };
+  const removeDriveChangedListener = onDriveChanged(requestCycle);
 
   window.addEventListener("online", onOnline);
   document.addEventListener("visibilitychange", onVisibilityChange);
@@ -132,6 +134,7 @@ export function attachMyDrivePrefetchCoordinator(
         return;
       }
       disposed = true;
+      removeDriveChangedListener();
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (refreshInterval !== null) {
