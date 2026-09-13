@@ -34,3 +34,18 @@
   新しい API や fresh-bypass flag の追加。
 - **検証**：subscriber sharing／isolation／cancellation、note denial entry-ordering
   ／ordering の focused specs を候補で直列実行する。
+
+## D104：拒否世代を共有 HTTP の join 判定にも適用する
+
+- **状態**：候補実装済み。ライブソースには反映しない。
+- **背景**：拒否確定後の新しい session が、同じ viewer／note の古い共有
+  HTTP へ参加すると、古い 200 を新世代へ保存できてしまう。
+- **選択**：拒否世代の in-memory ledger を `src/lib/note-access-order.ts` へ
+  抽出し、`offline-cache.ts` は互換 export の薄い delegate とする。共有 helper
+  は各 scoped call の現在世代を読み、`Entry` に記録した世代と一致しない group
+  には参加しない。
+- **理由**：begin は増分せず、拒否入口だけが増分する既存意味を保ったまま、
+  storage と HTTP sharing が同じ ephemeral ledger を参照できる。古い settle／
+  cancel は既存の identity-safe cleanup により新しい group を削除しない。
+- **対象外**：caller の epoch／fresh option、session の拒否 catch／fail-closed
+  方針、永続 marker／schema／key、live source、cross-tab 同期。

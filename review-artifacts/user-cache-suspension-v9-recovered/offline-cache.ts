@@ -1,6 +1,13 @@
 // Canonical candidate v9; see decisions.md for transaction-terminal rationale.
 import type { FolderAccess, Note, NoteSummary } from "@miyulabmd/shared";
 
+import {
+  beginNoteReadOrder,
+  currentNoteReadGeneration,
+  enterNoteDenialOrder,
+  isCurrentNoteReadOrder,
+} from "./note-access-order.ts";
+
 const DATABASE_NAME = "miyulabmd-offline-cache";
 const DATABASE_VERSION = 4;
 const NOTE_STORE = "notes";
@@ -81,7 +88,6 @@ type CancellationOptions = {
 };
 
 const suspendedUsers = new Set<string>();
-const noteGenerations = new Map<string, number>();
 const userLifetimes = new Map<string, number>();
 const pendingUserOperations = new Map<string, Set<() => void>>();
 
@@ -112,14 +118,11 @@ function assertUserActive(userId: string, lifetime: number): void {
 }
 
 export function beginOfflineNoteRead(userId: string, noteId: string): number {
-  return currentNoteGeneration(userId, noteId);
+  return beginNoteReadOrder(userId, noteId);
 }
 
 export function enterOfflineNoteDenial(userId: string, noteId: string): number {
-  const key = generationKey(userId, noteId);
-  const generation = currentNoteGeneration(userId, noteId) + 1;
-  noteGenerations.set(key, generation);
-  return generation;
+  return enterNoteDenialOrder(userId, noteId);
 }
 
 export function isOfflineNoteReadCurrent(
@@ -127,19 +130,15 @@ export function isOfflineNoteReadCurrent(
   noteId: string,
   token: number,
 ): boolean {
-  return currentNoteGeneration(userId, noteId) === token;
+  return isCurrentNoteReadOrder(userId, noteId, token);
 }
 
 function deniedNoteKey(userId: string, noteId: string): string {
   return `${DENIED_NOTE_PREFIX}${noteKey(userId, noteId)}`;
 }
 
-function generationKey(userId: string, noteId: string): string {
-  return noteKey(userId, noteId);
-}
-
 function currentNoteGeneration(userId: string, noteId: string): number {
-  return noteGenerations.get(generationKey(userId, noteId)) ?? 0;
+  return currentNoteReadGeneration(userId, noteId);
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

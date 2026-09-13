@@ -1,6 +1,7 @@
 import type { Note } from "@miyulabmd/shared";
 
 import { type ApiResult, requestJson } from "./api-transport.ts";
+import { currentNoteReadGeneration } from "./note-access-order.ts";
 
 type NoteRequestOptions = {
   signal?: AbortSignal;
@@ -16,6 +17,7 @@ type Subscriber = {
 
 type Entry = {
   controller: AbortController;
+  generation: number;
   promise: Promise<ApiResult<Note>>;
   subscribers: Set<Subscriber>;
 };
@@ -59,11 +61,13 @@ function shareNoteRequest(
     byNote = new Map();
     inFlightByViewer.set(viewerId, byNote);
   }
+  const generation = currentNoteReadGeneration(viewerId, id);
   let entry = byNote.get(id);
-  if (!entry) {
+  if (!entry || entry.generation !== generation) {
     const controller = new AbortController();
     entry = {
       controller,
+      generation,
       promise: requestJson<Note>(`/api/notes/${id}`, {
         credentials: "include",
         signal: controller.signal,

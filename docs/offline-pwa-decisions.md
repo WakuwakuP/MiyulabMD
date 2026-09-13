@@ -1957,6 +1957,27 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   永続marker形式、schema version、sessionの公開条件、別タブの世代同期や
   alias対応は変更しない。親が新しい91件を確認してから採用を判断する。
 
+## D105：拒否世代を含むノート取得共有の限定採用
+
+- 状態：親がD104の単一世代ledgerとEntry比較を読み、candidate全体で
+  typecheck／Biomeと91件成功を確認した。D101/D103/D104を合わせて限定採用する。
+- ledgerはI/Oを持たず、userIdとnoteIdの構造化キーに既存の拒否世代だけを保持する。
+  storageの既存export／private lookupは全て同じledgerへ委譲する。
+  共有Entryの世代が現在値と違えば置き換え、旧cleanupはidentity比較で新Entryを守る。
+- 親が承認済み差分をliteral patchでライブ6ファイルへ配置する。対象と候補SHA256：
+  - api.ts：`67a4536f2081a0fa3e77a289f893dde317930fb20f1914a35c6604b87fb30486`
+  - note-read-session.ts：`c95e764c923ce243fd972d969ec68ab9830fe248a47987e670077c330483aa7c`
+  - offline-cache.ts：`32a627531733c729c4187093be54814b200bc0585d07551f99cabb2847061c90`
+  - mydrive-prefetch.ts：`3fed3078feaac884e3590e1872a33d51564a8147d9f7bc9e971dd45ca5cea77c`
+  - note-request.ts：`33635880d359d1286a6dfc2cd947424b5e4e5c2c5952b0222efe925cb6c3aded`
+  - note-access-order.ts：`d3d0fdbeecc1403073247428ed50b258fbb0bd24204a7ffd4226f6b3b38b55df`
+  flat note-read-session/offline-cacheの先頭candidateコメントだけはライブから除く。
+- 本体でbrowser91／unit117／PWA8／型チェック等を再確認する。
+  共有対象は同じページ・明示viewer・同じ要求ID・同じ拒否世代の進行中ノートGET。
+  legacy hover、一覧／フォルダ、alias、別タブHTTP共有、保存の重複統合までは含めない。
+- 既存のfail-closed拒否catchは変更しない。別タブ間の拒否世代の同期などの
+  既存未完了事項を、この共有修正で解決したとはしない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

@@ -35,3 +35,21 @@ cross-tab HTTP sharing の完了を意味しない。
   は 1 file checked、問題なし。`git diff --check` も成功した。
 - この候補結果は親の独立レビューと採用判断を要する。ライブ採用および全体の
   request coalescing 完了を意味しない。
+
+## D104 検証
+
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser note-request-sharing.spec.ts note-request-subscribers.spec.ts note-denial-entry-ordering.spec.ts note-denial-ordering.spec.ts`
+  は 9 passed、0 failed。拒否後の新しい read が古い transport に join せず、
+  fresh 403 を受ける回帰試験を含む。
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all`
+  は 21 files checked、91 passed、0 failed。`pnpm --filter
+  @miyulabmd/web test` は 117 passed、0 failed。
+- 変更候補の SHA-256 は `offline-cache.ts`:
+  `32a627531733c729c4187093be54814b200bc0585d07551f99cabb2847061c90`、
+  `src/lib/note-access-order.ts`:
+  `d3d0fdbeecc1403073247428ed50b258fbb0bd24204a7ffd4226f6b3b38b55df`、
+  `src/lib/note-request.ts`:
+  `33635880d359d1286a6dfc2cd947424b5e4e5c2c5952b0222efe925cb6c3aded`。
+- Biome と `git diff --check` は、許可された候補 scope の確認として実行する。
+- 結果は親の独立レビューと採用判断を要する。ライブ採用、全体の request
+  coalescing 完了、cross-tab 拒否同期を意味しない。
