@@ -439,7 +439,7 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 
 ## D36：更新dispatchへ所有権付き閲覧スコープを渡す
 
-- **状態**：公開APIを決め、親テストREDから実装へ進む。
+- **状態**：共通policyとしてライブ採用済み。API・画面への接続は後続。
 - **選択前チェックポイント**：`d755e26`（AppShell viewer contextのライブ採用）。
 - **背景**：更新APIが現在のデータのcache/network由来を参照する必要がある。
   古い画面の遅い結果やcleanupが、新しい画面・viewerの許可状態を変更してはいけない。
@@ -462,6 +462,9 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **検証**：`viewing-access.spec.ts`を作成し、新モジュールが存在しないためREDを確認。
   pending、cache、viewer変更、古いpublish/dispose、入力値変更、古いbinding解除をpublic APIで検証する。
 - **範囲**：このスライスはpolicyモジュールのみ。API・AppShell・Editorへの接続は後続。
+- **結果**：親が候補35件・型チェック・Biomeを再確認。ライブへ同一bytesを配置し、
+  policyの公開APIテスト1件、Web unit117件、型チェック・Biomeを確認した。
+  採用SHA256は`439b32f697a82f9fdbb5ee7f1d3953b17ca8d632d9a6e7d307950363388b5214`。
 
 ## D37：既存Editorの状態を維持して読み取り専用へ接続する
 
