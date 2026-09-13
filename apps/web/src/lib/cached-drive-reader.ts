@@ -19,26 +19,10 @@ export async function readCachedDrive(
   signal?: AbortSignal,
   isCurrent?: () => boolean,
 ): Promise<CachedDriveView> {
-  const cache = await openOfflineCache({ signal, userId });
-  try {
+  const ensureReadIsCurrent = () => {
     if (signal?.aborted) {
       throw signal.reason;
     }
-    const [folder, noteList] = await Promise.all([
-      cache.getFolder(folderId),
-      cache.getNoteList(),
-    ]);
-    if (signal?.aborted) {
-      throw signal.reason;
-    }
-    const result = {
-      folder: folder?.folder ?? null,
-      folderCachedAt: folder?.cachedAt ?? null,
-      folderMissing: folder === null,
-      notes: noteList?.notes ?? [],
-      notesCachedAt: noteList?.cachedAt ?? null,
-      notesMissing: noteList === null,
-    };
     if (isCurrent && !isCurrent()) {
       throw new DOMException(
         "Cached drive view is no longer current",
@@ -48,8 +32,25 @@ export async function readCachedDrive(
     if (isOfflineCacheUserSuspended(userId)) {
       throw new DOMException("Offline cache is suspended");
     }
-    return result;
+  };
+  const cache = await openOfflineCache({ signal, userId });
+  let result: CachedDriveView;
+  try {
+    ensureReadIsCurrent();
+    const noteList = await cache.getNoteList();
+    ensureReadIsCurrent();
+    const folder = await cache.getFolder(folderId);
+    result = {
+      folder: folder?.folder ?? null,
+      folderCachedAt: folder?.cachedAt ?? null,
+      folderMissing: folder === null,
+      notes: noteList?.notes ?? [],
+      notesCachedAt: noteList?.cachedAt ?? null,
+      notesMissing: noteList === null,
+    };
   } finally {
     cache.close();
   }
+  ensureReadIsCurrent();
+  return result;
 }

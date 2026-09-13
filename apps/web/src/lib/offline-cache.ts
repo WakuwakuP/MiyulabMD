@@ -9,6 +9,7 @@ const METADATA_STORE = "metadata";
 const VIEWER_ID_METADATA_KEY = "viewer-id";
 const DRIVE_ROOT_METADATA_PREFIX = "drive-root:";
 const DENIED_NOTE_PREFIX = "denied-note:";
+const DENIED_FOLDER_PREFIX = "denied-folder:";
 const OPFS_ROOT = "miyulabmd-offline-cache-v1";
 
 type NoteRecord = {
@@ -53,6 +54,7 @@ type OfflineCache = {
   beginNoteRead(id: string): number;
   denyNote(id: string, orderingToken?: number): Promise<void>;
   clearNoteDenial(id: string, orderingToken?: number): Promise<void>;
+  denyFolder(id: string): Promise<void>;
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
   putNoteList(
     notes: NoteSummary[],
@@ -173,6 +175,10 @@ function noteListKey(userId: string): string {
 
 function driveRootMetadataKey(userId: string): string {
   return `${DRIVE_ROOT_METADATA_PREFIX}${encodePathPart(userId)}`;
+}
+
+function deniedFolderKey(userId: string, folderId: string): string {
+  return `${DENIED_FOLDER_PREFIX}${encodePathPart(userId)}:${encodePathPart(folderId)}`;
 }
 
 function openDatabase(signal?: AbortSignal): Promise<IDBDatabase> {
@@ -477,6 +483,62 @@ async function readDeniedNote(
   );
 }
 
+function readDeniedFolderIds(
+  database: IDBDatabase,
+  userId: string,
+): Promise<Set<string>> {
+  const prefix = `${DENIED_FOLDER_PREFIX}${encodePathPart(userId)}:`;
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(METADATA_STORE, "readonly");
+    const request = transaction
+      .objectStore(METADATA_STORE)
+      .openCursor(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+    const denied = new Set<string>();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(denied);
+        return;
+      }
+      const record = cursor.value as MetadataRecord;
+      if (record.value) {
+        denied.add(record.value);
+      }
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function projectDeniedFolder(
+  folder: FolderAccess,
+  deniedFolderIds: Set<string>,
+): FolderAccess | null {
+  if (folder.id !== null && deniedFolderIds.has(folder.id)) {
+    return null;
+  }
+  const deniedCrumbIndex = folder.crumbs.reduce(
+    (lastIndex, crumb, index) =>
+      deniedFolderIds.has(crumb.id) ? index : lastIndex,
+    -1,
+  );
+  const children = folder.children.filter(
+    (child) => !deniedFolderIds.has(child.id),
+  );
+  if (deniedCrumbIndex < 0) {
+    return { ...folder, children };
+  }
+  const crumbs = folder.crumbs.slice(deniedCrumbIndex + 1);
+  return {
+    ...folder,
+    children: children.map(({ folder: _folder, ...child }) => child),
+    crumbs,
+    folder: undefined,
+    parentId: crumbs.length >= 2 ? (crumbs.at(-2)?.id ?? null) : null,
+    sourceFolder: null,
+  };
+}
+
 function removeCachedNote(
   database: IDBDatabase,
   userId: string,
@@ -728,6 +790,24 @@ export async function openOfflineCache(
       }
     },
 
+    async denyFolder(id) {
+      if (closed) {
+        throw new Error("Offline cache is closed");
+      }
+      const lifetime = currentUserLifetime(userId);
+      assertUserActive(userId, lifetime);
+      await commitTransaction(
+        database,
+        METADATA_STORE,
+        {
+          key: deniedFolderKey(userId, id),
+          value: id,
+        },
+        userId,
+      );
+      assertUserActive(userId, lifetime);
+    },
+
     async denyNote(id, orderingToken) {
       if (closed) {
         throw new Error("Offline cache is closed");
@@ -775,9 +855,15 @@ export async function openOfflineCache(
       if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
         return null;
       }
-      return record
-        ? { cachedAt: record.cachedAt, folder: record.folder }
-        : null;
+      const deniedFolderIds = await readDeniedFolderIds(database, userId);
+      if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
+        return null;
+      }
+      if (!record) {
+        return null;
+      }
+      const folder = projectDeniedFolder(record.folder, deniedFolderIds);
+      return folder ? { cachedAt: record.cachedAt, folder } : null;
     },
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: lifetime and denial guards are intentionally explicit.
