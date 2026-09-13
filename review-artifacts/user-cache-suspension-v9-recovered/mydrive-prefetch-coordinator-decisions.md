@@ -23,3 +23,21 @@
   queue, starting for cached viewers, or copying the acquisition/error policy
   into the coordinator would broaden this slice and risk unauthorized or
   duplicate work.
+
+## D88
+
+- **Status:** Implemented and candidate-validated.
+- **Scope:** The coordinator now wraps each background `prefetchMyDrive` call
+  in the native Web Locks API with the stable app-specific lock prefix
+  `miyulabmd:mydrive-prefetch:` and a JSON-structured authenticated user ID.
+  The lock is exclusive and uses `ifAvailable: true`, so a busy lock skips
+  that cycle rather than queueing it. Existing debounce, minimum interval,
+  single-active-cycle, one-pending-cycle, and disposal behavior remain intact.
+- **Safety:** The lock callback checks disposal and the cycle's abort signal
+  before starting I/O, and awaits `prefetchMyDrive` so ownership lasts through
+  cache close. Environments without Web Locks skip background acquisition
+  rather than using an unsafe parallel fallback. Foreground reads and
+  autosave are not lock-gated.
+- **Deferred:** Identity-change/privacy handling, normal-request deduplication,
+  and other PWA requirements remain outside D88 and are not claimed complete.
+- **Candidate source SHA-256:** `83860f35d2da2d6d745d6042ba0a148e9dbfaf1fcc8bac1c0008659bd8d3b44c`.

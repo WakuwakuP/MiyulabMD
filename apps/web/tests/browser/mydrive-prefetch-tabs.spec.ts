@@ -123,6 +123,23 @@ test("two authenticated tabs share one background prefetch and release ownership
     await expect.poll(readBody, { timeout: 10_000 }).toBe(currentNote.markdown);
     expect(treeRequests).toEqual(["leader", "follower"]);
     expect(bodyRequests).toEqual(["leader", "follower"]);
+
+    currentNote = { ...currentNote, updatedAt: currentNote.updatedAt + 1 };
+    await follower.evaluate(() => {
+      Object.defineProperty(navigator, "locks", {
+        configurable: true,
+        value: undefined,
+      });
+      window.dispatchEvent(new Event("online"));
+    });
+    // Without cross-tab exclusion support, background work is skipped rather
+    // than silently falling back to uncoordinated acquisition.
+    await follower.waitForTimeout(observationWindow);
+    expect(treeRequests).toEqual(["leader", "follower"]);
+    expect(bodyRequests).toEqual(["leader", "follower"]);
+    await expect(
+      follower.getByRole("button", { name: "新規ノート" }),
+    ).toBeVisible();
   } finally {
     releaseFirst.resolve();
     await follower.close();
