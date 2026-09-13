@@ -12,6 +12,7 @@
     "test": "node --experimental-strip-types --test src/lib/*.test.ts src/pages/*.test.ts src/components/editor/*.test.ts",
     "test:browser": "node scripts/playwright.mjs test",
     "test:browser:install": "node scripts/playwright.mjs install chromium",
+    "test:pwa": "pnpm run build && node scripts/playwright.mjs test --config playwright.pwa.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

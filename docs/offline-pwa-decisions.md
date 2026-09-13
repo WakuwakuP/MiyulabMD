@@ -1120,6 +1120,30 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - **制約**：これは保存primitiveであり、networkからの拒否処理が接続済みという意味ではない。
   I/O失敗・競合・解除なども後続で検証するため、このテストだけで採用しない。
 
+## D61：PWA shellは本番build専用のテストで検証する
+
+- **状態**：folder拒否とは独立して、親がbuild成果物を使う最初のREDを追加した。
+- **調査**：現在のmainはSW撤去helperを呼び、public/sw.jsも全cache削除・unregister・
+  client再読み込みを行う撤去用scriptである。静的icon／manifest／Workbox依存はない。
+  ViteはReact/Tailwindだけで、main chunkは約2.3 MB。Workerはnote HTMLへSSR情報を注入する。
+- **テストの分離**：既存browser suiteはVite devのままにし、`playwright.pwa.config.ts`と
+  `tests/pwa`を追加した。`test:pwa`はbuild後にVite previewを専用port4175で起動する。
+  HTTP cacheをCDPで無効にし、SWのactivate・次のnavigationのcontrol・offline reload・
+  SW経由のJS取得と実AppHeaderの表示を要求する。APIもoffline時はabortする。
+- **親実行**：buildは成功したが、SW registrationのactive stateがundefinedのままでRED
+  （期待activated、15秒timeout、exit 1）。この1件は既存dev browser件数とは別で管理する。
+- **実装方式の比較**：手書きSWでも生成asset一覧を作るbuild処理が必要になる。
+  ハッシュ付きVite assetsの扱いは標準のWorkbox injectManifestを使う方向を推奨する。
+  採用する場合は実際のmainサイズを上限へ反映し、2 MBの既定上限でmainを除外しない。
+- **不変条件**：private SSR HTMLやAPI/auth/ws/MCP応答を保存しない。online navigationは
+  networkを通し、offline時だけ本文のない共通shellへ戻す。最初の実装でskipWaiting、
+  client強制navigation／reload、全cache削除を追加しない。
+- **次の検証**：最初のbootテスト後、SSR応答非保存、非対象route、他cacheの保護、
+  update時の旧画面維持を順に検証する。Vite previewだけで実Worker SSRを検証したとはしない。
+- **並行作業**：data候補とは別の固定`review-artifacts/pwa-shell/`でshell候補を管理する。
+  build設定・public assetsを含むため、従来のsrc差替えrunnerは使わず、使い捨てbuild treeで
+  検証する専用runnerを用意する。通常ソースを書き換えてから戻す方式へは戻らない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
