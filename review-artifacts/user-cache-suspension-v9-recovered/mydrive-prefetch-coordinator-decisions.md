@@ -41,3 +41,18 @@
 - **Deferred:** Identity-change/privacy handling, normal-request deduplication,
   and other PWA requirements remain outside D88 and are not claimed complete.
 - **Candidate source SHA-256:** `83860f35d2da2d6d745d6042ba0a148e9dbfaf1fcc8bac1c0008659bd8d3b44c`.
+
+## D91
+
+- **Status:** Candidate implementation added; parent review and validation remain
+  pending.
+- **Scope:** Add the named `PREFETCH_REFRESH_INTERVAL_MS` five-minute interval
+  to the existing eligible-viewer coordinator. Each tick checks visible state
+  and enters the existing `requestCycle` scheduler, preserving debounce,
+  minimum interval, single-flight, one-pending-cycle, and Web Locks behavior.
+- **Safety:** Hidden documents skip periodic requests. Disposal clears the
+  interval, aborts the active cycle, and prevents later scheduling. The
+  defensive viewer snapshot and existing lock skip/release behavior are
+  unchanged.
+- **Deferred:** No parallel acquisition path, auth promotion, API mutation
+  triggers, normal-request integration, or cross-tab identity handling is added.

@@ -66,3 +66,33 @@ Final SHA-256 values:
   storage, AppShell, or PWA files were edited.
 - This validates D88 only; it does not claim full PWA completion or the
   explicitly deferred identity-change/privacy and deduplication requirements.
+
+## D91 serial validation
+
+- Initial focused browser attempt:
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser tests/browser/mydrive-prefetch-periodic.spec.ts mydrive-prefetch-triggers.spec.ts mydrive-prefetch-tabs.spec.ts`
+  — **exit 1** because the project-local Playwright Chromium headless shell was
+  absent (`Executable doesn't exist ... chromium_headless_shell-1243`).
+- Authorized setup:
+  `pnpm install --frozen-lockfile` — **completed**.
+  `pnpm --filter @miyulabmd/web run test:browser:install` — **completed**.
+- Focused candidate browser validation (periodic, triggers, and tabs):
+  the same command above — **5 passed**, exit 0.
+- Candidate complete suite:
+  `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all --workers=1`
+  — **79 passed**, exit 0; candidate Biome checks passed.
+- Live unit regression:
+  `pnpm --filter @miyulabmd/web test` — **117 passed, 0 failed**, exit 0.
+- Direct candidate Biome:
+  `pnpm exec biome check review-artifacts/user-cache-suspension-v9-recovered/src/lib/mydrive-prefetch-coordinator.ts`
+  — **passed**, exit 0.
+- `git diff --check` — **passed**, exit 0.
+- Final SHA-256 after validation:
+  `src/lib/mydrive-prefetch-coordinator.ts`:
+  `10b274fd2226a8d418c9c7b99dad783158598a0d0bcc2517b7cfacadc1fc0a1a`.
+  `mydrive-prefetch-coordinator-decisions.md`:
+  `1862f2ef6f659b70e3ec0d11a5bdb24237666ff474e6ede745b210775fd4a032`.
+  The validation record itself was `27b24139c0a22eb6f1353645e44ccb7467a8fb03bb17b489c651cf335ae814ec`
+  before this hash line was appended.
+- This records candidate evidence only. Parent review and independent
+  validation remain pending; no full completion claim is made.

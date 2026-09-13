@@ -3,6 +3,7 @@ import type { ViewerContext } from "./viewer-context.ts";
 
 export const PREFETCH_DEBOUNCE_MS = 200;
 export const PREFETCH_MIN_INTERVAL_MS = 1000;
+export const PREFETCH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const PREFETCH_LOCK_PREFIX = "miyulabmd:mydrive-prefetch:";
 
 type PrefetchCoordinator = {
@@ -43,6 +44,7 @@ export function attachMyDrivePrefetchCoordinator(
   let activeController: AbortController | null = null;
   let pending = false;
   let lastAttemptAt: number | null = null;
+  let refreshInterval: number | null = null;
 
   const schedule = () => {
     if (disposed || timer !== null) {
@@ -107,15 +109,21 @@ export function attachMyDrivePrefetchCoordinator(
     }
     schedule();
   };
+  const isDocumentVisible = () => document.visibilityState === "visible";
   const onOnline = () => requestCycle();
   const onVisibilityChange = () => {
-    if (document.visibilityState === "visible") {
+    if (isDocumentVisible()) {
       requestCycle();
     }
   };
 
   window.addEventListener("online", onOnline);
   document.addEventListener("visibilitychange", onVisibilityChange);
+  refreshInterval = window.setInterval(() => {
+    if (isDocumentVisible()) {
+      requestCycle();
+    }
+  }, PREFETCH_REFRESH_INTERVAL_MS);
   requestCycle();
 
   return {
@@ -126,6 +134,10 @@ export function attachMyDrivePrefetchCoordinator(
       disposed = true;
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (refreshInterval !== null) {
+        window.clearInterval(refreshInterval);
+        refreshInterval = null;
+      }
       if (timer !== null) {
         window.clearTimeout(timer);
         timer = null;
