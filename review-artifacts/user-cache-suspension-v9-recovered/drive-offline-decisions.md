@@ -69,3 +69,21 @@ storage contract while distinguishing a `null` root route from a literal
 `"root"` folder ID.
 
 No live source, test, runner, schema, or other candidate file was changed.
+
+## D50 implementation
+
+The candidate now preserves a canonical non-null folder ID and writes its
+user-scoped root reference in the existing metadata store. The canonical folder
+record and reference are committed in one readwrite transaction, using the
+existing pending-user operation lifecycle; ordinary `putFolder(folder)` keeps
+its previous behavior. A root lookup follows the explicit reference and falls
+back to the legacy null-ID record only when no reference exists. The reference
+stores a JSON-encoded ID so `null` remains distinct from a missing reference
+and from the literal `"root"` folder key.
+
+The rejected alternatives were rewriting the canonical ID to null (which would
+break note and child parent identity) and maintaining a duplicated root
+snapshot (which could diverge in body and `cachedAt`). Root detection in the
+cached view also recognizes `locked` root snapshots, allowing direct canonical
+ID routes without an invalid parent link. No database version, store, schema,
+test, runner, or live `apps/web/src` file was changed.

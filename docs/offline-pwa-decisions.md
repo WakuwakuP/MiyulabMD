@@ -841,6 +841,28 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   既定browserは49件。root直下の直接URLも`locked`情報を使ってrootと判定し、
   存在しない「上のフォルダ」を提示しない。通常の子folder動作は維持する。
 
+## D51：複数storeへの同期put失敗もtransactionを中止する
+
+- **状態**：D50候補の親レビューで不完全な原子性を確認し、追加テストでRED再現。
+- **D50候補**：通常のroot参照・画面テストを含む49件成功を担当が報告した。
+  親はfolder／metadataのどちらのnative `IDBObjectStore.put`が失敗しても、再起動後に
+  元のrootとfolderだけが残ることを公開APIから検証する2ケースを追加した。
+- **結果**：folder put失敗は成功。metadata put失敗ではPromiseはrejectしたが、
+  先にqueueされた新folderだけがcommitされ、`getFolder(replacementId)`で取得できた。
+  新folderなしが期待値のため、親テストは1成功／1失敗（exit 1）。
+- **原因**：共通helperが複数のputを囲むcatchでrejectするだけで、作成済みtransactionを
+  abortしていない。Promiseの失敗はIndexedDB transactionの中止を意味しない。
+- **選択肢A**：transactionのterminal handlersと停止registryを設定してからputを行い、
+  同期put例外では即座にabortを要求する。complete／abortイベントで結果とcleanupを確定する。
+- **選択肢B**：失敗後に新folderを別transactionで削除する。途中終了・別の有効な更新との
+  競合を作るため選ばない。C＝root参照だけ旧版なら部分保存を容認する案も、
+  「本体と参照を同時に確定」というD50の公開契約を満たさない。
+- **採用**：A。transaction生成前の例外と、生成後のwrite例外を区別する。
+  同期write例外も通常の非同期abortと同じ終了処理へ流し、停止registryを残さない。
+  正常commitを後から取消扱いにする修正はしない。
+- **次の検証**：追加2ケースを含む既定51 browser、型、Biome、既存unitを再実行する。
+  候補はまだ未採用でライブの保存処理は変更していない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

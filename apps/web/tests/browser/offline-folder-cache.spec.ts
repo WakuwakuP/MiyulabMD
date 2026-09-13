@@ -135,3 +135,83 @@ test("a null folder ID and the literal root ID retain separate cached folders", 
   expect(cached.nullFolder?.folder).toEqual(nullFolder);
   expect(cached.literalRoot?.folder).toEqual(literalRootFolder);
 });
+
+for (const failingStore of ["folders", "metadata"] as const) {
+  test(`a failed root replacement at ${failingStore} preserves the previous reference and folder`, async ({
+    page,
+  }) => {
+    const original: FolderAccess = {
+      ...parent,
+      children: [],
+      crumbs: [],
+      folder: "",
+      id: "root-alice-original",
+      locked: true,
+      name: "マイドライブ",
+      parentId: null,
+    };
+    const replacement = { ...original, id: "root-alice-replacement" };
+    const other = { ...original, id: "root-bob" };
+    const moduleUrl = "/src/lib/offline-cache.ts";
+    await page.goto("/tests/browser/fixtures/storage.html");
+    const rejected = await page.evaluate(
+      async ({ failingStore, original, replacement, other, moduleUrl }) => {
+        const { openOfflineCache } = await import(moduleUrl);
+        const alice = await openOfflineCache({ userId: "alice" });
+        const bob = await openOfflineCache({ userId: "bob" });
+        await alice.putFolder(original, { asDriveRoot: true });
+        await bob.putFolder(other, { asDriveRoot: true });
+        const originalPut = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function (
+          this: IDBObjectStore,
+          ...args: Parameters<IDBObjectStore["put"]>
+        ) {
+          if (this.name === failingStore) {
+            throw new DOMException("Storage full", "QuotaExceededError");
+          }
+          return originalPut.apply(this, args);
+        };
+        try {
+          return await alice.putFolder(replacement, { asDriveRoot: true }).then(
+            () => false,
+            () => true,
+          );
+        } finally {
+          IDBObjectStore.prototype.put = originalPut;
+          alice.close();
+          bob.close();
+        }
+      },
+      { failingStore, moduleUrl, original, other, replacement },
+    );
+    expect(rejected).toBe(true);
+    await page.reload();
+    const snapshots = await page.evaluate(
+      async ({ moduleUrl, originalId, replacementId }) => {
+        const { openOfflineCache } = await import(moduleUrl);
+        const alice = await openOfflineCache({ userId: "alice" });
+        const bob = await openOfflineCache({ userId: "bob" });
+        try {
+          return {
+            original: await alice.getFolder(originalId),
+            other: await bob.getFolder(null),
+            replacement: await alice.getFolder(replacementId),
+            root: await alice.getFolder(null),
+          };
+        } finally {
+          alice.close();
+          bob.close();
+        }
+      },
+      {
+        moduleUrl,
+        originalId: original.id,
+        replacementId: replacement.id,
+      },
+    );
+    expect(snapshots.root?.folder).toEqual(original);
+    expect(snapshots.root).toEqual(snapshots.original);
+    expect(snapshots.replacement).toBeNull();
+    expect(snapshots.other?.folder).toEqual(other);
+  });
+}

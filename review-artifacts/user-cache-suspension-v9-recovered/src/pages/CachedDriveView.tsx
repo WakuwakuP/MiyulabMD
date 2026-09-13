@@ -95,7 +95,7 @@ export function CachedDriveView() {
           childrenFolders={children}
           crumbs={folder?.crumbs ?? []}
           currentFolderId={folder?.id ?? null}
-          isDriveRoot={!folderId}
+          isDriveRoot={!folderId || folder?.locked === true}
           listingIncomplete={view.notesMissing}
           notes={view.notes}
           onItemMenu={() => undefined}

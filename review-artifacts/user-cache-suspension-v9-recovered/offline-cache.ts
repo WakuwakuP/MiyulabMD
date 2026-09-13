@@ -8,6 +8,7 @@ const FOLDER_STORE = "folders";
 const NOTE_LIST_STORE = "note-lists";
 const METADATA_STORE = "metadata";
 const VIEWER_ID_METADATA_KEY = "viewer-id";
+const DRIVE_ROOT_METADATA_PREFIX = "drive-root:";
 const DENIED_NOTE_PREFIX = "denied-note:";
 const OPFS_ROOT = "miyulabmd-offline-cache-v1";
 
@@ -40,6 +41,11 @@ type MetadataRecord = {
   value: string;
 };
 
+type StoreRecord = {
+  storeName: string;
+  record: NoteRecord | FolderRecord | NoteListRecord | MetadataRecord;
+};
+
 type OfflineCache = {
   putNote(
     note: Note,
@@ -51,7 +57,10 @@ type OfflineCache = {
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
   putNoteList(notes: NoteSummary[]): Promise<void>;
   getNoteList(): Promise<{ notes: NoteSummary[]; cachedAt: number } | null>;
-  putFolder(folder: FolderAccess): Promise<void>;
+  putFolder(
+    folder: FolderAccess,
+    options?: { asDriveRoot?: boolean },
+  ): Promise<void>;
   getFolder(
     id: string | null,
   ): Promise<{ folder: FolderAccess; cachedAt: number } | null>;
@@ -158,6 +167,10 @@ function folderKey(userId: string, folderId: string | null): string {
 
 function noteListKey(userId: string): string {
   return encodePathPart(userId);
+}
+
+function driveRootMetadataKey(userId: string): string {
+  return `${DRIVE_ROOT_METADATA_PREFIX}${encodePathPart(userId)}`;
 }
 
 function openDatabase(signal?: AbortSignal): Promise<IDBDatabase> {
@@ -313,6 +326,29 @@ function readFolderRecord(
   });
 }
 
+async function readFolderForRoute(
+  database: IDBDatabase,
+  userId: string,
+  id: string | null,
+): Promise<FolderRecord | undefined> {
+  if (id !== null) {
+    return readFolderRecord(database, folderKey(userId, id));
+  }
+  const rootReference = await readMetadataRecord(
+    database,
+    driveRootMetadataKey(userId),
+  );
+  if (!rootReference) {
+    return readFolderRecord(database, folderKey(userId, null));
+  }
+  try {
+    const rootId = JSON.parse(rootReference.value) as string | null;
+    return readFolderRecord(database, folderKey(userId, rootId));
+  } catch {
+    return undefined;
+  }
+}
+
 function commitNoteListRecord(
   database: IDBDatabase,
   record: NoteListRecord,
@@ -327,9 +363,28 @@ function commitStoreRecord(
   record: FolderRecord | NoteListRecord,
   userId: string,
 ): Promise<void> {
+  return commitStoreRecords(database, [{ record, storeName }], userId);
+}
+
+function commitStoreRecords(
+  database: IDBDatabase,
+  records: StoreRecord[],
+  userId: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(storeName, "readwrite");
-    transaction.objectStore(storeName).put(record);
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(
+        [...new Set(records.map(({ storeName }) => storeName))],
+        "readwrite",
+      );
+      for (const { storeName, record } of records) {
+        transaction.objectStore(storeName).put(record);
+      }
+    } catch (error) {
+      reject(error);
+      return;
+    }
     const operations =
       pendingUserOperations.get(userId) ?? new Set<() => void>();
     pendingUserOperations.set(userId, operations);
@@ -353,7 +408,9 @@ function commitStoreRecord(
     };
     operations.add(abort);
     transaction.oncomplete = () => finish(resolve);
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = () => {
+      // The abort event is the single terminal rejection boundary.
+    };
     transaction.onabort = () =>
       finish(() =>
         reject(transaction.error ?? new DOMException("Transaction aborted")),
@@ -691,7 +748,7 @@ export async function openOfflineCache(
       if (isUserSuspended(userId)) {
         return null;
       }
-      const record = await readFolderRecord(database, folderKey(userId, id));
+      const record = await readFolderForRoute(database, userId, id);
       if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
         return null;
       }
@@ -798,23 +855,38 @@ export async function openOfflineCache(
       return { cachedAt: record.cachedAt, notes };
     },
 
-    async putFolder(folder) {
+    async putFolder(folder, options = {}) {
       if (closed) {
         throw new Error("Offline cache is closed");
       }
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
-      await commitFolderRecord(
-        database,
-        {
-          cachedAt: Date.now(),
-          folder,
-          folderId: folder.id,
-          key: folderKey(userId, folder.id),
-          userId,
-        },
+      const cachedAt = Date.now();
+      const record: FolderRecord = {
+        cachedAt,
+        folder,
+        folderId: folder.id,
+        key: folderKey(userId, folder.id),
         userId,
-      );
+      };
+      if (options.asDriveRoot) {
+        await commitStoreRecords(
+          database,
+          [
+            { record, storeName: FOLDER_STORE },
+            {
+              record: {
+                key: driveRootMetadataKey(userId),
+                value: JSON.stringify(folder.id),
+              },
+              storeName: METADATA_STORE,
+            },
+          ],
+          userId,
+        );
+      } else {
+        await commitFolderRecord(database, record, userId);
+      }
     },
 
     async putNote(note, options = {}) {

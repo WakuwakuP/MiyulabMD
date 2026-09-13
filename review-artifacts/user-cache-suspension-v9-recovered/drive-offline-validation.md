@@ -66,3 +66,43 @@ the user is suspended in between. Candidate SHA-256 changes relative to
 The two dedicated records were unchanged before this append; their
 post-append hashes are recorded by the parent review after this entry is
 written. No live source files were adopted or modified.
+
+## D50 validation
+
+Commands were run serially from `cb9203d` in the candidate worktree:
+
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser offline-drive-view.spec.ts offline-folder-cache.spec.ts`
+  first exited **1** because dependencies were absent.
+- `pnpm install --frozen-lockfile` exited **0**; **625** packages were installed.
+- The focused browser command then exited **1** because Chromium was absent.
+- `pnpm --filter @miyulabmd/web test:browser:install` exited **0** (Chromium
+  only).
+- The focused browser command exited **0**: **7 passed**.
+- `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all`
+  first exited **1** on three Biome diagnostics; no fixes were applied.
+- After the formatting and complexity corrections, the same `all` command
+  exited **0**: **49 passed**; typecheck and Biome checked **15 files** with
+  no fixes applied.
+- `pnpm --filter @miyulabmd/web test` exited **0**: **117 passed**, **0
+  failed**.
+- `git diff --check` exited **0**.
+
+Final SHA-256 values after this append:
+
+| File | SHA-256 |
+| --- | --- |
+| `offline-cache.ts` | `57d2ca3616470279af1b7cea353fcc15a9d87dfe65251e9487e1825ebc16644d` |
+| `src/pages/CachedDriveView.tsx` | `6de3791a57fd05b62ac3183bdadf3e5a6e196b7f254332e6e20f4f863ffe20ea` |
+| `drive-offline-decisions.md` | `5483152e90da334f6c71d91d730c539456dc4712e167508f01fd0c80c37652a4` |
+| `drive-offline-validation.md` | `697f75142cf6fc74462917a79dabb263a4e4b681e89a3b7189edbd7e6e0e055f` |
+
+The live files remained unchanged: `apps/web/src/lib/offline-cache.ts`
+SHA-256 `f8c004b8d3ce250f23571b44efc136e1f36efe006b66ed42122e3fef861648d3`
+and `apps/web/src/pages/CachedDriveView.tsx` SHA-256
+`beddfd7ae56483f82e551e9b6757da44f15e9e574ab7c1f828f3c0ce259cf4b1`.
+
+Because this validation entry itself changes its document hash, the final
+post-entry hashes are corrected here: `drive-offline-decisions.md`
+`439f358a47343ae43b25cb2a0123bbd11bfcd6a7260518f662473e734d3c40e0` and
+`drive-offline-validation.md`
+`8437ebceb78099bdeda4515ac6a3d28864d32c11771d4760aeee0528971f08df`.
