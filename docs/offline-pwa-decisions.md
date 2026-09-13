@@ -824,6 +824,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   子folder→親への復帰と直接URLが同じsnapshotを参照することを先に要求する。
   自動prefetchの実装前にこの契約を確定する。
 
+### D50：保存APIとREDテスト
+
+- 選択前のライブ成功チェックポイントは`c21d89b`（48 browser／117 unit成功）。
+- 公開APIは`putFolder(folder, { asDriveRoot: true })`を追加する方針とする。
+  root取得の呼出側が明示し、通常の`putFolder(folder)`で保存された任意のfolderを
+  勝手にルートと推測しない。保存先は既存metadata storeのユーザー別root参照と
+  正規folder record。両者を同じtransactionで確定し、DB versionは増やさない。
+- `getFolder(null)`はroot参照があれば正規IDを解決する。参照未保存なら既存null-ID
+  snapshotの読み出しを維持する。`getFolder(実ID)`はその正規snapshotを直接読む。
+  通常のID指定更新でもroot routeが新しいsnapshotを読むので、rootの複製を作らない。
+- parentは公開cache APIから非nullのrootを保存する実画面テストを追加した。
+  正規ID指定の再保存後にもroot aliasが同じsnapshot／cachedAtを返すこと、
+  root直下noteの表示、子から実IDへの親リンク、直接reload、root crumbへの復帰を確認する。
+- 現状は`getFolder(null)`でrootを得られず、期待`drive-root-alice`に対してundefinedでRED。
+  既定browserは49件。root直下の直接URLも`locked`情報を使ってrootと判定し、
+  存在しない「上のフォルダ」を提示しない。通常の子folder動作は維持する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

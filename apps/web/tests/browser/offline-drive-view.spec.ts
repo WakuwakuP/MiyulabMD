@@ -291,3 +291,77 @@ test("a pending drive snapshot cannot publish a completed folder after user susp
   }, root);
   expect(result.rejected).toBe(true);
 });
+
+test("MyDrive root keeps its canonical server ID across cached routes and updates", async ({
+  page,
+}) => {
+  const rootId = "drive-root-alice";
+  const serverRoot: FolderAccess = {
+    ...root,
+    children: [{ id: "docs", name: "資料", parentId: rootId }],
+    id: rootId,
+    locked: true,
+  };
+  const rootNote: NoteSummary = {
+    ...note,
+    folder: "",
+    folderId: rootId,
+    title: "ルート直下のノート",
+  };
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const snapshots = await page.evaluate(
+    async ({ serverRoot, docs, rootNote, moduleUrl }) => {
+      const { openOfflineCache, persistCachedViewerId } = await import(
+        moduleUrl
+      );
+      await persistCachedViewerId("alice");
+      const cache = await openOfflineCache({ userId: "alice" });
+      try {
+        await cache.putFolder(serverRoot, { asDriveRoot: true });
+        const boundRoot = await cache.getFolder(null);
+        // A normal fetch by canonical ID must also update the root route.
+        await cache.putFolder({
+          ...serverRoot,
+          children: [
+            ...serverRoot.children,
+            { id: "new-docs", name: "追加資料", parentId: serverRoot.id },
+          ],
+        });
+        await cache.putFolder({ ...docs, parentId: serverRoot.id });
+        await cache.putNoteList([rootNote]);
+        return {
+          boundRoot,
+          canonical: await cache.getFolder(serverRoot.id),
+          rootRoute: await cache.getFolder(null),
+        };
+      } finally {
+        cache.close();
+      }
+    },
+    { docs, moduleUrl: "/src/lib/offline-cache.ts", rootNote, serverRoot },
+  );
+  expect(snapshots.boundRoot?.folder.id).toBe(rootId);
+  expect(snapshots.rootRoute).toEqual(snapshots.canonical);
+  expect(snapshots.rootRoute?.folder.children).toHaveLength(2);
+
+  await page.route("**/api/**", (route) => route.abort("internetdisconnected"));
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
+  await expect(page.getByRole("link", { name: "追加資料" })).toBeVisible();
+  await page.getByRole("link", { exact: true, name: "資料" }).click();
+  await expect(page).toHaveURL(/\/f\/docs$/);
+  await page.getByRole("link", { name: "上のフォルダへ" }).click();
+  await expect(page).toHaveURL(`/f/${rootId}`);
+  await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
+  await expect(page.getByRole("link", { name: "上のフォルダへ" })).toHaveCount(
+    0,
+  );
+  await page.reload();
+  await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
+  await page
+    .getByRole("navigation", { exact: true, name: "フォルダ" })
+    .getByRole("link", { exact: true, name: "マイドライブ" })
+    .click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("link", { name: rootNote.title })).toBeVisible();
+});
