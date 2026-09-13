@@ -141,3 +141,35 @@ new-note control remain usable and cached-only wording is absent. A subsequent
 reload after the injected fault is disabled clears the warning and saves the
 root snapshot. Warning state is reset on each read and viewer remount, while
 the next cancellation-boundary test remains out of scope.
+
+## D57 metadata transaction cancellation reason validation
+
+Validation was run serially from checkpoint `90f89dd`; no commit or restore was
+made. Only candidate `offline-cache.ts` and the two allowed metadata records
+were changed. The initial targeted browser command exited `1` because `vite`
+was absent (`ERR_MODULE_NOT_FOUND`).
+
+### Commands and exact results
+
+1. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-folder-cache.spec.ts` —
+   exit `1`; dependencies were missing.
+2. `pnpm install --frozen-lockfile` — exit `0`; `625` packages installed.
+3. `pnpm --filter @miyulabmd/web test:browser:install` — exit `0`; Chromium
+   installed.
+4. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered browser home-metadata.spec.ts offline-folder-cache.spec.ts` —
+   exit `0`; `11 passed`, `0 failed`.
+5. `node apps/web/scripts/check-offline-candidate.mjs review-artifacts/user-cache-suspension-v9-recovered all` —
+   exit `0`; `16 files` checked and `59 passed`, `0 failed`.
+6. `pnpm --filter @miyulabmd/web test` — exit `0`; `117 passed`, `0 failed`,
+   `0 skipped`.
+7. `git diff --check` — exit `0`.
+8. `git diff --quiet -- apps/web/src` — exit `0`; live `apps/web/src` is
+   unchanged.
+
+Candidate SHA-256 for `offline-cache.ts` after the D57 change:
+`a60ebcb6df42d52f6678b0e79d7f1b0286ecec33374d886863b5b9e1803fa925`.
+
+Both parent-provided D57 RED cases are green: cancelling a pending folder save
+and cancelling a pending note-list save rejects with the exact custom
+`AbortController` reason by identity and preserves the prior snapshot. The
+candidate remains under parent review and is not adopted into live sources.

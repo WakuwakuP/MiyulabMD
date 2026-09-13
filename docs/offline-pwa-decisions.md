@@ -1026,6 +1026,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   同一であることを確認する。既定browserは59件となる。
 - readerの保存完了後〜結果公開までの取消境界は、これとは別に続けて検証する。
 
+## D58：metadata snapshotの最終return直前にも取消を確認する
+
+- **状態**：D57のreason選択diffを親が確認。担当は59件成功を報告した。
+  保存完了とreader結果返却の間を検証する追加テストでREDを確認した。
+- **再現**：native DB close時点でsignalをabortする。この時点ではfolder/listのcommitは
+  完了済みだが、readerのPromiseはまだ結果を返していない。現在は保存helper内の最後の確認を
+  通過済みのため、指定reasonで拒否せずsnapshotを成功として返す。
+  親テストでは保存済みデータの維持は成功し、取消結果の確認だけ失敗した（exit 1）。
+- **選択肢A**：`await saveHomeMetadata(...)`の後、`return snapshot`の直前で既存の
+  `throwIfCancelled(signal, isCurrentOwner)`を再利用する。
+- **選択肢B**：確定したcacheを削除して帳尻を合わせる。正常なcommitを壊すため選ばない。
+  C＝UI callbackだけで取消を扱う案も、共有readerの他の利用者へ契約が及ばない。
+- **採用**：A。データの確定と要求結果の返却を分ける。既に保存されたfolder/listは残し、
+  取消済み要求は最後の非同期境界の後でもreasonを保持して拒否する。
+- **検証**：既定browserは60件。新テストは外部fetchとnative DB close境界を使い、
+  snapshotが失われないこととreaderが取消理由で拒否することを同時に確認する。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

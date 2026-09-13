@@ -423,9 +423,11 @@ function commitStoreRecords(
     transaction.onabort = () =>
       finish(() =>
         reject(
-          putError ??
-            transaction.error ??
-            new DOMException("Transaction aborted"),
+          signal?.aborted
+            ? signal.reason
+            : (putError ??
+                transaction.error ??
+                new DOMException("Transaction aborted")),
         ),
       );
     try {

@@ -388,3 +388,78 @@ for (const kind of ["folder", "note-list"] as const) {
     expect(outcome.reasonPreserved).toBe(true);
   });
 }
+
+test("cancellation after metadata commit prevents publication without deleting committed snapshots", async ({
+  page,
+}) => {
+  const { markdown: _markdown, ...summary } = note;
+  await page.goto("/tests/browser/fixtures/storage.html");
+  const result = await page.evaluate(
+    async ({ folder, summary }) => {
+      const readerUrl = "/src/lib/home-metadata-reader.ts";
+      const storageUrl = "/src/lib/offline-cache.ts";
+      const { readHomeMetadata } = await import(readerUrl);
+      const { openOfflineCache } = await import(storageUrl);
+      const controller = new AbortController();
+      const reason = new Error("View left after the cache commit");
+      const originalFetch = globalThis.fetch;
+      const originalClose = IDBDatabase.prototype.close;
+      globalThis.fetch = (input) => {
+        const pathname = new URL(
+          input instanceof Request ? input.url : String(input),
+          location.origin,
+        ).pathname;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              pathname === "/api/notes" ? { notes: [summary] } : folder,
+            ),
+          ),
+        );
+      };
+      IDBDatabase.prototype.close = function (this: IDBDatabase) {
+        originalClose.call(this);
+        controller.abort(reason);
+      };
+      let reasonPreserved: boolean;
+      try {
+        reasonPreserved = await readHomeMetadata({
+          folderId: undefined,
+          isCurrentOwner: () => true,
+          signal: controller.signal,
+          viewer: {
+            cacheViewerId: "alice",
+            mode: "authenticated",
+            user: {
+              displayName: "Alice",
+              email: "alice@example.test",
+              id: "alice",
+            },
+          },
+        }).then(
+          () => false,
+          (error: unknown) => error === reason,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        IDBDatabase.prototype.close = originalClose;
+      }
+      const cache = await openOfflineCache({ userId: "alice" });
+      try {
+        return {
+          aborted: controller.signal.aborted,
+          folder: (await cache.getFolder(null))?.folder,
+          notes: (await cache.getNoteList())?.notes,
+          reasonPreserved,
+        };
+      } finally {
+        cache.close();
+      }
+    },
+    { folder, summary },
+  );
+  expect(result.aborted).toBe(true);
+  expect(result.folder).toEqual(folder);
+  expect(result.notes).toEqual([summary]);
+  expect(result.reasonPreserved).toBe(true);
+});

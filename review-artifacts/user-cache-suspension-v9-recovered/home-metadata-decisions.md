@@ -76,3 +76,24 @@
   targeted browser `10/10`, default candidate `56/56`, and live web regression
   `117/117` all passed. Candidate reader SHA-256:
   `03b96c28238a35cc1548ddea7bcc477f7b2f8917424aeff3680c4ec8374ee39a`.
+
+## D57 metadata transaction cancellation reason
+
+- **Status:** Candidate-only implementation from checkpoint `90f89dd`; not
+  adopted into `apps/web/src`.
+- **Background:** The shared metadata transaction helper already aborted on its
+  signal and preserved the prior snapshot, but `commitStoreRecords` rejected
+  with `putError`, `transaction.error`, or a generic abort error. In particular,
+  folder multi-write could surface a later `TransactionInactiveError`, and the
+  note-list path exposed a generic transaction abort.
+- **Choice:** In that helper's `transaction.onabort` handler only, when
+  `signal?.aborted` is true, reject with `signal.reason` by identity. Otherwise
+  retain the existing `putError ?? transaction.error ?? default` fallback.
+- **Reason:** Caller cancellation is the authoritative reason for a
+  signal-triggered abort, matching the existing note/viewer cancellation
+  precedence, while non-signal transaction and synchronous put failures keep
+  their established diagnostics.
+- **Scope:** Only candidate `offline-cache.ts` and these candidate records were
+  changed. Completion behavior, abort registration, synchronous-put handling,
+  cleanup, schema, and all live sources remain unchanged. Final reader
+  publication cancellation is deferred to a later test.
