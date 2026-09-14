@@ -7,6 +7,7 @@ import {
   openOfflineCache,
   suspendOfflineCacheUser,
 } from "./offline-cache.ts";
+import type { StorageWriteRecovery } from "./storage-write-recovery.ts";
 
 export type AttachedImage = { url: string; noteId: string; imageId: string };
 
@@ -64,15 +65,34 @@ export function collectAttachedImages(
 type Options = {
   scope: OfflineCacheScope;
   cacheOnly: boolean;
+  requireCache?: boolean;
   signal?: AbortSignal;
+  storageRecovery?: StorageWriteRecovery;
+};
+type CacheFailure = {
+  error: unknown;
+  retry(signal: AbortSignal): Promise<void>;
+};
+type LoadedImage = {
+  bytes: Blob | null;
+  cacheFailure?: CacheFailure;
 };
 type Entry = {
   controller: AbortController;
-  promise: Promise<Blob | null>;
+  promise: Promise<LoadedImage>;
   users: number;
 };
 const inFlight = new Map<string, Entry>();
 type ImageCache = Awaited<ReturnType<typeof openOfflineCache>>;
+
+export class AttachedImageCacheError extends Error {
+  cause: unknown;
+
+  constructor(cause: unknown) {
+    super("Attached image cache write failed");
+    this.cause = cause;
+  }
+}
 
 function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) {
@@ -80,13 +100,39 @@ function checkAbort(signal?: AbortSignal): void {
   }
 }
 
+async function writeImageToFreshCache(
+  image: AttachedImage,
+  bytes: Blob,
+  scope: OfflineCacheScope,
+  orderingToken: number | undefined,
+  signal: AbortSignal,
+): Promise<void> {
+  const cache = await openOfflineCache({
+    scope,
+    signal,
+    userId: scope.userId,
+  });
+  try {
+    const token =
+      orderingToken ??
+      (await cache.beginImageRead(image.noteId, image.imageId));
+    await cache.putImage(image.noteId, image.imageId, bytes, {
+      orderingToken: token,
+      signal,
+    });
+  } finally {
+    cache.close();
+  }
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: network status, durable denial, and optional cache fallback have separate semantics.
 async function readNetworkImage(
   image: AttachedImage,
   cache: ImageCache | null,
+  cacheOpenError: unknown,
   scope: OfflineCacheScope,
   signal?: AbortSignal,
-): Promise<Blob | null> {
+): Promise<LoadedImage> {
   const orderingToken = cache
     ? await cache.beginImageRead(image.noteId, image.imageId)
     : undefined;
@@ -111,64 +157,90 @@ async function readNetworkImage(
     } catch {
       suspendOfflineCacheUser(scope.userId);
     }
-    return null;
+    return { bytes: null };
   }
   if (response.status >= 500 && response.status <= 599) {
-    return cache ? await cache.getImage(image.noteId, image.imageId) : null;
+    return {
+      bytes: cache ? await cache.getImage(image.noteId, image.imageId) : null,
+    };
   }
   if (!response.ok || response.redirected) {
-    return null;
+    return { bytes: null };
   }
   const mime =
     response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ??
     "";
   if (!isSupportedCachedImageMime(mime)) {
-    return null;
+    return { bytes: null };
   }
   const bytes = new Blob([await response.blob()], { type: mime });
   checkAbort(signal);
   await assertOfflineCacheScope(scope);
+  const retry = (retrySignal: AbortSignal) =>
+    writeImageToFreshCache(image, bytes, scope, orderingToken, retrySignal);
+  if (!cache) {
+    return {
+      bytes,
+      cacheFailure: {
+        error: cacheOpenError ?? new Error("Image cache storage unavailable"),
+        retry,
+      },
+    };
+  }
   try {
-    await cache?.putImage(image.noteId, image.imageId, bytes, {
+    await cache.putImage(image.noteId, image.imageId, bytes, {
       orderingToken,
       signal,
     });
   } catch (error) {
     checkAbort(signal);
     if (error instanceof DOMException && error.name === "AbortError") {
-      return null;
+      return { bytes: null };
     }
     // Failed replacements leave the old committed reference intact.
+    return { bytes, cacheFailure: { error, retry } };
   }
-  return bytes;
+  return { bytes };
 }
 
 async function loadImage(
   image: AttachedImage,
   options: Options,
-): Promise<Blob | null> {
+): Promise<LoadedImage> {
   const { scope, signal, cacheOnly } = options;
   checkAbort(signal);
   await assertOfflineCacheScope(scope);
   let cache: ImageCache | null = null;
+  let cacheOpenError: unknown;
   try {
     try {
       cache = await openOfflineCache({ scope, signal, userId: scope.userId });
-    } catch {
+    } catch (error) {
       checkAbort(signal);
+      cacheOpenError = error;
       // A healthy online image does not depend on optional local storage.
     }
     if (cacheOnly) {
-      return cache ? await cache.getImage(image.noteId, image.imageId) : null;
+      return {
+        bytes: cache ? await cache.getImage(image.noteId, image.imageId) : null,
+      };
     }
     try {
-      return await readNetworkImage(image, cache, scope, signal);
+      return await readNetworkImage(
+        image,
+        cache,
+        cacheOpenError,
+        scope,
+        signal,
+      );
     } catch (error) {
       checkAbort(signal);
       if (!(error instanceof TypeError)) {
         throw error;
       }
-      return cache ? await cache.getImage(image.noteId, image.imageId) : null;
+      return {
+        bytes: cache ? await cache.getImage(image.noteId, image.imageId) : null,
+      };
     }
   } finally {
     cache?.close();
@@ -180,7 +252,13 @@ export async function acquireAttachedImage(
   image: AttachedImage,
   options: Options,
 ): Promise<Blob | null> {
-  const { scope, signal, cacheOnly } = options;
+  const {
+    scope,
+    signal = new AbortController().signal,
+    cacheOnly,
+    requireCache,
+    storageRecovery,
+  } = options;
   checkAbort(signal);
   const target = attachedImage(image.url);
   if (
@@ -222,7 +300,7 @@ export async function acquireAttachedImage(
   }
   const current = entry;
   current.users += 1;
-  const bytes = await new Promise<Blob | null>((resolve, reject) => {
+  const loaded = await new Promise<LoadedImage>((resolve, reject) => {
     let settled = false;
     const cleanup = () => {
       if (settled) {
@@ -264,5 +342,20 @@ export async function acquireAttachedImage(
   checkAbort(signal);
   await assertOfflineCacheScope(scope);
   checkAbort(signal);
-  return bytes;
+  if (requireCache && loaded.cacheFailure) {
+    try {
+      if (!storageRecovery) {
+        throw loaded.cacheFailure.error;
+      }
+      await storageRecovery.recover(
+        loaded.cacheFailure.error,
+        () => loaded.cacheFailure?.retry(signal) ?? Promise.resolve(),
+        signal,
+      );
+    } catch (error) {
+      checkAbort(signal);
+      throw new AttachedImageCacheError(error);
+    }
+  }
+  return loaded.bytes;
 }

@@ -2317,6 +2317,31 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - folder/list表示投影、guest/cache-disabled画像のchecked fetch、quota連携、
   端末全体削除UIと最終受入れは未完。記録は`mounted-denial-validation.md`。
 
+## D129：quota failure 後の cycle 内共有 recovery
+
+- 状態：quota recovery slice の実装・候補検証済み。本体の focused browser suite
+  はこの環境で依存未導入のため未完走。全オフライン要件の完了ではない。
+- 本文・folder/list metadata・添付画像の write は、acquisition cycle の入口で一度
+  だけ作った recovery 予算を共有する。最初の quota failure の write が settle して
+  shared lock を離れた後にのみ、別の exclusive lock で orphan GC を行う。GC と
+  retry は一 cycle 一回で、abort は GC 前・再試行前に再確認し、abort 後に再開しない。
+- 画像の in-flight key は `requireCache` を含めない。通常の foreground は cache write
+  failure 後も network bytes を受け取り、必須保存を要求する background だけが
+  storage failure を観測する。denial marker は retry せず、retry は元の scope と
+  ordering token を維持する。
+- 候補 quota focused 5件、quota+image regression 20件、candidate typecheck/lint、
+  live typecheck/対象lintは成功。live browser 20件は外部中断され、10件成功時点
+  までしか完走していない。この環境の再実行は `@playwright/test` 未導入で0件実行の
+  起動失敗となった。詳細は
+  `review-artifacts/user-cache-suspension-v9-recovered/quota-recovery-validation.md`。
+- folder denial projection、manual clear、guest image identity、候補外の quarantine
+  branch はこの判断の対象外であり、未完のまま残す。
+- 追加した回帰テストは、本文 write が recovery を消費して成功した後の画像 quota
+  failure が二回目の GC/retry をせず storage stop になることを固定する。なお
+  `collectOfflineCacheOrphans` は大量 orphan の削除途中で signal を観測しないため、
+  abort 完了が遅れるP2リスクが残る。GC後の signal check により abort後の retry は
+  防ぐが、今回APIは広げず後続課題とする。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

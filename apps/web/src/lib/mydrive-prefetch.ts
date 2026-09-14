@@ -9,6 +9,7 @@ import {
 import { ApiCommunicationError, ApiIdentityError } from "./api-transport.ts";
 import {
   type AttachedImage,
+  AttachedImageCacheError,
   acquireAttachedImage,
   collectAttachedImages,
 } from "./attached-images.ts";
@@ -18,6 +19,10 @@ import {
   type OfflineCacheScope,
   openOfflineCache,
 } from "./offline-cache.ts";
+import {
+  createStorageWriteRecovery,
+  type StorageWriteRecovery,
+} from "./storage-write-recovery.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export const PREFETCH_MAX_ATTEMPTS = 2;
@@ -139,6 +144,22 @@ function stopReason(
 }
 
 type PrefetchCache = Awaited<ReturnType<typeof openOfflineCache>>;
+
+function withStorageRecovery(
+  cache: PrefetchCache,
+  recovery: StorageWriteRecovery,
+  signal: AbortSignal,
+): PrefetchCache {
+  return {
+    ...cache,
+    putFolder: (folder, options) =>
+      recovery.run(() => cache.putFolder(folder, options), signal),
+    putNote: (note, options) =>
+      recovery.run(() => cache.putNote(note, options), signal),
+    putNoteList: (notes, options) =>
+      recovery.run(() => cache.putNoteList(notes, options), signal),
+  };
+}
 
 async function capturePrefetchNoteAuthority(
   scope: OfflineCacheScope,
@@ -294,6 +315,7 @@ async function acquireDrive(
   signal: AbortSignal,
   userId: string,
   counts: Counts,
+  storageRecovery: StorageWriteRecovery,
   getPriority: GetPriority = () => null,
 ): Promise<MyDrivePrefetchResult> {
   const acquisition = new Acquisition(signal);
@@ -329,6 +351,7 @@ async function acquireDrive(
     folderIds(treeResult.data),
     counts,
     acquisition,
+    storageRecovery,
     getPriority,
   );
   return notesStop || acquisition.incomplete
@@ -343,6 +366,7 @@ async function acquireNotes(
   ownedFolders: Set<string>,
   counts: Counts,
   acquisition: Acquisition,
+  storageRecovery: StorageWriteRecovery,
   getPriority: GetPriority,
 ): Promise<"aborted" | "auth" | "network" | "storage" | null> {
   const scope = await captureOfflineCacheScope(userId);
@@ -416,7 +440,7 @@ async function acquireNotes(
     collectImages(noteResult.data.markdown);
     counts.notes += 1;
   }
-  await acquireImages(images, scope, signal);
+  await acquireImages(images, scope, signal, storageRecovery);
   return null;
 }
 
@@ -426,13 +450,23 @@ async function acquireImages(
   images: Map<string, AttachedImage>,
   scope: OfflineCacheScope,
   signal: AbortSignal,
+  storageRecovery: StorageWriteRecovery,
 ): Promise<void> {
   for (const image of images.values()) {
     throwIfPrefetchAborted(signal);
     try {
-      await acquireAttachedImage(image, { cacheOnly: false, scope, signal });
-    } catch {
+      await acquireAttachedImage(image, {
+        cacheOnly: false,
+        requireCache: true,
+        scope,
+        signal,
+        storageRecovery,
+      });
+    } catch (error) {
       throwIfPrefetchAborted(signal);
+      if (error instanceof AttachedImageCacheError) {
+        throw new PrefetchIoError("storage", error.cause);
+      }
       // Image storage and permission failures are partial attachment misses.
     }
   }
@@ -468,7 +502,16 @@ export async function prefetchMyDrive(
       openOfflineCache({ signal, userId }),
     );
     throwIfPrefetchAborted(signal);
-    outcome = await acquireDrive(cache, signal, userId, counts, getPriority);
+    const storageRecovery = createStorageWriteRecovery(userId);
+    const recoveringCache = withStorageRecovery(cache, storageRecovery, signal);
+    outcome = await acquireDrive(
+      recoveringCache,
+      signal,
+      userId,
+      counts,
+      storageRecovery,
+      getPriority,
+    );
   } catch (error) {
     outcome = stopped(stopReason(error, signal), counts);
   } finally {
