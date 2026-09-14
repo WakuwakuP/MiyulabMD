@@ -1803,7 +1803,7 @@ function folderOperationIds(
   return [...ids];
 }
 
-async function commitFolderDenial(
+function commitFolderDenial(
   database: IDBDatabase,
   userId: string,
   id: string | null,
@@ -2685,14 +2685,7 @@ export async function openOfflineCache(
         reportCommittedFolderDenial(userId, id, receipt);
         return receipt.committed;
       } catch (error) {
-        throwFolderDenialFailure(
-          error,
-          userId,
-          id,
-          lifetime,
-          signal,
-          scope,
-        );
+        throwFolderDenialFailure(error, userId, id, lifetime, signal, scope);
       }
     },
 

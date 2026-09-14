@@ -150,9 +150,10 @@ async function saveHomeMetadata(
   }
 }
 
-function deniedFolderError(
-  result: { error: string; status: number },
-): HomeMetadataError {
+function deniedFolderError(result: {
+  error: string;
+  status: number;
+}): HomeMetadataError {
   return new HomeMetadataError(
     result.status === 404 ? "フォルダが見つかりません。" : result.error,
     result.status,
@@ -273,16 +274,14 @@ async function projectCachedHomeMetadata(
         projectionCache.getNoteListState(),
         projectionCache.getFolderState(folderId ?? null),
       ]);
-    if (listState === "denied") {
-      snapshot.notes = [];
-    } else if (projectedList) {
-      snapshot.notes = projectedList.notes;
-    }
-    if (folderId !== undefined && folderState === "denied") {
-      snapshot.visibleFolder = null;
-    } else if (folderId !== undefined && projectedFolder) {
-      snapshot.visibleFolder = projectedFolder.folder;
-    }
+    applyCachedHomeMetadataProjection(
+      snapshot,
+      folderId,
+      projectedList,
+      projectedFolder,
+      listState,
+      folderState,
+    );
   } catch (error) {
     if (
       signal.aborted ||
@@ -294,6 +293,29 @@ async function projectCachedHomeMetadata(
     snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
   } finally {
     projectionCache?.close();
+  }
+}
+
+function applyCachedHomeMetadataProjection(
+  snapshot: HomeMetadataSnapshot,
+  folderId: string | undefined,
+  projectedList: { notes: NoteSummary[]; cachedAt: number } | null,
+  projectedFolder: { folder: FolderAccess; cachedAt: number } | null,
+  listState: "available" | "denied" | "missing",
+  folderState: "available" | "denied" | "missing",
+): void {
+  if (listState === "denied") {
+    snapshot.notes = [];
+  } else if (projectedList) {
+    snapshot.notes = projectedList.notes;
+  }
+  if (folderId === undefined) {
+    return;
+  }
+  if (folderState === "denied") {
+    snapshot.visibleFolder = null;
+  } else if (projectedFolder) {
+    snapshot.visibleFolder = projectedFolder.folder;
   }
 }
 
