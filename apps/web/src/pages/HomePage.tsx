@@ -8,6 +8,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
@@ -26,6 +27,10 @@ import {
   HomeMetadataError,
   readHomeMetadata,
 } from "../lib/home-metadata-reader.ts";
+import {
+  readOfflineNoteDenial,
+  subscribeOfflineCacheNoteDenial,
+} from "../lib/offline-cache.ts";
 import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
   type ConfirmState,
@@ -317,6 +322,9 @@ function NetworkHomePage() {
   const [folderCreateError, setFolderCreateError] = useState<string | null>(
     null,
   );
+  const [noteReload, setNoteReload] = useState(0);
+  const notesRef = useRef<NoteSummary[]>([]);
+  const reloadOwnerRef = useRef(0);
   const [folderRename, setFolderRename] = useState<{
     id: string;
     name: string;
@@ -346,6 +354,7 @@ function NetworkHomePage() {
     setError(null);
     setCacheWarning(null);
     setFolderPending(true);
+    ++reloadOwnerRef.current;
     void readHomeMetadata({
       folderId,
       isCurrentOwner: () => current,
@@ -356,6 +365,7 @@ function NetworkHomePage() {
         if (!current || controller.signal.aborted) {
           return;
         }
+        notesRef.current = snapshot.notes;
         setNotes(snapshot.notes);
         setVisibleFolder(snapshot.visibleFolder);
         setPublicFolders(snapshot.publicFolders);
@@ -382,7 +392,41 @@ function NetworkHomePage() {
       current = false;
       controller.abort();
     };
-  }, [folderId, userLoading, viewer]);
+  }, [folderId, noteReload, userLoading, viewer]);
+
+  useEffect(() => {
+    if (viewer.cacheViewerId === null) {
+      return;
+    }
+    const owner = reloadOwnerRef.current;
+    const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
+      if (
+        event.userId !== viewer.cacheViewerId ||
+        owner !== reloadOwnerRef.current
+      ) {
+        return;
+      }
+      const identities = event.resource.aliases.filter((alias) =>
+        notesRef.current.some(
+          (current) => current.id === alias || current.shortId === alias,
+        ),
+      );
+      if (identities.length === 0) {
+        return;
+      }
+      void readOfflineNoteDenial(event, identities).then((denied) => {
+        if (
+          denied === false ||
+          owner !== reloadOwnerRef.current ||
+          viewer.cacheViewerId !== event.userId
+        ) {
+          return;
+        }
+        setNoteReload((current) => current + 1);
+      });
+    });
+    return unsubscribe;
+  }, [viewer.cacheViewerId]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.
