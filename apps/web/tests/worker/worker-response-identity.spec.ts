@@ -103,3 +103,34 @@ test("authoritative API response identity follows the verified request cookie", 
     await bobRequest.dispose();
   }
 });
+
+test("logout preparation clears the real cookie and reports its incoming actor", async ({
+  request,
+}) => {
+  const user = await login(request, "logout-preparation@example.test");
+  const prepared = await request.post("/auth/logout", {
+    headers: {
+      "X-MiyulabMD-Logout": "prepare",
+      [header]: "user:spoofed",
+    },
+    maxRedirects: 0,
+  });
+  expect(prepared.status()).toBe(200);
+  expect(prepared.headers()[header]).toBe(`user:${user.id}`);
+  expect(prepared.headers()["cache-control"]).toBe("private, no-store");
+  expect(prepared.headers().location).toBeUndefined();
+  expect(await prepared.json()).toEqual({ ok: true });
+  const after = await request.get("/api/me");
+  expect(after.headers()[header]).toBe("guest");
+  expect((await after.json()).user).toBeNull();
+
+  const repeated = await request.post("/auth/logout", {
+    headers: { "X-MiyulabMD-Logout": "prepare" },
+    maxRedirects: 0,
+  });
+  expect(repeated.status()).toBe(200);
+  expect(repeated.headers()[header]).toBe("guest");
+  const native = await request.get("/auth/logout", { maxRedirects: 0 });
+  expect(native.status()).toBe(302);
+  expect(native.headers().location).toBe("/");
+});
