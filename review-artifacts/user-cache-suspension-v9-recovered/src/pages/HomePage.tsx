@@ -8,6 +8,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
@@ -311,6 +312,8 @@ function NetworkHomePage() {
   const [error, setError] = useState<string | null>(null);
   const [cacheWarning, setCacheWarning] = useState<string | null>(null);
   const [reloadRequest, setReloadRequest] = useState(0);
+  const latestReloadRequest = useRef(reloadRequest);
+  latestReloadRequest.current = reloadRequest;
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -348,17 +351,20 @@ function NetworkHomePage() {
     }
     const controller = new AbortController();
     let current = true;
+    const requestOwner = reloadRequest;
+    const isCurrentOwner = () =>
+      current && latestReloadRequest.current === requestOwner;
     setError(null);
     setCacheWarning(null);
     setFolderPending(true);
     void readHomeMetadata({
       folderId,
-      isCurrentOwner: () => current,
+      isCurrentOwner,
       signal: controller.signal,
       viewer,
     })
       .then((snapshot) => {
-        if (!current || controller.signal.aborted) {
+        if (!isCurrentOwner() || controller.signal.aborted) {
           return;
         }
         setNotes(snapshot.notes);
@@ -368,7 +374,7 @@ function NetworkHomePage() {
         setFolderPending(false);
       })
       .catch((error: unknown) => {
-        if (!current || controller.signal.aborted) {
+        if (!isCurrentOwner() || controller.signal.aborted) {
           return;
         }
         setFolderPending(false);

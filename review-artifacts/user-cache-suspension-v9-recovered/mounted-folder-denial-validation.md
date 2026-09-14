@@ -49,3 +49,27 @@ browser case GREEN. That browser case was a false positive: it awaited
 old denial across the newer successful write. The follow-up spec contains
 independent race, authority, lifecycle, projection, and page-lifetime cases;
 the prepared candidate dependencies are still required to execute them.
+
+## 51acba5 / ae8075a migration record
+
+The useful folder signal/owner changes from `51acba50bd8109f5a3c00fb38a14cb26196c176e`
+were migrated only into the four candidate sources and this artifact record.
+The live tree was not edited; `ae8075a` remains the live revert/verification
+state. The migration also removes the existing candidate complexity violations
+by extracting lifecycle, note-list, and Home snapshot helpers. No browser DOM
+or full candidate typecheck/lint run was executed because dependencies are not
+installed. `git diff --check` passed and `git diff -- apps/web/src --exit-code`
+reports no live working-tree changes.
+
+## Parent prepared candidate measurements
+
+The parent prepared candidate run recorded:
+
+```text
+candidate typecheck: PASS
+folder authority focused tests: 11/11 PASS
+full candidate lint before this cleanup: 7 errors, 2 warnings
+```
+
+This worker only edits the candidate sources and this validation artifact; DOM
+tests remain reserved for the next slice.

@@ -388,32 +388,49 @@ function invalidateRealm(userId: string): void {
   notifyLifecycle({ type: "invalidate", userId });
 }
 
+function handleDenialLifecycleMessage(
+  event: NoteDenialEvent | FolderDenialEvent,
+): void {
+  if (event.resource.generation === null) {
+    suspendOfflineCacheUser(event.userId);
+  }
+  notifyLifecycle(event);
+}
+
+function handleImageLifecycleMessage(
+  event: Partial<ImageInvalidationEvent>,
+): void {
+  if (
+    event.resource?.type === "image" &&
+    typeof event.resource.noteId === "string" &&
+    typeof event.resource.imageId === "string"
+  ) {
+    notifyLifecycle(event as ImageInvalidationEvent);
+  }
+}
+
+function handleInvalidationLifecycleMessage(
+  data: unknown,
+  event: Partial<OfflineCacheLifecycleEvent>,
+): void {
+  if (isNoteDenialEvent(data) || isFolderDenialEvent(data)) {
+    handleDenialLifecycleMessage(data);
+  } else if (event.resource?.type === "image") {
+    handleImageLifecycleMessage(event);
+  } else if (!event.resource && typeof event.userId === "string") {
+    invalidateRealm(event.userId);
+  }
+}
+
 function handleLifecycleMessage(data: unknown): void {
-  if (data && typeof data === "object" && "type" in data && "userId" in data) {
-    const event = data as Partial<OfflineCacheLifecycleEvent>;
-    if (event.type === "invalidate" && typeof event.userId === "string") {
-      if (isNoteDenialEvent(data)) {
-        if (data.resource.generation === null) {
-          suspendOfflineCacheUser(data.userId);
-        }
-        notifyLifecycle(data);
-      } else if (isFolderDenialEvent(data)) {
-        if (data.resource.generation === null) {
-          suspendOfflineCacheUser(data.userId);
-        }
-        notifyLifecycle(data);
-      } else if (
-        event.resource?.type === "image" &&
-        typeof event.resource.noteId === "string" &&
-        typeof event.resource.imageId === "string"
-      ) {
-        notifyLifecycle(event as ImageInvalidationEvent);
-      } else if (!event.resource) {
-        invalidateRealm(event.userId);
-      }
-    } else if (event.type === "identity" && typeof event.userId === "string") {
-      notifyLifecycle({ type: "identity", userId: event.userId });
-    }
+  if (!data || typeof data !== "object" || !("type" in data)) {
+    return;
+  }
+  const event = data as Partial<OfflineCacheLifecycleEvent>;
+  if (event.type === "invalidate" && typeof event.userId === "string") {
+    handleInvalidationLifecycleMessage(data, event);
+  } else if (event.type === "identity" && typeof event.userId === "string") {
+    notifyLifecycle({ type: "identity", userId: event.userId });
   }
 }
 
@@ -1780,6 +1797,65 @@ function folderOperationIds(
   return [...ids];
 }
 
+async function commitFolderDenial(
+  database: IDBDatabase,
+  userId: string,
+  id: string | null,
+  orderingToken: number | undefined,
+  signal: AbortSignal | undefined,
+  scope: OfflineCacheScope,
+): Promise<FolderDenialReceipt> {
+  return updateFolderDenial(
+    database,
+    userId,
+    id,
+    orderingToken,
+    "deny",
+    undefined,
+    signal,
+    scope,
+  );
+}
+
+function reportCommittedFolderDenial(
+  userId: string,
+  id: string | null,
+  receipt: FolderDenialReceipt,
+): void {
+  if (receipt.committed) {
+    reportOfflineFolderDenial(
+      userId,
+      id,
+      receipt.epoch,
+      receipt.generation,
+      receipt.aliases,
+    );
+  }
+}
+
+function throwFolderDenialFailure(
+  error: unknown,
+  userId: string,
+  id: string | null,
+  lifetime: number,
+  signal: AbortSignal | undefined,
+  scope: OfflineCacheScope,
+): never {
+  if (signal?.aborted) {
+    throw signal.reason;
+  }
+  if (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    isUserSuspended(userId) ||
+    currentUserLifetime(userId) !== lifetime
+  ) {
+    throw error instanceof DOMException ? error : invalidatedError();
+  }
+  suspendOfflineCacheUser(userId);
+  reportOfflineFolderDenial(userId, id, scope.epoch, null, [id]);
+  throw error;
+}
+
 function applyFolderOperation(
   transaction: IDBTransaction,
   operation: FolderOperation,
@@ -2021,7 +2097,9 @@ export async function readOfflineFolderDenial(
 ): Promise<boolean | null> {
   try {
     const database = await getEpochDatabase();
-    if (!database) return null;
+    if (!database) {
+      return null;
+    }
     return await new Promise<boolean | null>((resolve, reject) => {
       const transaction = database.transaction(METADATA_STORE, "readonly");
       const store = transaction.objectStore(METADATA_STORE);
@@ -2054,8 +2132,7 @@ export async function readOfflineFolderDenial(
           parsed.some(
             ({ marker }) =>
               marker?.denied === true &&
-              (generation === null || generation === undefined ||
-                marker.generation >= generation),
+              (generation === null || marker.generation >= generation),
           ),
         );
       };
@@ -2587,44 +2664,28 @@ export async function openOfflineCache(
         throw signal.reason;
       }
       try {
-        const receipt = await updateFolderDenial(
+        const receipt = await commitFolderDenial(
           database,
           userId,
           id,
           orderingToken,
-          "deny",
-          undefined,
           signal,
-          scope,
         );
         assertUserActive(userId, lifetime);
         if (signal?.aborted) {
           throw signal.reason;
         }
-        if (receipt.committed) {
-          reportOfflineFolderDenial(
-            userId,
-            id,
-            receipt.epoch,
-            receipt.generation,
-            receipt.aliases,
-          );
-        }
+        reportCommittedFolderDenial(userId, id, receipt);
         return receipt.committed;
       } catch (error) {
-        if (signal?.aborted) {
-          throw signal.reason;
-        }
-        if (
-          (error instanceof DOMException && error.name === "AbortError") ||
-          isUserSuspended(userId) ||
-          currentUserLifetime(userId) !== lifetime
-        ) {
-          throw error instanceof DOMException ? error : invalidatedError();
-        }
-        suspendOfflineCacheUser(userId);
-        reportOfflineFolderDenial(userId, id, scope.epoch, null, [id]);
-        throw error;
+        throwFolderDenialFailure(
+          error,
+          userId,
+          id,
+          lifetime,
+          signal,
+          scope,
+        );
       }
     },
 

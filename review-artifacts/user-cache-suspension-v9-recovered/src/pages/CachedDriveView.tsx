@@ -1,5 +1,5 @@
 import type { FolderRecord } from "@miyulabmd/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import { NoteTree } from "../components/notes/NoteTree.tsx";
@@ -29,12 +29,19 @@ export function CachedDriveView() {
   const [pending, setPending] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadRequest, setReloadRequest] = useState(0);
+  const latestReloadRequest = useRef(reloadRequest);
+  latestReloadRequest.current = reloadRequest;
   const cacheViewerId = viewer.cacheViewerId;
 
   useEffect(() => {
     setHeader(null);
     const scope = viewing.beginView(viewer);
     const controller = new AbortController();
+    const requestOwner = reloadRequest;
+    const isCurrentRequest = () =>
+      !controller.signal.aborted &&
+      scope.isCurrent() &&
+      latestReloadRequest.current === requestOwner;
     setPending(true);
     setError(null);
     setView(emptyView);
@@ -50,25 +57,25 @@ export function CachedDriveView() {
       scope.isCurrent,
     )
       .then((next) => {
-        if (!controller.signal.aborted && scope.isCurrent()) {
+        if (isCurrentRequest()) {
           const published =
             !(next.folderMissing || next.notesMissing) &&
             scope.publish({
               source: "cache",
               viewer,
             });
-          if (published || (!next.folderMissing && scope.isCurrent())) {
+          if (published || (!next.folderMissing && isCurrentRequest())) {
             setView(next);
           }
         }
       })
       .catch(() => {
-        if (!controller.signal.aborted && scope.isCurrent()) {
+        if (isCurrentRequest()) {
           setError("キャッシュを読み込めませんでした。");
         }
       })
       .finally(() => {
-        if (!controller.signal.aborted && scope.isCurrent()) {
+        if (isCurrentRequest()) {
           setPending(false);
         }
       });

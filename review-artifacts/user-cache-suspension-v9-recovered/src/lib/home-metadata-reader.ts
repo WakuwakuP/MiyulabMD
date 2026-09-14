@@ -150,6 +150,58 @@ async function saveHomeMetadata(
   }
 }
 
+function deniedFolderError(
+  result: { error: string; status: number },
+): HomeMetadataError {
+  return new HomeMetadataError(
+    result.status === 404 ? "フォルダが見つかりません。" : result.error,
+    result.status,
+  );
+}
+
+async function persistDeniedFolder(
+  error: HomeMetadataError,
+  viewer: ViewerContext,
+  folderId: string | undefined,
+  scope: OfflineCacheScope | null,
+  signal: AbortSignal,
+  isCurrentOwner: () => boolean,
+  orderingToken: number | undefined,
+): Promise<void> {
+  if (!viewer.user || (error.status !== 403 && error.status !== 404)) {
+    return;
+  }
+  let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
+  try {
+    cache = await openOfflineCache({
+      scope: scope ?? undefined,
+      signal,
+      userId: viewer.user.id,
+    });
+    const committed = await cache.denyFolder(
+      folderId ?? null,
+      orderingToken,
+      signal,
+    );
+    if (!committed) {
+      throw new DOMException("Home read is no longer current", "AbortError");
+    }
+  } catch (cause) {
+    if (
+      signal.aborted ||
+      !isCurrentOwner() ||
+      (cause instanceof DOMException && cause.name === "AbortError")
+    ) {
+      throw cause;
+    }
+    suspendOfflineCacheUser(viewer.user.id);
+    error.cacheWarning =
+      "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
+  } finally {
+    cache?.close();
+  }
+}
+
 async function rejectDeniedFolder(
   result: { ok: false; error: string; status: number },
   viewer: ViewerContext,
@@ -159,41 +211,16 @@ async function rejectDeniedFolder(
   isCurrentOwner: () => boolean,
   orderingToken: number | undefined,
 ): Promise<never> {
-  const error = new HomeMetadataError(
-    result.status === 404 ? "フォルダが見つかりません。" : result.error,
-    result.status,
+  const error = deniedFolderError(result);
+  await persistDeniedFolder(
+    error,
+    viewer,
+    folderId,
+    scope,
+    signal,
+    isCurrentOwner,
+    orderingToken,
   );
-  if (viewer.user && (result.status === 403 || result.status === 404)) {
-    let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
-    try {
-      cache = await openOfflineCache({
-        scope: scope ?? undefined,
-        signal,
-        userId: viewer.user.id,
-      });
-      const committed = await cache.denyFolder(
-        folderId ?? null,
-        orderingToken,
-        signal,
-      );
-      if (!committed) {
-        throw new DOMException("Home read is no longer current", "AbortError");
-      }
-    } catch (cause) {
-      if (
-        signal.aborted ||
-        !isCurrentOwner() ||
-        (cause instanceof DOMException && cause.name === "AbortError")
-      ) {
-        throw cause;
-      }
-      suspendOfflineCacheUser(viewer.user.id);
-      error.cacheWarning =
-        "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
-    } finally {
-      cache?.close();
-    }
-  }
   throwIfCancelled(signal, isCurrentOwner);
   throw error;
 }
@@ -218,6 +245,55 @@ async function validateHomePublication(
       throw error;
     }
     snapshot.cacheWarning = "オフラインキャッシュを確認できませんでした。";
+  }
+}
+
+async function projectCachedHomeMetadata(
+  snapshot: HomeMetadataSnapshot,
+  folderId: string | undefined,
+  viewer: ViewerContext,
+  scope: OfflineCacheScope | null,
+  signal: AbortSignal,
+  isCurrentOwner: () => boolean,
+): Promise<void> {
+  if (!viewer.user) {
+    return;
+  }
+  let projectionCache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
+  try {
+    projectionCache = await openOfflineCache({
+      scope: scope ?? undefined,
+      signal,
+      userId: viewer.user.id,
+    });
+    const [projectedList, projectedFolder, listState, folderState] =
+      await Promise.all([
+        projectionCache.getNoteList(),
+        projectionCache.getFolder(folderId ?? null),
+        projectionCache.getNoteListState(),
+        projectionCache.getFolderState(folderId ?? null),
+      ]);
+    if (listState === "denied") {
+      snapshot.notes = [];
+    } else if (projectedList) {
+      snapshot.notes = projectedList.notes;
+    }
+    if (folderId !== undefined && folderState === "denied") {
+      snapshot.visibleFolder = null;
+    } else if (folderId !== undefined && projectedFolder) {
+      snapshot.visibleFolder = projectedFolder.folder;
+    }
+  } catch (error) {
+    if (
+      signal.aborted ||
+      !isCurrentOwner() ||
+      (error instanceof DOMException && error.name === "AbortError")
+    ) {
+      throw error;
+    }
+    snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
+  } finally {
+    projectionCache?.close();
   }
 }
 
@@ -288,41 +364,14 @@ async function readHomeMetadataSnapshot({
     scope,
     folderReadGeneration,
   );
-  if (viewer.user) {
-    let projectionCache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
-    try {
-      projectionCache = await openOfflineCache({
-        scope: scope ?? undefined,
-        signal,
-        userId: viewer.user.id,
-      });
-      const projectedList = await projectionCache.getNoteList();
-      const projectedFolder = await projectionCache.getFolder(folderId ?? null);
-      const listState = await projectionCache.getNoteListState();
-      const folderState = await projectionCache.getFolderState(folderId ?? null);
-      if (listState === "denied") {
-        snapshot.notes = [];
-      } else if (projectedList) {
-        snapshot.notes = projectedList.notes;
-      }
-      if (folderId !== undefined && folderState === "denied") {
-        snapshot.visibleFolder = null;
-      } else if (folderId !== undefined && projectedFolder) {
-        snapshot.visibleFolder = projectedFolder.folder;
-      }
-    } catch (error) {
-      if (
-        signal.aborted ||
-        !isCurrentOwner() ||
-        (error instanceof DOMException && error.name === "AbortError")
-      ) {
-        throw error;
-      }
-      snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
-    } finally {
-      projectionCache?.close();
-    }
-  }
+  await projectCachedHomeMetadata(
+    snapshot,
+    folderId,
+    viewer,
+    scope,
+    signal,
+    isCurrentOwner,
+  );
   throwIfCancelled(signal, isCurrentOwner);
   try {
     await validateHomePublication(
