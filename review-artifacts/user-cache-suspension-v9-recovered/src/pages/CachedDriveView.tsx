@@ -50,6 +50,8 @@ export function CachedDriveView() {
       latestReloadRequest.current === requestOwner;
     setPending(true);
     setError(null);
+    notesRef.current = [];
+    viewRef.current = emptyView;
     setView(emptyView);
     if (userLoading || viewer.mode !== "cached" || cacheViewerId === null) {
       setPending(false);
@@ -133,9 +135,10 @@ export function CachedDriveView() {
     if (cacheViewerId === null || viewer.mode !== "cached") {
       return;
     }
-    const owner = reloadOwnerRef.current;
+    let active = true;
     const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
-      if (event.userId !== cacheViewerId || owner !== reloadOwnerRef.current) {
+      const receiptOwner = reloadOwnerRef.current;
+      if (event.userId !== cacheViewerId || !active) {
         return;
       }
       const identities = event.resource.aliases.filter((alias) =>
@@ -149,7 +152,8 @@ export function CachedDriveView() {
       void readOfflineNoteDenial(event, identities).then((denied) => {
         if (
           denied !== false &&
-          owner === reloadOwnerRef.current &&
+          active &&
+          receiptOwner === reloadOwnerRef.current &&
           cacheViewerId === event.userId
         ) {
           setReloadRequest((value) => value + 1);
@@ -157,6 +161,7 @@ export function CachedDriveView() {
       });
     });
     return () => {
+      active = false;
       unsubscribe();
     };
   }, [cacheViewerId, viewer.mode]);

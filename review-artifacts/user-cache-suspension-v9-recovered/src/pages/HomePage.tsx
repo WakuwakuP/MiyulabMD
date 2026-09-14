@@ -429,11 +429,12 @@ function NetworkHomePage() {
     if (viewer.cacheViewerId === null) {
       return;
     }
-    const owner = reloadOwnerRef.current;
+    let active = true;
     const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
+      const receiptOwner = reloadOwnerRef.current;
       if (
         event.userId !== viewer.cacheViewerId ||
-        owner !== reloadOwnerRef.current
+        !active
       ) {
         return;
       }
@@ -448,7 +449,8 @@ function NetworkHomePage() {
       void readOfflineNoteDenial(event, identities).then((denied) => {
         if (
           denied === false ||
-          owner !== reloadOwnerRef.current ||
+          !active ||
+          receiptOwner !== reloadOwnerRef.current ||
           viewer.cacheViewerId !== event.userId
         ) {
           return;
@@ -456,7 +458,10 @@ function NetworkHomePage() {
         setReloadRequest((value) => value + 1);
       });
     });
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [viewer.cacheViewerId]);
 
   useEffect(() => {

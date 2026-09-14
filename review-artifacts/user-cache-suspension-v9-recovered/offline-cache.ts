@@ -632,11 +632,20 @@ export async function readOfflineNoteDenial(
           if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
             denied = false;
           } else if (event.resource.generation !== null) {
-            denied = identities.some(
-              (id) =>
-                parseNoteAuthority(records.get(deniedNoteKey(event.userId, id)))
-                  ?.denied,
-            );
+            const generation = event.resource.generation;
+            const authorities = identities
+              .map((id) =>
+                parseNoteAuthority(
+                  records.get(deniedNoteKey(event.userId, id)),
+                ),
+              )
+              .filter(
+                (authority): authority is NoteAuthorityMarker =>
+                  authority !== null && authority.generation >= generation,
+              );
+            denied =
+              authorities.length > 0 &&
+              authorities.some((authority) => authority.denied);
           }
         },
         () => transaction.abort(),
@@ -1735,6 +1744,17 @@ function folderSequence(record: MetadataRecord | undefined): number {
   return Number.isSafeInteger(value) && value >= 1 ? value : 1;
 }
 
+function requiredFolderSequence(record: MetadataRecord | undefined): number {
+  if (!record) {
+    return 1;
+  }
+  const value = Number(record.value);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error("Invalid folder denial sequence");
+  }
+  return value;
+}
+
 export async function captureOfflineFolderRead(
   scope: OfflineCacheScope,
 ): Promise<number | undefined> {
@@ -2079,22 +2099,64 @@ async function readDeniedFolderIds(
   database: IDBDatabase,
   userId: string,
 ): Promise<Set<string | null>> {
+  return (await readFolderDenialSnapshot(database, userId)).deniedFolderIds;
+}
+
+type FolderDenialSnapshot = {
+  deniedFolderIds: Set<string | null>;
+  sequence: number;
+};
+
+function readFolderDenialSnapshot(
+  database: IDBDatabase,
+  userId: string,
+): Promise<FolderDenialSnapshot> {
   const suffix = `${encodePathPart(userId)}:`;
-  const [legacy, current] = await Promise.all([
-    readMetadataRange(database, `${DENIED_FOLDER_PREFIX}${suffix}`),
-    readMetadataRange(database, `${FOLDER_STATE_PREFIX}${suffix}`),
-  ]);
-  const denied = new Set<string | null>(legacy.map((record) => record.value));
-  for (const record of current) {
-    const marker = JSON.parse(record.value) as FolderDenialMarker;
-    if (marker.folderId !== null && typeof marker.folderId !== "string") {
-      throw new Error("Invalid folder denial metadata");
-    }
-    if (marker.denied !== false) {
-      denied.add(marker.folderId);
-    }
-  }
-  return denied;
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(METADATA_STORE, "readonly");
+    const store = transaction.objectStore(METADATA_STORE);
+    const legacyRequest = store.getAll(
+      IDBKeyRange.bound(`${DENIED_FOLDER_PREFIX}${suffix}`, `${DENIED_FOLDER_PREFIX}${suffix}\uffff`),
+    );
+    const currentRequest = store.getAll(
+      IDBKeyRange.bound(`${FOLDER_STATE_PREFIX}${suffix}`, `${FOLDER_STATE_PREFIX}${suffix}\uffff`),
+    );
+    const sequenceRequest = store.get(folderSequenceKey(userId));
+    transaction.oncomplete = () => {
+      try {
+        const denied = new Set<string | null>(
+          (legacyRequest.result as MetadataRecord[]).map((record) => record.value),
+        );
+        for (const record of currentRequest.result as MetadataRecord[]) {
+          let marker: Partial<FolderDenialMarker>;
+          try {
+            marker = JSON.parse(record.value) as Partial<FolderDenialMarker>;
+          } catch {
+            throw new Error("Invalid folder denial metadata");
+          }
+          if (
+            (marker.folderId !== null && typeof marker.folderId !== "string") ||
+            !Number.isSafeInteger(marker.generation) ||
+            (marker.generation ?? 0) < 1 ||
+            typeof marker.denied !== "boolean"
+          ) {
+            throw new Error("Invalid folder denial metadata");
+          }
+          if (marker.denied !== false) {
+            denied.add(marker.folderId ?? null);
+          }
+        }
+        const sequence = requiredFolderSequence(
+          sequenceRequest.result as MetadataRecord | undefined,
+        );
+        resolve({ deniedFolderIds: denied, sequence });
+      } catch (error) {
+        reject(error);
+      }
+    };
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error ?? invalidatedError());
+  });
 }
 
 /** Null means the durable folder authority could not be inspected. */
@@ -2301,7 +2363,8 @@ async function readVisibleNoteList(
       currentNoteGeneration(userId, note.id),
     ]),
   );
-  const deniedFolderIds = await readDeniedFolderIds(database, userId);
+  const folderSnapshot = await readFolderDenialSnapshot(database, userId);
+  const { deniedFolderIds } = folderSnapshot;
   if (!cacheLifetimeCurrent(userId, lifetime)) {
     return null;
   }
@@ -2323,6 +2386,9 @@ async function readVisibleNoteList(
   }
   if (
     !cacheLifetimeCurrent(userId, lifetime) ||
+    requiredFolderSequence(
+      await readMetadataRecord(database, folderSequenceKey(userId)),
+    ) !== folderSnapshot.sequence ||
     record.notes.some(
       (note) =>
         currentNoteGeneration(userId, note.id) !== generations.get(note.id),

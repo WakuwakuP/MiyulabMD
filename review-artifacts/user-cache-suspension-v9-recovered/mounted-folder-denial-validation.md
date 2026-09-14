@@ -132,6 +132,26 @@ failures. This fixture-only correction addresses the reviewed causes:
 No live or candidate source was edited. Biome and browser execution for this
 follow-up remain unverified in this checkout.
 
+## Mounted denial race follow-up
+
+The candidate commit adds three browser fixtures:
+
+- `folder reload then peer note denial fences Home owner and preserves sibling`
+- `note list read is invalidated when folder denial sequence changes`
+- `stale note denial receipt is false after a newer clear generation`
+
+The note-list race uses native IndexedDB hooks only. It wraps the first
+`IDBObjectStore.prototype.get` for a `denied-note:` key and gates that
+transaction's `IDBTransaction.prototype.oncomplete`. This is the
+`readDeniedNote` call after the folder-denial snapshot and before the final
+folder-sequence reread. The test waits for gate entry, commits the peer folder
+denial, releases completion, asserts the old list is `null`, and then performs
+a fresh read asserting only the allowed note remains.
+
+Browser, candidate typecheck, and candidate lint execution remain unverified
+because this checkout lacks the prepared dependencies. `git diff --check`
+passes.
+
 ## Sibling projection and receipt relevance follow-up
 
 The candidate now applies a non-null filtered note-list projection before
