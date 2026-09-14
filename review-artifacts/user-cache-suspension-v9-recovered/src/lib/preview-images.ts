@@ -98,6 +98,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
     const initialize = async () => {
       if (usesCache) {
         const cache = await import("./offline-cache.ts");
+        const attached = await import("./attached-images.ts");
         if (controller.signal.aborted) return;
         unsubscribeImage = cache.subscribeOfflineCacheImageInvalidation((event) => {
           if (
@@ -152,7 +153,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
           targets.map(async (image) => {
             let bytes: Blob | null = null;
             try {
-              bytes = await cache.acquireAttachedImage(image, {
+              bytes = await attached.acquireAttachedImage(image, {
                 cacheOnly,
                 scope,
                 signal: controller.signal,
