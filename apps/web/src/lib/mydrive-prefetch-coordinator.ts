@@ -1,5 +1,8 @@
 import { onDriveChanged } from "./drive-changed.ts";
-import { prefetchMyDrive } from "./mydrive-prefetch.ts";
+import {
+  type MyDrivePrefetchPriority,
+  prefetchMyDrive,
+} from "./mydrive-prefetch.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export const PREFETCH_DEBOUNCE_MS = 200;
@@ -22,6 +25,21 @@ function isEligibleViewer(viewer: ViewerContext): boolean {
 
 function prefetchLockName(userId: string): string {
   return `${PREFETCH_LOCK_PREFIX}${JSON.stringify(userId)}`;
+}
+
+function currentPriority(): MyDrivePrefetchPriority {
+  const match = /^\/(f|n|s)\/([^/]+)\/?$/.exec(window.location.pathname);
+  if (!match) {
+    return null;
+  }
+  try {
+    return {
+      id: decodeURIComponent(match[2] ?? ""),
+      kind: match[1] === "f" ? "folder" : "note",
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function attachMyDrivePrefetchCoordinator(
@@ -86,6 +104,7 @@ export function attachMyDrivePrefetchCoordinator(
                 return;
               }
               const result = await prefetchMyDrive(snapshot, {
+                getPriority: currentPriority,
                 signal: controller.signal,
               });
               if (result.status === "stopped" && result.reason !== "aborted") {

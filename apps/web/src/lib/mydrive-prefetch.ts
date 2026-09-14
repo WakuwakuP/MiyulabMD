@@ -25,6 +25,37 @@ export type MyDrivePrefetchResult =
 
 type Counts = { folders: number; notes: number };
 
+export type MyDrivePrefetchPriority =
+  | { kind: "folder"; id: string }
+  | { kind: "note"; id: string }
+  | null;
+
+type GetPriority = () => MyDrivePrefetchPriority;
+
+// Select anew between requests, not once at cycle entry. The remaining work
+// belongs only to this acquisition; navigation never changes its viewer.
+function takeNext<T>(pending: T[], preferred: (item: T) => boolean): T {
+  const index = pending.findIndex(preferred);
+  return pending.splice(index < 0 ? 0 : index, 1)[0] as T;
+}
+
+function takeNextNote(
+  targets: NoteSummary[],
+  priority: MyDrivePrefetchPriority,
+): NoteSummary {
+  // Canonical IDs win over short-ID collisions, as in foreground reads.
+  const currentNote =
+    priority?.kind === "note"
+      ? (targets.find((item) => item.id === priority.id) ??
+        targets.find((item) => item.shortId === priority.id))
+      : undefined;
+  return takeNext(targets, (item) =>
+    priority?.kind === "folder"
+      ? item.folderId === priority.id
+      : item === currentNote,
+  );
+}
+
 function stopped(
   reason: "aborted" | "auth" | "network" | "storage" | "unavailable",
   counts: Counts,
@@ -188,13 +219,19 @@ async function acquireFolders(
   tree: FolderRecord[],
   counts: Counts,
   acquisition: Acquisition,
+  getPriority: GetPriority,
 ): Promise<"aborted" | "auth" | "network" | "storage" | null> {
   const root = rootFolder(tree);
   if (!root) {
     return "network";
   }
   const ordered = [root, ...tree.filter((folder) => folder.id !== root.id)];
-  for (const folder of ordered) {
+  while (ordered.length) {
+    const priority = getPriority();
+    const folder = takeNext(
+      ordered,
+      (item) => priority?.kind === "folder" && item.id === priority.id,
+    );
     const folderResult = await acquisition.run(
       () => fetchFolder(folder.id, { signal }),
       { rawFetchErrors: true },
@@ -221,6 +258,7 @@ async function acquireDrive(
   signal: AbortSignal,
   userId: string,
   counts: Counts,
+  getPriority: GetPriority = () => null,
 ): Promise<MyDrivePrefetchResult> {
   const acquisition = new Acquisition(signal);
   const treeResult = await acquisition.run(() => fetchFolderTree({ signal }), {
@@ -241,6 +279,7 @@ async function acquireDrive(
     treeResult.data,
     counts,
     acquisition,
+    getPriority,
   );
   if (folderStop) {
     return stopped(folderStop, counts);
@@ -252,6 +291,7 @@ async function acquireDrive(
     folderIds(treeResult.data),
     counts,
     acquisition,
+    getPriority,
   );
   return notesStop || acquisition.incomplete
     ? stopped(notesStop ?? "network", counts)
@@ -265,6 +305,7 @@ async function acquireNotes(
   ownedFolders: Set<string>,
   counts: Counts,
   acquisition: Acquisition,
+  getPriority: GetPriority,
 ): Promise<"aborted" | "auth" | "network" | "storage" | null> {
   const summaries = await acquisition.run(() => fetchNotes({ signal }), {
     rawFetchErrors: true,
@@ -281,7 +322,8 @@ async function acquireNotes(
       summary.folderId !== null &&
       ownedFolders.has(summary.folderId),
   );
-  for (const summary of targets) {
+  while (targets.length) {
+    const summary = takeNextNote(targets, getPriority());
     const existing = await prefetchIo(signal, "storage", () =>
       cache.getNote(summary.id),
     );
@@ -319,13 +361,14 @@ async function acquireNotes(
 
 export async function prefetchMyDrive(
   viewer: ViewerContext,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; getPriority?: GetPriority } = {},
 ): Promise<MyDrivePrefetchResult> {
   const ownedViewer: ViewerContext = {
     ...viewer,
     user: viewer.user ? { ...viewer.user } : null,
   };
   const signal = options.signal ?? new AbortController().signal;
+  const getPriority = options.getPriority;
   const counts: Counts = { folders: 0, notes: 0 };
   if (signal.aborted) {
     return stopped("aborted", counts);
@@ -346,7 +389,7 @@ export async function prefetchMyDrive(
       openOfflineCache({ signal, userId }),
     );
     throwIfPrefetchAborted(signal);
-    outcome = await acquireDrive(cache, signal, userId, counts);
+    outcome = await acquireDrive(cache, signal, userId, counts, getPriority);
   } catch (error) {
     outcome = stopped(stopReason(error, signal), counts);
   } finally {
