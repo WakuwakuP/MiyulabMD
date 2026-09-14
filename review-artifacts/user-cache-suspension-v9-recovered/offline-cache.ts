@@ -2080,21 +2080,6 @@ function updateFolderDenial(
   });
 }
 
-function readMetadataRange(
-  database: IDBDatabase,
-  prefix: string,
-): Promise<MetadataRecord[]> {
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(METADATA_STORE, "readonly");
-    const request = transaction
-      .objectStore(METADATA_STORE)
-      .getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
-    transaction.oncomplete = () => resolve(request.result as MetadataRecord[]);
-    request.onerror = () => reject(request.error);
-    transaction.onabort = () => reject(transaction.error ?? invalidatedError());
-  });
-}
-
 async function readDeniedFolderIds(
   database: IDBDatabase,
   userId: string,
@@ -2116,40 +2101,27 @@ function readFolderDenialSnapshot(
     const transaction = database.transaction(METADATA_STORE, "readonly");
     const store = transaction.objectStore(METADATA_STORE);
     const legacyRequest = store.getAll(
-      IDBKeyRange.bound(`${DENIED_FOLDER_PREFIX}${suffix}`, `${DENIED_FOLDER_PREFIX}${suffix}\uffff`),
+      IDBKeyRange.bound(
+        `${DENIED_FOLDER_PREFIX}${suffix}`,
+        `${DENIED_FOLDER_PREFIX}${suffix}\uffff`,
+      ),
     );
     const currentRequest = store.getAll(
-      IDBKeyRange.bound(`${FOLDER_STATE_PREFIX}${suffix}`, `${FOLDER_STATE_PREFIX}${suffix}\uffff`),
+      IDBKeyRange.bound(
+        `${FOLDER_STATE_PREFIX}${suffix}`,
+        `${FOLDER_STATE_PREFIX}${suffix}\uffff`,
+      ),
     );
     const sequenceRequest = store.get(folderSequenceKey(userId));
     transaction.oncomplete = () => {
       try {
-        const denied = new Set<string | null>(
-          (legacyRequest.result as MetadataRecord[]).map((record) => record.value),
+        resolve(
+          parseFolderDenialSnapshot(
+            legacyRequest.result as MetadataRecord[],
+            currentRequest.result as MetadataRecord[],
+            sequenceRequest.result as MetadataRecord | undefined,
+          ),
         );
-        for (const record of currentRequest.result as MetadataRecord[]) {
-          let marker: Partial<FolderDenialMarker>;
-          try {
-            marker = JSON.parse(record.value) as Partial<FolderDenialMarker>;
-          } catch {
-            throw new Error("Invalid folder denial metadata");
-          }
-          if (
-            (marker.folderId !== null && typeof marker.folderId !== "string") ||
-            !Number.isSafeInteger(marker.generation) ||
-            (marker.generation ?? 0) < 1 ||
-            typeof marker.denied !== "boolean"
-          ) {
-            throw new Error("Invalid folder denial metadata");
-          }
-          if (marker.denied !== false) {
-            denied.add(marker.folderId ?? null);
-          }
-        }
-        const sequence = requiredFolderSequence(
-          sequenceRequest.result as MetadataRecord | undefined,
-        );
-        resolve({ deniedFolderIds: denied, sequence });
       } catch (error) {
         reject(error);
       }
@@ -2157,6 +2129,39 @@ function readFolderDenialSnapshot(
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error ?? invalidatedError());
   });
+}
+
+function parseFolderDenialSnapshot(
+  legacyRecords: MetadataRecord[],
+  currentRecords: MetadataRecord[],
+  sequenceRecord: MetadataRecord | undefined,
+): FolderDenialSnapshot {
+  const deniedFolderIds = new Set<string | null>(
+    legacyRecords.map((record) => record.value),
+  );
+  for (const record of currentRecords) {
+    let marker: Partial<FolderDenialMarker>;
+    try {
+      marker = JSON.parse(record.value) as Partial<FolderDenialMarker>;
+    } catch {
+      throw new Error("Invalid folder denial metadata");
+    }
+    if (
+      (marker.folderId !== null && typeof marker.folderId !== "string") ||
+      !Number.isSafeInteger(marker.generation) ||
+      (marker.generation ?? 0) < 1 ||
+      typeof marker.denied !== "boolean"
+    ) {
+      throw new Error("Invalid folder denial metadata");
+    }
+    if (marker.denied !== false) {
+      deniedFolderIds.add(marker.folderId ?? null);
+    }
+  }
+  return {
+    deniedFolderIds,
+    sequence: requiredFolderSequence(sequenceRecord),
+  };
 }
 
 /** Null means the durable folder authority could not be inspected. */

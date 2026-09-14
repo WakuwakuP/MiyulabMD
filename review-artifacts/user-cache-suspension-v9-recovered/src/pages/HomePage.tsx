@@ -432,10 +432,7 @@ function NetworkHomePage() {
     let active = true;
     const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
       const receiptOwner = reloadOwnerRef.current;
-      if (
-        event.userId !== viewer.cacheViewerId ||
-        !active
-      ) {
+      if (event.userId !== viewer.cacheViewerId || !active) {
         return;
       }
       const identities = event.resource.aliases.filter((alias) =>
