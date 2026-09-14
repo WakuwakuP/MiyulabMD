@@ -182,7 +182,8 @@ export type OfflineCacheLifecycleEvent = {
   userId: string;
   resource?:
     | { type: "image"; noteId: string; imageId: string }
-    | NoteDenialEvent["resource"];
+    | NoteDenialEvent["resource"]
+    | FolderDenialEvent["resource"];
 };
 export type NoteDenialEvent = {
   type: "invalidate";
@@ -190,6 +191,16 @@ export type NoteDenialEvent = {
   resource: {
     type: "note";
     aliases: string[];
+    epoch: string | null;
+    generation: number | null;
+  };
+};
+export type FolderDenialEvent = {
+  type: "invalidate";
+  userId: string;
+  resource: {
+    type: "folder";
+    aliases: (string | null)[];
     epoch: string | null;
     generation: number | null;
   };
@@ -246,6 +257,16 @@ export function subscribeOfflineCacheNoteDenial(
   });
 }
 
+export function subscribeOfflineCacheFolderDenial(
+  listener: (event: FolderDenialEvent) => void,
+): () => void {
+  return subscribeOfflineCacheLifecycle((event) => {
+    if (event.type === "invalidate" && event.resource?.type === "folder") {
+      listener(event as FolderDenialEvent);
+    }
+  });
+}
+
 function isNoteDenialEvent(value: unknown): value is NoteDenialEvent {
   const event = value as Partial<NoteDenialEvent> | null;
   const resource = event?.resource;
@@ -259,6 +280,24 @@ function isNoteDenialEvent(value: unknown): value is NoteDenialEvent {
     (resource.epoch === null || typeof resource.epoch === "string") &&
     (resource.generation === null ||
       (Number.isSafeInteger(resource.generation) && resource.generation >= 0))
+  );
+}
+
+function isFolderDenialEvent(value: unknown): value is FolderDenialEvent {
+  const event = value as Partial<FolderDenialEvent> | null;
+  const resource = event?.resource;
+  return (
+    event?.type === "invalidate" &&
+    typeof event.userId === "string" &&
+    resource?.type === "folder" &&
+    Array.isArray(resource.aliases) &&
+    resource.aliases.length > 0 &&
+    resource.aliases.every(
+      (id) => id === null || (typeof id === "string" && id.length > 0),
+    ) &&
+    (resource.epoch === null || typeof resource.epoch === "string") &&
+    (resource.generation === null ||
+      (Number.isSafeInteger(resource.generation) && resource.generation >= 1))
   );
 }
 
@@ -283,6 +322,31 @@ export function reportOfflineNoteDenial(
     lifecycleChannel?.postMessage(event);
   } catch {
     // A missing notification does not undo the durable authority marker.
+  }
+}
+
+export function reportOfflineFolderDenial(
+  userId: string,
+  id: string | null,
+  epoch: string | null,
+  generation: number | null,
+  aliases: readonly (string | null)[] = [id],
+): void {
+  const event: FolderDenialEvent = {
+    resource: {
+      aliases: [...new Set(aliases)],
+      epoch,
+      generation,
+      type: "folder",
+    },
+    type: "invalidate",
+    userId,
+  };
+  notifyLifecycle(event);
+  try {
+    lifecycleChannel?.postMessage(event);
+  } catch {
+    // The durable marker remains authoritative when delivery is unavailable.
   }
 }
 
@@ -320,6 +384,11 @@ if (lifecycleChannel) {
   lifecycleChannel.onmessage = ({ data }) => {
     if (data?.type === "invalidate" && typeof data.userId === "string") {
       if (isNoteDenialEvent(data)) {
+        if (data.resource.generation === null) {
+          suspendOfflineCacheUser(data.userId);
+        }
+        notifyLifecycle(data);
+      } else if (isFolderDenialEvent(data)) {
         if (data.resource.generation === null) {
           suspendOfflineCacheUser(data.userId);
         }
@@ -1886,6 +1955,29 @@ async function readDeniedFolderIds(
   return denied;
 }
 
+/** Null means the durable folder authority could not be inspected. */
+export async function readOfflineFolderDenial(
+  event: FolderDenialEvent,
+): Promise<boolean | null> {
+  try {
+    const database = await getEpochDatabase();
+    if (!database) return null;
+    const marker = await readMetadataRecord(
+      database,
+      deniedFolderKey(event.userId, event.resource.aliases[0] ?? null),
+    );
+    const epoch =
+      (await readMetadataRecord(database, epochKey(event.userId)))?.value ?? "0";
+    if (event.resource.epoch !== null && epoch !== event.resource.epoch) return false;
+    const parsed = parseFolderDenialMarker(marker, event.resource.aliases[0] ?? null);
+    return parsed !== null && event.resource.generation !== null
+      ? parsed.generation >= event.resource.generation && parsed.denied
+      : parsed?.denied ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function projectDeniedFolder(
   folder: FolderAccess,
   deniedFolderIds: Set<string | null>,
@@ -2332,8 +2424,27 @@ export async function openOfflineCache(
       assertUserActive(userId, lifetime);
       try {
         await updateFolderDenial(database, userId, id, undefined, "deny");
+        const rootId = rootReferenceId(
+          await readMetadataRecord(database, driveRootMetadataKey(userId)),
+        );
+        const aliases = folderOperationIds(
+          { action: "deny", folderId: id, orderingToken: undefined },
+          rootId,
+        );
+        const marker = parseFolderDenialMarker(
+          await readMetadataRecord(database, deniedFolderKey(userId, id)),
+          id,
+        );
+        reportOfflineFolderDenial(
+          userId,
+          id,
+          scope.epoch,
+          marker?.generation ?? null,
+          aliases,
+        );
       } catch (error) {
         suspendOfflineCacheUser(userId);
+        reportOfflineFolderDenial(userId, id, scope.epoch, null, [id]);
         throw error;
       }
       assertUserActive(userId, lifetime);
@@ -2575,9 +2686,16 @@ export async function openOfflineCache(
           currentNoteGeneration(userId, note.id),
         ]),
       );
+      const deniedFolderIds = await readDeniedFolderIds(database, userId);
+      if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
+        return null;
+      }
       const notes: NoteSummary[] = [];
       for (const note of record.notes) {
-        if (!(await readDeniedNote(database, userId, note.id))) {
+        if (
+          !deniedFolderIds.has(note.folderId) &&
+          !(await readDeniedNote(database, userId, note.id))
+        ) {
           if (
             isUserSuspended(userId) ||
             currentUserLifetime(userId) !== lifetime ||

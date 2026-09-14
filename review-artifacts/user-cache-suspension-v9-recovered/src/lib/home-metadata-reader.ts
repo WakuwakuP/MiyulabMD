@@ -261,6 +261,33 @@ async function readHomeMetadataSnapshot({
     scope,
     folderReadGeneration,
   );
+  if (viewer.user) {
+    let projectionCache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
+    try {
+      projectionCache = await openOfflineCache({
+        scope: scope ?? undefined,
+        signal,
+        userId: viewer.user.id,
+      });
+      const projectedList = await projectionCache.getNoteList();
+      const projectedFolder = await projectionCache.getFolder(folderId ?? null);
+      if (projectedList) snapshot.notes = projectedList.notes;
+      if (folderId !== undefined && projectedFolder) {
+        snapshot.visibleFolder = projectedFolder.folder;
+      }
+    } catch (error) {
+      if (
+        signal.aborted ||
+        !isCurrentOwner() ||
+        (error instanceof DOMException && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
+    } finally {
+      projectionCache?.close();
+    }
+  }
   throwIfCancelled(signal, isCurrentOwner);
   try {
     await validateHomePublication(
