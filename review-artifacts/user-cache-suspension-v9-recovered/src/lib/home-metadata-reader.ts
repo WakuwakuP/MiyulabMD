@@ -315,9 +315,6 @@ function applyCachedHomeMetadataProjection(
   } else if (projectedList) {
     snapshot.notes = projectedList.notes;
   }
-  if (folderId === undefined) {
-    return;
-  }
   if (folderState === "denied") {
     snapshot.visibleFolder = null;
   } else if (projectedFolder) {

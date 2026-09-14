@@ -231,6 +231,7 @@ async function routeAuthenticatedHome(
   page: Page,
   folders: Record<string, ReturnType<typeof folderFixture>>,
   notes: unknown[],
+  deniedFolders = new Set<string>(),
 ) {
   await page.route("**/api/**", (route) => {
     const pathname = new URL(route.request().url()).pathname;
@@ -257,6 +258,13 @@ async function routeAuthenticatedHome(
     }
     const folderId = pathname.match(/^\/api\/folders\/([^/]+)$/)?.[1];
     if (folderId && folders[folderId]) {
+      if (deniedFolders.has(folderId)) {
+        return route.fulfill({
+          headers: sessionHeaders,
+          json: { error: "Denied" },
+          status: 403,
+        });
+      }
       return route.fulfill({
         headers: sessionHeaders,
         json: folders[folderId],
@@ -340,10 +348,12 @@ test("mounted network folder removes only the denied current view", async ({
     updatedAt: 6,
   };
   const apiRequests = trackApiRequests(page);
+  const deniedFolders = new Set<string>();
   await routeAuthenticatedHome(
     page,
     { root: current, [current.id]: current, [other.id]: other },
     [targetNote, unrelatedNote],
+    deniedFolders,
   );
   await page.goto(`/f/${current.id}`);
   await expect(
@@ -364,7 +374,7 @@ test("mounted network folder removes only the denied current view", async ({
   const peer = await context.newPage();
   try {
     await peer.goto("/tests/browser/fixtures/storage.html");
-    const token = await peer.evaluate(async (id) => {
+    const unrelatedToken = await peer.evaluate(async (id) => {
       const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
       const cache = await openOfflineCache({ userId: "alice" });
       try {
@@ -372,8 +382,8 @@ test("mounted network folder removes only the denied current view", async ({
       } finally {
         cache.close();
       }
-    }, current.id);
-    await denyFolderFromPeer(peer, "not-current", token);
+    }, other.id);
+    await denyFolderFromPeer(peer, other.id, unrelatedToken);
     await expect(
       page
         .getByRole("navigation", { name: "フォルダ" })
@@ -382,7 +392,17 @@ test("mounted network folder removes only the denied current view", async ({
     await expect(
       page.getByRole("link", { name: targetNote.title }),
     ).toBeVisible();
-    await denyFolderFromPeer(peer, current.id, token);
+    deniedFolders.add(current.id);
+    const currentToken = await peer.evaluate(async (id) => {
+      const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
+      const cache = await openOfflineCache({ userId: "alice" });
+      try {
+        return await cache.beginFolderRead(id);
+      } finally {
+        cache.close();
+      }
+    }, current.id);
+    await denyFolderFromPeer(peer, current.id, currentToken);
     await expect
       .poll(
         () =>
@@ -403,11 +423,12 @@ test("mounted network folder removes only the denied current view", async ({
     const afterCurrentDenial = apiRequests.filter((path) =>
       path.startsWith("/api/folders"),
     ).length;
-    await denyFolderFromPeer(peer, other.id);
-    await page.waitForTimeout(100);
-    expect(
-      apiRequests.filter((path) => path.startsWith("/api/folders")).length,
-    ).toBe(afterCurrentDenial);
+    await denyFolderFromPeer(peer, other.id, unrelatedToken);
+    await expect
+      .poll(
+        () => apiRequests.filter((path) => path.startsWith("/api/folders")).length,
+      )
+      .toBe(afterCurrentDenial);
   } finally {
     await peer.close();
   }
@@ -565,18 +586,13 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
     { id: folderA.id, name: folderA.name, parentId: "route-root" },
     { id: folderB.id, name: folderB.name, parentId: "route-root" },
   ]);
-  let release: () => void = () => undefined;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const apiRequests = trackApiRequests(page);
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === `/api/folders/${folderA.id}`) {
-      await gate;
       return route.fulfill({
         headers: sessionHeaders,
-        json: { error: "Denied" },
-        status: 403,
+        json: folderA,
       });
     }
     if (pathname === "/api/me") {
@@ -595,35 +611,54 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
       return route.fulfill({ headers: sessionHeaders, json: folderB });
     }
     if (pathname === "/api/notes") {
-      return route.fulfill({ headers: sessionHeaders, json: { notes: [] } });
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: {
+          notes: [
+            {
+              ...note,
+              folderId: folderB.id,
+              id: "route-b-note",
+              shortId: "route-b-note",
+              title: "Route B Note",
+            },
+          ],
+        },
+      });
     }
     return route.fulfill({ headers: sessionHeaders, json: routeRoot });
   });
-  const firstNavigation = page.goto(`/f/${folderA.id}`);
-  await page.waitForRequest(
-    (request) =>
-      new URL(request.url()).pathname === `/api/folders/${folderA.id}`,
-  );
+  await page.goto(`/f/${folderA.id}`);
+  await expect(
+    page.getByRole("navigation", { name: "フォルダ" }).getByText(folderA.name),
+  ).toBeVisible();
+  await page.goto(`/f/${folderB.id}`);
+  await expect(page).toHaveURL(`/f/${folderB.id}`);
+  await expect(
+    page.getByRole("navigation", { name: "フォルダ" }).getByText(folderB.name),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Route B Note" })).toBeVisible();
+  const folderBRequestCount = apiRequests.filter(
+    (path) => path === `/api/folders/${folderB.id}`,
+  ).length;
+  const peer = await page.context().newPage();
   try {
-    const secondNavigation = page.waitForRequest(
-      (request) =>
-        new URL(request.url()).pathname === `/api/folders/${folderB.id}`,
-    );
-    await page.goto(`/f/${folderB.id}`);
-    await secondNavigation;
-    release();
-    await firstNavigation.catch(() => undefined);
+    await denyFolderFromPeer(peer, folderA.id);
+    await expect
+      .poll(
+        () =>
+          apiRequests.filter((path) => path === `/api/folders/${folderB.id}`)
+            .length,
+      )
+      .toBe(folderBRequestCount);
     await expect(
       page
         .getByRole("navigation", { name: "フォルダ" })
         .getByText(folderB.name),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Route B Note" })).toBeVisible();
     await expect(page.getByText(/キャッシュ|停止|警告/)).toHaveCount(0);
   } finally {
-    release();
-    await firstNavigation.catch(() => undefined);
+    await peer.close();
   }
-  await expect(
-    page.getByRole("navigation", { name: "フォルダ" }).getByText(folderB.name),
-  ).toBeVisible();
 });

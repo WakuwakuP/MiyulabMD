@@ -157,3 +157,19 @@ live apps/web/src/**: unchanged
 candidate typecheck/lint: not executed (prepared candidate dependencies unavailable)
 mounted browser validation: not executed (prepared candidate dependencies unavailable)
 ```
+
+## Remaining mounted RED corrections
+
+The Home metadata projection now applies the cached root folder and denied root
+state instead of returning early for the root route. The mounted browser
+fixtures also use a mutable 403 response for the current folder, capture a
+fresh current-folder read generation after the unrelated denial, and rewrite
+the route-switch case as settled A-then-B navigation followed by a late A
+receipt. These changes were not executable in this checkout because the
+candidate browser dependencies are not installed.
+
+```text
+git diff --check: PASS
+Biome/typecheck: not executed (candidate dependencies unavailable)
+mounted browser validation: not executed (candidate dependencies unavailable)
+```
