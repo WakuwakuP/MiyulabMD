@@ -414,19 +414,20 @@ test("mounted network folder removes only the denied current view", async ({
         .getByRole("navigation", { name: "フォルダ" })
         .getByText(current.name),
     ).toHaveCount(0);
-    await expect(page.getByRole("link", { name: targetNote.title })).toHaveCount(
-      0,
-    );
-    await expect(page.getByText(/キャッシュを削除できませんでした/)).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByRole("link", { name: targetNote.title }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText(/キャッシュを削除できませんでした/),
+    ).toHaveCount(0);
     const afterCurrentDenial = apiRequests.filter((path) =>
       path.startsWith("/api/folders"),
     ).length;
     await denyFolderFromPeer(peer, other.id, unrelatedToken);
     await expect
       .poll(
-        () => apiRequests.filter((path) => path.startsWith("/api/folders")).length,
+        () =>
+          apiRequests.filter((path) => path.startsWith("/api/folders")).length,
       )
       .toBe(afterCurrentDenial);
   } finally {
@@ -565,23 +566,49 @@ test("folder reload then peer note denial fences Home owner and preserves siblin
   page,
   context,
 }) => {
-  const child = folderFixture("home-owner-child", "Owner Child", "home-owner-root", []);
+  const child = folderFixture(
+    "home-owner-child",
+    "Owner Child",
+    "home-owner-root",
+    [],
+  );
   const root = folderFixture("home-owner-root", "Owner Root", null, [
     { id: child.id, name: child.name, parentId: "home-owner-root" },
   ]);
-  const target = { ...note, folderId: root.id, id: "home-owner-target", shortId: "home-owner-target", title: "Home Owner Target" };
-  const sibling = { ...note, folderId: root.id, id: "home-owner-sibling", shortId: "home-owner-sibling", title: "Home Owner Sibling" };
+  const target = {
+    ...note,
+    folderId: root.id,
+    id: "home-owner-target",
+    shortId: "home-owner-target",
+    title: "Home Owner Target",
+  };
+  const sibling = {
+    ...note,
+    folderId: root.id,
+    id: "home-owner-sibling",
+    shortId: "home-owner-sibling",
+    title: "Home Owner Sibling",
+  };
   const requests = trackApiRequests(page);
   const denied = new Set<string>();
-  await routeAuthenticatedHome(page, { root, [root.id]: root, [child.id]: child }, [target, sibling], denied);
+  await routeAuthenticatedHome(
+    page,
+    { root, [root.id]: root, [child.id]: child },
+    [target, sibling],
+    denied,
+  );
   await page.goto("/");
   await expect(page.getByRole("link", { name: target.title })).toBeVisible();
   const peer = await context.newPage();
   try {
     await denyFolderFromPeer(peer, child.id);
-    await expect.poll(() => requests.filter((path) => path === "/api/folders").length).toBeGreaterThan(1);
+    await expect
+      .poll(() => requests.filter((path) => path === "/api/folders").length)
+      .toBeGreaterThan(1);
     await denyNoteFromPeer(peer, target.id);
-    await expect.poll(() => requests.filter((path) => path === "/api/notes").length).toBeGreaterThan(1);
+    await expect
+      .poll(() => requests.filter((path) => path === "/api/notes").length)
+      .toBeGreaterThan(1);
     await expect(page.getByRole("link", { name: target.title })).toHaveCount(0);
     await expect(page.getByRole("link", { name: sibling.title })).toBeVisible();
   } finally {
@@ -596,9 +623,21 @@ test("note list read is invalidated when folder denial sequence changes", async 
   await open(page);
   const resultPromise = page.evaluate(async (template) => {
     const module = await import("/src/lib/offline-cache.ts");
-    const cache = await module.openOfflineCache({ userId: "list-sequence-race" });
-    const allowed = { ...template, id: "list-race-allowed", shortId: "list-race-allowed", folderId: "list-race-allowed-folder" };
-    const denied = { ...template, id: "list-race-denied", shortId: "list-race-denied", folderId: "list-race-denied-folder" };
+    const cache = await module.openOfflineCache({
+      userId: "list-sequence-race",
+    });
+    const allowed = {
+      ...template,
+      folderId: "list-race-allowed-folder",
+      id: "list-race-allowed",
+      shortId: "list-race-allowed",
+    };
+    const denied = {
+      ...template,
+      folderId: "list-race-denied-folder",
+      id: "list-race-denied",
+      shortId: "list-race-denied",
+    };
     const folder = { ...template, id: denied.folderId, name: "Race folder" };
     await cache.putFolder(folder);
     await cache.putNoteList([allowed, denied]);
@@ -608,7 +647,7 @@ test("note list read is invalidated when folder denial sequence changes", async 
       IDBRequest.prototype,
       "onsuccess",
     );
-    if (!descriptor?.set || !descriptor.get) {
+    if (!(descriptor?.set && descriptor.get)) {
       throw new Error("IDB request success hook is unavailable");
     }
     let gateNext = false;
@@ -622,21 +661,26 @@ test("note list read is invalidated when folder denial sequence changes", async 
     Object.defineProperty(IDBRequest.prototype, "onsuccess", {
       ...descriptor,
       set(callback: ((this: IDBRequest, event: Event) => unknown) | null) {
+        let installedCallback = callback;
         if (gateNext && callback) {
           gateNext = false;
           const originalCallback = callback;
-          callback = function (this: IDBRequest, event: Event) {
-            (globalThis as typeof globalThis & {
-              __listRaceEntered?: boolean;
-            }).__listRaceEntered = true;
+          installedCallback = function (this: IDBRequest, event: Event) {
+            (
+              globalThis as typeof globalThis & {
+                __listRaceEntered?: boolean;
+              }
+            ).__listRaceEntered = true;
             entered.resolve();
             void release.promise.then(() => originalCallback.call(this, event));
           };
         }
-        descriptor.set?.call(this, callback);
+        descriptor.set.call(this, installedCallback);
       },
     });
-    (globalThis as typeof globalThis & { __releaseListRace?: () => void }).__releaseListRace = release.resolve;
+    (
+      globalThis as typeof globalThis & { __releaseListRace?: () => void }
+    ).__releaseListRace = release.resolve;
     return cache.getNoteList().finally(() => {
       IDBObjectStore.prototype.get = originalGet;
       Object.defineProperty(IDBRequest.prototype, "onsuccess", descriptor);
@@ -656,16 +700,24 @@ test("note list read is invalidated when folder denial sequence changes", async 
       .toBe(true);
     await denyFolderFromPeer(peer, "list-race-denied-folder");
     await page.evaluate(() =>
-      (globalThis as typeof globalThis & { __releaseListRace?: () => void }).__releaseListRace?.(),
+      (
+        globalThis as typeof globalThis & { __releaseListRace?: () => void }
+      ).__releaseListRace?.(),
     );
     expect(await resultPromise).toBeNull();
     await expect
       .poll(() =>
         page.evaluate(async () => {
-          const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
-          const cache = await openOfflineCache({ userId: "list-sequence-race" });
+          const { openOfflineCache } = await import(
+            "/src/lib/offline-cache.ts"
+          );
+          const cache = await openOfflineCache({
+            userId: "list-sequence-race",
+          });
           try {
-            return (await cache.getNoteList())?.notes.map((item) => item.id) ?? null;
+            return (
+              (await cache.getNoteList())?.notes.map((item) => item.id) ?? null
+            );
           } finally {
             cache.close();
           }
@@ -683,7 +735,9 @@ test("stale note denial receipt is false after a newer clear generation", async 
   await open(page);
   const result = await page.evaluate(async () => {
     const module = await import("/src/lib/offline-cache.ts");
-    const cache = await module.openOfflineCache({ userId: "stale-note-receipt" });
+    const cache = await module.openOfflineCache({
+      userId: "stale-note-receipt",
+    });
     const id = "stale-note-receipt-note";
     try {
       await cache.denyNote(id);
@@ -783,7 +837,9 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
         .getByRole("navigation", { name: "フォルダ" })
         .getByText(folderB.name),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: "Route B Note" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Route B Note" }),
+    ).toBeVisible();
     await expect(page.getByText(/キャッシュ|停止|警告/)).toHaveCount(0);
   } finally {
     await peer.close();
