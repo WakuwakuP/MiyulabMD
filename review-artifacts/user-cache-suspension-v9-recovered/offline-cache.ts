@@ -20,6 +20,7 @@ const METADATA_STORE = "metadata";
 const VIEWER_ID_METADATA_KEY = "viewer-id";
 const DRIVE_ROOT_METADATA_PREFIX = "drive-root:";
 const DENIED_NOTE_PREFIX = "denied-note:";
+const NOTE_ORDER_PREFIX = "note-order:";
 const DENIED_FOLDER_PREFIX = "denied-folder:";
 const FOLDER_STATE_PREFIX = "folder-state:";
 const IMAGE_METADATA_PREFIX = "image:";
@@ -64,6 +65,11 @@ type MetadataRecord = {
   value: string;
 };
 
+export type OfflineNoteAuthority = {
+  epoch: string;
+  generation: number;
+};
+
 type StoreRecord = {
   storeName: string;
   record: NoteRecord | FolderRecord | NoteListRecord | MetadataRecord;
@@ -85,11 +91,18 @@ type OfflineCache = {
   ): Promise<void>;
   putNote(
     note: Note,
-    options?: CancellationOptions & { orderingToken?: number },
+    options?: CancellationOptions & {
+      orderingToken?: number;
+      authorityGeneration?: number;
+    },
   ): Promise<void>;
   beginNoteRead(id: string): number;
   denyNote(id: string, orderingToken?: number): Promise<void>;
-  clearNoteDenial(id: string, orderingToken?: number): Promise<void>;
+  clearNoteDenial(
+    id: string,
+    orderingToken: number,
+    authorityGeneration: number,
+  ): Promise<void>;
   beginFolderRead(id: string | null): Promise<number>;
   denyFolder(id: string | null): Promise<void>;
   clearFolderDenial(id: string | null, orderingToken: number): Promise<void>;
@@ -418,6 +431,126 @@ function deniedNoteKey(userId: string, noteId: string): string {
   return `${DENIED_NOTE_PREFIX}${noteKey(userId, noteId)}`;
 }
 
+function noteOrderKey(userId: string): string {
+  return `${NOTE_ORDER_PREFIX}${encodePathPart(userId)}`;
+}
+
+function noteSequence(record: MetadataRecord | undefined): number {
+  const generation = Number(record?.value ?? 0);
+  if (!Number.isSafeInteger(generation) || generation < 0) {
+    throw new Error("Invalid note denial sequence");
+  }
+  return generation;
+}
+
+type NoteAuthorityMarker = {
+  denied: boolean;
+  generation: number;
+};
+
+function parseNoteAuthority(
+  record: MetadataRecord | undefined,
+): NoteAuthorityMarker | null {
+  if (!record) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(record.value) as NoteAuthorityMarker;
+    return parsed !== null &&
+      Number.isSafeInteger(parsed.generation) &&
+      parsed.generation >= 0 &&
+      typeof parsed.denied === "boolean"
+      ? parsed
+      : { denied: true, generation: 0 };
+  } catch {
+    return { denied: true, generation: 0 };
+  }
+}
+
+export async function captureOfflineNoteAuthority(
+  userId: string,
+  _id: string,
+): Promise<OfflineNoteAuthority> {
+  const database = await getEpochDatabase();
+  if (!database) {
+    throw new Error("Note authority is unavailable");
+  }
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(METADATA_STORE, "readonly");
+    let snapshot: OfflineNoteAuthority;
+    let failure: unknown;
+    readMetadataBatch(
+      transaction.objectStore(METADATA_STORE),
+      [noteOrderKey(userId), epochKey(userId)],
+      (records) => {
+        const epoch = records.get(epochKey(userId))?.value ?? "0";
+        if (isPurgingEpoch(epoch)) {
+          throw invalidatedError();
+        }
+        snapshot = {
+          epoch,
+          generation: noteSequence(records.get(noteOrderKey(userId))),
+        };
+      },
+      (error) => {
+        failure = error;
+        transaction.abort();
+      },
+    );
+    transaction.oncomplete = () => resolve(snapshot);
+    transaction.onabort = () =>
+      reject(failure ?? transaction.error ?? invalidatedError());
+  });
+}
+
+export async function assertOfflineNoteAuthority(
+  authority: OfflineNoteAuthority,
+  userId: string,
+  id: string | readonly string[],
+  scope?: OfflineCacheScope,
+): Promise<void> {
+  if (scope && scope.epoch !== authority.epoch) {
+    throw invalidatedError();
+  }
+  const database = await getEpochDatabase();
+  if (!database) {
+    throw new Error("Note authority is unavailable");
+  }
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(METADATA_STORE, "readonly");
+    guardTransaction(
+      database,
+      transaction,
+      scope ?? {
+        epoch: authority.epoch,
+        lifetime: captureOfflineCacheUserClearLifetime(userId),
+        userId,
+      },
+    );
+    for (const identity of typeof id === "string" ? [id] : id) {
+      const request = transaction
+        .objectStore(METADATA_STORE)
+        .get(deniedNoteKey(userId, identity));
+      request.onsuccess = () => {
+        if (
+          (parseNoteAuthority(request.result)?.generation ?? 0) >
+          authority.generation
+        ) {
+          transaction.abort();
+        }
+      };
+    }
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(invalidatedError());
+  });
+  if (
+    scope &&
+    !isOfflineCacheUserClearLifetimeCurrent(userId, scope.lifetime)
+  ) {
+    throw invalidatedError();
+  }
+}
+
 function currentNoteGeneration(userId: string, noteId: string): number {
   return currentNoteReadGeneration(userId, noteId);
 }
@@ -565,6 +698,7 @@ function clearUserRecords(
         if (
           key === driveRootMetadataKey(userId) ||
           key === folderSequenceKey(userId) ||
+          key === noteOrderKey(userId) ||
           key.startsWith(`${FOLDER_STATE_PREFIX}${encodePathPart(userId)}:`) ||
           key.startsWith(
             `${IMAGE_METADATA_PREFIX}${encodePathPart(userId)}:`,
@@ -657,6 +791,7 @@ function commitTransaction(
   record: NoteRecord | MetadataRecord,
   userId: string,
   signal?: AbortSignal,
+  authorityGeneration?: number,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let transaction: IDBTransaction;
@@ -701,6 +836,22 @@ function commitTransaction(
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
       throwIfAborted(signal);
+      if (authorityGeneration !== undefined && "noteId" in record) {
+        for (const id of noteIdentityIds(userId, record.noteId)) {
+          const request = transaction
+            .objectStore(METADATA_STORE)
+            .get(deniedNoteKey(userId, id));
+          request.onsuccess = () => {
+            if (
+              (parseNoteAuthority(request.result)?.generation ?? 0) >
+              authorityGeneration
+            ) {
+              requestError = invalidatedError();
+              transaction.abort();
+            }
+          };
+        }
+      }
       transaction.objectStore(storeName).put(record);
     } catch (error) {
       try {
@@ -1040,8 +1191,10 @@ async function readDeniedNote(
   userId: string,
   noteId: string,
 ): Promise<boolean> {
-  return Boolean(
-    await readMetadataRecord(database, deniedNoteKey(userId, noteId)),
+  return (
+    parseNoteAuthority(
+      await readMetadataRecord(database, deniedNoteKey(userId, noteId)),
+    )?.denied ?? false
   );
 }
 
@@ -1463,52 +1616,6 @@ function removeCachedNote(
   });
 }
 
-function deleteMetadata(
-  database: IDBDatabase,
-  key: string,
-  userId: string,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let transaction: IDBTransaction;
-    try {
-      transaction = database.transaction(METADATA_STORE, "readwrite");
-      guardTransaction(database, transaction);
-      transaction.objectStore(METADATA_STORE).delete(key);
-    } catch (error) {
-      reject(error);
-      return;
-    }
-    const operations =
-      pendingUserOperations.get(userId) ?? new Set<() => void>();
-    pendingUserOperations.set(userId, operations);
-    let settled = false;
-    const abort = () => {
-      try {
-        transaction.abort();
-      } catch {
-        // The terminal event has already won.
-      }
-    };
-    const finish = (callback: () => void) => {
-      if (!settled) {
-        settled = true;
-        operations.delete(abort);
-        if (!operations.size) {
-          pendingUserOperations.delete(userId);
-        }
-        callback();
-      }
-    };
-    operations.add(abort);
-    transaction.oncomplete = () => finish(resolve);
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () =>
-      finish(() =>
-        reject(transaction.error ?? new DOMException("Transaction aborted")),
-      );
-  });
-}
-
 export async function persistCachedViewerId(
   viewerId: string,
   options: CancellationOptions = {},
@@ -1663,6 +1770,109 @@ async function removeUnreferencedNoteFile(
   }
 }
 
+function writeNoteAuthorityMarkers(
+  metadata: IDBObjectStore,
+  userId: string,
+  identities: readonly string[],
+  records: Map<string, MetadataRecord>,
+  denialGeneration: number | undefined,
+  authorityGeneration: number | undefined,
+): void {
+  for (const identity of identities) {
+    const previous = parseNoteAuthority(
+      records.get(deniedNoteKey(userId, identity)),
+    );
+    if (
+      denialGeneration === undefined &&
+      (authorityGeneration === undefined ||
+        (previous?.generation ?? 0) > authorityGeneration)
+    ) {
+      throw invalidatedError();
+    }
+    metadata.put({
+      key: deniedNoteKey(userId, identity),
+      value: JSON.stringify({
+        denied: denialGeneration !== undefined,
+        generation: denialGeneration ?? previous?.generation ?? 0,
+      } satisfies NoteAuthorityMarker),
+    } satisfies MetadataRecord);
+  }
+}
+
+function updateNoteAuthority(
+  database: IDBDatabase,
+  userId: string,
+  id: string,
+  action: "deny" | "clear",
+  orderingToken?: number,
+  authorityGeneration?: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(METADATA_STORE, "readwrite");
+      guardTransaction(database, transaction);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const metadata = transaction.objectStore(METADATA_STORE);
+    const identities = noteIdentityIds(userId, id);
+    let failure: unknown;
+    readMetadataBatch(
+      metadata,
+      [
+        noteOrderKey(userId),
+        ...identities.map((identity) => deniedNoteKey(userId, identity)),
+      ],
+      (records) => {
+        if (
+          orderingToken !== undefined &&
+          currentNoteGeneration(userId, id) !== orderingToken
+        ) {
+          throw invalidatedError();
+        }
+        let generation: number | undefined;
+        if (action === "deny") {
+          generation = noteSequence(records.get(noteOrderKey(userId))) + 1;
+          if (!Number.isSafeInteger(generation)) {
+            throw new Error("Note denial sequence exhausted");
+          }
+          metadata.put({
+            key: noteOrderKey(userId),
+            value: String(generation),
+          } satisfies MetadataRecord);
+        }
+        writeNoteAuthorityMarkers(
+          metadata,
+          userId,
+          identities,
+          records,
+          generation,
+          authorityGeneration,
+        );
+      },
+      (error) => {
+        failure = error;
+        transaction.abort();
+      },
+    );
+    const operations =
+      pendingUserOperations.get(userId) ?? new Set<() => void>();
+    pendingUserOperations.set(userId, operations);
+    const abort = () => transaction.abort();
+    operations.add(abort);
+    transaction.oncomplete = () => {
+      operations.delete(abort);
+      resolve();
+    };
+    transaction.onabort = () => {
+      operations.delete(abort);
+      reject(failure ?? transaction.error ?? invalidatedError());
+    };
+  });
+}
+
 export async function openOfflineCache(
   options: OpenOfflineCacheOptions & CancellationOptions,
 ): Promise<OfflineCache> {
@@ -1739,7 +1949,7 @@ export async function openOfflineCache(
       }
       await updateFolderDenial(database, userId, id, orderingToken, "clear");
     },
-    async clearNoteDenial(id, orderingToken) {
+    async clearNoteDenial(id, orderingToken, authorityGeneration) {
       if (closed) {
         throw new Error("Offline cache is closed");
       }
@@ -1752,15 +1962,14 @@ export async function openOfflineCache(
       ) {
         return;
       }
-      for (const identity of noteIdentityIds(userId, id)) {
-        if (
-          orderingToken !== undefined &&
-          orderingToken !== currentNoteGeneration(userId, identity)
-        ) {
-          return;
-        }
-        await deleteMetadata(database, deniedNoteKey(userId, identity), userId);
-      }
+      await updateNoteAuthority(
+        database,
+        userId,
+        id,
+        "clear",
+        orderingToken,
+        authorityGeneration,
+      );
     },
     close() {
       if (!closed) {
@@ -1836,14 +2045,7 @@ export async function openOfflineCache(
         if (denialToken !== currentNoteGeneration(userId, id)) {
           return;
         }
-        await commitStoreRecords(
-          database,
-          noteIdentityIds(userId, id).map((identity) => ({
-            record: { key: deniedNoteKey(userId, identity), value: "1" },
-            storeName: METADATA_STORE,
-          })),
-          userId,
-        );
+        await updateNoteAuthority(database, userId, id, "deny", denialToken);
       } catch (error) {
         suspendOfflineCacheUser(userId);
         throw error;
@@ -2184,7 +2386,7 @@ export async function openOfflineCache(
       assertUserActive(userId, lifetime);
       const orderingToken = options.orderingToken;
       if (!bindNoteIdentity(userId, note.id, note.shortId, orderingToken)) {
-        return;
+        throw invalidatedError();
       }
       // Register before the first path await and settle only after metadata and
       // cleanup reach their terminal outcome. Purge waits even for failed writes.
@@ -2213,8 +2415,7 @@ export async function openOfflineCache(
             orderingToken !== undefined &&
             orderingToken !== currentNoteGeneration(userId, note.id)
           ) {
-            await removeUnreferencedNoteFile(userId, note.id, fileName);
-            return;
+            throw invalidatedError();
           }
           await commitTransaction(
             database,
@@ -2229,6 +2430,7 @@ export async function openOfflineCache(
             },
             userId,
             options.signal,
+            options.authorityGeneration,
           );
         } catch (error) {
           await removeUnreferencedNoteFile(userId, note.id, fileName);
@@ -2278,7 +2480,6 @@ export async function openOfflineCache(
     "denyFolder",
     "clearNoteDenial",
     "clearFolderDenial",
-    "getNote",
     "getFolder",
     "getNoteList",
   ] as const) {
@@ -2295,6 +2496,31 @@ export async function openOfflineCache(
         }),
     });
   }
+  const readCachedNote = cache.getNote.bind(cache);
+  cache.getNote = (id) =>
+    userStorageLock(userId, "shared", async () => {
+      await assertOfflineCacheScope(scope, true);
+      const authority = await captureOfflineNoteAuthority(userId, id);
+      const snapshot = await readCachedNote(id);
+      await assertOfflineCacheScope(scope, true);
+      if (!snapshot) {
+        return null;
+      }
+      try {
+        await assertOfflineNoteAuthority(
+          authority,
+          userId,
+          [id, snapshot.note.id],
+          scope,
+        );
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return null;
+        }
+        throw error;
+      }
+      return isUserSuspended(userId) ? null : snapshot;
+    });
   const trackedClose = () => cache.close();
   const caches = openUserCaches.get(userId) ?? new Set<() => void>();
   openUserCaches.set(userId, caches);

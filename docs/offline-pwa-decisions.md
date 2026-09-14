@@ -2253,6 +2253,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   `apps/web/src` の意図しない差分がないことを確認する。移行途中の証拠と未完範囲は
   保持し、報告の「candidate」という名称だけで本体反映を判断しない。
 
+## D125：永続拒否世代とpurge epochを合成し、候補全体を検証する
+
+- 状態：候補全体検証済み、本体採用を開始する。全要件の完了ではない。
+- folderとnoteの拒否は、読取時に捕捉した永続sequenceより新しい対象拒否があれば、
+  本文／一覧への保存・拒否解除・最終公開を許さない。読取や解除では世代を進めず、
+  解除後も世代を保持する。root routeのnullと任意文字列IDは別namespaceに分離する。
+- note取得共有はuser、note、同期的な同一realm entry世代に加え、永続拒否sequenceと
+  purge epochを区別する。通知を全て逃したタブでも、削除後の新規取得が削除前の
+  transportに合流しない。実2ページのRED→GREENで確認した。
+- 既存HistoryPanelを簡略UIに置換する候補は棄却し、ページング・preview・確認・
+  復元操作を維持する差分へ修正した。settingsの既存描画もASTで比較した。
+- 親の候補全体検証は最終 **198 browser成功**、typecheck成功、source lint40成功。
+  live Web unit117成功。途中の失敗とfixture修正は候補記録に残す。
+- 採用対象は `review-artifacts/user-cache-suspension-v9-recovered/composed-adoption-manifest.md`
+  の29ファイルとhashに限定し、2つのflat candidateの先頭コメント以外はbyte一致させる。
+  全端末削除UI・安全な回収・表示中拒否通知・残取得入口・実Worker追加受入れは未完。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

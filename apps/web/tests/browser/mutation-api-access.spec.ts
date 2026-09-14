@@ -12,6 +12,7 @@ test("API mutation dispatch follows AppShell's actual viewing access without blo
     email: "alice@example.test",
     id: "alice",
   };
+  const headers = { "X-MiyulabMD-Session-User": "user:alice" };
   await page.route("**/auth/logout", (route) => {
     logouts += 1;
     return route.fulfill({ status: 204 });
@@ -21,23 +22,27 @@ test("API mutation dispatch follows AppShell's actual viewing access without blo
     const path = new URL(request.url()).pathname;
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
       writes.push(`${request.method()} ${path}`);
-      return route.fulfill({ json: note });
+      return route.fulfill({ headers, json: note });
     }
     switch (path) {
       case "/api/me":
         return offlineViewer
           ? route.abort("internetdisconnected")
-          : route.fulfill({ json: { user } });
+          : route.fulfill({ headers, json: { user } });
       case "/api/auth/config":
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({ headers, json: { access: false, mock: true } });
       case "/api/article-sources":
-        return route.fulfill({ json: { sources: [] } });
+        return route.fulfill({ headers, json: { sources: [] } });
       case "/api/notes":
-        return route.fulfill({ json: { notes: [] } });
+        return route.fulfill({ headers, json: { notes: [] } });
       case `/api/notes/${note.id}`:
-        return route.fulfill({ json: note });
+        return route.fulfill({ headers, json: note });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers,
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
   await page.goto("/tests/browser/fixtures/app-shell.html");

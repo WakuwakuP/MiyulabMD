@@ -4,8 +4,10 @@ import type { Note } from "@miyulabmd/shared";
 import { ApiCommunicationError, type ApiResult, fetchNote } from "./api.ts";
 import {
   assertOfflineCacheScope,
+  assertOfflineNoteAuthority,
   beginOfflineNoteRead,
   captureOfflineCacheScope,
+  captureOfflineNoteAuthority,
   enterOfflineNoteDenial,
   isOfflineCacheUserSuspended,
   isOfflineNoteReadCurrent,
@@ -113,10 +115,11 @@ async function persistNote(
   note: Note,
   signal: AbortSignal,
   orderingToken: number,
+  authorityGeneration: number,
 ): Promise<void> {
   try {
-    await cache.putNote(note, { orderingToken, signal });
-    await cache.clearNoteDenial(note.id, orderingToken);
+    await cache.putNote(note, { authorityGeneration, orderingToken, signal });
+    await cache.clearNoteDenial(note.id, orderingToken, authorityGeneration);
   } catch {
     if (signal.aborted) {
       throw signal.reason;
@@ -270,14 +273,21 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
     note: Note,
     orderingToken: number,
     scope: OfflineCacheScope | null,
+    authority: Awaited<ReturnType<typeof captureOfflineNoteAuthority>> | null,
   ): Promise<NoteReadResult> => {
     if (signal.aborted) {
       throw signal.reason;
     }
     const openedCache =
       scope?.epoch === null ? null : await getCache(scope ?? undefined);
-    if (openedCache) {
-      await persistNote(openedCache, note, signal, orderingToken);
+    if (openedCache && authority) {
+      await persistNote(
+        openedCache,
+        note,
+        signal,
+        orderingToken,
+        authority.generation,
+      );
     }
     if (signal.aborted) {
       throw signal.reason;
@@ -304,10 +314,13 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
   const fetchWithFallback = async (
     id: string,
     orderingToken: number,
+    authority: Awaited<ReturnType<typeof captureOfflineNoteAuthority>> | null,
   ): Promise<ApiResult<Note> | NoteReadResult> => {
     let result: ApiResult<Note>;
     try {
       result = await fetchNote(id, {
+        noteAuthorityEpoch: authority?.epoch,
+        noteAuthorityGeneration: authority?.generation,
         signal,
         viewerId: capturedViewer.user?.id ?? null,
       });
@@ -352,13 +365,36 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       const scope = capturedViewer.cacheViewerId
         ? await captureOfflineCacheScope(capturedViewer.cacheViewerId)
         : null;
+      let noteAuthority: Awaited<
+        ReturnType<typeof captureOfflineNoteAuthority>
+      > | null = null;
+      if (capturedViewer.cacheViewerId) {
+        try {
+          noteAuthority = await captureOfflineNoteAuthority(
+            capturedViewer.cacheViewerId,
+            id,
+          );
+        } catch {
+          // Cache storage is optional for online display.
+        }
+      }
       if (signal.aborted) {
         throw signal.reason;
+      }
+      if (
+        scope?.epoch &&
+        noteAuthority &&
+        scope.epoch !== noteAuthority.epoch
+      ) {
+        throw new DOMException(
+          "Note scope changed before acquisition",
+          "AbortError",
+        );
       }
       const result =
         capturedViewer.mode === "cached"
           ? await readCachedOnly(id)
-          : await fetchWithFallback(id, orderingToken);
+          : await fetchWithFallback(id, orderingToken, noteAuthority);
       if (scope) {
         await assertOfflineCacheScope(scope);
       }
@@ -366,7 +402,19 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       if (isPublishedReadResult(result)) {
         published = result;
       } else if (result.ok) {
-        published = await readNetworkNote(result.data, orderingToken, scope);
+        if (noteAuthority && capturedViewer.cacheViewerId) {
+          await assertOfflineNoteAuthority(
+            noteAuthority,
+            capturedViewer.cacheViewerId,
+            id,
+          );
+        }
+        published = await readNetworkNote(
+          result.data,
+          orderingToken,
+          scope,
+          noteAuthority,
+        );
       } else {
         if (signal.aborted) {
           throw signal.reason;
@@ -398,6 +446,14 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       try {
         if (scope) {
           await assertOfflineCacheScope(scope);
+          if (published.ok && noteAuthority) {
+            await assertOfflineNoteAuthority(
+              noteAuthority,
+              scope.userId,
+              [id, published.data.id],
+              scope,
+            );
+          }
         }
       } finally {
         ensurePublishable(published, id, orderingToken);

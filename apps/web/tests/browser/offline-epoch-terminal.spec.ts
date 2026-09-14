@@ -116,7 +116,7 @@ for (const scenario of [
       const release = Promise.withResolvers<void>();
       const home = scenario.startsWith("home");
       const originalGet = IDBObjectStore.prototype.get;
-      const originalDelete = IDBObjectStore.prototype.delete;
+      const originalPut = IDBObjectStore.prototype.put;
       const originalClose = IDBDatabase.prototype.close;
       const originalFetch = globalThis.fetch;
       let owner = true;
@@ -129,15 +129,17 @@ for (const scenario of [
         }
         return originalClose.call(this);
       };
-      IDBObjectStore.prototype.delete = function (key) {
+      IDBObjectStore.prototype.put = function (value, ...args) {
+        const record = value as { key?: string; value?: string };
         if (
           !home &&
-          String(key).startsWith("denied-note:") &&
-          String(key).endsWith(shortSuffix)
+          record.key?.startsWith("denied-note:") &&
+          record.key.endsWith(shortSuffix) &&
+          record.value?.includes('"denied":false')
         ) {
           armed = true;
         }
-        return originalDelete.call(this, key);
+        return originalPut.call(this, value, ...args);
       };
       IDBObjectStore.prototype.get = function (key) {
         const request = originalGet.call(this, key);
@@ -223,7 +225,7 @@ for (const scenario of [
         session.dispose();
         globalThis.fetch = originalFetch;
         IDBObjectStore.prototype.get = originalGet;
-        IDBObjectStore.prototype.delete = originalDelete;
+        IDBObjectStore.prototype.put = originalPut;
         IDBDatabase.prototype.close = originalClose;
       }
     };

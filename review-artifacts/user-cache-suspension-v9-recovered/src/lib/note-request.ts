@@ -2,10 +2,13 @@ import type { Note } from "@miyulabmd/shared";
 
 import { type ApiResult, requestJson } from "./api-transport.ts";
 import { currentNoteReadGeneration } from "./note-access-order.ts";
+import { captureOfflineNoteAuthority } from "./offline-cache.ts";
 
 type NoteRequestOptions = {
   signal?: AbortSignal;
   viewerId?: string | null;
+  noteAuthorityGeneration?: number;
+  noteAuthorityEpoch?: string;
 };
 
 type Subscriber = {
@@ -18,6 +21,8 @@ type Subscriber = {
 type Entry = {
   controller: AbortController;
   generation: number;
+  authorityGeneration?: number;
+  authorityEpoch?: string;
   promise: Promise<ApiResult<Note>>;
   subscribers: Set<Subscriber>;
 };
@@ -51,6 +56,9 @@ function shareNoteRequest(
   id: string,
   viewerId: string,
   signal?: AbortSignal,
+  authorityGeneration?: number,
+  entryGeneration = currentNoteReadGeneration(viewerId, id),
+  authorityEpoch?: string,
 ): Promise<ApiResult<Note>> {
   if (signal?.aborted) {
     return Promise.reject(signal.reason);
@@ -61,11 +69,23 @@ function shareNoteRequest(
     byNote = new Map();
     inFlightByViewer.set(viewerId, byNote);
   }
-  const generation = currentNoteReadGeneration(viewerId, id);
+  const generation = entryGeneration;
+  if (generation !== currentNoteReadGeneration(viewerId, id)) {
+    return Promise.reject(
+      new DOMException("Note read superseded by denial", "AbortError"),
+    );
+  }
   let entry = byNote.get(id);
-  if (!entry || entry.generation !== generation) {
+  if (
+    !entry ||
+    entry.generation !== generation ||
+    entry.authorityGeneration !== authorityGeneration ||
+    entry.authorityEpoch !== authorityEpoch
+  ) {
     const controller = new AbortController();
     entry = {
+      authorityEpoch,
+      authorityGeneration,
       controller,
       generation,
       promise: requestJson<Note>(
@@ -121,19 +141,68 @@ function shareNoteRequest(
   });
 }
 
+function shareAfterAuthority(
+  id: string,
+  viewerId: string,
+  signal: AbortSignal | undefined,
+  generation: number,
+): Promise<ApiResult<Note>> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      signal?.removeEventListener("abort", abort);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    void captureOfflineNoteAuthority(viewerId, id)
+      .catch(() => null)
+      .then((authority) => {
+        signal?.removeEventListener("abort", abort);
+        return shareNoteRequest(
+          id,
+          viewerId,
+          signal,
+          authority?.generation,
+          generation,
+          authority?.epoch,
+        );
+      })
+      .then(resolve, reject);
+  });
+}
+
 export function fetchNoteRequest(
   id: string,
   options: NoteRequestOptions = {},
 ): Promise<ApiResult<Note>> {
-  if (!options.viewerId) {
-    if (options.signal?.aborted) {
-      return Promise.reject(options.signal.reason);
-    }
+  const { viewerId, signal, noteAuthorityGeneration, noteAuthorityEpoch } =
+    options;
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason);
+  }
+  if (!viewerId) {
     return requestJson<Note>(
       `/api/notes/${id}`,
-      { credentials: "include", signal: options.signal },
-      { viewerId: options.viewerId },
+      { credentials: "include", signal },
+      { viewerId },
     );
   }
-  return shareNoteRequest(id, options.viewerId, options.signal);
+  const generation = currentNoteReadGeneration(viewerId, id);
+  if (
+    noteAuthorityGeneration !== undefined &&
+    noteAuthorityEpoch !== undefined
+  ) {
+    return shareNoteRequest(
+      id,
+      viewerId,
+      signal,
+      noteAuthorityGeneration,
+      generation,
+      noteAuthorityEpoch,
+    );
+  }
+  return shareAfterAuthority(id, viewerId, signal, generation);
 }

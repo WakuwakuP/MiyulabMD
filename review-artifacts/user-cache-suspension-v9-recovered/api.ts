@@ -40,6 +40,13 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
 
+export type ReadOptions = {
+  signal?: AbortSignal;
+  viewerId?: string | null;
+  noteAuthorityGeneration?: number;
+  noteAuthorityEpoch?: string;
+};
+
 export {
   ApiCommunicationError,
   ApiHttpError,
@@ -96,7 +103,7 @@ export async function fetchNotes(
 
 export function fetchNote(
   id: string,
-  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+  options: ReadOptions = {},
 ): Promise<ApiResult<Note>> {
   return fetchNoteRequest(id, options);
 }
@@ -120,6 +127,7 @@ export async function updateTaskCheckbox(
 export async function fetchNoteHistory(
   id: string,
   query: { limit?: number; before?: number } = {},
+  options: ReadOptions = {},
 ): Promise<ApiResult<NoteHistoryPage>> {
   const params = new URLSearchParams();
   if (query.limit !== undefined) {
@@ -129,7 +137,11 @@ export async function fetchNoteHistory(
     params.set("before", String(query.before));
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  const res = await fetch(`/api/notes/${id}/history${suffix}`, fetchOpts);
+  const res = await fetch(
+    `/api/notes/${id}/history${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -139,10 +151,12 @@ export async function fetchNoteHistory(
 export async function fetchNoteRevision(
   id: string,
   revisionId: string,
+  options: ReadOptions = {},
 ): Promise<ApiResult<NoteRevisionBody>> {
   const res = await fetch(
     `/api/notes/${id}/revisions/${revisionId}`,
-    fetchOpts,
+    { ...fetchOpts, signal: options.signal },
+    options,
   );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
@@ -448,8 +462,14 @@ export type ApiTokenCreated = ApiTokenSummary & {
   token: string;
 };
 
-export async function fetchTokens(): Promise<ApiResult<ApiTokenSummary[]>> {
-  const res = await fetch("/api/tokens", fetchOpts);
+export async function fetchTokens(
+  options: ReadOptions = {},
+): Promise<ApiResult<ApiTokenSummary[]>> {
+  const res = await fetch(
+    "/api/tokens",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -481,10 +501,14 @@ export type ArticleSourceWrite = {
   webhookAuthorization?: string | null;
 };
 
-export async function fetchArticleSources(): Promise<
-  ApiResult<ArticleSource[]>
-> {
-  const res = await fetch("/api/article-sources", fetchOpts);
+export async function fetchArticleSources(
+  options: ReadOptions = {},
+): Promise<ApiResult<ArticleSource[]>> {
+  const res = await fetch(
+    "/api/article-sources",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -492,10 +516,14 @@ export async function fetchArticleSources(): Promise<
   return { data: body.sources, ok: true };
 }
 
-export async function fetchArticleSourceStatus(): Promise<
-  ApiResult<ArticleSourceStatus>
-> {
-  const res = await fetch("/api/article-sources/status", fetchOpts);
+export async function fetchArticleSourceStatus(
+  options: ReadOptions = {},
+): Promise<ApiResult<ArticleSourceStatus>> {
+  const res = await fetch(
+    "/api/article-sources/status",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }

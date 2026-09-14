@@ -14,6 +14,7 @@ import {
 } from "./attached-images.ts";
 import {
   captureOfflineCacheScope,
+  captureOfflineNoteAuthority,
   type OfflineCacheScope,
   openOfflineCache,
 } from "./offline-cache.ts";
@@ -138,6 +139,20 @@ function stopReason(
 }
 
 type PrefetchCache = Awaited<ReturnType<typeof openOfflineCache>>;
+
+async function capturePrefetchNoteAuthority(
+  scope: OfflineCacheScope,
+  id: string,
+): ReturnType<typeof captureOfflineNoteAuthority> {
+  const authority = await captureOfflineNoteAuthority(scope.userId, id);
+  if (authority.epoch !== scope.epoch) {
+    throw new DOMException(
+      "Prefetch scope changed before acquisition",
+      "AbortError",
+    );
+  }
+  return authority;
+}
 
 function transientStatus(status: unknown): boolean {
   return typeof status === "number" && status >= 500 && status <= 599;
@@ -365,8 +380,16 @@ async function acquireNotes(
     const orderingToken = await prefetchIo(signal, "storage", () =>
       cache.beginNoteRead(summary.id),
     );
+    const authority = await prefetchIo(signal, "storage", () =>
+      capturePrefetchNoteAuthority(scope, summary.id),
+    );
     const noteResult = await acquisition.run(() =>
-      fetchNote(summary.id, { signal, viewerId: userId }),
+      fetchNote(summary.id, {
+        noteAuthorityEpoch: authority.epoch,
+        noteAuthorityGeneration: authority.generation,
+        signal,
+        viewerId: userId,
+      }),
     );
     if (!noteResult) {
       continue;
@@ -381,10 +404,14 @@ async function acquireNotes(
       continue;
     }
     await prefetchIo(signal, "storage", () =>
-      cache.putNote(noteResult.data, { orderingToken, signal }),
+      cache.putNote(noteResult.data, {
+        authorityGeneration: authority.generation,
+        orderingToken,
+        signal,
+      }),
     );
     await prefetchIo(signal, "storage", () =>
-      cache.clearNoteDenial(summary.id, orderingToken),
+      cache.clearNoteDenial(summary.id, orderingToken, authority.generation),
     );
     collectImages(noteResult.data.markdown);
     counts.notes += 1;

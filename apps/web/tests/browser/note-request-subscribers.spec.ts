@@ -10,6 +10,18 @@ for (const status of [200, 403]) {
       async ({ note, status }) => {
         const apiUrl = "/src/lib/api.ts";
         const { fetchNote } = await import(apiUrl);
+        const cacheUrl = "/src/lib/offline-cache.ts";
+        const { captureOfflineNoteAuthority } = await import(cacheUrl);
+        const aliceAuthority = await captureOfflineNoteAuthority(
+          "alice",
+          note.id,
+        );
+        const bobAuthority = await captureOfflineNoteAuthority("bob", note.id);
+        const aliceOptions = {
+          noteAuthorityEpoch: aliceAuthority.epoch,
+          noteAuthorityGeneration: aliceAuthority.generation,
+          viewerId: "alice",
+        };
         const originalFetch = globalThis.fetch;
         const pending: {
           resolve: (response: Response) => void;
@@ -23,15 +35,19 @@ for (const status of [200, 403]) {
         const reason = { message: "Only the first subscriber left" };
         try {
           const cancelled = fetchNote(note.id, {
+            ...aliceOptions,
             signal: controller.signal,
-            viewerId: "alice",
           }).then(
             () => false,
             (error: unknown) => error === reason,
           );
-          const first = fetchNote(note.id, { viewerId: "alice" });
-          const second = fetchNote(note.id, { viewerId: "alice" });
-          const otherViewer = fetchNote(note.id, { viewerId: "bob" });
+          const first = fetchNote(note.id, aliceOptions);
+          const second = fetchNote(note.id, aliceOptions);
+          const otherViewer = fetchNote(note.id, {
+            noteAuthorityEpoch: bobAuthority.epoch,
+            noteAuthorityGeneration: bobAuthority.generation,
+            viewerId: "bob",
+          });
           await new Promise<void>((resolve) =>
             requestAnimationFrame(() => resolve()),
           );
@@ -121,6 +137,16 @@ test("last cancellation releases a group without letting old cleanup remove its 
   const result = await page.evaluate(async (note) => {
     const apiUrl = "/src/lib/api.ts";
     const { fetchNote } = await import(apiUrl);
+    const cacheUrl = "/src/lib/offline-cache.ts";
+    const { captureOfflineNoteAuthority } = await import(cacheUrl);
+    // This case exercises transport subscription lifetime, not IDB scheduling.
+    // Capture the same public authority supplied by the foreground/prefetch callers.
+    const authority = await captureOfflineNoteAuthority("alice", note.id);
+    const readOptions = {
+      noteAuthorityEpoch: authority.epoch,
+      noteAuthorityGeneration: authority.generation,
+      viewerId: "alice",
+    };
     const originalFetch = globalThis.fetch;
     const pending: {
       resolve: (response: Response) => void;
@@ -151,36 +177,36 @@ test("last cancellation releases a group without letting old cleanup remove its 
       const already = new AbortController();
       already.abort(firstReason);
       const preCancelled = await fetchNote(note.id, {
+        ...readOptions,
         signal: already.signal,
-        viewerId: "alice",
       }).then(
         () => false,
         (error: unknown) => error === firstReason,
       );
       const requestsBefore = pending.length;
       const a = fetchNote(note.id, {
+        ...readOptions,
         signal: first.signal,
-        viewerId: "alice",
       }).catch((error: unknown) => error === firstReason);
       const b = fetchNote(note.id, {
+        ...readOptions,
         signal: second.signal,
-        viewerId: "alice",
       }).catch((error: unknown) => error === secondReason);
       await tick();
       first.abort(firstReason);
       second.abort(secondReason);
       const cancelled = await Promise.all([a, b]);
       const underlyingAborted = pending[0]?.signal?.aborted;
-      const fresh = fetchNote(note.id, { viewerId: "alice" });
+      const fresh = fetchNote(note.id, readOptions);
       await tick();
       complete(0, "Old cancelled result");
       await tick();
-      const joined = fetchNote(note.id, { viewerId: "alice" });
+      const joined = fetchNote(note.id, readOptions);
       await tick();
       const requestsWhileFresh = pending.length;
       complete(1, "Fresh result");
       const recovered = await Promise.all([fresh, joined]);
-      const later = fetchNote(note.id, { viewerId: "alice" });
+      const later = fetchNote(note.id, readOptions);
       await tick();
       complete(2, "Later result");
       return {

@@ -330,6 +330,7 @@ function EditorWorkspace({
           canEdit={canEdit}
           noteId={note.id}
           onClose={onCloseHistory}
+          user={user}
         />
       )}
     </section>
