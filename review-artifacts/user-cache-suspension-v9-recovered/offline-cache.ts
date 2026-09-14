@@ -104,7 +104,11 @@ type OfflineCache = {
     authorityGeneration: number,
   ): Promise<void>;
   beginFolderRead(id: string | null): Promise<number>;
-  denyFolder(id: string | null, orderingToken?: number): Promise<boolean>;
+  denyFolder(
+    id: string | null,
+    orderingToken?: number,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
   clearFolderDenial(id: string | null, orderingToken: number): Promise<void>;
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
   putNoteList(
@@ -384,9 +388,10 @@ function invalidateRealm(userId: string): void {
   notifyLifecycle({ type: "invalidate", userId });
 }
 
-if (lifecycleChannel) {
-  lifecycleChannel.onmessage = ({ data }) => {
-    if (data?.type === "invalidate" && typeof data.userId === "string") {
+function handleLifecycleMessage(data: unknown): void {
+  if (data && typeof data === "object" && "type" in data && "userId" in data) {
+    const event = data as Partial<OfflineCacheLifecycleEvent>;
+    if (event.type === "invalidate" && typeof event.userId === "string") {
       if (isNoteDenialEvent(data)) {
         if (data.resource.generation === null) {
           suspendOfflineCacheUser(data.userId);
@@ -398,18 +403,22 @@ if (lifecycleChannel) {
         }
         notifyLifecycle(data);
       } else if (
-        data.resource?.type === "image" &&
-        typeof data.resource.noteId === "string" &&
-        typeof data.resource.imageId === "string"
+        event.resource?.type === "image" &&
+        typeof event.resource.noteId === "string" &&
+        typeof event.resource.imageId === "string"
       ) {
-        notifyLifecycle(data);
-      } else if (!data.resource) {
-        invalidateRealm(data.userId);
+        notifyLifecycle(event as ImageInvalidationEvent);
+      } else if (!event.resource) {
+        invalidateRealm(event.userId);
       }
-    } else if (data?.type === "identity" && typeof data.userId === "string") {
-      notifyLifecycle({ type: "identity", userId: data.userId });
+    } else if (event.type === "identity" && typeof event.userId === "string") {
+      notifyLifecycle({ type: "identity", userId: event.userId });
     }
-  };
+  }
+}
+
+if (lifecycleChannel) {
+  lifecycleChannel.onmessage = ({ data }) => handleLifecycleMessage(data);
 }
 
 function epochKey(userId: string): string {
@@ -2023,7 +2032,8 @@ export async function readOfflineFolderDenial(
       }));
       const epochRequest = store.get(epochKey(event.userId));
       transaction.oncomplete = () => {
-        const epoch = (epochRequest.result as MetadataRecord | undefined)?.value ?? "0";
+        const epoch =
+          (epochRequest.result as MetadataRecord | undefined)?.value ?? "0";
         if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
           resolve(false);
           return;
@@ -2190,6 +2200,78 @@ export async function readCachedViewerId(
   } finally {
     database.close();
   }
+}
+
+function cacheLifetimeCurrent(userId: string, lifetime: number): boolean {
+  return !isUserSuspended(userId) && currentUserLifetime(userId) === lifetime;
+}
+
+async function readVisibleNoteList(
+  database: IDBDatabase,
+  userId: string,
+  lifetime: number,
+  record: NoteListRecord,
+): Promise<{ notes: NoteSummary[]; cachedAt: number } | null> {
+  const generations = new Map(
+    record.notes.map((note) => [
+      note.id,
+      currentNoteGeneration(userId, note.id),
+    ]),
+  );
+  const deniedFolderIds = await readDeniedFolderIds(database, userId);
+  if (!cacheLifetimeCurrent(userId, lifetime)) {
+    return null;
+  }
+  const notes: NoteSummary[] = [];
+  for (const note of record.notes) {
+    const denied =
+      deniedFolderIds.has(note.folderId) ||
+      (await readDeniedNote(database, userId, note.id));
+    if (denied) {
+      continue;
+    }
+    if (
+      !cacheLifetimeCurrent(userId, lifetime) ||
+      currentNoteGeneration(userId, note.id) !== generations.get(note.id)
+    ) {
+      return null;
+    }
+    notes.push(note);
+  }
+  if (
+    !cacheLifetimeCurrent(userId, lifetime) ||
+    record.notes.some(
+      (note) =>
+        currentNoteGeneration(userId, note.id) !== generations.get(note.id),
+    )
+  ) {
+    return null;
+  }
+  return { cachedAt: record.cachedAt, notes };
+}
+
+async function readNoteListState(
+  database: IDBDatabase,
+  userId: string,
+  lifetime: number,
+  record: NoteListRecord | undefined,
+): Promise<"available" | "denied" | "missing"> {
+  if (!record) {
+    return "missing";
+  }
+  if (!cacheLifetimeCurrent(userId, lifetime)) {
+    return "denied";
+  }
+  const deniedFolders = await readDeniedFolderIds(database, userId);
+  for (const note of record.notes) {
+    if (
+      deniedFolders.has(note.folderId) ||
+      (await readDeniedNote(database, userId, note.id))
+    ) {
+      return "denied";
+    }
+  }
+  return "available";
 }
 
 async function noteFile(
@@ -2495,12 +2577,15 @@ export async function openOfflineCache(
       }
     },
 
-    async denyFolder(id, orderingToken) {
+    async denyFolder(id, orderingToken, signal) {
       if (closed) {
         throw new Error("Offline cache is closed");
       }
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
+      if (signal?.aborted) {
+        throw signal.reason;
+      }
       try {
         const receipt = await updateFolderDenial(
           database,
@@ -2509,9 +2594,13 @@ export async function openOfflineCache(
           orderingToken,
           "deny",
           undefined,
-          undefined,
+          signal,
           scope,
         );
+        assertUserActive(userId, lifetime);
+        if (signal?.aborted) {
+          throw signal.reason;
+        }
         if (receipt.committed) {
           reportOfflineFolderDenial(
             userId,
@@ -2523,6 +2612,16 @@ export async function openOfflineCache(
         }
         return receipt.committed;
       } catch (error) {
+        if (signal?.aborted) {
+          throw signal.reason;
+        }
+        if (
+          (error instanceof DOMException && error.name === "AbortError") ||
+          isUserSuspended(userId) ||
+          currentUserLifetime(userId) !== lifetime
+        ) {
+          throw error instanceof DOMException ? error : invalidatedError();
+        }
         suspendOfflineCacheUser(userId);
         reportOfflineFolderDenial(userId, id, scope.epoch, null, [id]);
         throw error;
@@ -2764,7 +2863,6 @@ export async function openOfflineCache(
       }
     },
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-item denial and terminal publication guards are intentionally explicit.
     async getNoteList() {
       if (closed) {
         throw new Error("Offline cache is closed");
@@ -2781,43 +2879,7 @@ export async function openOfflineCache(
       ) {
         return null;
       }
-      const generations = new Map(
-        record.notes.map((note) => [
-          note.id,
-          currentNoteGeneration(userId, note.id),
-        ]),
-      );
-      const deniedFolderIds = await readDeniedFolderIds(database, userId);
-      if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
-        return null;
-      }
-      const notes: NoteSummary[] = [];
-      for (const note of record.notes) {
-        if (
-          !deniedFolderIds.has(note.folderId) &&
-          !(await readDeniedNote(database, userId, note.id))
-        ) {
-          if (
-            isUserSuspended(userId) ||
-            currentUserLifetime(userId) !== lifetime ||
-            currentNoteGeneration(userId, note.id) !== generations.get(note.id)
-          ) {
-            return null;
-          }
-          notes.push(note);
-        }
-      }
-      if (
-        isUserSuspended(userId) ||
-        currentUserLifetime(userId) !== lifetime ||
-        record.notes.some(
-          (note) =>
-            currentNoteGeneration(userId, note.id) !== generations.get(note.id),
-        )
-      ) {
-        return null;
-      }
-      return { cachedAt: record.cachedAt, notes };
+      return readVisibleNoteList(database, userId, lifetime, record);
     },
 
     async getNoteListState() {
@@ -2829,27 +2891,7 @@ export async function openOfflineCache(
         return "denied";
       }
       const record = await readNoteListRecord(database, noteListKey(userId));
-      if (!record) {
-        return "missing";
-      }
-      if (
-        isUserSuspended(userId) ||
-        currentUserLifetime(userId) !== lifetime
-      ) {
-        return "denied";
-      }
-      const deniedFolders = await readDeniedFolderIds(database, userId);
-      let deniedNote = false;
-      for (const note of record.notes) {
-        if (
-          deniedFolders.has(note.folderId) ||
-          (await readDeniedNote(database, userId, note.id))
-        ) {
-          deniedNote = true;
-          break;
-        }
-      }
-      return deniedNote ? "denied" : "available";
+      return readNoteListState(database, userId, lifetime, record);
     },
 
     async putFolder(folder, options = {}) {

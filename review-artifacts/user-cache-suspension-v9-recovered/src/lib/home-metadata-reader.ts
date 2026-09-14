@@ -55,6 +55,32 @@ function requireResult<T>(
   return result.data;
 }
 
+function buildHomeSnapshot(
+  viewer: ViewerContext,
+  folderId: string | undefined,
+  notes: NoteSummary[],
+  folderResult:
+    | Awaited<ReturnType<typeof fetchFolder>>
+    | Awaited<ReturnType<typeof fetchPublicFolders>>,
+): HomeMetadataSnapshot {
+  if (viewer.user || folderId) {
+    return {
+      notes,
+      publicFolders: [],
+      visibleFolder: requireResult(
+        folderResult as Awaited<ReturnType<typeof fetchFolder>>,
+      ),
+    };
+  }
+  return {
+    notes,
+    publicFolders: requireResult(
+      folderResult as Awaited<ReturnType<typeof fetchPublicFolders>>,
+    ),
+    visibleFolder: null,
+  };
+}
+
 function throwIfCancelled(
   signal: AbortSignal,
   isCurrentOwner: () => boolean,
@@ -145,11 +171,22 @@ async function rejectDeniedFolder(
         signal,
         userId: viewer.user.id,
       });
-      const committed = await cache.denyFolder(folderId ?? null, orderingToken);
+      const committed = await cache.denyFolder(
+        folderId ?? null,
+        orderingToken,
+        signal,
+      );
       if (!committed) {
         throw new DOMException("Home read is no longer current", "AbortError");
       }
-    } catch {
+    } catch (cause) {
+      if (
+        signal.aborted ||
+        !isCurrentOwner() ||
+        (cause instanceof DOMException && cause.name === "AbortError")
+      ) {
+        throw cause;
+      }
       suspendOfflineCacheUser(viewer.user.id);
       error.cacheWarning =
         "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
@@ -239,22 +276,7 @@ async function readHomeMetadataSnapshot({
     await assertOfflineCacheScope(scope);
   }
 
-  const snapshot: HomeMetadataSnapshot =
-    viewer.user || folderId
-      ? {
-          notes,
-          publicFolders: [],
-          visibleFolder: requireResult(
-            folderResult as Awaited<ReturnType<typeof fetchFolder>>,
-          ),
-        }
-      : {
-          notes,
-          publicFolders: requireResult(
-            folderResult as Awaited<ReturnType<typeof fetchPublicFolders>>,
-          ),
-          visibleFolder: null,
-        };
+  const snapshot = buildHomeSnapshot(viewer, folderId, notes, folderResult);
 
   await saveHomeMetadata(
     snapshot,

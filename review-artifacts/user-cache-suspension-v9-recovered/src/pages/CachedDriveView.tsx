@@ -88,17 +88,14 @@ export function CachedDriveView() {
 
   useEffect(() => {
     let active = true;
-    const targetId = folderId ?? null;
     const targetUserId = cacheViewerId;
     const unsubscribe = subscribeOfflineCacheFolderDenial((event) => {
-      if (
-        active &&
-        event.userId === targetUserId &&
-        event.resource.aliases.includes(targetId)
-      ) {
+      if (active && event.userId === targetUserId) {
         void readOfflineFolderDenial(event).then((denied) => {
-          if (active && denied === true) {
+          if (active && denied !== null) {
             setReloadRequest((value) => value + 1);
+          } else if (active) {
+            setError("キャッシュの状態を確認できませんでした。");
           }
         });
       }
@@ -107,7 +104,7 @@ export function CachedDriveView() {
       active = false;
       unsubscribe();
     };
-  }, [cacheViewerId, folderId]);
+  }, [cacheViewerId]);
 
   const folder = view.folder;
   const children = (folder?.children ?? []) as FolderRecord[];

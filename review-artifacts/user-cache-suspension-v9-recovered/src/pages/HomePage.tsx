@@ -391,17 +391,14 @@ function NetworkHomePage() {
 
   useEffect(() => {
     let active = true;
-    const targetId = folderId ?? null;
     const targetUserId = viewer.user?.id;
     const unsubscribe = subscribeOfflineCacheFolderDenial((event) => {
-      if (
-        active &&
-        event.userId === targetUserId &&
-        event.resource.aliases.includes(targetId)
-      ) {
+      if (active && event.userId === targetUserId) {
         void readOfflineFolderDenial(event).then((denied) => {
-          if (active && denied === true) {
+          if (active && denied !== null) {
             setReloadRequest((value) => value + 1);
+          } else if (active) {
+            setCacheWarning("オフラインキャッシュを確認できませんでした。");
           }
         });
       }
@@ -410,7 +407,7 @@ function NetworkHomePage() {
       active = false;
       unsubscribe();
     };
-  }, [folderId, viewer.user?.id]);
+  }, [viewer.user?.id]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.
