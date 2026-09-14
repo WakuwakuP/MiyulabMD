@@ -80,3 +80,19 @@ full candidate lint before this cleanup: 7 errors, 2 warnings
 
 This worker only edits the candidate sources and this validation artifact; DOM
 tests remain reserved for the next slice.
+
+## Browser DOM fixture slice
+
+The mounted-folder spec retains the 176-line core invariant tests and appends
+four independent Playwright DOM fixtures:
+
+- `mounted network folder removes only the denied current view`
+- `mounted root reprojects a denied child without hiding an allowed descendant`
+- `mounted note list removes only a peer-denied note`
+- `route switch fences a delayed folder denial`
+
+Each fixture uses authenticated API route responses with the explicit
+`X-MiyulabMD-Session-User: user:alice` header, opens the public offline cache
+API from a same-context peer page, and waits on locators or a response gate
+rather than `page.waitForTimeout`. The candidate/live source was not edited.
+These browser tests were not executed in this isolated checkout.

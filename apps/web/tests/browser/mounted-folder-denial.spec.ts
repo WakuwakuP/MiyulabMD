@@ -174,3 +174,266 @@ test("direct denied note is removed while descendant note remains", async ({ pag
   );
   expect(result).toEqual(["child"]);
 });
+
+const sessionHeaders = { "X-MiyulabMD-Session-User": "user:alice" };
+const authenticatedUser = {
+  displayName: "Alice",
+  email: "alice@example.test",
+  id: "alice",
+};
+
+function folderFixture(
+  id: string,
+  name: string,
+  parentId: string | null,
+  children: { id: string; name: string; parentId: string | null }[],
+  crumbs: { id: string; name: string }[] = [],
+) {
+  return {
+    children,
+    crumbs,
+    effectiveReadScope: "all" as const,
+    effectiveWriteScope: "self" as const,
+    flags: { canAdmin: false, canEdit: false, canView: true },
+    folder: crumbs.map((crumb) => crumb.name).concat(parentId ? [name] : []).join("/"),
+    grants: [],
+    id,
+    inherit: false,
+    name,
+    parentId,
+    readScope: "all" as const,
+    source: "folder" as const,
+    sourceFolder: null,
+    writeScope: "self" as const,
+  };
+}
+
+async function routeAuthenticatedHome(
+  page: Page,
+  folders: Record<string, ReturnType<typeof folderFixture>>,
+  notes: unknown[],
+) {
+  await page.route("**/api/**", (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/me") {
+      return route.fulfill({ headers: sessionHeaders, json: { user: authenticatedUser } });
+    }
+    if (pathname === "/api/auth/config") {
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: { access: false, mock: true },
+      });
+    }
+    if (pathname === "/api/notes") {
+      return route.fulfill({ headers: sessionHeaders, json: { notes } });
+    }
+    if (pathname === "/api/folders") {
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: folders.root,
+      });
+    }
+    const folderId = pathname.match(/^\/api\/folders\/([^/]+)$/)?.[1];
+    if (folderId && folders[folderId]) {
+      return route.fulfill({ headers: sessionHeaders, json: folders[folderId] });
+    }
+    return route.fulfill({
+      headers: sessionHeaders,
+      json: { error: "No fixture" },
+      status: 404,
+    });
+  });
+}
+
+async function denyFolderFromPeer(
+  peer: Page,
+  id: string,
+  token?: number,
+) {
+  await peer.goto("/tests/browser/fixtures/storage.html");
+  await peer.evaluate(
+    async ({ id, token }) => {
+      const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
+      const cache = await openOfflineCache({ userId: "alice" });
+      try {
+        await cache.denyFolder(id, token);
+      } finally {
+        cache.close();
+      }
+    },
+    { id, token },
+  );
+}
+
+async function denyNoteFromPeer(peer: Page, id: string) {
+  await peer.goto("/tests/browser/fixtures/storage.html");
+  await peer.evaluate(async (noteId) => {
+    const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
+    const cache = await openOfflineCache({ userId: "alice" });
+    try {
+      await cache.denyNote(noteId);
+    } finally {
+      cache.close();
+    }
+  }, id);
+}
+
+test("mounted network folder removes only the denied current view", async ({
+  page,
+  context,
+}) => {
+  const current = folderFixture("mounted-current", "Mounted Current", null, [], [
+    { id: "mounted-current", name: "Mounted Current" },
+  ]);
+  const other = folderFixture("mounted-other", "Mounted Other", null, []);
+  const targetNote = {
+    id: "mounted-target-note",
+    shortId: "mounted-target-short",
+    title: "Mounted Target Note",
+    folderId: current.id,
+  };
+  const unrelatedNote = {
+    ...targetNote,
+    id: "mounted-unrelated-note",
+    shortId: "mounted-unrelated-short",
+    title: "Mounted Unrelated Note",
+  };
+  await routeAuthenticatedHome(
+    page,
+    { root: current, [current.id]: current, [other.id]: other },
+    [targetNote, unrelatedNote],
+  );
+  await page.goto(`/f/${current.id}`);
+  await expect(
+    page.getByRole("navigation", { name: "フォルダ" }).getByText(current.name),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: targetNote.title })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "フォルダ" }).getByText("マイドライブ"),
+  ).toBeVisible();
+
+  const peer = await context.newPage();
+  try {
+    const token = await peer.evaluate(async (id) => {
+      const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
+      const cache = await openOfflineCache({ userId: "alice" });
+      try {
+        return await cache.beginFolderRead(id);
+      } finally {
+        cache.close();
+      }
+    }, current.id);
+    await denyFolderFromPeer(peer, "not-current", token);
+    await expect(
+      page.getByRole("navigation", { name: "フォルダ" }).getByText(current.name),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: targetNote.title })).toBeVisible();
+    await denyFolderFromPeer(peer, current.id, token);
+    await expect(page.getByText(/キャッシュに保存されていません/)).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "フォルダ" }).getByText("マイドライブ"),
+    ).toBeVisible();
+  } finally {
+    await peer.close();
+  }
+});
+
+test("mounted root reprojects a denied child without hiding an allowed descendant", async ({
+  page,
+  context,
+}) => {
+  const deniedChild = folderFixture("mounted-denied-child", "Denied Child", "mounted-root", []);
+  const allowedChild = folderFixture("mounted-allowed-child", "Allowed Child", "mounted-root", []);
+  const root = folderFixture(
+    "mounted-root",
+    "Mounted Network Root",
+    null,
+    [
+      { id: deniedChild.id, name: deniedChild.name, parentId: "mounted-root" },
+      { id: allowedChild.id, name: allowedChild.name, parentId: "mounted-root" },
+    ],
+  );
+  const directNote = { id: "mounted-direct-note", shortId: "mounted-direct", title: "Denied Direct Note", folderId: deniedChild.id };
+  const descendantNote = { id: "mounted-descendant-note", shortId: "mounted-descendant", title: "Allowed Descendant Note", folderId: allowedChild.id };
+  await routeAuthenticatedHome(page, { root, [deniedChild.id]: deniedChild, [allowedChild.id]: allowedChild }, [directNote, descendantNote]);
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: deniedChild.name })).toBeVisible();
+  await expect(page.getByRole("link", { name: allowedChild.name })).toBeVisible();
+  await expect(page.getByRole("link", { name: directNote.title })).toBeVisible();
+  await expect(page.getByRole("link", { name: descendantNote.title })).toBeVisible();
+  const peer = await context.newPage();
+  try {
+    await denyFolderFromPeer(peer, deniedChild.id);
+    await expect(page.getByRole("link", { name: deniedChild.name })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: directNote.title })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: allowedChild.name })).toBeVisible();
+    await expect(page.getByRole("link", { name: descendantNote.title })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "フォルダ" }).getByText("マイドライブ"),
+    ).toBeVisible();
+  } finally {
+    await peer.close();
+  }
+});
+
+test("mounted note list removes only a peer-denied note", async ({ page, context }) => {
+  const root = folderFixture("mounted-note-root", "Mounted Note Home", null, []);
+  const target = { id: "peer-denied-note", shortId: "peer-denied-short", title: "Peer Denied Note", folderId: root.id };
+  const sibling = { id: "peer-kept-note", shortId: "peer-kept-short", title: "Peer Kept Note", folderId: root.id };
+  await routeAuthenticatedHome(page, { root, [root.id]: root }, [target, sibling]);
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: target.title })).toBeVisible();
+  await expect(page.getByRole("link", { name: sibling.title })).toBeVisible();
+  const peer = await context.newPage();
+  try {
+    await denyNoteFromPeer(peer, target.id);
+    await expect(page.getByRole("link", { name: target.title })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: sibling.title })).toBeVisible();
+  } finally {
+    await peer.close();
+  }
+});
+
+test("route switch fences a delayed folder denial", async ({ page }) => {
+  const folderA = folderFixture("mounted-route-a", "Route A", null, []);
+  const folderB = folderFixture("mounted-route-b", "Route B", null, []);
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === `/api/folders/${folderA.id}`) {
+      await gate;
+      return route.fulfill({ headers: sessionHeaders, json: { error: "Denied" }, status: 403 });
+    }
+    if (pathname === "/api/me") {
+      return route.fulfill({ headers: sessionHeaders, json: { user: authenticatedUser } });
+    }
+    if (pathname === "/api/auth/config") {
+      return route.fulfill({ headers: sessionHeaders, json: { access: false, mock: true } });
+    }
+    if (pathname === `/api/folders/${folderB.id}`) {
+      return route.fulfill({ headers: sessionHeaders, json: folderB });
+    }
+    if (pathname === "/api/notes") {
+      return route.fulfill({ headers: sessionHeaders, json: { notes: [] } });
+    }
+    return route.fulfill({ headers: sessionHeaders, json: folderA });
+  });
+  const firstNavigation = page.goto(`/f/${folderA.id}`);
+  await page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === `/api/folders/${folderA.id}`,
+  );
+  await page.goto(`/f/${folderB.id}`);
+  await expect(
+    page.getByRole("navigation", { name: "フォルダ" }).getByText(folderB.name),
+  ).toBeVisible();
+  release();
+  await firstNavigation.catch(() => undefined);
+  await expect(
+    page.getByRole("navigation", { name: "フォルダ" }).getByText(folderB.name),
+  ).toBeVisible();
+  await expect(page.getByText(/キャッシュ|停止|警告/)).toHaveCount(0);
+});
