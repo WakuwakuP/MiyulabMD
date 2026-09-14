@@ -317,6 +317,7 @@ function NetworkHomePage() {
   const latestReloadRequest = useRef(reloadRequest);
   latestReloadRequest.current = reloadRequest;
   const notesRef = useRef<NoteSummary[]>([]);
+  const visibleFolderRef = useRef<FolderAccess | null>(null);
   const reloadOwnerRef = useRef(0);
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
@@ -373,6 +374,7 @@ function NetworkHomePage() {
           return;
         }
         notesRef.current = snapshot.notes;
+        visibleFolderRef.current = snapshot.visibleFolder;
         setNotes(snapshot.notes);
         setVisibleFolder(snapshot.visibleFolder);
         setPublicFolders(snapshot.publicFolders);
@@ -439,7 +441,15 @@ function NetworkHomePage() {
     let active = true;
     const targetUserId = viewer.user?.id;
     const unsubscribe = subscribeOfflineCacheFolderDenial((event) => {
-      if (active && event.userId === targetUserId) {
+      const relationIds = new Set<string | null>([
+        folderId ?? null,
+        visibleFolderRef.current?.id ?? null,
+        ...(visibleFolderRef.current?.children ?? []).map((child) => child.id),
+        ...(visibleFolderRef.current?.crumbs ?? []).map((crumb) => crumb.id),
+        ...notesRef.current.map((note) => note.folderId),
+      ]);
+      const relevant = event.resource.aliases.some((id) => relationIds.has(id));
+      if (active && event.userId === targetUserId && relevant) {
         void readOfflineFolderDenial(event).then((denied) => {
           if (active && denied !== null) {
             setReloadRequest((value) => value + 1);
@@ -453,7 +463,7 @@ function NetworkHomePage() {
       active = false;
       unsubscribe();
     };
-  }, [viewer.user?.id]);
+  }, [folderId, viewer.user?.id]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.

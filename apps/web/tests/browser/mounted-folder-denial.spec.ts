@@ -390,13 +390,24 @@ test("mounted network folder removes only the denied current view", async ({
       )
       .toBeGreaterThan(folderRequestCount);
     await expect(
-      page.getByText(/キャッシュに保存されていません/),
-    ).toBeVisible();
-    await expect(
       page
         .getByRole("navigation", { name: "フォルダ" })
-        .getByText("マイドライブ"),
-    ).toBeVisible();
+        .getByText(current.name),
+    ).toHaveCount(0);
+    await expect(page.getByRole("link", { name: targetNote.title })).toHaveCount(
+      0,
+    );
+    await expect(page.getByText(/キャッシュを削除できませんでした/)).toHaveCount(
+      0,
+    );
+    const afterCurrentDenial = apiRequests.filter((path) =>
+      path.startsWith("/api/folders"),
+    ).length;
+    await denyFolderFromPeer(peer, other.id);
+    await page.waitForTimeout(100);
+    expect(
+      apiRequests.filter((path) => path.startsWith("/api/folders")).length,
+    ).toBe(afterCurrentDenial);
   } finally {
     await peer.close();
   }
@@ -444,9 +455,6 @@ test("mounted root reprojects a denied child without hiding an allowed descendan
   await expect(
     page.getByRole("link", { name: allowedChild.name }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: descendantNote.title }),
-  ).toBeVisible();
   const folderRequestCount = apiRequests.filter((path) =>
     path.startsWith("/api/folders"),
   ).length;
@@ -466,12 +474,14 @@ test("mounted root reprojects a denied child without hiding an allowed descendan
       page.getByRole("link", { name: allowedChild.name }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: descendantNote.title }),
-    ).toBeVisible();
-    await expect(
       page
         .getByRole("navigation", { name: "フォルダ" })
         .getByText("マイドライブ"),
+    ).toBeVisible();
+    await page.getByRole("link", { name: allowedChild.name }).click();
+    await expect(page).toHaveURL(`/f/${allowedChild.id}`);
+    await expect(
+      page.getByRole("link", { name: descendantNote.title }),
     ).toBeVisible();
   } finally {
     await peer.close();
@@ -601,6 +611,8 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
     );
     await page.goto(`/f/${folderB.id}`);
     await secondNavigation;
+    release();
+    await firstNavigation.catch(() => undefined);
     await expect(
       page
         .getByRole("navigation", { name: "フォルダ" })

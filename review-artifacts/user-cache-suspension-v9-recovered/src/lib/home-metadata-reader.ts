@@ -291,6 +291,12 @@ async function projectCachedHomeMetadata(
       throw error;
     }
     snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
+    if (scope) {
+      snapshot.notes = [];
+      if (folderId !== undefined) {
+        snapshot.visibleFolder = null;
+      }
+    }
   } finally {
     projectionCache?.close();
   }

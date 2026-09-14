@@ -2345,15 +2345,8 @@ async function readNoteListState(
   if (!cacheLifetimeCurrent(userId, lifetime)) {
     return "denied";
   }
-  const deniedFolders = await readDeniedFolderIds(database, userId);
-  for (const note of record.notes) {
-    if (
-      deniedFolders.has(note.folderId) ||
-      (await readDeniedNote(database, userId, note.id))
-    ) {
-      return "denied";
-    }
-  }
+  // Individual denials are projected by getNoteList. They do not make the
+  // list itself unavailable; only an invalid lifetime denies it.
   return "available";
 }
 

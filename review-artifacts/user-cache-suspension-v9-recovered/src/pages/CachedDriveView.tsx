@@ -35,6 +35,7 @@ export function CachedDriveView() {
   latestReloadRequest.current = reloadRequest;
   const cacheViewerId = viewer.cacheViewerId;
   const notesRef = useRef(view.notes);
+  const viewRef = useRef(view);
   const reloadOwnerRef = useRef(0);
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export function CachedDriveView() {
             });
           if (published || (!next.folderMissing && isCurrentRequest())) {
             notesRef.current = next.notes;
+            viewRef.current = next;
             setView(next);
           }
         }
@@ -103,7 +105,15 @@ export function CachedDriveView() {
     let active = true;
     const targetUserId = cacheViewerId;
     const unsubscribe = subscribeOfflineCacheFolderDenial((event) => {
-      if (active && event.userId === targetUserId) {
+      const relationIds = new Set<string | null>([
+        folderId ?? null,
+        viewRef.current.folder?.id ?? null,
+        ...(viewRef.current.folder?.children ?? []).map((child) => child.id),
+        ...(viewRef.current.folder?.crumbs ?? []).map((crumb) => crumb.id),
+        ...notesRef.current.map((note) => note.folderId),
+      ]);
+      const relevant = event.resource.aliases.some((id) => relationIds.has(id));
+      if (active && event.userId === targetUserId && relevant) {
         void readOfflineFolderDenial(event).then((denied) => {
           if (active && denied !== null) {
             setReloadRequest((value) => value + 1);
@@ -117,7 +127,7 @@ export function CachedDriveView() {
       active = false;
       unsubscribe();
     };
-  }, [cacheViewerId]);
+  }, [cacheViewerId, folderId]);
 
   useEffect(() => {
     if (cacheViewerId === null || viewer.mode !== "cached") {

@@ -131,3 +131,29 @@ failures. This fixture-only correction addresses the reviewed causes:
 
 No live or candidate source was edited. Biome and browser execution for this
 follow-up remain unverified in this checkout.
+
+## Sibling projection and receipt relevance follow-up
+
+The candidate now applies a non-null filtered note-list projection before
+consulting list availability, so a single denied note/folder cannot erase
+unrelated siblings. List denial remains reserved for an invalid user lifetime
+(including suspended users). A captured cache scope also fails closed on
+malformed projection metadata, while a cache-disabled authenticated read keeps
+healthy network data.
+
+Home and CachedDrive folder receipts now intersect their aliases with the
+route, visible folder, child, crumb, and visible-note folder IDs before
+performing a durable read/reload. Stale route A receipts therefore do not
+reload route B, and unrelated sibling denials are ignored.
+
+The three mounted fixture corrections cover success-denial warning/count
+contracts, root-child navigation, and note-list sibling retention. The route
+fixture releases the old A response only after B navigation has completed and
+observes B's request before asserting the settled crumb.
+
+```text
+git diff --check: PASS
+live apps/web/src/**: unchanged
+candidate typecheck/lint: not executed (prepared candidate dependencies unavailable)
+mounted browser validation: not executed (prepared candidate dependencies unavailable)
+```
