@@ -1,17 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  acquireAttachedImage,
-  acquireAttachedImageNetworkOnly,
   attachedImage,
   collectAttachedImages,
-} from "./attached-images.ts";
-import {
-  captureOfflineCacheScope,
-  readOfflineNoteDenial,
-  subscribeOfflineCacheImageInvalidation,
-  subscribeOfflineCacheInvalidation,
-  subscribeOfflineCacheNoteDenial,
-} from "./offline-cache.ts";
+} from "./attached-image-target.ts";
+import { acquireAttachedImageNetworkOnly } from "./network-attached-images.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export type ImageViewContext = {
@@ -20,6 +12,25 @@ export type ImageViewContext = {
 };
 
 type Images = { owner: string; urls: Map<string, string | null> };
+type AcquisitionMode =
+  | "cache"
+  | "cache-backed-network"
+  | "network-only"
+  | "disabled";
+
+function acquisitionMode(context?: ImageViewContext): AcquisitionMode {
+  if (!context) return "disabled";
+  const { viewer } = context;
+  if (context.source === "cache") {
+    return viewer.cacheViewerId ? "cache" : "disabled";
+  }
+  if (viewer.mode === "guest") return "network-only";
+  if (viewer.mode !== "authenticated" || !viewer.user?.id) return "disabled";
+  if (viewer.cacheViewerId === null) return "network-only";
+  return viewer.cacheViewerId === viewer.user.id
+    ? "cache-backed-network"
+    : "disabled";
+}
 
 function ownImageUrl(
   bytes: Blob | null,
@@ -35,20 +46,18 @@ function ownImageUrl(
 
 /** Blob URLs belong to the preview, never to the acquisition/cache or Markdown. */
 export function usePreviewImages(markdown: string, context?: ImageViewContext) {
-  const cacheOnly = context?.source === "cache";
+  const mode = acquisitionMode(context);
+  const cacheOnly = mode === "cache";
   const userId = context?.viewer.cacheViewerId ?? null;
   const expectedViewerId =
-    context?.source === "network" && context.viewer.mode === "guest"
-      ? null
-      : context?.source === "network" &&
-          context.viewer.mode === "authenticated" &&
-          context.viewer.user?.id
-        ? context.viewer.user.id
+    mode === "network-only" && context?.viewer.mode !== "guest"
+      ? context?.viewer.user?.id ?? null
+      : mode === "network-only"
+        ? null
         : undefined;
-  const enabled = cacheOnly
-    ? Boolean(userId)
-    : context?.source === "network" && expectedViewerId !== undefined;
+  const enabled = mode !== "disabled";
   const owner = JSON.stringify([
+    mode,
     enabled,
     userId,
     expectedViewerId,
@@ -82,113 +91,114 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
       }
       ownedUrls.clear();
     };
-    const unsubscribeImage = cacheOnly
-      ? subscribeOfflineCacheImageInvalidation((event) => {
-      if (
-        event.userId !== userId ||
-        !event.resource ||
-        !targets.some(
-          (image) =>
-            image.noteId === event.resource.noteId &&
-            image.imageId === event.resource.imageId,
-        )
-      ) {
-        return;
-      }
-      const imageUrl = targets.find(
-        (image) =>
-          image.noteId === event.resource?.noteId &&
-          image.imageId === event.resource?.imageId,
-      )?.url;
-      if (imageUrl) {
-        forgetImage(imageUrl);
-      }
-        })
-      : () => {};
-    const unsubscribeNote = cacheOnly
-      ? subscribeOfflineCacheNoteDenial((event) => {
-      if (event.userId !== userId || controller.signal.aborted) {
-        return;
-      }
-      for (const image of targets) {
-        if (!event.resource.aliases.includes(image.noteId)) {
-          continue;
-        }
-        void readOfflineNoteDenial(event, [image.noteId])
-          .then((denied) => {
-            if (!controller.signal.aborted && denied !== false) {
-              forgetImage(image.url);
+    let unsubscribeImage: (() => void) | undefined;
+    let unsubscribeNote: (() => void) | undefined;
+    let unsubscribeRealm: (() => void) | undefined;
+    const usesCache = mode !== "network-only";
+    const initialize = async () => {
+      if (usesCache) {
+        const cache = await import("./offline-cache.ts");
+        if (controller.signal.aborted) return;
+        unsubscribeImage = cache.subscribeOfflineCacheImageInvalidation((event) => {
+          if (
+            event.userId !== userId ||
+            !event.resource ||
+            !targets.some(
+              (image) =>
+                image.noteId === event.resource.noteId &&
+                image.imageId === event.resource.imageId,
+            )
+          ) {
+            return;
+          }
+          const imageUrl = targets.find(
+            (image) =>
+              image.noteId === event.resource?.noteId &&
+              image.imageId === event.resource?.imageId,
+          )?.url;
+          if (imageUrl) {
+            forgetImage(imageUrl);
+          }
+        });
+        unsubscribeNote = cache.subscribeOfflineCacheNoteDenial((event) => {
+          if (event.userId !== userId || controller.signal.aborted) {
+            return;
+          }
+          for (const image of targets) {
+            if (!event.resource.aliases.includes(image.noteId)) {
+              continue;
             }
-          })
-          .catch(() => {
-            // A target notification must not fail the independent note body.
-          });
-      }
-        })
-      : () => {};
-    const unsubscribeRealm = cacheOnly
-      ? subscribeOfflineCacheInvalidation(
-      (invalidatedUser) => {
-        if (invalidatedUser !== userId) {
-          return;
-        }
-        revoke();
-        setImages({ owner, urls: new Map() });
-      },
-        )
-      : () => {};
-    const scopePromise = cacheOnly
-      ? captureOfflineCacheScope(userId as string)
-      : null;
-    const load = (image: (typeof targets)[number]) =>
-      cacheOnly
-        ? (
-            scopePromise as Promise<
-              Awaited<ReturnType<typeof captureOfflineCacheScope>>
-            >
-          ).then((scope) =>
-              acquireAttachedImage(image, {
-                cacheOnly: true,
+            void cache.readOfflineNoteDenial(event, [image.noteId])
+              .then((denied) => {
+                if (!controller.signal.aborted && denied !== false) {
+                  forgetImage(image.url);
+                }
+              })
+              .catch(() => {
+                // A target notification must not fail the independent note body.
+              });
+          }
+        });
+        unsubscribeRealm = cache.subscribeOfflineCacheInvalidation((invalidatedUser) => {
+          if (invalidatedUser !== userId) {
+            return;
+          }
+          revoke();
+          setImages({ owner, urls: new Map() });
+        });
+        const scope = await cache.captureOfflineCacheScope(userId as string);
+        if (controller.signal.aborted) return;
+        await Promise.all(
+          targets.map(async (image) => {
+            let bytes: Blob | null = null;
+            try {
+              bytes = await cache.acquireAttachedImage(image, {
+                cacheOnly,
                 scope,
                 signal: controller.signal,
-              }),
-            )
-        : acquireAttachedImageNetworkOnly(image, {
-            expectedViewerId: expectedViewerId as string | null,
-            signal: controller.signal,
-          });
-    void Promise.all(
-      targets.map(async (image) => {
-        let bytes: Blob | null = null;
-        try {
-          bytes = await load(image);
-        } catch {
-          // A failed attachment must not replace or fail the note body.
-        }
-        if (controller.signal.aborted || blocked.has(image.url)) {
-          return;
-        }
-        const url = ownImageUrl(bytes, ownedUrls);
-        urls.set(image.url, url);
-        setImages({ owner, urls: new Map(urls) });
-      }),
-    )
-      /* Cache errors still publish nulls; network errors are independently
-       * represented by each image and never open local storage. */
-      .then(() => {
-        if (controller.signal.aborted) return;
-        for (const image of targets) {
-          if (!urls.has(image.url)) urls.set(image.url, null);
-        }
-        setImages({ owner, urls: new Map(urls) });
-      })
+              });
+            } catch {
+              // A failed attachment must not replace or fail the note body.
+            }
+            if (controller.signal.aborted || blocked.has(image.url)) return;
+            const url = ownImageUrl(bytes, ownedUrls);
+            urls.set(image.url, url);
+            setImages({ owner, urls: new Map(urls) });
+          }),
+        );
+      } else {
+        await Promise.all(
+          targets.map(async (image) => {
+            let bytes: Blob | null = null;
+            try {
+              bytes = await acquireAttachedImageNetworkOnly(image, {
+                expectedViewerId: expectedViewerId as string | null,
+                signal: controller.signal,
+              });
+            } catch {
+              // A failed attachment must not replace or fail the note body.
+            }
+            if (controller.signal.aborted || blocked.has(image.url)) return;
+            const url = ownImageUrl(bytes, ownedUrls);
+            urls.set(image.url, url);
+            setImages({ owner, urls: new Map(urls) });
+          }),
+        );
+      }
+      if (controller.signal.aborted) return;
+      for (const image of targets) {
+        if (!urls.has(image.url)) urls.set(image.url, null);
+      }
+      setImages({ owner, urls: new Map(urls) });
+    };
+    void initialize().catch(() => {});
     return () => {
-      unsubscribeImage();
-      unsubscribeNote();
-      unsubscribeRealm();
+      unsubscribeImage?.();
+      unsubscribeNote?.();
+      unsubscribeRealm?.();
       revoke();
     };
-  }, [cacheOnly, enabled, markdown, owner, userId, expectedViewerId]);
+  }, [cacheOnly, enabled, markdown, owner, userId, expectedViewerId, mode]);
   return useMemo(
     () => ({
       enabled,
@@ -209,9 +219,6 @@ export function resolvePreviewImages(
   html: string,
   images: { enabled: boolean; urls: Map<string, string | null> },
 ): string {
-  if (!images.enabled) {
-    return html;
-  }
   const template = document.createElement("template");
   template.innerHTML = html;
   for (const node of template.content.querySelectorAll("img")) {
@@ -219,7 +226,7 @@ export function resolvePreviewImages(
     if (!image) {
       continue;
     }
-    const url = images.urls.get(image.url);
+    const url = images.enabled ? images.urls.get(image.url) : null;
     if (url) {
       node.src = url;
     } else {
@@ -227,7 +234,7 @@ export function resolvePreviewImages(
       const message = document.createElement("span");
       message.setAttribute("role", "status");
       message.textContent =
-        url === null
+        !images.enabled || url === null
           ? "画像を表示できません（未保存または閲覧不可）。"
           : "画像を読み込み中…";
       node.after(message);

@@ -2,8 +2,12 @@
 
 ## Scope
 
-This candidate adds `acquireAttachedImageNetworkOnly` without changing the
-existing cache-backed acquisition path. Its in-flight namespace is separate
+This candidate adds `acquireAttachedImageNetworkOnly` while preserving the
+existing cache-backed acquisition path. Preview acquisition is explicit:
+cache views use cache-only, authenticated network views with a matching
+`cacheViewerId` use cache-backed reads, and only guest or verified
+authenticated-without-cache-id views use network-only. Mismatched or
+unavailable contexts fail closed. The network-only in-flight namespace is separate
 and keyed by the captured expected viewer (`null` for guest), so guest, Alice,
 Bob, and cache-backed reads cannot share a transport.
 
@@ -17,6 +21,18 @@ continues to revoke Blob URLs during cleanup and context changes.
 
 Cache-backed reads retain their existing `acquireAttachedImage` path and
 foreground/background in-flight sharing, including `requireCache` behavior.
-Only network-source previews use the new primitive. Unavailable or cached-only
-viewer contexts fail closed; external images retain raw rendering.
+Only the network-only mode uses the new primitive. Cache-backed network views
+retain subscriptions, scope capture, cache writes, denial markers, and
+invalidation. Network-only views never open storage or subscribe to its
+lifecycle. Managed image URLs are removed when no valid view context exists;
+external images retain raw rendering.
 
+## Storage boundary
+
+`network-attached-images.ts` imports only the API transport and the
+storage-free target parser. Its private MIME predicate intentionally mirrors
+the PNG/JPEG/GIF/WebP cache predicate without importing `offline-cache.ts`.
+`preview-images.ts` therefore has no static cache or attached-cache import:
+cache subscriptions, scope capture, and cache acquisition begin only after the
+cache module's dynamic import completes, and an aborted effect cannot publish
+late work.

@@ -2,13 +2,21 @@
 
 ## Evidence status
 
+The parent measurement was RED: 1/11 passed and 10/11 failed. The primary
+failure was nested imports of `../../api-fetch.ts` and `../../api-transport.ts`;
+the overlay virtual path is `apps/web/src/lib`, so the imports must be
+`./api-fetch.ts` and `./api-transport.ts`. The parent also measured 23 Biome
+errors. The resolver-only fixtures named as cache-backed acquisition/sharing
+regressions were removed because they did not exercise transport, storage, or
+foreground/background sharing.
+
 The browser spec is present at
 `apps/web/tests/browser/network-only-preview-image.spec.ts`. The isolated
 candidate worktree has no `node_modules`, so the browser runner, typecheck, and
 lint could not be executed here. No GREEN result is claimed. The parent worker
 should run the requested browser matrix and candidate regression suite with its
 installed dependencies. `node --experimental-strip-types --check` passes for
-the new spec.
+the new spec. This candidate does not claim the full matrix is green.
 
 ## Required RED/GREEN matrix
 
@@ -27,8 +35,38 @@ the new spec.
 - GREEN: existing cache-enabled foreground/background quota sharing remains
   unchanged.
 
+## Review follow-up
+
+The prior candidate was not approved: it routed every network source through
+network-only, used an `error.name` identity check, accepted empty image bodies,
+left rejected response bodies undisposed, and left managed raw URLs visible
+without an image context. This revision addresses those findings with explicit
+acquisition modes, an `instanceof ApiIdentityError` check, best-effort body
+disposal, empty-body rejection, and fail-closed managed-image resolution.
+Candidate-wide typecheck remains blocked by a known error in another candidate
+folder. No full browser matrix, Biome, or candidate typecheck was run in this
+isolated checkout because dependencies are absent.
+
 ## Remaining risk
 
 The candidate source has not been executed in this isolated checkout. Browser
 coverage and source/runtime compatibility therefore remain for the parent
 worker to establish.
+
+## This structural revision
+
+The parent focused run measured 21/23 passing. The two failures were the guest
+note fixture lacking an explicit `X-MiyulabMD-Session-User: guest` response
+header (the note itself was rejected) and a cache-disabled storage assertion
+observing one IndexedDB open. The latter was caused by static loading of
+`offline-cache.ts` through the network-only image path; the assertion remains
+zero rather than being weakened. The candidate now isolates parsing in
+`attached-image-target.ts`, transport and actor-keyed sharing in
+`network-attached-images.ts`, and dynamically loads cache modules only for
+cache modes. The MIME parser also uses optional chaining before `trim()`.
+
+The requested candidate Biome baseline was 22 errors and the candidate type
+baseline had one MIME parse error. Dependencies are absent here, so the
+browser matrix, typecheck, and Biome remain unexecuted; these measurements
+must be re-run by the parent worker. The node strip-types syntax check and
+`git diff --check` were run successfully.
