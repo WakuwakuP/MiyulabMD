@@ -2300,6 +2300,23 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   詳細・失敗履歴・hashはcandidateの`offline-cache-gc-validation.md`。
 - quota時の呼出し、端末全体削除UI、表示中拒否通知は依然未完。自動LRUは導入しない。
 
+## D128：表示中の拒否対象を所有scopeだけから除去する
+
+- 状態：noteと親note添付画像の通知・表示除去を本体反映、親検証済み。
+- 委譲先のnote/quota編集が再びcandidate指定を外れたため、未検証差分をlocal branch
+  `review/unvalidated-mounted-denial-quota` の `d3255f5` に保全した。この範囲の
+  実装委譲を止め、親が候補へ実装し直した。quota差分は未採用。
+- durable marker commit後にuser/alias/epoch/世代だけのnote拒否通知を送る。
+  marker保存失敗は削除成功とは扱わず、suspendと警告を保った別状態で対象を隠す。
+  他noteのeditor bufferや添付はidentity-wide invalidationで巻き込まない。
+- readerは現在のread所有者・永続拒否状態・後発の検証済み応答を照合する。
+  自分が報告する403を通知でabortせず、古い通知は新しい許可済み表示を消さない。
+  拒否された親noteのblobだけをrevokeし、遅い画像完了でも再設置させない。
+- 実RED4件を12条件へ拡張し、画像親拒否RED・遅延通知も追加。candidate全体
+  **217成功**、本体対象17成功、Web unit117成功、型・lint・diffcheck成功。
+- folder/list表示投影、guest/cache-disabled画像のchecked fetch、quota連携、
+  端末全体削除UIと最終受入れは未完。記録は`mounted-denial-validation.md`。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

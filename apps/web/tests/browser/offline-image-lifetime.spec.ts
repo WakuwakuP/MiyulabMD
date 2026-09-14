@@ -192,3 +192,70 @@ test("preview owns blob URLs and purge removes visible assets and revokes them",
   );
   expect(tracking.revoked).toEqual(expect.arrayContaining(tracking.created));
 });
+
+test("peer parent-note denial revokes only that parent's mounted image", async ({
+  page,
+  context,
+}) => {
+  await fixture(page);
+  const otherPath = "/api/notes/independent-parent/images/other";
+  await page.route(`**/api/notes/${note.id}`, (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...note,
+        markdown: `${markdown}\n\n![Other parent](${otherPath})`,
+      },
+    }),
+  );
+  for (const path of [imagePath, otherPath]) {
+    await page.route(`**${path}`, (route) =>
+      route.fulfill({ body: png, contentType: "image/png", headers }),
+    );
+  }
+  await page.goto(`/n/${note.id}`);
+  const image = page.getByRole("img", { exact: true, name: "Attachment" });
+  const other = page.getByRole("img", { exact: true, name: "Other parent" });
+  for (const target of [image, other]) {
+    await expect
+      .poll(() =>
+        target.evaluate((element: HTMLImageElement) => element.naturalWidth),
+      )
+      .toBe(1);
+  }
+  const previous = await image.getAttribute("src");
+  const independent = await other.getAttribute("src");
+  const peer = await context.newPage();
+  try {
+    await peer.goto("/tests/browser/fixtures/storage.html");
+    await peer.route("**/api/notes/another-parent", (route) =>
+      route.fulfill({ headers, json: { error: "Forbidden" }, status: 403 }),
+    );
+    const denied = await peer.evaluate(async () => {
+      const url = "/src/lib/note-read-session.ts";
+      const { createNoteReadSession } = await import(url);
+      const session = createNoteReadSession({
+        cacheViewerId: "alice",
+        mode: "authenticated",
+        user: {
+          displayName: "Alice",
+          email: "alice@example.test",
+          id: "alice",
+        },
+      });
+      try {
+        return await session.read("another-parent");
+      } finally {
+        session.dispose();
+      }
+    });
+    expect(denied).toMatchObject({ ok: false, status: 403 });
+    await expect(image).not.toHaveAttribute("src", previous ?? "");
+    await expect(other).toHaveAttribute("src", independent ?? "");
+    await expect(
+      page.getByText("通信なしでも読みたい本文。", { exact: true }),
+    ).toBeVisible();
+  } finally {
+    await peer.close();
+  }
+});

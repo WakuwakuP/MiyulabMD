@@ -10,9 +10,14 @@ import {
   enterOfflineNoteDenial,
   isOfflineCacheUserSuspended,
   isOfflineNoteReadCurrent,
+  type NoteDenialEvent,
   type OfflineCacheScope,
+  type OfflineNoteAuthority,
   openOfflineCache,
+  readOfflineNoteDenial,
+  reportOfflineNoteDenial,
   subscribeOfflineCacheInvalidation,
+  subscribeOfflineCacheNoteDenial,
   suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
@@ -39,6 +44,32 @@ export type NoteReadSession = {
   read(id: string): Promise<NoteReadResult>;
   dispose(): void;
 };
+
+type NoteReadSessionOptions = {
+  onDenied?: (event: NoteDenialEvent) => void;
+};
+
+type ReadOwner = {
+  identities: Set<string>;
+  authority: OfflineNoteAuthority | null;
+  publishedNetwork: boolean;
+};
+
+function revalidatedAfter(owner: ReadOwner, event: NoteDenialEvent): boolean {
+  return Boolean(
+    owner.publishedNetwork &&
+      owner.authority &&
+      event.resource.generation !== null &&
+      owner.authority.epoch === event.resource.epoch &&
+      owner.authority.generation >= event.resource.generation,
+  );
+}
+
+export function noteDenialMessage(event: NoteDenialEvent): string {
+  return event.resource.generation === null
+    ? "閲覧が拒否されたため表示を停止しました。キャッシュを無効化できませんでした。端末キャッシュを削除してください。"
+    : "閲覧できないか削除されたため、表示を停止しました。";
+}
 
 export class OfflineNoteUnavailableError extends Error {
   constructor(id: string) {
@@ -127,10 +158,16 @@ async function persistNote(
   }
 }
 
-export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
+export function createNoteReadSession(
+  viewer: ViewerContext,
+  options: NoteReadSessionOptions = {},
+): NoteReadSession {
   const capturedViewer = snapshotViewer(viewer);
   const controller = new AbortController();
   const { signal } = controller;
+  const onDenied = options.onDenied;
+  const actorId = capturedViewer.user?.id ?? capturedViewer.cacheViewerId;
+  let currentRead: ReadOwner | null = null;
   const unsubscribe = subscribeOfflineCacheInvalidation((userId) => {
     if (userId === capturedViewer.cacheViewerId) {
       controller.abort(new DOMException("Note read invalidated", "AbortError"));
@@ -140,6 +177,33 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
     | Promise<Awaited<ReturnType<typeof openOfflineCache>> | null>
     | undefined;
   let disposed = false;
+  const unsubscribeDenial = subscribeOfflineCacheNoteDenial((event) => {
+    const owner = currentRead;
+    if (!(onDenied && owner) || actorId !== event.userId) {
+      return;
+    }
+    const identities = event.resource.aliases.filter((id) =>
+      owner.identities.has(id),
+    );
+    if (!identities.length || revalidatedAfter(owner, event)) {
+      return;
+    }
+    void readOfflineNoteDenial(event, identities)
+      .then((denied) => {
+        if (
+          disposed ||
+          currentRead !== owner ||
+          denied === false ||
+          revalidatedAfter(owner, event)
+        ) {
+          return;
+        }
+        return onDenied(event);
+      })
+      .catch(() => {
+        // Observer failures do not replace the original HTTP result.
+      });
+  });
   let cache: Awaited<ReturnType<typeof openOfflineCache>> | null = null;
   let cacheOpenFailed = false;
 
@@ -348,6 +412,7 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       }
       disposed = true;
       unsubscribe();
+      unsubscribeDenial();
       controller.abort();
       cache?.close();
       cache = null;
@@ -355,6 +420,12 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: terminal publication and denial guards are intentionally explicit.
     async read(id) {
+      const owner: ReadOwner = {
+        authority: null,
+        identities: new Set([id]),
+        publishedNetwork: false,
+      };
+      currentRead = owner;
       if (signal.aborted) {
         throw signal.reason;
       }
@@ -380,6 +451,7 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       if (signal.aborted) {
         throw signal.reason;
       }
+      owner.authority = noteAuthority;
       if (
         scope?.epoch &&
         noteAuthority &&
@@ -430,11 +502,23 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
               await openedCache.denyNote(id, denialToken);
             } else if (cacheOpenFailed) {
               suspendOfflineCacheUser(capturedViewer.cacheViewerId);
+              reportOfflineNoteDenial(
+                capturedViewer.cacheViewerId,
+                id,
+                scope?.epoch ?? null,
+                null,
+              );
               cacheWarning =
                 "キャッシュを無効化できませんでした。安全のためキャッシュをクリアしてください。";
             }
           } catch {
             suspendOfflineCacheUser(capturedViewer.cacheViewerId);
+            reportOfflineNoteDenial(
+              capturedViewer.cacheViewerId,
+              id,
+              scope?.epoch ?? null,
+              null,
+            );
             cacheWarning =
               "キャッシュの無効化を保存できませんでした。安全のためキャッシュをクリアしてください。";
           }
@@ -456,6 +540,11 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
         }
       } finally {
         ensurePublishable(published, id, orderingToken);
+      }
+      if (published.ok) {
+        owner.identities.add(published.data.id);
+        owner.identities.add(published.data.shortId);
+        owner.publishedNetwork = published.source === "network";
       }
       return published;
     },

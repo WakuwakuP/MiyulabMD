@@ -6,8 +6,10 @@ import {
 } from "./attached-images.ts";
 import {
   captureOfflineCacheScope,
+  readOfflineNoteDenial,
   subscribeOfflineCacheImageInvalidation,
   subscribeOfflineCacheInvalidation,
+  subscribeOfflineCacheNoteDenial,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
@@ -46,6 +48,17 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
     const ownedUrls = new Set<string>();
     const urls = new Map<string, string | null>();
     const targets = collectAttachedImages(markdown);
+    const blocked = new Set<string>();
+    const forgetImage = (imageUrl: string) => {
+      blocked.add(imageUrl);
+      const blobUrl = urls.get(imageUrl);
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        ownedUrls.delete(blobUrl);
+      }
+      urls.set(imageUrl, null);
+      setImages({ owner, urls: new Map(urls) });
+    };
     const revoke = () => {
       controller.abort();
       for (const url of ownedUrls) {
@@ -70,14 +83,27 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
           image.noteId === event.resource?.noteId &&
           image.imageId === event.resource?.imageId,
       )?.url;
-      const blobUrl = imageUrl ? urls.get(imageUrl) : null;
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-        ownedUrls.delete(blobUrl);
-      }
       if (imageUrl) {
-        urls.set(imageUrl, null);
-        setImages({ owner, urls: new Map(urls) });
+        forgetImage(imageUrl);
+      }
+    });
+    const unsubscribeNote = subscribeOfflineCacheNoteDenial((event) => {
+      if (event.userId !== userId || controller.signal.aborted) {
+        return;
+      }
+      for (const image of targets) {
+        if (!event.resource.aliases.includes(image.noteId)) {
+          continue;
+        }
+        void readOfflineNoteDenial(event, [image.noteId])
+          .then((denied) => {
+            if (!controller.signal.aborted && denied !== false) {
+              forgetImage(image.url);
+            }
+          })
+          .catch(() => {
+            // A target notification must not fail the independent note body.
+          });
       }
     });
     const unsubscribeRealm = subscribeOfflineCacheInvalidation(
@@ -103,7 +129,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
             } catch {
               // A failed attachment must not replace or fail the note body.
             }
-            if (controller.signal.aborted) {
+            if (controller.signal.aborted || blocked.has(image.url)) {
               return;
             }
             const url = ownImageUrl(bytes, ownedUrls);
@@ -123,6 +149,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
       });
     return () => {
       unsubscribeImage();
+      unsubscribeNote();
       unsubscribeRealm();
       revoke();
     };

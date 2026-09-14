@@ -12,6 +12,7 @@ import {
 import {
   createNoteReadSession,
   type NoteReadResult,
+  noteDenialMessage,
   OfflineNoteUnavailableError,
 } from "../lib/note-read-session.ts";
 import type { ViewerContext } from "../lib/viewer-context.ts";
@@ -121,10 +122,26 @@ export function SharePage() {
       });
       return () => scope.dispose();
     }
-    const session = createNoteReadSession(viewer);
     let cancelled = false;
+    let settled = false;
+    const session = createNoteReadSession(viewer, {
+      onDenied: (event) => {
+        if (cancelled || !scope.isCurrent()) {
+          return;
+        }
+        if (settled) {
+          scope.dispose();
+        }
+        setState({
+          error: noteDenialMessage(event),
+          id,
+          viewer,
+        });
+      },
+    });
     void session.read(id).then(
       (result) => {
+        settled = true;
         if (
           cancelled ||
           !scope.publish({
@@ -137,6 +154,7 @@ export function SharePage() {
         setState({ id, result, viewer });
       },
       (error: unknown) => {
+        settled = true;
         if (cancelled || !scope.isCurrent()) {
           return;
         }
@@ -175,6 +193,8 @@ export function SharePage() {
       if (current.result.source === "network") {
         void loadOgCards(markdown);
       }
+    } else {
+      document.title = "共有ノート · MiyulabMD";
     }
     return () => {
       document.title = previous;

@@ -1,9 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
-for (const mode of ["network", "cached"] as const) {
-  for (const routeId of [note.id, note.shortId]) {
-    test(`${mode} mounted note ${routeId} disappears on peer denial without clearing another note`, async ({
+for (const mode of ["network", "cached", "storage-failure"] as const) {
+  for (const routePath of [
+    `/n/${note.id}`,
+    `/n/${note.shortId}`,
+    `/s/${note.id}`,
+    `/s/${note.shortId}`,
+  ]) {
+    test(`${mode} mounted note ${routePath} disappears on peer denial without clearing another note`, async ({
       page,
       context,
     }) => {
@@ -50,7 +55,7 @@ for (const mode of ["network", "cached"] as const) {
           status: 404,
         });
       });
-      await page.goto(`/n/${routeId}`);
+      await page.goto(routePath);
       const body = page.getByText("通信なしでも読みたい本文。", {
         exact: true,
       });
@@ -76,6 +81,13 @@ for (const mode of ["network", "cached"] as const) {
         await other.goto(`/n/${independent.id}`);
         await expect(independentBody).toBeVisible();
         await peer.goto("/tests/browser/fixtures/storage.html");
+        if (mode === "storage-failure") {
+          await peer.evaluate(() => {
+            IDBFactory.prototype.open = () => {
+              throw new DOMException("Denied storage", "UnknownError");
+            };
+          });
+        }
         await peer.route(`**/api/notes/${note.id}`, (route) =>
           route.fulfill({ headers, json: { error: "Forbidden" }, status: 403 }),
         );
@@ -98,7 +110,14 @@ for (const mode of ["network", "cached"] as const) {
           { id: note.id, user },
         );
         expect(result).toMatchObject({ ok: false, status: 403 });
+        if (mode === "storage-failure") {
+          expect(result.cacheWarning).toBeTruthy();
+          await expect(
+            page.getByText(/端末キャッシュを削除してください/),
+          ).toBeVisible();
+        }
         await expect(body).toHaveCount(0);
+        await expect(page).not.toHaveTitle(new RegExp(note.title));
         await expect(editButton).toHaveCount(0);
         await expect(independentBody).toBeVisible();
         expect(targetReads).toBe(beforeDenial);

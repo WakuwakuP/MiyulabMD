@@ -28,7 +28,7 @@
 | ID | 作業 | 完了条件 | 状態 |
 |---|---|---|---|
 | C1 | user切替・明示logout・端末cache削除 | 旧userの表示・メモリ・IDB・OPFSを規則どおり除去し、全タブの進行中処理が復元しない。app起動資産とserverデータは残す | logout/switch・user purge本体反映済み、実Workerでpeer本文・IDB・OPFS削除確認。端末全体削除UIは未実装 |
-| C2 | 認証と拒否のタブ間整合性 | 別タブの認証変更を検出し、誤ったuser領域への保存・表示を防ぐ。確定拒否後の古い保存／公開が他タブでも復活しない | 本体に応答identity・note/folder永続世代・purgeをまたぐ取得共有防止を反映。表示中note/folderの拒否通知が残る |
+| C2 | 認証と拒否のタブ間整合性 | 別タブの認証変更を検出し、誤ったuser領域への保存・表示を防ぐ。確定拒否後の古い保存／公開が他タブでも復活しない | 応答identity・永続世代・表示中note/親画像の拒否通知を本体反映。folder/list投影・guest/cache-disabled画像のchecked fetchが残る |
 | C3 | folder HTTP拒否・解除 | canonical ID/root alias、独立した子孫、パンくず・参照、失敗時のfail-closed、古い応答、新しい成功による解除を検証 | 本体反映・対象検証済み：非衝突root、永続世代、atomic保存／解除、Home警告、独立prefetch。表示中通知はC2で継続 |
 | C4 | 短縮ID・alias・`/s` | serverの実際の識別子契約に合わせ、対応URLのoffline直接アクセス／reloadと拒否・別名変更を検証 | 本体反映・対象検証済み：canonical/short IDと`/s`。記事aliasはgeneric note APIの契約外。C2との最終統合検証待ち |
 | C5 | read入口の残る統合 | folder/list・hoverをviewer所有の共通取得へ接続。通常取得と背景取得の重複、中断、guest/readonly、既存UIを検証 | 調査中 |

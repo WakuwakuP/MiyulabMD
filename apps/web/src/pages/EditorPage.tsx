@@ -40,6 +40,7 @@ import {
 import {
   createNoteReadSession,
   type NoteReadResult,
+  noteDenialMessage,
   OfflineNoteUnavailableError,
 } from "../lib/note-read-session.ts";
 import type { ImageViewContext } from "../lib/preview-images.ts";
@@ -561,12 +562,34 @@ export function EditorPage() {
         scope.dispose();
       };
     }
-    const session = createNoteReadSession(viewer);
+    let settled = false;
+    const session = createNoteReadSession(viewer, {
+      onDenied: (event) => {
+        if (cancelled || !scope.isCurrent()) {
+          return;
+        }
+        if (settled) {
+          scope.dispose();
+          setViewScope(null);
+        }
+        teardownCollab(unbindCollabRef, sessionRef, setCollab, setCollabReady);
+        hydratedRef.current = false;
+        setReadState({ id, ownerViewer: viewer, phase: "error" });
+        setNote(null);
+        setAccessDraft(null);
+        setMarkdown("");
+        setShareOpen(false);
+        setHistoryOpen(false);
+        setLoading(false);
+        setLoadError(noteDenialMessage(event));
+      },
+    });
     setLoading(true);
     setLoadError(null);
     void session.read(id).then(
       // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: read publication and stale-scope guards are intentionally explicit.
       (result: NoteReadResult) => {
+        settled = true;
         if (cancelled) {
           return;
         }
@@ -598,6 +621,7 @@ export function EditorPage() {
         setLoading(false);
       },
       (error: unknown) => {
+        settled = true;
         if (cancelled || !scope.publish({ source: "pending", viewer })) {
           return;
         }

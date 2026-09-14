@@ -179,7 +179,19 @@ void getEpochDatabase();
 export type OfflineCacheLifecycleEvent = {
   type: "identity" | "invalidate";
   userId: string;
-  resource?: { type: "image"; noteId: string; imageId: string };
+  resource?:
+    | { type: "image"; noteId: string; imageId: string }
+    | NoteDenialEvent["resource"];
+};
+export type NoteDenialEvent = {
+  type: "invalidate";
+  userId: string;
+  resource: {
+    type: "note";
+    aliases: string[];
+    epoch: string | null;
+    generation: number | null;
+  };
 };
 type ImageInvalidationEvent = {
   type: "invalidate";
@@ -223,6 +235,56 @@ export function subscribeOfflineCacheImageInvalidation(
   });
 }
 
+export function subscribeOfflineCacheNoteDenial(
+  listener: (event: NoteDenialEvent) => void,
+): () => void {
+  return subscribeOfflineCacheLifecycle((event) => {
+    if (event.type === "invalidate" && event.resource?.type === "note") {
+      listener(event as NoteDenialEvent);
+    }
+  });
+}
+
+function isNoteDenialEvent(value: unknown): value is NoteDenialEvent {
+  const event = value as Partial<NoteDenialEvent> | null;
+  const resource = event?.resource;
+  return (
+    event?.type === "invalidate" &&
+    typeof event.userId === "string" &&
+    resource?.type === "note" &&
+    Array.isArray(resource.aliases) &&
+    resource.aliases.length > 0 &&
+    resource.aliases.every((id) => typeof id === "string" && id.length > 0) &&
+    (resource.epoch === null || typeof resource.epoch === "string") &&
+    (resource.generation === null ||
+      (Number.isSafeInteger(resource.generation) && resource.generation >= 0))
+  );
+}
+
+export function reportOfflineNoteDenial(
+  userId: string,
+  id: string,
+  epoch: string | null,
+  generation: number | null,
+): void {
+  const event: NoteDenialEvent = {
+    resource: {
+      aliases: noteIdentityIds(userId, id),
+      epoch,
+      generation,
+      type: "note",
+    },
+    type: "invalidate",
+    userId,
+  };
+  notifyLifecycle(event);
+  try {
+    lifecycleChannel?.postMessage(event);
+  } catch {
+    // A missing notification does not undo the durable authority marker.
+  }
+}
+
 export function subscribeOfflineCacheLifecycle(
   listener: (event: OfflineCacheLifecycleEvent) => void,
 ): () => void {
@@ -256,9 +318,18 @@ function invalidateRealm(userId: string): void {
 if (lifecycleChannel) {
   lifecycleChannel.onmessage = ({ data }) => {
     if (data?.type === "invalidate" && typeof data.userId === "string") {
-      if (data.resource?.type === "image") {
+      if (isNoteDenialEvent(data)) {
+        if (data.resource.generation === null) {
+          suspendOfflineCacheUser(data.userId);
+        }
         notifyLifecycle(data);
-      } else {
+      } else if (
+        data.resource?.type === "image" &&
+        typeof data.resource.noteId === "string" &&
+        typeof data.resource.imageId === "string"
+      ) {
+        notifyLifecycle(data);
+      } else if (!data.resource) {
         invalidateRealm(data.userId);
       }
     } else if (data?.type === "identity" && typeof data.userId === "string") {
@@ -429,6 +500,47 @@ export function isOfflineNoteReadCurrent(
 
 function deniedNoteKey(userId: string, noteId: string): string {
   return `${DENIED_NOTE_PREFIX}${noteKey(userId, noteId)}`;
+}
+
+/** Null means authority cannot be inspected, not proof of restored access. */
+export async function readOfflineNoteDenial(
+  event: NoteDenialEvent,
+  identities: readonly string[],
+): Promise<boolean | null> {
+  try {
+    const database = await getEpochDatabase();
+    if (!database) {
+      return null;
+    }
+    return await new Promise<boolean | null>((resolve, reject) => {
+      const transaction = database.transaction(METADATA_STORE, "readonly");
+      let denied: boolean | null = null;
+      readMetadataBatch(
+        transaction.objectStore(METADATA_STORE),
+        [
+          epochKey(event.userId),
+          ...identities.map((id) => deniedNoteKey(event.userId, id)),
+        ],
+        (records) => {
+          const epoch = records.get(epochKey(event.userId))?.value ?? "0";
+          if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
+            denied = false;
+          } else if (event.resource.generation !== null) {
+            denied = identities.some(
+              (id) =>
+                parseNoteAuthority(records.get(deniedNoteKey(event.userId, id)))
+                  ?.denied,
+            );
+          }
+        },
+        () => transaction.abort(),
+      );
+      transaction.oncomplete = () => resolve(denied);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } catch {
+    return null;
+  }
 }
 
 function noteOrderKey(userId: string): string {
@@ -2037,7 +2149,7 @@ function updateNoteAuthority(
   action: "deny" | "clear",
   orderingToken?: number,
   authorityGeneration?: number,
-): Promise<void> {
+): Promise<number> {
   return new Promise((resolve, reject) => {
     let transaction: IDBTransaction;
     try {
@@ -2050,6 +2162,7 @@ function updateNoteAuthority(
     const metadata = transaction.objectStore(METADATA_STORE);
     const identities = noteIdentityIds(userId, id);
     let failure: unknown;
+    let committedGeneration = 0;
     readMetadataBatch(
       metadata,
       [
@@ -2066,6 +2179,7 @@ function updateNoteAuthority(
         let generation: number | undefined;
         if (action === "deny") {
           generation = noteSequence(records.get(noteOrderKey(userId))) + 1;
+          committedGeneration = generation;
           if (!Number.isSafeInteger(generation)) {
             throw new Error("Note denial sequence exhausted");
           }
@@ -2095,7 +2209,7 @@ function updateNoteAuthority(
     operations.add(abort);
     transaction.oncomplete = () => {
       operations.delete(abort);
-      resolve();
+      resolve(committedGeneration);
     };
     transaction.onabort = () => {
       operations.delete(abort);
@@ -2276,9 +2390,17 @@ export async function openOfflineCache(
         if (denialToken !== currentNoteGeneration(userId, id)) {
           return;
         }
-        await updateNoteAuthority(database, userId, id, "deny", denialToken);
+        const generation = await updateNoteAuthority(
+          database,
+          userId,
+          id,
+          "deny",
+          denialToken,
+        );
+        reportOfflineNoteDenial(userId, id, scope.epoch, generation);
       } catch (error) {
         suspendOfflineCacheUser(userId);
+        reportOfflineNoteDenial(userId, id, scope.epoch, null);
         throw error;
       }
       try {
