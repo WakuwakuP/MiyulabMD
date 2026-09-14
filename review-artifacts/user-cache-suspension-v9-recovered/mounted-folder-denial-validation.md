@@ -32,6 +32,13 @@ failures were the delayed old-denial ordering fence and the transaction receipt
 returning `epoch: null` instead of the uninitialized cache scope's opaque
 `"0"`. The receipt now takes the epoch default inside the same IDB transaction.
 
+The parent then identified two remaining candidate typecheck errors in
+`offline-cache.ts`: the lifecycle message path passed a broad partial event to
+the image handler, and `commitFolderDenial` was called without its scope.
+This cleanup validates image messages before narrowing them to the image event
+shape and passes the cache's current scope. Candidate lint and the full
+typecheck remain for the parent's next measurement.
+
 The six former cache-only “UI” cases were removed rather than counted as
 successes. They did not mount Home/CachedDrive, did not await lifecycle
 delivery, did not inject storage failure, or did not hold an HTTP response.

@@ -309,6 +309,20 @@ function isFolderDenialEvent(value: unknown): value is FolderDenialEvent {
   );
 }
 
+function isImageInvalidationEvent(
+  value: unknown,
+): value is ImageInvalidationEvent {
+  const event = value as Partial<ImageInvalidationEvent> | null;
+  const resource = event?.resource;
+  return (
+    event?.type === "invalidate" &&
+    typeof event.userId === "string" &&
+    resource?.type === "image" &&
+    typeof resource.noteId === "string" &&
+    typeof resource.imageId === "string"
+  );
+}
+
 export function reportOfflineNoteDenial(
   userId: string,
   id: string,
@@ -397,16 +411,8 @@ function handleDenialLifecycleMessage(
   notifyLifecycle(event);
 }
 
-function handleImageLifecycleMessage(
-  event: Partial<ImageInvalidationEvent>,
-): void {
-  if (
-    event.resource?.type === "image" &&
-    typeof event.resource.noteId === "string" &&
-    typeof event.resource.imageId === "string"
-  ) {
-    notifyLifecycle(event as ImageInvalidationEvent);
-  }
+function handleImageLifecycleMessage(event: ImageInvalidationEvent): void {
+  notifyLifecycle(event);
 }
 
 function handleInvalidationLifecycleMessage(
@@ -415,8 +421,8 @@ function handleInvalidationLifecycleMessage(
 ): void {
   if (isNoteDenialEvent(data) || isFolderDenialEvent(data)) {
     handleDenialLifecycleMessage(data);
-  } else if (event.resource?.type === "image") {
-    handleImageLifecycleMessage(event);
+  } else if (isImageInvalidationEvent(data)) {
+    handleImageLifecycleMessage(data);
   } else if (!event.resource && typeof event.userId === "string") {
     invalidateRealm(event.userId);
   }
@@ -2670,6 +2676,7 @@ export async function openOfflineCache(
           id,
           orderingToken,
           signal,
+          scope,
         );
         assertUserActive(userId, lifetime);
         if (signal?.aborted) {
