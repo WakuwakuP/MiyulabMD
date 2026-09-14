@@ -1,5 +1,5 @@
-import { collectImageUrls } from "@miyulabmd/markdown";
 import { apiFetch } from "./api-fetch.ts";
+import { type AttachedImage, attachedImage } from "./attached-image-target.ts";
 import {
   assertOfflineCacheScope,
   isSupportedCachedImageMime,
@@ -9,58 +9,11 @@ import {
 } from "./offline-cache.ts";
 import type { StorageWriteRecovery } from "./storage-write-recovery.ts";
 
-export type AttachedImage = { url: string; noteId: string; imageId: string };
-
-/** Resolve only the app's image API. The referenced parent can differ from the viewed note. */
-export function attachedImage(
-  url: string,
-  origin = location.origin,
-): AttachedImage | null {
-  try {
-    const parsed = new URL(url, origin);
-    if (
-      parsed.origin !== origin ||
-      parsed.username ||
-      parsed.password ||
-      parsed.search ||
-      parsed.hash
-    ) {
-      return null;
-    }
-    const match = /^\/api\/notes\/([^/]+)\/images\/([^/]+)$/.exec(
-      parsed.pathname,
-    );
-    if (!match) {
-      return null;
-    }
-    const noteId = decodeURIComponent(match[1] as string);
-    const imageId = decodeURIComponent(match[2] as string);
-    if (!(noteId && imageId) || /[/\\]/.test(noteId + imageId)) {
-      return null;
-    }
-    return {
-      imageId,
-      noteId,
-      url: `/api/notes/${encodeURIComponent(noteId)}/images/${encodeURIComponent(imageId)}`,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function collectAttachedImages(
-  markdown: string,
-  origin = location.origin,
-): AttachedImage[] {
-  const images = new Map<string, AttachedImage>();
-  for (const url of collectImageUrls(markdown)) {
-    const image = attachedImage(url, origin);
-    if (image) {
-      images.set(image.url, image);
-    }
-  }
-  return [...images.values()];
-}
+export {
+  type AttachedImage,
+  attachedImage,
+  collectAttachedImages,
+} from "./attached-image-target.ts";
 
 type Options = {
   scope: OfflineCacheScope;

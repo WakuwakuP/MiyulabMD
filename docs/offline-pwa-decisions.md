@@ -2342,6 +2342,22 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   abort 完了が遅れるP2リスクが残る。GC後の signal check により abort後の retry は
   防ぐが、今回APIは広げず後続課題とする。
 
+## D130：cache-disabled actorのnetwork-only preview imageを本体採用する
+
+- 状態：checked candidate 4ファイルを本体へ採用。全オフライン要件の完了ではない。
+- guest/cache-disabled actorはstorageへ触れず、network-onlyでchecked fetchする。
+  `attached-image-target.ts` と `network-attached-images.ts` はcache/OPFSをimportせず、
+  network-only lifecycleを分離した。cache-enabled actorの既存pathは保持する。
+- managed raw imageはnetwork responseへ直接露出せず、Blob URLへ変換する。SSRでは
+  managed-lookingなraw `src`をstripし、外部画像と非画像markupは保持する。
+- 失敗履歴として、候補検証中の依存未導入・browser起動失敗・quota recoveryの
+  focused run未完走は消去せず候補validationへ残す。今回の最終candidateは
+  typecheck、target Biome、purge lifecycle単独1/1、network-only／
+  offline-image-cache／prefetch／lifetime／prefetch-quota合計30/30で確認済み。
+- 影響範囲はpreview imageのactor分岐、identity付きnetwork fetch、cache lifecycle、
+  SSR stripであり、端末全体削除UI・安全な回収・表示中拒否通知・残取得入口・
+  実Worker追加受入れを含む全要件は未完のまま残す。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

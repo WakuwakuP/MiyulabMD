@@ -9,10 +9,10 @@ rewritten to retroactively claim these new files or later review fixes.
 
 | Candidate source | Live adoption target | Candidate SHA-256 | Live SHA-256 |
 |---|---|---|---|
-| `src/lib/attached-image-target.ts` | `apps/web/src/lib/attached-image-target.ts` (new) | `3ca72250abe220c0dbeacfffd011de75d033cf4c5f647703247d8513bc199ba8` | not present before adoption |
-| `src/lib/network-attached-images.ts` | `apps/web/src/lib/network-attached-images.ts` (new) | `b37644637441650fa11d96ac5a130c12fe57c5fa78f024f4f807e500bbb7deb0` | not present before adoption |
-| `src/lib/attached-images.ts` | `apps/web/src/lib/attached-images.ts` (existing) | `faf09006ced38829248f6aa1bb31e8ca4805999bdfc41f89c5d252bd3c4a1d9e` | `33baf35a43dc031ab4f68aec7200aac9d2cc4b2f1ee8e562c399cad3e77f3387` |
-| `src/lib/preview-images.ts` | `apps/web/src/lib/preview-images.ts` (existing) | `21199af259c33d94fa5a732bba16b68249ba8a94aa64d49a405a8ac7e267c5f5` | `1d6e276dd9e72d182dd8768b3b64ac225b14758aeff5182649c6dc55a1937c83` |
+| `src/lib/attached-image-target.ts` | `apps/web/src/lib/attached-image-target.ts` (new) | `9bc74675400f13024da4cb2c1b72a0f6dc4a0d53df8dc6b25b80c56e2d538283` | `9bc74675400f13024da4cb2c1b72a0f6dc4a0d53df8dc6b25b80c56e2d538283` |
+| `src/lib/network-attached-images.ts` | `apps/web/src/lib/network-attached-images.ts` (new) | `b37644637441650fa11d96ac5a130c12fe57c5fa78f024f4f807e500bbb7deb0` | `b37644637441650fa11d96ac5a130c12fe57c5fa78f024f4f807e500bbb7deb0` |
+| `src/lib/attached-images.ts` | `apps/web/src/lib/attached-images.ts` (existing) | `faf09006ced38829248f6aa1bb31e8ca4805999bdfc41f89c5d252bd3c4a1d9e` | `faf09006ced38829248f6aa1bb31e8ca4805999bdfc41f89c5d252bd3c4a1d9e` |
+| `src/lib/preview-images.ts` | `apps/web/src/lib/preview-images.ts` (existing) | `7b17915f0534d210169f61ac7bcb20e0f0c4ff6718b443590acab282c82a3ad6` | `7b17915f0534d210169f61ac7bcb20e0f0c4ff6718b443590acab282c82a3ad6` |
 
 ## Tests and validation
 
