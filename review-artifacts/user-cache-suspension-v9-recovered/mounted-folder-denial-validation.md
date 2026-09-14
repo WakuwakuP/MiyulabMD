@@ -152,6 +152,11 @@ Browser, candidate typecheck, and candidate lint execution remain unverified
 because this checkout lacks the prepared dependencies. `git diff --check`
 passes.
 
+The list-race peer now writes the same `list-sequence-race` cache scope as the
+reader; all other peer-denial callers retain the helper's default `alice`
+scope. The helper passes the selected user ID through its `page.evaluate`
+payload before opening the peer cache. This is a test-only correction.
+
 ## Sibling projection and receipt relevance follow-up
 
 The candidate now applies a non-null filtered note-list projection before
@@ -177,6 +182,26 @@ live apps/web/src/**: unchanged
 candidate typecheck/lint: not executed (prepared candidate dependencies unavailable)
 mounted browser validation: not executed (prepared candidate dependencies unavailable)
 ```
+
+## Parent 14/15 diagnosis and exact validation
+
+The parent run was 14/15 because the list-race peer denial previously updated
+the default `alice` scope while the test read `list-sequence-race`; the
+expected sequence change therefore never reached the gated reader. The
+correction targets the matching scope and keeps the existing gate and
+`null`/fresh allowed-only assertions unchanged.
+
+Exact test-only validation for this correction:
+
+```text
+pnpm exec biome check apps/web/tests/browser/mounted-folder-denial.spec.ts:
+  not run (Biome is unavailable because candidate dependencies are not installed)
+git diff --check: PASS
+live apps/web/src/**: unchanged
+```
+
+The candidate browser and parent validation suites still require the prepared
+dependencies and remain unexecuted in this checkout.
 
 ## Parent 13/15 follow-up diagnosis
 

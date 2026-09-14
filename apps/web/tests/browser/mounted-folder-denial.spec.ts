@@ -278,19 +278,37 @@ async function routeAuthenticatedHome(
   });
 }
 
-async function denyFolderFromPeer(peer: Page, id: string, token?: number) {
+type DenyFolderPeerOptions = {
+  token?: number;
+  userId?: string;
+};
+
+async function denyFolderFromPeer(
+  peer: Page,
+  id: string,
+  tokenOrOptions?: number | DenyFolderPeerOptions,
+  userId = "alice",
+) {
+  const token =
+    typeof tokenOrOptions === "number"
+      ? tokenOrOptions
+      : tokenOrOptions?.token;
+  const cacheUserId =
+    typeof tokenOrOptions === "object"
+      ? (tokenOrOptions.userId ?? userId)
+      : userId;
   await peer.goto("/tests/browser/fixtures/storage.html");
   await peer.evaluate(
-    async ({ id, token }) => {
+    async ({ id, token, userId }) => {
       const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
-      const cache = await openOfflineCache({ userId: "alice" });
+      const cache = await openOfflineCache({ userId });
       try {
         await cache.denyFolder(id, token);
       } finally {
         cache.close();
       }
     },
-    { id, token },
+    { id, token, userId: cacheUserId },
   );
 }
 
@@ -698,7 +716,9 @@ test("note list read is invalidated when folder denial sequence changes", async 
         ),
       )
       .toBe(true);
-    await denyFolderFromPeer(peer, "list-race-denied-folder");
+    await denyFolderFromPeer(peer, "list-race-denied-folder", {
+      userId: "list-sequence-race",
+    });
     await page.evaluate(() =>
       (
         globalThis as typeof globalThis & { __releaseListRace?: () => void }
