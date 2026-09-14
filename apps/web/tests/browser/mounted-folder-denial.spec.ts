@@ -289,7 +289,8 @@ async function denyFolderFromPeer(
   tokenOrOptions?: number | DenyFolderPeerOptions,
   userId = "alice",
 ) {
-  const token = typeof tokenOrOptions === "number" ? tokenOrOptions : tokenOrOptions?.token;
+  const token =
+    typeof tokenOrOptions === "number" ? tokenOrOptions : tokenOrOptions?.token;
   const cacheUserId =
     typeof tokenOrOptions === "object"
       ? (tokenOrOptions.userId ?? userId)
