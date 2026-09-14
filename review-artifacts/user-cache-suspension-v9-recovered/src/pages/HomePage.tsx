@@ -29,8 +29,8 @@ import {
 } from "../lib/home-metadata-reader.ts";
 import {
   readOfflineFolderDenial,
-  subscribeOfflineCacheFolderDenial,
   readOfflineNoteDenial,
+  subscribeOfflineCacheFolderDenial,
   subscribeOfflineCacheNoteDenial,
 } from "../lib/offline-cache.ts";
 import { CachedDriveView } from "./CachedDriveView.tsx";
@@ -316,7 +316,6 @@ function NetworkHomePage() {
   const [reloadRequest, setReloadRequest] = useState(0);
   const latestReloadRequest = useRef(reloadRequest);
   latestReloadRequest.current = reloadRequest;
-  const [noteReload, setNoteReload] = useState(0);
   const notesRef = useRef<NoteSummary[]>([]);
   const reloadOwnerRef = useRef(0);
   const [share, setShare] = useState<ShareState | null>(null);
@@ -400,7 +399,7 @@ function NetworkHomePage() {
       current = false;
       controller.abort();
     };
-  }, [folderId, noteReload, reloadRequest, userLoading, viewer]);
+  }, [folderId, reloadRequest, userLoading, viewer]);
 
   useEffect(() => {
     if (viewer.cacheViewerId === null) {
@@ -430,7 +429,7 @@ function NetworkHomePage() {
         ) {
           return;
         }
-        setNoteReload((current) => current + 1);
+        setReloadRequest((value) => value + 1);
       });
     });
     return unsubscribe;

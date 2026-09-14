@@ -9,8 +9,8 @@ import {
 } from "../lib/cached-drive-reader.ts";
 import {
   readOfflineFolderDenial,
-  subscribeOfflineCacheFolderDenial,
   readOfflineNoteDenial,
+  subscribeOfflineCacheFolderDenial,
   subscribeOfflineCacheNoteDenial,
 } from "../lib/offline-cache.ts";
 
@@ -34,7 +34,6 @@ export function CachedDriveView() {
   const latestReloadRequest = useRef(reloadRequest);
   latestReloadRequest.current = reloadRequest;
   const cacheViewerId = viewer.cacheViewerId;
-  const [noteReload, setNoteReload] = useState(0);
   const notesRef = useRef(view.notes);
   const reloadOwnerRef = useRef(0);
 
@@ -93,7 +92,6 @@ export function CachedDriveView() {
   }, [
     cacheViewerId,
     folderId,
-    noteReload,
     reloadRequest,
     setHeader,
     userLoading,
@@ -127,10 +125,7 @@ export function CachedDriveView() {
     }
     const owner = reloadOwnerRef.current;
     const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
-      if (
-        event.userId !== cacheViewerId ||
-        owner !== reloadOwnerRef.current
-      ) {
+      if (event.userId !== cacheViewerId || owner !== reloadOwnerRef.current) {
         return;
       }
       const identities = event.resource.aliases.filter((alias) =>
@@ -147,7 +142,7 @@ export function CachedDriveView() {
           owner === reloadOwnerRef.current &&
           cacheViewerId === event.userId
         ) {
-          setNoteReload((current) => current + 1);
+          setReloadRequest((value) => value + 1);
         }
       });
     });
