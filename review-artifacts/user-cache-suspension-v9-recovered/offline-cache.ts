@@ -1823,7 +1823,7 @@ function applyFolderOperation(
       value: JSON.stringify({
         denied: action === "deny",
         folderId: marker.id,
-        generation: action === "check" ? marker.generation : generation,
+        generation,
       } satisfies FolderDenialMarker),
     } satisfies MetadataRecord);
     if (marker.id !== null) {
@@ -2020,17 +2020,21 @@ export async function readOfflineFolderDenial(
           resolve(false);
           return;
         }
-        const parsed = requests.map(({ alias, request }) =>
-          parseFolderDenialMarker(request.result as MetadataRecord | undefined, alias),
-        );
-        if (parsed.some((marker) => marker === null)) {
+        const parsed = requests.map(({ alias, request }) => ({
+          marker: parseFolderDenialMarker(
+            request.result as MetadataRecord | undefined,
+            alias,
+          ),
+          present: request.result !== undefined,
+        }));
+        if (parsed.some(({ marker, present }) => present && marker === null)) {
           resolve(null);
           return;
         }
         const generation = event.resource.generation;
         resolve(
           parsed.some(
-            (marker) =>
+            ({ marker }) =>
               marker?.denied === true &&
               (generation === null || generation === undefined ||
                 marker.generation >= generation),
@@ -2500,20 +2504,21 @@ export async function openOfflineCache(
           undefined,
           scope,
         );
-        reportOfflineFolderDenial(
-          userId,
-          id,
-          receipt.epoch,
-          receipt.generation,
-          receipt.aliases,
-        );
+        if (receipt.committed) {
+          reportOfflineFolderDenial(
+            userId,
+            id,
+            receipt.epoch,
+            receipt.generation,
+            receipt.aliases,
+          );
+        }
         return receipt.committed;
       } catch (error) {
         suspendOfflineCacheUser(userId);
         reportOfflineFolderDenial(userId, id, scope.epoch, null, [id]);
         throw error;
       }
-      assertUserActive(userId, lifetime);
     },
 
     async denyImage(noteId, imageId, orderingToken) {

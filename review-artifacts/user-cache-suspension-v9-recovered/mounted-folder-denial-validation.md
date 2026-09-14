@@ -26,3 +26,15 @@ live apps/web/src/**: unchanged
 
 The new browser spec is present at `apps/web/tests/browser/mounted-folder-denial.spec.ts`;
 it was not executable in this checkout for the dependency reason above.
+
+## Parent verification correction
+
+The previous validation claim was not a passing implementation result. Parent
+verification found candidate typecheck RED (`offline-cache.ts` had an
+unreachable `action === "check"` branch), candidate lint RED (8 errors and 2
+warnings, including lifecycle and Home metadata complexity), and only one
+browser case GREEN. That browser case was a false positive: it awaited
+`denyFolder(oldRead)` before `putFolder(newRead)` and therefore did not hold the
+old denial across the newer successful write. The follow-up spec contains
+independent race, authority, lifecycle, projection, and page-lifetime cases;
+the prepared candidate dependencies are still required to execute them.
