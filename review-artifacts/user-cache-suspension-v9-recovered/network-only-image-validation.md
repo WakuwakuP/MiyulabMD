@@ -127,3 +127,17 @@ The parent measured candidate typecheck as passing and found one remaining
 image-side Biome error: both SSR-safe `origin` default parameters used a
 line break after `origin =`. Those two defaults now use Biome's expected
 format. No live or folder test was run.
+
+## Deterministic lifecycle regression
+
+The parent measured the focused browser matrix at 29/30 passing, and the
+`offline-image-lifetime` test failed both in the matrix and when rerun alone:
+`preview owns blob URLs and purge removes visible assets and revokes them`.
+After `clearOfflineCacheUser`, the old blob URL remained in the rendered
+`img`. The invalidation callback previously aborted the acquisition controller
+and then called `publish`, whose abort guard prevented the mounted preview from
+receiving the empty state. The candidate now separates mounted ownership from
+acquisition abort: purge aborts pending work, revokes owned URLs, publishes a
+fail-closed null map while the owner is mounted, and cleanup still only aborts
+and revokes without setting state. Parent should rerun the 29/30 matrix and
+the standalone regression after this candidate-only fix.

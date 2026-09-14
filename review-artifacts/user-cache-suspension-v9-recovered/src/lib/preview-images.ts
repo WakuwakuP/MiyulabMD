@@ -97,13 +97,15 @@ export function usePreviewImages(
     if (!enabled || (cacheOnly && !userId)) {
       return;
     }
-    const controller = new AbortController();
+    const acquisitionController = new AbortController();
+    let active = true;
+    let realmInvalidated = false;
     const ownedUrls = new Set<string>();
     const urls = new Map<string, string | null>();
     const targets = collectAttachedImages(markdown);
     const blocked = new Set<string>();
     const publish = (status: Images["status"]) => {
-      if (!controller.signal.aborted) {
+      if (active) {
         setImages({ owner, status, urls: new Map(urls) });
       }
     };
@@ -117,8 +119,7 @@ export function usePreviewImages(
       urls.set(imageUrl, null);
       publish("ready");
     };
-    const revoke = () => {
-      controller.abort();
+    const revokeOwnedUrls = () => {
       for (const url of ownedUrls) {
         URL.revokeObjectURL(url);
       }
@@ -133,13 +134,15 @@ export function usePreviewImages(
       if (usesCache) {
         const cache = await import("./offline-cache.ts");
         const attached = await import("./attached-images.ts");
-        if (controller.signal.aborted) {
+        if (acquisitionController.signal.aborted) {
           return;
         }
         unsubscribeImage = cache.subscribeOfflineCacheImageInvalidation(
           (event) => {
             if (
               event.userId !== userId ||
+              acquisitionController.signal.aborted ||
+              realmInvalidated ||
               !event.resource ||
               !targets.some(
                 (image) =>
@@ -161,7 +164,11 @@ export function usePreviewImages(
         );
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: denial notifications must independently invalidate each matching image.
         unsubscribeNote = cache.subscribeOfflineCacheNoteDenial((event) => {
-          if (event.userId !== userId || controller.signal.aborted) {
+          if (
+            event.userId !== userId ||
+            acquisitionController.signal.aborted ||
+            realmInvalidated
+          ) {
             return;
           }
           for (const image of targets) {
@@ -171,7 +178,7 @@ export function usePreviewImages(
             void cache
               .readOfflineNoteDenial(event, [image.noteId])
               .then((denied) => {
-                if (!controller.signal.aborted && denied !== false) {
+                if (!acquisitionController.signal.aborted && denied !== false) {
                   forgetImage(image.url);
                 }
               })
@@ -182,15 +189,25 @@ export function usePreviewImages(
         });
         unsubscribeRealm = cache.subscribeOfflineCacheInvalidation(
           (invalidatedUser) => {
-            if (invalidatedUser !== userId) {
+            if (
+              invalidatedUser !== userId ||
+              !active ||
+              realmInvalidated
+            ) {
               return;
             }
-            revoke();
+            realmInvalidated = true;
+            acquisitionController.abort();
+            revokeOwnedUrls();
+            urls.clear();
+            for (const image of targets) {
+              urls.set(image.url, null);
+            }
             publish("ready");
           },
         );
         const scope = await cache.captureOfflineCacheScope(userId as string);
-        if (controller.signal.aborted) {
+        if (acquisitionController.signal.aborted) {
           return;
         }
         await Promise.all(
@@ -200,12 +217,15 @@ export function usePreviewImages(
               bytes = await attached.acquireAttachedImage(image, {
                 cacheOnly,
                 scope,
-                signal: controller.signal,
+                signal: acquisitionController.signal,
               });
             } catch {
               // A failed attachment must not replace or fail the note body.
             }
-            if (controller.signal.aborted || blocked.has(image.url)) {
+            if (
+              acquisitionController.signal.aborted ||
+              blocked.has(image.url)
+            ) {
               return;
             }
             const url = ownImageUrl(bytes, ownedUrls);
@@ -220,12 +240,15 @@ export function usePreviewImages(
             try {
               bytes = await acquireAttachedImageNetworkOnly(image, {
                 expectedViewerId: expectedViewerId as string | null,
-                signal: controller.signal,
+                signal: acquisitionController.signal,
               });
             } catch {
               // A failed attachment must not replace or fail the note body.
             }
-            if (controller.signal.aborted || blocked.has(image.url)) {
+            if (
+              acquisitionController.signal.aborted ||
+              blocked.has(image.url)
+            ) {
               return;
             }
             const url = ownImageUrl(bytes, ownedUrls);
@@ -234,7 +257,7 @@ export function usePreviewImages(
           }),
         );
       }
-      if (controller.signal.aborted) {
+      if (acquisitionController.signal.aborted) {
         return;
       }
       for (const image of targets) {
@@ -245,17 +268,19 @@ export function usePreviewImages(
       publish("ready");
     };
     void initialize().catch(() => {
-      if (controller.signal.aborted) {
+      if (acquisitionController.signal.aborted) {
         return;
       }
       urls.clear();
       publish("unavailable");
     });
     return () => {
+      active = false;
       unsubscribeImage?.();
       unsubscribeNote?.();
       unsubscribeRealm?.();
-      revoke();
+      acquisitionController.abort();
+      revokeOwnedUrls();
     };
   }, [cacheOnly, enabled, markdown, owner, userId, expectedViewerId, mode]);
   return useMemo<PreviewImages>(
