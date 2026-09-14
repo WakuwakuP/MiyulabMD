@@ -3,6 +3,7 @@ import { collectOgUrls, renderMarkdownHtml } from "@miyulabmd/markdown";
 import { Elysia } from "elysia";
 import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { isAccessConfigured } from "./auth/access.ts";
+import { withApiSessionIdentity } from "./auth/api-response.ts";
 import { readSession } from "./auth/session.ts";
 import { envTruthy } from "./env.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
@@ -217,6 +218,20 @@ export default {
     const noteId = noteIdFromWsPath(pathname);
     if (noteId) {
       return handleNoteWebSocket(request, env, noteId);
+    }
+
+    if (pathname.startsWith("/api/")) {
+      const user = await readSession(request, env);
+      let response: Response;
+      try {
+        response =
+          (await handleAuthAndMeRoutes(request, env, pathname)) ??
+          (await api.fetch(request));
+      } catch {
+        // Elysia handles route errors; this also covers non-Elysia API handlers.
+        response = new Response("Internal Server Error", { status: 500 });
+      }
+      return withApiSessionIdentity(response, user);
     }
 
     const special = await handleAuthAndMeRoutes(request, env, pathname);
