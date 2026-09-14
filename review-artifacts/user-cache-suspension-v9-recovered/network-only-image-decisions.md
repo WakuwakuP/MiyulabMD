@@ -1,0 +1,28 @@
+# Network-only preview image decisions
+
+## Scope
+
+This candidate adds `acquireAttachedImageNetworkOnly` while preserving the
+existing cache-backed acquisition path. Preview acquisition is explicit:
+cache views use cache-only, authenticated network views with a matching
+`cacheViewerId` use cache-backed reads, and only guest or verified
+authenticated-without-cache-id views use network-only. Mismatched or
+unavailable contexts fail closed. The network-only in-flight namespace is separate
+and keyed by the captured expected viewer (`null` for guest), so guest, Alice,
+Bob, and cache-backed reads cannot share a transport.
+
+The primitive validates the canonical same-origin attachment URL, calls
+`apiFetch` with an explicit identity expectation, and accepts only a 2xx
+response with PNG/JPEG/GIF/WebP MIME. It never opens offline storage, writes a
+denial marker, performs recovery, or creates a Blob URL. Preview ownership
+continues to revoke Blob URLs during cleanup and context changes.
+
+## Deliberate compatibility
+
+Cache-backed reads retain their existing `acquireAttachedImage` path and
+foreground/background in-flight sharing, including `requireCache` behavior.
+Only the network-only mode uses the new primitive. Cache-backed network views
+retain subscriptions, scope capture, cache writes, denial markers, and
+invalidation. Network-only views never open storage or subscribe to its
+lifecycle. Managed image URLs are removed when no valid view context exists;
+external images retain raw rendering.
