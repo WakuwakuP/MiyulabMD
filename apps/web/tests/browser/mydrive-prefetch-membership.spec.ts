@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 test("a second complete listing replaces MyDrive membership without denying valid bodies", async ({
   page,
 }) => {
@@ -74,17 +76,21 @@ test("a second complete listing replaces MyDrive membership without denying vali
             },
           ];
     if (path === "/api/folders/tree") {
-      return route.fulfill({ json: { folders } });
+      return route.fulfill({ headers, json: { folders } });
     }
     if (path === "/api/notes") {
-      return route.fulfill({ json: { notes: bodies } });
+      return route.fulfill({ headers, json: { notes: bodies } });
     }
     const folder = folders.find((item) => path === `/api/folders/${item.id}`);
     if (folder) {
-      return route.fulfill({ json: folder });
+      return route.fulfill({ headers, json: folder });
     }
     const body = bodies.find((item) => path === `/api/notes/${item.id}`);
-    return route.fulfill({ json: body ?? {}, status: body ? 200 : 404 });
+    return route.fulfill({
+      headers,
+      json: body ?? {},
+      status: body ? 200 : 404,
+    });
   });
   await page.goto("/tests/browser/fixtures/storage.html");
   const acquire = () =>

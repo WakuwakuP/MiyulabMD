@@ -70,9 +70,13 @@ test("authenticated startup prepares unvisited MyDrive folders and bodies withou
       case "/api/auth/config":
         return route.fulfill({ json: { access: false, mock: true } });
       case "/api/notes":
-        return route.fulfill({ json: { notes: summaries } });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { notes: summaries },
+        });
       case "/api/folders/tree":
         return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
           json: {
             folders: [
               { ...rootCrumb, folder: "", parentId: null },
@@ -82,15 +86,27 @@ test("authenticated startup prepares unvisited MyDrive folders and bodies withou
         });
       case "/api/folders":
       case `/api/folders/${rootId}`:
-        return route.fulfill({ json: root });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: root,
+        });
       case `/api/folders/${childId}`:
-        return route.fulfill({ json: child });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: child,
+        });
       case `/api/notes/${owned.id}`:
         bodyRequests.push(owned.id);
-        return route.fulfill({ json: owned });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: owned,
+        });
       case `/api/notes/${shared.id}`:
         bodyRequests.push(shared.id);
-        return route.fulfill({ json: shared });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: shared,
+        });
       default:
         return route.fulfill({ json: { error: "No fixture" }, status: 404 });
     }

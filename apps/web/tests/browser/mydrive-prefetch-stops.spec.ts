@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 for (const boundary of ["storage", "auth", "close"] as const) {
   test(`prefetch classifies the ${boundary} stop without discarding committed data`, async ({
     page,
@@ -24,6 +26,7 @@ for (const boundary of ["storage", "auth", "close"] as const) {
       switch (path) {
         case "/api/folders/tree":
           return route.fulfill({
+            headers,
             json: {
               folders: [
                 { folder: "", id: rootId, name: root.name, parentId: null },
@@ -31,16 +34,24 @@ for (const boundary of ["storage", "auth", "close"] as const) {
             },
           });
         case `/api/folders/${rootId}`:
-          return route.fulfill({ json: root });
+          return route.fulfill({ headers, json: root });
         case "/api/notes":
           return boundary === "auth"
-            ? route.fulfill({ json: { error: "Session expired" }, status: 401 })
-            : route.fulfill({ json: { notes: [summary] } });
+            ? route.fulfill({
+                headers,
+                json: { error: "Session expired" },
+                status: 401,
+              })
+            : route.fulfill({ headers, json: { notes: [summary] } });
         case `/api/notes/${owned.id}`:
           bodyRequests += 1;
-          return route.fulfill({ json: owned });
+          return route.fulfill({ headers, json: owned });
         default:
-          return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+          return route.fulfill({
+            headers,
+            json: { error: "No fixture" },
+            status: 404,
+          });
       }
     });
     await page.goto("/tests/browser/fixtures/storage.html");

@@ -117,7 +117,11 @@ test("cache clearing invalidates a previously uncached pending note read", async
       );
       await started.promise;
       await clearOfflineCacheUser("alice");
-      response.resolve(new Response(JSON.stringify(late)));
+      response.resolve(
+        new Response(JSON.stringify(late), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        }),
+      );
       const published = await pending;
       const cache = await openOfflineCache({ userId: "alice" });
       try {
@@ -126,7 +130,11 @@ test("cache clearing invalidates a previously uncached pending note read", async
         cache.close();
       }
     } finally {
-      response.resolve(new Response(JSON.stringify(late)));
+      response.resolve(
+        new Response(JSON.stringify(late), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        }),
+      );
       reader.dispose();
       globalThis.fetch = originalFetch;
     }
@@ -167,6 +175,7 @@ test("cache clearing prevents an older Home snapshot from being saved or publish
         JSON.stringify(
           url.endsWith("/api/notes") ? { notes: [summary] } : folder,
         ),
+        { headers: { "X-MiyulabMD-Session-User": "user:alice" } },
       );
     };
     try {

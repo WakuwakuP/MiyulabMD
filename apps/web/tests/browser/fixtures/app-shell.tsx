@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useOutletContext } from "react-router";
 import { AppShell } from "../../../src/components/layout/AppShell.tsx";
@@ -7,6 +7,10 @@ import { ThemeProvider } from "../../../src/hooks/use-theme.ts";
 
 function ViewerProbe() {
   const context = useOutletContext<AppShellContext>();
+  const [buffer, setBuffer] = useState("");
+  useEffect(() => {
+    setBuffer("");
+  }, [context.viewer]);
   const scope = useRef<{ dispose: () => void } | null>(null);
   useEffect(() => () => scope.current?.dispose(), []);
   const showSource = (source: "cache" | "network") => {
@@ -21,6 +25,11 @@ function ViewerProbe() {
   };
   return (
     <>
+      <input
+        aria-label="Unsent viewer buffer"
+        onChange={(event) => setBuffer(event.target.value)}
+        value={buffer}
+      />
       <output aria-label="Viewer context">
         {JSON.stringify({
           hasViewing: Boolean(context.viewing),

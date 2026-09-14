@@ -175,7 +175,11 @@ for (const scenario of [
                 parentId: null,
               };
         }
-        return Promise.resolve(new Response(JSON.stringify(data)));
+        return Promise.resolve(
+          new Response(JSON.stringify(data), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          }),
+        );
       };
       const session = createNoteReadSession(viewer);
       try {

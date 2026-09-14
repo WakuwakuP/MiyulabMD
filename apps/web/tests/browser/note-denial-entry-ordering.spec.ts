@@ -30,9 +30,13 @@ test("denial invalidates an older network request even when its database cannot 
       return Promise.resolve(
         requests === 2
           ? new Response(JSON.stringify({ error: "Forbidden" }), {
+              headers: { "X-MiyulabMD-Session-User": "user:alice" },
               status: 403,
             })
-          : new Response(JSON.stringify(note), { status: 200 }),
+          : new Response(JSON.stringify(note), {
+              headers: { "X-MiyulabMD-Session-User": "user:alice" },
+              status: 200,
+            }),
       );
     };
     try {

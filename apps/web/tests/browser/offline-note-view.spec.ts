@@ -29,12 +29,17 @@ async function verifyCachedNoteView(
       return;
     }
     if (apiUnavailable && path === `/api/notes/${displayedNote.id}`) {
-      await route.fulfill({ json: { error: "Unavailable" }, status: 503 });
+      await route.fulfill({
+        headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        json: { error: "Unavailable" },
+        status: 503,
+      });
       return;
     }
     switch (path) {
       case "/api/me":
         await route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
           json: {
             user: {
               displayName: "Alice",
@@ -45,16 +50,26 @@ async function verifyCachedNoteView(
         });
         return;
       case "/api/auth/config":
-        await route.fulfill({ json: { access: false, mock: true } });
+        await route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { access: false, mock: true },
+        });
         return;
       case `/api/notes/${displayedNote.id}`:
-        await route.fulfill({ json: displayedNote });
+        await route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: displayedNote,
+        });
         return;
       case "/api/article-sources":
-        await route.fulfill({ json: { sources: [] } });
+        await route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { sources: [] },
+        });
         return;
       default:
         await route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
           json: { error: "No test fixture for this API" },
           status: 404,
         });

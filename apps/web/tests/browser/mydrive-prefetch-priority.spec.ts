@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 for (const destination of [
   "/f/child",
   "/n/preferred",
@@ -52,22 +54,26 @@ for (const destination of [
       requests.push(path);
       if (path === "/api/folders/tree") {
         await treeGate;
-        return route.fulfill({ json: { folders } });
+        return route.fulfill({ headers, json: { folders } });
       }
       if (path === "/api/notes") {
-        return route.fulfill({ json: { notes: bodies } });
+        return route.fulfill({ headers, json: { notes: bodies } });
       }
       const folder = folders.find(
         (entry) => path === `/api/folders/${entry.id}`,
       );
       if (folder) {
-        return route.fulfill({ json: folder });
+        return route.fulfill({ headers, json: folder });
       }
       const body = bodies.find((entry) => path === `/api/notes/${entry.id}`);
       if (body?.id === "preferred") {
         await bodyGate;
       }
-      return route.fulfill({ json: body ?? {}, status: body ? 200 : 404 });
+      return route.fulfill({
+        headers,
+        json: body ?? {},
+        status: body ? 200 : 404,
+      });
     });
     await page.goto("/tests/browser/fixtures/storage.html");
     await page.evaluate(async () => {

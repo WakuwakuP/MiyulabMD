@@ -1,6 +1,9 @@
 import { expect, type Page, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+// Every request in these fixtures is served by Alice, including late replies.
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 async function mockEditorApis(
   page: Page,
   mode: "normal" | "denied-note" | "unavailable-viewer" = "normal",
@@ -20,14 +23,19 @@ async function mockEditorApis(
     const path = new URL(request.url()).pathname;
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
       writes.push(`${request.method()} ${path}`);
-      return route.fulfill({ json: note });
+      return route.fulfill({ headers, json: note });
     }
     switch (path) {
       case "/api/me":
         if (mode === "unavailable-viewer") {
-          return route.fulfill({ json: { error: "Forbidden" }, status: 403 });
+          return route.fulfill({
+            headers,
+            json: { error: "Forbidden" },
+            status: 403,
+          });
         }
         return route.fulfill({
+          headers,
           json: {
             user: {
               displayName: "Alice",
@@ -37,18 +45,26 @@ async function mockEditorApis(
           },
         });
       case "/api/auth/config":
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({ headers, json: { access: false, mock: true } });
       case "/api/article-sources":
-        return route.fulfill({ json: { sources: [] } });
+        return route.fulfill({ headers, json: { sources: [] } });
       case `/api/notes/${note.id}`:
         noteReads += 1;
         return mode === "denied-note"
-          ? route.fulfill({ json: { error: "Forbidden" }, status: 403 })
-          : route.fulfill({ json: note });
+          ? route.fulfill({
+              headers,
+              json: { error: "Forbidden" },
+              status: 403,
+            })
+          : route.fulfill({ headers, json: note });
       case `/api/notes/${second.id}`:
-        return route.fulfill({ json: second });
+        return route.fulfill({ headers, json: second });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers,
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
   return {
@@ -143,8 +159,12 @@ for (const outcome of ["success", "failure"] as const) {
       }
       release = () =>
         outcome === "success"
-          ? route.fulfill({ json: { ...note, folder: "late-old-folder" } })
+          ? route.fulfill({
+              headers,
+              json: { ...note, folder: "late-old-folder" },
+            })
           : route.fulfill({
+              headers,
               json: { error: "Old save failed" },
               status: 500,
             });
@@ -195,7 +215,7 @@ test("an open share dialog is not carried into another cached note", async ({
 }) => {
   const { second } = await mockEditorApis(page);
   await page.route(`**/api/notes/${second.id}`, (route) =>
-    route.fulfill({ json: { error: "Unavailable" }, status: 503 }),
+    route.fulfill({ headers, json: { error: "Unavailable" }, status: 503 }),
   );
   await page.goto(`/n/${note.id}`);
   await expect(page.getByText("通信なしでも読みたい本文。")).toBeVisible();

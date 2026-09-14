@@ -68,7 +68,10 @@ test("a short-ID HTTP denial also hides its canonical cached body and list entry
     });
     const original = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
+      new Response(JSON.stringify({ error: "Forbidden" }), {
+        headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        status: 403,
+      });
     try {
       const denied = await session.read(note.shortId);
       return {

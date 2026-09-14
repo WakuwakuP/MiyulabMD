@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 test("only successful drive mutations refresh the background cache", async ({
   page,
 }) => {
@@ -28,12 +30,13 @@ test("only successful drive mutations refresh the background cache", async ({
     const path = new URL(route.request().url()).pathname;
     switch (path) {
       case "/api/me":
-        return route.fulfill({ json: { user } });
+        return route.fulfill({ headers, json: { user } });
       case "/api/auth/config":
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({ headers, json: { access: false, mock: true } });
       case "/api/folders/tree":
         cycles += 1;
         return route.fulfill({
+          headers,
           json: {
             folders: [
               { folder: "", id: rootId, name: root.name, parentId: null },
@@ -42,15 +45,16 @@ test("only successful drive mutations refresh the background cache", async ({
         });
       case "/api/folders":
       case `/api/folders/${rootId}`:
-        return route.fulfill({ json: root });
+        return route.fulfill({ headers, json: root });
       case "/api/notes": {
         const { markdown: _markdown, ...summary } = currentNote;
-        return route.fulfill({ json: { notes: [summary] } });
+        return route.fulfill({ headers, json: { notes: [summary] } });
       }
       case `/api/notes/${note.id}`:
         if (route.request().method() === "PATCH") {
           if (!allowWrite) {
             return route.fulfill({
+              headers,
               json: { error: "Write failed" },
               status: 500,
             });
@@ -64,9 +68,13 @@ test("only successful drive mutations refresh the background cache", async ({
         } else {
           bodies += 1;
         }
-        return route.fulfill({ json: currentNote });
+        return route.fulfill({ headers, json: currentNote });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers,
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
   await page.goto("/");

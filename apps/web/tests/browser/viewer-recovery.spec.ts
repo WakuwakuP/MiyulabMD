@@ -40,11 +40,13 @@ for (const verifiedUser of ["alice", "bob"] as const) {
     const mutations: string[] = [];
     const verify = Promise.withResolvers<void>();
     const releaseNote = Promise.withResolvers<void>();
+    const headers = { "X-MiyulabMD-Session-User": `user:${verifiedUser}` };
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
       if (route.request().method() !== "GET") {
         mutations.push(path);
         return route.fulfill({
+          headers,
           json: { error: "Unexpected write" },
           status: 403,
         });
@@ -56,6 +58,7 @@ for (const verifiedUser of ["alice", "bob"] as const) {
         }
         await verify.promise;
         return route.fulfill({
+          headers,
           json: {
             user: {
               displayName: verifiedUser,
@@ -66,19 +69,24 @@ for (const verifiedUser of ["alice", "bob"] as const) {
         });
       }
       if (path === "/api/auth/config") {
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({ headers, json: { access: false, mock: true } });
       }
       if (path === `/api/notes/${note.id}`) {
         noteRequests += 1;
         await releaseNote.promise;
         return verifiedUser === "alice"
-          ? route.fulfill({ json: fresh })
+          ? route.fulfill({ headers, json: fresh })
           : route.fulfill({
+              headers,
               json: { error: "別ユーザーには非公開です" },
               status: 403,
             });
       }
-      return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+      return route.fulfill({
+        headers,
+        json: { error: "No fixture" },
+        status: 404,
+      });
     });
     try {
       await page.goto(`/n/${note.id}`);
@@ -181,6 +189,7 @@ test("failed verification preserves cached reading state and permits a later ret
   let online = false;
   let recoveries = 0;
   const releaseRetry = Promise.withResolvers<void>();
+  const headers = { "X-MiyulabMD-Session-User": "user:alice" };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/me") {
@@ -189,10 +198,15 @@ test("failed verification preserves cached reading state and permits a later ret
       }
       recoveries += 1;
       if (recoveries === 1) {
-        return route.fulfill({ json: { error: "Try later" }, status: 503 });
+        return route.fulfill({
+          headers,
+          json: { error: "Try later" },
+          status: 503,
+        });
       }
       await releaseRetry.promise;
       return route.fulfill({
+        headers,
         json: {
           user: {
             displayName: "Alice",
@@ -203,12 +217,12 @@ test("failed verification preserves cached reading state and permits a later ret
       });
     }
     if (path === "/api/auth/config") {
-      return route.fulfill({ json: { access: false, mock: true } });
+      return route.fulfill({ headers, json: { access: false, mock: true } });
     }
     if (path === `/api/notes/${note.id}`) {
-      return route.fulfill({ json: { ...note, markdown: text } });
+      return route.fulfill({ headers, json: { ...note, markdown: text } });
     }
-    return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+    return route.fulfill({ headers, json: { error: "No fixture" }, status: 404 });
   });
   try {
     await page.goto(`/n/${note.id}`);

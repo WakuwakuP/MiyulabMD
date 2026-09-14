@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 for (const status of [403, 404]) {
   test(`prefetch ${status} denies only that note and still acquires an independent note`, async ({
     page,
@@ -32,6 +34,7 @@ for (const status of [403, 404]) {
       switch (path) {
         case "/api/folders/tree":
           return route.fulfill({
+            headers,
             json: {
               folders: [
                 { folder: "", id: rootId, name: root.name, parentId: null },
@@ -39,17 +42,21 @@ for (const status of [403, 404]) {
             },
           });
         case `/api/folders/${rootId}`:
-          return route.fulfill({ json: root });
+          return route.fulfill({ headers, json: root });
         case "/api/notes":
-          return route.fulfill({ json: { notes: summaries } });
+          return route.fulfill({ headers, json: { notes: summaries } });
         case `/api/notes/${denied.id}`:
           return accessRestored
-            ? route.fulfill({ json: denied })
-            : route.fulfill({ json: { error: "No access" }, status });
+            ? route.fulfill({ headers, json: denied })
+            : route.fulfill({ headers, json: { error: "No access" }, status });
         case `/api/notes/${independent.id}`:
-          return route.fulfill({ json: independent });
+          return route.fulfill({ headers, json: independent });
         default:
-          return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+          return route.fulfill({
+            headers,
+            json: { error: "No fixture" },
+            status: 404,
+          });
       }
     });
     await page.goto("/tests/browser/fixtures/storage.html");

@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 for (const trigger of ["online", "visibilitychange"] as const) {
   test(`a ${trigger} burst schedules one cycle after startup's transient retry`, async ({
     page,
@@ -29,6 +31,7 @@ for (const trigger of ["online", "visibilitychange"] as const) {
       switch (path) {
         case "/api/me":
           return route.fulfill({
+            headers,
             json: {
               user: {
                 displayName: "Alice",
@@ -38,12 +41,16 @@ for (const trigger of ["online", "visibilitychange"] as const) {
             },
           });
         case "/api/auth/config":
-          return route.fulfill({ json: { access: false, mock: true } });
+          return route.fulfill({
+            headers,
+            json: { access: false, mock: true },
+          });
         case "/api/folders/tree":
           cycles += 1;
           return cycles === 1
             ? route.abort("internetdisconnected")
             : route.fulfill({
+                headers,
                 json: {
                   folders: [
                     { folder: "", id: rootId, name: root.name, parentId: null },
@@ -52,14 +59,18 @@ for (const trigger of ["online", "visibilitychange"] as const) {
               });
         case "/api/folders":
         case `/api/folders/${rootId}`:
-          return route.fulfill({ json: root });
+          return route.fulfill({ headers, json: root });
         case "/api/notes":
-          return route.fulfill({ json: { notes: [summary] } });
+          return route.fulfill({ headers, json: { notes: [summary] } });
         case `/api/notes/${owned.id}`:
           bodies += 1;
-          return route.fulfill({ json: owned });
+          return route.fulfill({ headers, json: owned });
         default:
-          return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+          return route.fulfill({
+            headers,
+            json: { error: "No fixture" },
+            status: 404,
+          });
       }
     });
     const firstFailure = page.waitForEvent("requestfailed", {
@@ -153,6 +164,7 @@ test("events during acquisition queue one later cycle and disposal prevents anot
         });
       }
       return route.fulfill({
+        headers,
         json: {
           folders: [
             { folder: "", id: rootId, name: root.name, parentId: null },
@@ -161,12 +173,16 @@ test("events during acquisition queue one later cycle and disposal prevents anot
       });
     }
     if (path === `/api/folders/${rootId}`) {
-      return route.fulfill({ json: root });
+      return route.fulfill({ headers, json: root });
     }
     if (path === "/api/notes") {
-      return route.fulfill({ json: { notes: [] } });
+      return route.fulfill({ headers, json: { notes: [] } });
     }
-    return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+    return route.fulfill({
+      headers,
+      json: { error: "No fixture" },
+      status: 404,
+    });
   });
   await page.goto("/tests/browser/fixtures/storage.html");
   const observationWindow = await page.evaluate(async () => {

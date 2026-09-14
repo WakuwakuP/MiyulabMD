@@ -5,7 +5,7 @@ import { currentNoteReadGeneration } from "./note-access-order.ts";
 
 type NoteRequestOptions = {
   signal?: AbortSignal;
-  viewerId?: string;
+  viewerId?: string | null;
 };
 
 type Subscriber = {
@@ -68,10 +68,11 @@ function shareNoteRequest(
     entry = {
       controller,
       generation,
-      promise: requestJson<Note>(`/api/notes/${id}`, {
-        credentials: "include",
-        signal: controller.signal,
-      }),
+      promise: requestJson<Note>(
+        `/api/notes/${id}`,
+        { credentials: "include", signal: controller.signal },
+        { viewerId },
+      ),
       subscribers: new Set(),
     };
     byNote.set(id, entry);
@@ -128,10 +129,11 @@ export function fetchNoteRequest(
     if (options.signal?.aborted) {
       return Promise.reject(options.signal.reason);
     }
-    return requestJson<Note>(`/api/notes/${id}`, {
-      credentials: "include",
-      signal: options.signal,
-    });
+    return requestJson<Note>(
+      `/api/notes/${id}`,
+      { credentials: "include", signal: options.signal },
+      { viewerId: options.viewerId },
+    );
   }
   return shareNoteRequest(id, options.viewerId, options.signal);
 }

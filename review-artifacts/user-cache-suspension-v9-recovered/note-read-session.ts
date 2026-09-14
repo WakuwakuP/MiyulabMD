@@ -309,9 +309,7 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
     try {
       result = await fetchNote(id, {
         signal,
-        ...(capturedViewer.mode === "authenticated" && capturedViewer.user
-          ? { viewerId: capturedViewer.user.id }
-          : {}),
+        viewerId: capturedViewer.user?.id ?? null,
       });
     } catch (error) {
       return await communicationFallback(id, error, orderingToken);

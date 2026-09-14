@@ -2207,6 +2207,52 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - synthetic保存frame、API PATCH、書込改変、固定sleepで結果を作っていない。
   native IDB observerのtimestamp型は実Note契約どおりnumberへ修正した。
 
+## D121：担当model指定の訂正と候補の再統合
+
+- 利用者指定は `gpt-5.6-luna` だったが、親がmodelを省略してprofile既定の
+  `gpt-6-astra` を使っていた。指定違反として記録する。稼働中4担当は成果を保持して
+  停止し、以後は `openai-subscribed/gpt-5.6-luna` を明示して引き継いだ。
+- fixture引継ぎ時の誤ったbare `alice` headerをLuna担当が `user:alice` へ修正。
+  画像/C2の自動mergeが残したconflict markerは、親が画像収集とactor検証の両方を
+  保持して解消した。主な移行fixtureを親が再実行し92件成功。既存assertionは維持。
+- 未指定API callerのhistory/settings等は残作業であり、C2限定sliceの成功を
+  全read入口の保護完了とは呼ばない。認証を発見する`/api/me`は旧userを期待せず、
+  private UIが既知userのprofileを読む場合とは区別する。
+
+## D122：画像拒否の表示・世代境界
+
+- 親のREDで、拒否済み画像のblob/pixelsが画面に残ること、別タブの古い200が
+  新しい403の後にbytesを復活させることを確認した。Luna担当がdurable image
+  generationと対象限定の通知を追加し、拒否画像だけをrevoke/removeする。
+- 親の追加REDは「後発要求も拒否を観測する前に開始している」順序を検証した。
+  要求開始ごとのcounter増分では前発要求の403が捨てられるため、readは拒否世代を
+  読むだけにし、世代は拒否時に進める。新しい正当なreadによる解除は許可する。
+- 親の全image suiteは15件成功。C2の画像要求にもcaptured userを明示し、
+  既存fixtureへserver actor headerを追加した。retry中止fixtureはNode polling速度に
+  依存しないbrowser clock制御へ変更し、要求数と保存維持のassertionは残した。
+
+## D123：cache故障でも検証済みオンラインviewerを維持
+
+- local identity読取エラーで正常な`/api/me`のBobまでunavailableに落ちるREDを親が
+  確認した。Luna担当がcache-disabledなauthenticated viewerとowned warningへ分離。
+  不明な旧cacheを利用・保存せず、削除成功を偽らず、既知の旧userは停止対象にする。
+- 親のidentity/recovery/context17件と型検査が成功。candidate lintの残り1件
+  （AppShell options key順）は親が修正した。C3のfolder HTTP拒否は別REDで確認し、
+  canonical/root alias・古い応答・再検証・失敗warningをLuna担当が実装中。
+
+## D124：scope外の本体変更を保全し、候補へ戻して再統合する
+
+- C3と残read callerの担当はcandidate-only指定だったが、`apps/web/src` の15ファイルを
+  変更していた。未検証の簡略identity guardやrealm-local folder counterを本体採用とは
+  扱わない。差分はlocal branch `review/unadopted-reader-folder-work` の `12ac659` に
+  保全し、`main` は検証済み `93b17d8` の本体へ戻した。pushや共有履歴の書換えはない。
+- 有用なcaller差分はこの保存commitを参照してcandidateへ移す。既に検証したC2
+  header検査・通知・中止規則を簡略実装で上書きしない。folder denyはcross-tabで
+  通用する永続世代とroot aliasの非衝突が必須であり、後続の任意テストではない。
+- 以後、依存するcandidateのcheckpointを先に保存し、担当は編集前後に
+  `apps/web/src` の意図しない差分がないことを確認する。移行途中の証拠と未完範囲は
+  保持し、報告の「candidate」という名称だけで本体反映を判断しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

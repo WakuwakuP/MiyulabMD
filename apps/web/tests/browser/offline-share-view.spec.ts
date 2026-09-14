@@ -70,12 +70,19 @@ for (const status of [200, 401, 403, 404, 503]) {
     await page.route("**/api/**", (route) => {
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/me") {
-        return route.fulfill({ json: { user: null } });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "guest" },
+          json: { user: null },
+        });
       }
       if (path === "/api/auth/config") {
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "guest" },
+          json: { access: false, mock: true },
+        });
       }
       return route.fulfill({
+        headers: { "X-MiyulabMD-Session-User": "guest" },
         json: status === 200 ? note : { error: "Server failure" },
         status,
       });

@@ -41,7 +41,11 @@ test("clearing a user in another tab prevents a late note response from restorin
       Object.assign(window, {
         pendingNote,
         releasePendingNote: () =>
-          response.resolve(new Response(JSON.stringify(note))),
+          response.resolve(
+            new Response(JSON.stringify(note), {
+              headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            }),
+          ),
       });
       await entered.promise;
     }, note);
@@ -288,7 +292,11 @@ test("a late HTTP response is invalidated durably even with no BroadcastChannel"
       Object.assign(window, {
         pending,
         release: (body: unknown) =>
-          response.resolve(new Response(JSON.stringify(body))),
+          response.resolve(
+            new Response(JSON.stringify(body), {
+              headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            }),
+          ),
       });
       await entered.promise;
     }, note.id);

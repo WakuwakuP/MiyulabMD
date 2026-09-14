@@ -5,7 +5,11 @@ test("a durable denial hides cached content after reload even when physical clea
   page,
 }) => {
   await page.route(`**/api/notes/${note.id}`, (route) =>
-    route.fulfill({ json: { error: "Forbidden" }, status: 403 }),
+    route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:alice" },
+      json: { error: "Forbidden" },
+      status: 403,
+    }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
   const denial = await page.evaluate(async (note) => {
@@ -105,7 +109,11 @@ test("failure to persist a denial suspends that user's live cache and reports a 
   page,
 }) => {
   await page.route(`**/api/notes/${note.id}`, (route) =>
-    route.fulfill({ json: { error: "Forbidden" }, status: 403 }),
+    route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:alice" },
+      json: { error: "Forbidden" },
+      status: 403,
+    }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async (note) => {
@@ -179,7 +187,11 @@ test("a denial still suspends the user's cache when the database cannot be opene
   page,
 }) => {
   await page.route(`**/api/notes/${note.id}`, (route) =>
-    route.fulfill({ json: { error: "Forbidden" }, status: 403 }),
+    route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:alice" },
+      json: { error: "Forbidden" },
+      status: 403,
+    }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async (note) => {
@@ -203,7 +215,10 @@ test("a denial still suspends the user's cache when the database cannot be opene
     let openAttempts = 0;
     IDBFactory.prototype.open = () => {
       openAttempts += 1;
-      throw new DOMException("Database temporarily unavailable", "UnknownError");
+      throw new DOMException(
+        "Database temporarily unavailable",
+        "UnknownError",
+      );
     };
     let denial: {
       ok: boolean;

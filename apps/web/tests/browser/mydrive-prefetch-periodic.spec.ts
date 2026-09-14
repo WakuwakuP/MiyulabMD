@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 test("periodic prefetch refreshes visible scopes but skips hidden and disposed scopes", async ({
   page,
 }) => {
@@ -24,6 +26,7 @@ test("periodic prefetch refreshes visible scopes but skips hidden and disposed s
       case "/api/folders/tree":
         cycles += 1;
         return route.fulfill({
+          headers,
           json: {
             folders: [
               { folder: "", id: rootId, name: root.name, parentId: null },
@@ -31,15 +34,19 @@ test("periodic prefetch refreshes visible scopes but skips hidden and disposed s
           },
         });
       case `/api/folders/${rootId}`:
-        return route.fulfill({ json: root });
+        return route.fulfill({ headers, json: root });
       case "/api/notes": {
         const { markdown: _markdown, ...summary } = currentNote;
-        return route.fulfill({ json: { notes: [summary] } });
+        return route.fulfill({ headers, json: { notes: [summary] } });
       }
       case `/api/notes/${note.id}`:
-        return route.fulfill({ json: currentNote });
+        return route.fulfill({ headers, json: currentNote });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers,
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
   await page.goto("/tests/browser/fixtures/storage.html");

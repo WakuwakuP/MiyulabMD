@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 test("prefetch owns its viewer snapshot even when the caller mutates the input", async ({
   page,
 }) => {
@@ -23,6 +25,7 @@ test("prefetch owns its viewer snapshot even when the caller mutates the input",
     switch (path) {
       case "/api/folders/tree":
         return route.fulfill({
+          headers,
           json: {
             folders: [
               { folder: "", id: rootId, name: root.name, parentId: null },
@@ -30,14 +33,18 @@ test("prefetch owns its viewer snapshot even when the caller mutates the input",
           },
         });
       case `/api/folders/${rootId}`:
-        return route.fulfill({ json: root });
+        return route.fulfill({ headers, json: root });
       case "/api/notes":
-        return route.fulfill({ json: { notes: [summary] } });
+        return route.fulfill({ headers, json: { notes: [summary] } });
       case `/api/notes/${owned.id}`:
         requestedBodies.push(owned.id);
-        return route.fulfill({ json: owned });
+        return route.fulfill({ headers, json: owned });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers,
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
   await page.goto("/tests/browser/fixtures/storage.html");

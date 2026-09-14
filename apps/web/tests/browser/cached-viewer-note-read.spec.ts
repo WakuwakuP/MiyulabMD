@@ -8,6 +8,7 @@ test("an unverified cached viewer reads only local notes and does not fetch on a
   await page.route("**/api/notes/**", (route) => {
     requests += 1;
     return route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:bob" },
       json: {
         ...note,
         markdown: "Unverified network response",

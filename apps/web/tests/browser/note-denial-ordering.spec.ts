@@ -36,18 +36,25 @@ test("a request started before denial cannot revive a note, but a new successful
       requests += 1;
       if (requests === 1) {
         return Promise.resolve(
-          new Response(JSON.stringify(note), { status: 200 }),
+          new Response(JSON.stringify(note), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            status: 200,
+          }),
         );
       }
       if (requests === 2) {
         return Promise.resolve(
           new Response(JSON.stringify({ error: "Forbidden" }), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
             status: 403,
           }),
         );
       }
       return Promise.resolve(
-        new Response(JSON.stringify(recoveredNote), { status: 200 }),
+        new Response(JSON.stringify(recoveredNote), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          status: 200,
+        }),
       );
     };
     try {
@@ -145,7 +152,10 @@ test("a cached read started before denial cannot publish after denial completes"
       await started;
       globalThis.fetch = () =>
         Promise.resolve(
-          new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }),
+          new Response(JSON.stringify({ error: "Forbidden" }), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            status: 403,
+          }),
         );
       const denial = await denyingReader.read(note.id);
       release();

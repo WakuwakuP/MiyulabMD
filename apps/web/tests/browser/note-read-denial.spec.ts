@@ -9,6 +9,7 @@ test("confirmed denial removes only the affected viewer's note and survives a ne
     response === "offline"
       ? route.abort("internetdisconnected")
       : route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
           json: { error: "Denied or missing" },
           status: response,
         }),

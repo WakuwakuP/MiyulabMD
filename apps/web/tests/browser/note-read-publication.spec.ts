@@ -17,7 +17,11 @@ test("a pending cached read rejects when disposed before publication", async ({
   context,
 }) => {
   await page.route(`**/api/notes/${note.id}`, (route) =>
-    route.fulfill({ json: { error: "Unavailable" }, status: 503 }),
+    route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:alice" },
+      json: { error: "Unavailable" },
+      status: 503,
+    }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
   await page.evaluate(async (note) => {

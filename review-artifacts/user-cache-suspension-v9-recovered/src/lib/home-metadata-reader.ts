@@ -131,11 +131,12 @@ async function readHomeMetadataSnapshot({
     ? await captureOfflineCacheScope(viewer.user.id)
     : null;
   throwIfCancelled(signal, isCurrentOwner);
-  const notesPromise = fetchNotes({ signal });
+  const viewerId = viewer.user?.id ?? null;
+  const notesPromise = fetchNotes({ signal, viewerId });
   const folderPromise =
     viewer.user || folderId
-      ? fetchFolder(folderId, { signal })
-      : fetchPublicFolders({ signal });
+      ? fetchFolder(folderId, { signal, viewerId })
+      : fetchPublicFolders({ signal, viewerId });
   const [notes, folderResult] = await Promise.all([
     notesPromise,
     folderPromise,

@@ -24,18 +24,24 @@ for (const boundary of [
       if (path === pathFor) {
         attempts.push(Date.now());
         if (attempts.length === 1 || boundary === "folder-exhausted") {
-          return route.fulfill({ json: { error: "Down" }, status: 503 });
+          return route.fulfill({
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            json: { error: "Down" },
+            status: 503,
+          });
         }
       }
       switch (path) {
         case "/api/folders/tree":
           return route.fulfill({
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
             json: {
               folders: [{ id: rootId, name: "MyDrive", parentId: null }],
             },
           });
         case `/api/folders/${rootId}`:
           return route.fulfill({
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
             json: {
               ...note.access,
               children: [],
@@ -46,9 +52,15 @@ for (const boundary of [
             },
           });
         case "/api/notes":
-          return route.fulfill({ json: { notes: [owned] } });
+          return route.fulfill({
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            json: { notes: [owned] },
+          });
         default:
-          return route.fulfill({ json: owned });
+          return route.fulfill({
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            json: owned,
+          });
       }
     });
     await page.goto("/tests/browser/fixtures/storage.html");

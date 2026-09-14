@@ -62,7 +62,10 @@ test("overlapping read sessions keep late responses in their original viewer sco
     heldAlice.resolve(route);
   });
   await page.route(`**/api/notes/${bobNote.id}`, (route) =>
-    route.fulfill({ json: bobNote }),
+    route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:bob" },
+      json: bobNote,
+    }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
   await page.evaluate(
@@ -98,7 +101,10 @@ test("overlapping read sessions keep late responses in their original viewer sco
     viewer: bob,
   });
 
-  await oldResponse.fulfill({ json: note });
+  await oldResponse.fulfill({
+    headers: { "X-MiyulabMD-Session-User": "user:alice" },
+    json: note,
+  });
   const aliceResult = await page.evaluate(
     () => (window as SessionFixture).sessions.pendingAlice,
   );
@@ -161,7 +167,10 @@ test("disposing a read session cancels its pending result and prevents later req
       held.resolve(route);
       return;
     }
-    return route.fulfill({ json: note });
+    return route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:alice" },
+      json: note,
+    });
   });
   await page.goto("/tests/browser/fixtures/storage.html");
   await page.evaluate(
@@ -189,7 +198,10 @@ test("disposing a read session cancels its pending result and prevents later req
   );
   const oldResponse = await held.promise;
   await page.evaluate(() => (window as CancellationFixture).reader.dispose());
-  await oldResponse.fulfill({ json: note });
+  await oldResponse.fulfill({
+    headers: { "X-MiyulabMD-Session-User": "user:alice" },
+    json: note,
+  });
   const first = await page.evaluate(
     () => (window as CancellationFixture).pendingRead,
   );
@@ -215,7 +227,10 @@ test("disposing at the storage transaction boundary preserves the previous note"
     updatedAt: 3,
   };
   await page.route(`**/api/notes/${note.id}`, (route) =>
-    route.fulfill({ json: updated }),
+    route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:alice" },
+      json: updated,
+    }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async (previous) => {
@@ -286,7 +301,11 @@ test("cached fallback carries the original timestamp and disables mutations for 
   await page.route(`**/api/notes/${note.id}`, (route) =>
     failure === "connection"
       ? route.abort("internetdisconnected")
-      : route.fulfill({ json: { error: "Unavailable" }, status: 503 }),
+      : route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { error: "Unavailable" },
+          status: 503,
+        }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
   const stored = await page.evaluate(async (note) => {

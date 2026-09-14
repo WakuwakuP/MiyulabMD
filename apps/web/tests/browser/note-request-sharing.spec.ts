@@ -42,6 +42,7 @@ test("keyboard navigation joins an in-flight background note request", async ({
         return route.fulfill({ json: { access: false, mock: true } });
       case "/api/folders/tree":
         return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
           json: {
             folders: [
               { folder: "", id: rootId, name: root.name, parentId: null },
@@ -50,14 +51,23 @@ test("keyboard navigation joins an in-flight background note request", async ({
         });
       case "/api/folders":
       case `/api/folders/${rootId}`:
-        return route.fulfill({ json: root });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: root,
+        });
       case "/api/notes":
-        return route.fulfill({ json: { notes: [summary] } });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { notes: [summary] },
+        });
       case `/api/notes/${note.id}`:
         noteRequests += 1;
         reading.resolve();
         await release.promise;
-        return route.fulfill({ json: owned });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: owned,
+        });
       default:
         return route.fulfill({ json: { error: "No fixture" }, status: 404 });
     }
@@ -121,6 +131,7 @@ test("a read after denial cannot join the older transport and restore its cached
       }
       return Promise.resolve(
         new Response(JSON.stringify({ error: "Still forbidden" }), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
           status: 403,
         }),
       );
@@ -133,7 +144,11 @@ test("a read after denial cannot join the older transport and restore its cached
       await firstStarted.promise;
       await cache.denyNote(note.id);
       const fresh = newReader.read(note.id);
-      oldResponse.resolve(new Response(JSON.stringify(note)));
+      oldResponse.resolve(
+        new Response(JSON.stringify(note), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        }),
+      );
       const [oldPublished, newResult] = await Promise.all([old, fresh]);
       return {
         cached: await cache.getNote(note.id),
@@ -142,7 +157,11 @@ test("a read after denial cannot join the older transport and restore its cached
         requests,
       };
     } finally {
-      oldResponse.resolve(new Response(JSON.stringify(note)));
+      oldResponse.resolve(
+        new Response(JSON.stringify(note), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        }),
+      );
       globalThis.fetch = originalFetch;
       oldReader.dispose();
       newReader.dispose();

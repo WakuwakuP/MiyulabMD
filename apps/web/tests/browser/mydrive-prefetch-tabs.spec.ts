@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 test("two authenticated tabs share one background prefetch and release ownership", async ({
   context,
   page,
@@ -31,6 +33,7 @@ test("two authenticated tabs share one background prefetch and release ownership
     switch (path) {
       case "/api/me":
         return route.fulfill({
+          headers,
           json: {
             user: {
               displayName: "Alice",
@@ -40,7 +43,7 @@ test("two authenticated tabs share one background prefetch and release ownership
           },
         });
       case "/api/auth/config":
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({ headers, json: { access: false, mock: true } });
       case "/api/folders/tree":
         treeRequests.push(tab);
         if (treeRequests.length === 1) {
@@ -48,6 +51,7 @@ test("two authenticated tabs share one background prefetch and release ownership
           await releaseFirst.promise;
         }
         return route.fulfill({
+          headers,
           json: {
             folders: [
               { folder: "", id: rootId, name: root.name, parentId: null },
@@ -56,16 +60,20 @@ test("two authenticated tabs share one background prefetch and release ownership
         });
       case "/api/folders":
       case `/api/folders/${rootId}`:
-        return route.fulfill({ json: root });
+        return route.fulfill({ headers, json: root });
       case "/api/notes": {
         const { markdown: _markdown, ...summary } = currentNote;
-        return route.fulfill({ json: { notes: [summary] } });
+        return route.fulfill({ headers, json: { notes: [summary] } });
       }
       case `/api/notes/${note.id}`:
         bodyRequests.push(tab);
-        return route.fulfill({ json: currentNote });
+        return route.fulfill({ headers, json: currentNote });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers,
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
 

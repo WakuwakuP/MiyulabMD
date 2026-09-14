@@ -42,6 +42,7 @@ test("changing the Home viewer hides previous private rows while the new request
     if (bob && ["/api/notes", "/api/folders"].includes(pathname)) {
       await released;
       return route.fulfill({
+        headers: { "X-MiyulabMD-Session-User": "user:bob" },
         json: { error: "Bob metadata unavailable" },
         status: 503,
       });
@@ -60,9 +61,15 @@ test("changing the Home viewer hides previous private rows while the new request
       case "/api/auth/config":
         return route.fulfill({ json: { access: false, mock: true } });
       case "/api/notes":
-        return route.fulfill({ json: { notes: [aliceNote] } });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { notes: [aliceNote] },
+        });
       case "/api/folders":
-        return route.fulfill({ json: folder });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: folder,
+        });
       default:
         return route.fulfill({ json: { error: "No fixture" }, status: 404 });
     }
@@ -129,10 +136,14 @@ test("a metadata read saves under the viewer captured before awaiting the networ
         ).pathname;
         await released;
         if (pathname === "/api/notes") {
-          return new Response(JSON.stringify({ notes: [aliceNote] }));
+          return new Response(JSON.stringify({ notes: [aliceNote] }), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          });
         }
         if (pathname === "/api/folders") {
-          return new Response(JSON.stringify(folder));
+          return new Response(JSON.stringify(folder), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          });
         }
         throw new Error(`Unexpected fixture request: ${pathname}`);
       };
@@ -269,9 +280,15 @@ test("Home reports failed cache saves without making network data readonly", asy
       case "/api/auth/config":
         return route.fulfill({ json: { access: false, mock: true } });
       case "/api/notes":
-        return route.fulfill({ json: { notes: [onlineNote] } });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { notes: [onlineNote] },
+        });
       case "/api/folders":
-        return route.fulfill({ json: folder });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: folder,
+        });
       default:
         return route.fulfill({ json: { error: "No fixture" }, status: 404 });
     }
@@ -414,6 +431,7 @@ test("cancellation after metadata commit prevents publication without deleting c
             JSON.stringify(
               pathname === "/api/notes" ? { notes: [summary] } : folder,
             ),
+            { headers: { "X-MiyulabMD-Session-User": "user:alice" } },
           ),
         );
       };

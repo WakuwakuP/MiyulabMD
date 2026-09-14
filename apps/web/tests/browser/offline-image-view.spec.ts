@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 test("an app-attached image remains visible with its cached note after reload", async ({
   page,
   context,
@@ -24,13 +26,14 @@ test("an app-attached image remains visible with its cached note after reload", 
     }
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === imagePath) {
-      return route.fulfill({ body: png, contentType: "image/png" });
+      return route.fulfill({ body: png, contentType: "image/png", headers });
     }
     if (pathname === `/api/notes/${note.id}`) {
-      return route.fulfill({ json: displayed });
+      return route.fulfill({ headers, json: displayed });
     }
     if (pathname === "/api/me") {
       return route.fulfill({
+        headers,
         json: {
           user: {
             displayName: "Alice",
@@ -41,12 +44,12 @@ test("an app-attached image remains visible with its cached note after reload", 
       });
     }
     if (pathname === "/api/auth/config") {
-      return route.fulfill({ json: { access: false, mock: true } });
+      return route.fulfill({ headers, json: { access: false, mock: true } });
     }
     if (pathname === "/api/article-sources") {
-      return route.fulfill({ json: { sources: [] } });
+      return route.fulfill({ headers, json: { sources: [] } });
     }
-    return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+    return route.fulfill({ headers, json: { error: "No fixture" }, status: 404 });
   });
   await page.goto(`/n/${note.id}`);
   const image = page.getByRole("img", { name: "Cached attachment" });

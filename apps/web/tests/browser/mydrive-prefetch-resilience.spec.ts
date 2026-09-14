@@ -1,6 +1,8 @@
 import { expect, type Route, test } from "@playwright/test";
 import { note } from "./fixtures/note.ts";
 
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 for (const failure of ["network", "server"] as const) {
   test(`prefetch spaces bounded ${failure} retries and continues independent notes`, async ({
     page,
@@ -17,6 +19,7 @@ for (const failure of ["network", "server"] as const) {
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/folders/tree") {
         return route.fulfill({
+          headers,
           json: {
             folders: [{ id: rootId, name: "MyDrive", parentId: null }],
           },
@@ -24,6 +27,7 @@ for (const failure of ["network", "server"] as const) {
       }
       if (path === `/api/folders/${rootId}`) {
         return route.fulfill({
+          headers,
           json: {
             ...note.access,
             children: [],
@@ -35,16 +39,20 @@ for (const failure of ["network", "server"] as const) {
         });
       }
       if (path === "/api/notes") {
-        return route.fulfill({ json: { notes } });
+        return route.fulfill({ headers, json: { notes } });
       }
       const id = path.split("/").pop() ?? "";
       requests.push({ at: Date.now(), id });
       if (id === "failed") {
         return failure === "network"
           ? route.abort("internetdisconnected")
-          : route.fulfill({ json: { error: "Transient" }, status: 503 });
+          : route.fulfill({
+              headers,
+              json: { error: "Transient" },
+              status: 503,
+            });
       }
-      return route.fulfill({ json: notes[1] });
+      return route.fulfill({ headers, json: notes[1] });
     });
     await page.goto("/tests/browser/fixtures/storage.html");
     const result = await page.evaluate(async () => {
@@ -95,13 +103,21 @@ for (const scenario of [
     const bodyResponse = (route: Route, id: string) => {
       bodies.push(id);
       if (scenario === "malformed") {
-        return route.fulfill({ body: "{", contentType: "application/json" });
+        return route.fulfill({
+          body: "{",
+          contentType: "application/json",
+          headers,
+        });
       }
       if (id === "first") {
-        return route.fulfill({ json: notes[0] });
+        return route.fulfill({ headers, json: notes[0] });
       }
       if (scenario === "auth") {
-        return route.fulfill({ json: { error: "Expired" }, status: 401 });
+        return route.fulfill({
+          headers,
+          json: { error: "Expired" },
+          status: 401,
+        });
       }
       const firstSecondRequest =
         id === "second" && bodies.filter((body) => body === id).length === 1;
@@ -111,18 +127,26 @@ for (const scenario of [
         (scenario === "rebuild" && !nextCycle) ||
         (scenario === "recover" && firstSecondRequest);
       if (transient) {
-        return route.fulfill({ json: { error: "Down" }, status: 503 });
+        return route.fulfill({ headers, json: { error: "Down" }, status: 503 });
       }
-      return route.fulfill({ json: notes.find((item) => item.id === id) });
+      return route.fulfill({
+        headers,
+        json: notes.find((item) => item.id === id),
+      });
     };
     await page.route("**/api/**", (route) => {
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/folders/tree") {
         cycles += 1;
         if (scenario === "cooldown") {
-          return route.fulfill({ json: { error: "Down" }, status: 503 });
+          return route.fulfill({
+            headers,
+            json: { error: "Down" },
+            status: 503,
+          });
         }
         return route.fulfill({
+          headers,
           json: {
             folders: [{ id: rootId, name: "MyDrive", parentId: null }],
           },
@@ -130,6 +154,7 @@ for (const scenario of [
       }
       if (path === `/api/folders/${rootId}`) {
         return route.fulfill({
+          headers,
           json: {
             ...note.access,
             children: [],
@@ -142,6 +167,7 @@ for (const scenario of [
       }
       if (path === "/api/notes") {
         return route.fulfill({
+          headers,
           json: { notes: nextCycle ? [notes[0], notes[3]] : notes.slice(0, 3) },
         });
       }
@@ -150,6 +176,10 @@ for (const scenario of [
     await page.goto("/tests/browser/fixtures/storage.html");
     if (scenario === "cooldown") {
       await page.clock.install();
+    }
+    if (scenario === "abort-delay") {
+      await page.clock.install({ time: new Date("2025-01-01T00:00:00Z") });
+      await page.clock.pauseAt(new Date("2025-01-01T00:00:01Z"));
     }
     const start = () =>
       page.evaluate(async (scenario) => {
@@ -188,17 +218,27 @@ for (const scenario of [
           IDBObjectStore.prototype.put = originalPut;
         }
       }, scenario);
+    const failedBody =
+      scenario === "abort-delay"
+        ? page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/api/notes/second" &&
+              response.status() === 503,
+          )
+        : null;
     const pending = start();
     if (scenario === "abort-delay") {
-      await expect.poll(() => bodies).toEqual(["first", "second"]);
-      await page.waitForTimeout(50);
+      await (await failedBody)?.finished();
+      // Control browser time, not Node's polling latency: the retry cannot
+      // elapse while the test driver is busy or the machine is under load.
+      await page.clock.runFor(50);
       await page.evaluate(() => {
         (window as unknown as { abortPrefetch: () => void }).abortPrefetch();
       });
     }
     const result = await pending;
     if (scenario === "abort-delay") {
-      await page.waitForTimeout(600);
+      await page.clock.runFor(1000);
     }
     if (scenario === "cooldown") {
       await expect.poll(() => cycles).toBe(2);

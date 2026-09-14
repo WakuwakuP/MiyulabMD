@@ -52,7 +52,10 @@ for (const status of [200, 403]) {
           aliceRequest.resolve(
             new Response(
               JSON.stringify(status === 200 ? note : { error: "Alice denied" }),
-              { status },
+              {
+                headers: { "X-MiyulabMD-Session-User": "user:alice" },
+                status,
+              },
             ),
           );
           bobRequest.resolve(
@@ -60,7 +63,10 @@ for (const status of [200, 403]) {
               JSON.stringify(
                 status === 200 ? bobNote : { error: "Bob denied" },
               ),
-              { status },
+              {
+                headers: { "X-MiyulabMD-Session-User": "user:bob" },
+                status,
+              },
             ),
           );
           const [a, b, other] = await Promise.all([first, second, otherViewer]);
@@ -135,7 +141,11 @@ test("last cancellation releases a group without letting old cleanup remove its 
       if (!request) {
         throw new Error(`Missing request ${index}`);
       }
-      request.resolve(new Response(JSON.stringify({ ...note, markdown })));
+      request.resolve(
+        new Response(JSON.stringify({ ...note, markdown }), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        }),
+      );
     };
     try {
       const already = new AbortController();
@@ -223,7 +233,11 @@ test("one result-copy failure settles that subscriber without abandoning the oth
     };
     window.addEventListener("unhandledrejection", onUnhandled);
     globalThis.fetch = () =>
-      Promise.resolve(new Response(JSON.stringify(note)));
+      Promise.resolve(
+        new Response(JSON.stringify(note), {
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+        }),
+      );
     globalThis.structuredClone = <T>(
       value: T,
       options?: StructuredSerializeOptions,

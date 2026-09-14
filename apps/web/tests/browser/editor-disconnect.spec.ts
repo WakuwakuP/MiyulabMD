@@ -2,6 +2,9 @@ import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
 import * as Y from "yjs";
 import { note } from "./fixtures/note.ts";
 
+// Disconnect changes transport availability, not the server session actor.
+const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+
 // A real y-websocket sync-step-2 frame. Client updates are intentionally not
 // acknowledged/stored: the entered text below is an unsent in-memory buffer.
 function syncFrame(doc: Y.Doc): Buffer {
@@ -23,11 +26,12 @@ async function checkDisconnect(page: Page, mode: "source" | "rich" | "split") {
     const path = new URL(request.url()).pathname;
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
       writes.push(`${request.method()} ${path}`);
-      return route.fulfill({ json: note });
+      return route.fulfill({ headers, json: note });
     }
     switch (path) {
       case "/api/me":
         return route.fulfill({
+          headers,
           json: {
             user: {
               displayName: "Alice",
@@ -37,13 +41,17 @@ async function checkDisconnect(page: Page, mode: "source" | "rich" | "split") {
           },
         });
       case "/api/auth/config":
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({ headers, json: { access: false, mock: true } });
       case "/api/article-sources":
-        return route.fulfill({ json: { sources: [] } });
+        return route.fulfill({ headers, json: { sources: [] } });
       case `/api/notes/${note.id}`:
-        return route.fulfill({ json: note });
+        return route.fulfill({ headers, json: note });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers,
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
   await page.addInitScript((editMode) => {
@@ -169,6 +177,7 @@ async function openRichSession(page: Page) {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/me") {
       return route.fulfill({
+        headers,
         json: {
           user: {
             displayName: "Alice",
@@ -179,15 +188,19 @@ async function openRichSession(page: Page) {
       });
     }
     if (path === "/api/auth/config") {
-      return route.fulfill({ json: { access: false, mock: true } });
+      return route.fulfill({ headers, json: { access: false, mock: true } });
     }
     if (path === "/api/article-sources") {
-      return route.fulfill({ json: { sources: [] } });
+      return route.fulfill({ headers, json: { sources: [] } });
     }
     if (path === `/api/notes/${note.id}`) {
-      return route.fulfill({ json: note });
+      return route.fulfill({ headers, json: note });
     }
-    return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+    return route.fulfill({
+      headers,
+      json: { error: "No fixture" },
+      status: 404,
+    });
   });
   await page.addInitScript(() => {
     localStorage.setItem("miyulabmd:editor-edit-mode", "rich");
@@ -277,6 +290,7 @@ async function checkShareCompletion(page: Page, success: boolean) {
     writes++;
     await response;
     await route.fulfill({
+      headers,
       // A successful canonical response can differ from the optimistic draft.
       json: success ? note : { error: "Deferred share failure" },
       status: success ? 200 : 500,
