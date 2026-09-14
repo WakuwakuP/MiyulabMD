@@ -11,7 +11,11 @@ export type ImageViewContext = {
   source: "network" | "cache";
 };
 
-type Images = { owner: string; urls: Map<string, string | null> };
+type Images = {
+  owner: string;
+  status: "ready" | "unavailable";
+  urls: Map<string, string | null>;
+};
 type AcquisitionMode =
   | "cache"
   | "cache-backed-network"
@@ -90,6 +94,11 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
     const urls = new Map<string, string | null>();
     const targets = collectAttachedImages(markdown);
     const blocked = new Set<string>();
+    const publish = (status: Images["status"]) => {
+      if (!controller.signal.aborted) {
+        setImages({ owner, status, urls: new Map(urls) });
+      }
+    };
     const forgetImage = (imageUrl: string) => {
       blocked.add(imageUrl);
       const blobUrl = urls.get(imageUrl);
@@ -98,7 +107,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
         ownedUrls.delete(blobUrl);
       }
       urls.set(imageUrl, null);
-      setImages({ owner, urls: new Map(urls) });
+      publish("ready");
     };
     const revoke = () => {
       controller.abort();
@@ -169,7 +178,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
               return;
             }
             revoke();
-            setImages({ owner, urls: new Map() });
+            publish("ready");
           },
         );
         const scope = await cache.captureOfflineCacheScope(userId as string);
@@ -193,7 +202,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
             }
             const url = ownImageUrl(bytes, ownedUrls);
             urls.set(image.url, url);
-            setImages({ owner, urls: new Map(urls) });
+            publish("ready");
           }),
         );
       } else {
@@ -213,7 +222,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
             }
             const url = ownImageUrl(bytes, ownedUrls);
             urls.set(image.url, url);
-            setImages({ owner, urls: new Map(urls) });
+            publish("ready");
           }),
         );
       }
@@ -225,9 +234,15 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
           urls.set(image.url, null);
         }
       }
-      setImages({ owner, urls: new Map(urls) });
+      publish("ready");
     };
-    void initialize().catch(() => undefined);
+    void initialize().catch(() => {
+      if (controller.signal.aborted) {
+        return;
+      }
+      urls.clear();
+      publish("unavailable");
+    });
     return () => {
       unsubscribeImage?.();
       unsubscribeNote?.();
@@ -242,6 +257,7 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
         images?.owner === owner
           ? images.urls
           : new Map<string, string | null>(),
+      status: images?.owner === owner ? images.status : "loading",
     }),
     [enabled, images, owner],
   );
@@ -253,8 +269,15 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
  */
 export function resolvePreviewImages(
   html: string,
-  images: { enabled: boolean; urls: Map<string, string | null> },
+  images: {
+    enabled: boolean;
+    status?: "loading" | "ready" | "unavailable";
+    urls: Map<string, string | null>;
+  },
 ): string {
+  if (typeof document === "undefined") {
+    return sanitizePreviewImagesWithoutDocument(html);
+  }
   const template = document.createElement("template");
   template.innerHTML = html;
   for (const node of template.content.querySelectorAll("img")) {
@@ -270,11 +293,41 @@ export function resolvePreviewImages(
       const message = document.createElement("span");
       message.setAttribute("role", "status");
       message.textContent =
-        !images.enabled || url === null
+        !images.enabled ||
+        images.status === "unavailable" ||
+        (images.urls.has(image.url) && url === null)
           ? "画像を表示できません（未保存または閲覧不可）。"
           : "画像を読み込み中…";
       node.after(message);
     }
   }
   return template.innerHTML;
+}
+
+/**
+ * SSR fallback for the resolver. It deliberately only interprets quoted src
+ * attributes: an ambiguous managed-looking candidate is stripped, while
+ * ordinary external images and all non-image markup are retained.
+ */
+export function sanitizePreviewImagesWithoutDocument(html: string): string {
+  return html.replace(/<img\b[^>]*>/gi, (tag) => {
+    const source = /\bsrc\s*=\s*(["'])(.*?)\1/i.exec(tag);
+    if (!source) {
+      return /(?:^|\s)src\s*=\s*(?:\/|%2f|%252f)/i.test(tag)
+        ? tag.replace(/\s+src\s*=\s*(?:[^\s>]+)/i, "")
+        : tag;
+    }
+    const candidate = attachedImage(source[2] ?? "");
+    if (!candidate && !looksLikeManagedImage(source[2] ?? "")) {
+      return tag;
+    }
+    return tag.replace(source[0], "");
+  });
+}
+
+function looksLikeManagedImage(source: string): boolean {
+  return (
+    /^\/?(?:%2f|%252f)*api\/notes\//i.test(source) ||
+    /(?:^|%2f)api(?:%2f|\/)notes(?:%2f|\/)/i.test(source)
+  );
 }

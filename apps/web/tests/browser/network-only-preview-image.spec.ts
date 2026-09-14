@@ -153,6 +153,23 @@ test("managed images are hidden without context while external images remain", a
   expect(html).toContain("https://example.com/x.png");
 });
 
+test("DOM-free image fallback strips managed sources and preserves prose", async ({
+  page,
+}) => {
+  const html = await page.evaluate(async () => {
+    const { sanitizePreviewImagesWithoutDocument } = await import(
+      "/src/lib/preview-images.ts"
+    );
+    return sanitizePreviewImagesWithoutDocument(
+      '<p>本文</p><img alt="managed" src="/api/notes/note-1/images/image-1"><img alt="external" src="https://example.com/x.png">',
+    );
+  });
+  expect(html).toContain("<p>本文</p>");
+  expect(html).toContain('alt="managed"');
+  expect(html).not.toContain("/api/notes/note-1/images/image-1");
+  expect(html).toContain("https://example.com/x.png");
+});
+
 test("guest MarkdownPreview displays checked attachments through a blob URL", async ({
   page,
 }) => {

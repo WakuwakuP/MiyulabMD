@@ -36,3 +36,13 @@ the PNG/JPEG/GIF/WebP cache predicate without importing `offline-cache.ts`.
 cache subscriptions, scope capture, and cache acquisition begin only after the
 cache module's dynamic import completes, and an aborted effect cannot publish
 late work.
+## Reviewer follow-up: checked preview image settlement
+
+- Dynamic initialization failure is terminal for the current owned preview
+  state: aborts remain silent, while import, capture-scope, and subscription
+  failures publish an empty managed-image map with `unavailable` status.
+- Preview resolution has a DOM-free fallback. It strips managed
+  `/api/notes/.../images/...` sources conservatively, including encoded paths,
+  while retaining body text and external image sources.
+- Blob URLs remain preview-owned and are revoked by the existing effect cleanup;
+  no delayed initialization branch publishes after abort.

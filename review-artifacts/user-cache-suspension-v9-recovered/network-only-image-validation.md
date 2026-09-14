@@ -88,3 +88,24 @@ typecheck reported two errors: the missing local `attachedImage` binding in
 `attached-images.ts` and the invalid-target `Promise<Blob | null>` return in
 `network-attached-images.ts`; both are addressed by this candidate fix. The
 five checked candidate files passed Biome.
+## Reviewer final findings and fix status
+
+The reviewer findings were addressed in the candidate source:
+
+- **P0 adoption accounting:** the two previously unlisted new libraries are
+  mapped explicitly in `network-only-image-adoption-manifest.md`; the
+  historical composed manifest remains an immutable D125/D126 record.
+- **P1 initialization:** non-abort initialization failures now publish an
+  owned empty map with `unavailable` status, so the preview settles to
+  `画像を表示できません` instead of loading forever. Cleanup and context
+  ownership checks prevent late state or URL publication.
+- **P1 SSR:** `resolvePreviewImages` no longer touches `document` when it is
+  unavailable. The pure fallback removes managed image sources while retaining
+  prose and external sources.
+- **P2 lifecycle coverage:** existing browser lifetime coverage exercises blob
+  creation/revocation and cache-backed DOM cleanup; the network-only regression
+  suite remains the source of the actor and transport checks.
+
+Not verified in this worker: live adoption of the two new files, the complete
+browser suite, and a deliberately failed dynamic-import fixture. The
+pre-existing mounted-folder worktree diff was not staged.
