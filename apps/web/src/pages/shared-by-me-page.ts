@@ -41,12 +41,13 @@ export type SharedByMeSetters = {
 
 async function collectFolderAccess(
   folderTree: ApiResult<FolderRecord[]>,
+  options: { signal?: AbortSignal; viewerId?: string | null },
 ): Promise<{ folders: FolderAccess[]; error: string | null }> {
   if (!folderTree.ok) {
     throw new Error(folderTree.error);
   }
   const results = await Promise.all(
-    folderTree.data.map((entry) => fetchFolder(entry.id)),
+    folderTree.data.map((entry) => fetchFolder(entry.id, options)),
   );
   const folders: FolderAccess[] = [];
   let error: string | null = null;
@@ -74,18 +75,19 @@ export async function loadSharedByMe(
   if (!user) {
     return;
   }
+  const options = { signal, viewerId: user.id };
   setters.setPending(true);
   setters.setError(null);
   try {
     const [noteList, folderTree] = await Promise.all([
       loadNotes(true),
-      fetchFolderTree(),
+      fetchFolderTree(options),
     ]);
     if (signal?.aborted) {
       return;
     }
     setters.setNotes(noteList);
-    const collected = await collectFolderAccess(folderTree);
+    const collected = await collectFolderAccess(folderTree, options);
     if (signal?.aborted) {
       return;
     }
@@ -115,7 +117,7 @@ export async function openSharedFolderShare(
     return;
   }
 
-  const result = await fetchFolder(folderId);
+  const result = await fetchFolder(folderId, { viewerId: user.id });
   if (!result.ok) {
     setError(result.error);
     return;
@@ -148,7 +150,7 @@ export async function openSharedNoteShare(
     return;
   }
 
-  const result = await fetchNote(noteId);
+  const result = await fetchNote(noteId, { viewerId: user.id });
   if (!result.ok) {
     setError(result.error);
     return;

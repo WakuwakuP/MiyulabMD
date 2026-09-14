@@ -6,8 +6,18 @@ import {
   fetchNote,
   fetchNotes,
 } from "./api.ts";
-import { ApiCommunicationError } from "./api-transport.ts";
-import { openOfflineCache } from "./offline-cache.ts";
+import { ApiCommunicationError, ApiIdentityError } from "./api-transport.ts";
+import {
+  type AttachedImage,
+  acquireAttachedImage,
+  collectAttachedImages,
+} from "./attached-images.ts";
+import {
+  captureOfflineCacheScope,
+  captureOfflineNoteAuthority,
+  type OfflineCacheScope,
+  openOfflineCache,
+} from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export const PREFETCH_MAX_ATTEMPTS = 2;
@@ -119,13 +129,30 @@ function stopReason(
   if (isAbort(cause, signal)) {
     return "aborted";
   }
-  if (cause instanceof ApiHttpError && isAuthStatus(cause.status)) {
+  if (
+    cause instanceof ApiIdentityError ||
+    (cause instanceof ApiHttpError && isAuthStatus(cause.status))
+  ) {
     return "auth";
   }
   return boundary;
 }
 
 type PrefetchCache = Awaited<ReturnType<typeof openOfflineCache>>;
+
+async function capturePrefetchNoteAuthority(
+  scope: OfflineCacheScope,
+  id: string,
+): ReturnType<typeof captureOfflineNoteAuthority> {
+  const authority = await captureOfflineNoteAuthority(scope.userId, id);
+  if (authority.epoch !== scope.epoch) {
+    throw new DOMException(
+      "Prefetch scope changed before acquisition",
+      "AbortError",
+    );
+  }
+  return authority;
+}
 
 function transientStatus(status: unknown): boolean {
   return typeof status === "number" && status >= 500 && status <= 599;
@@ -216,6 +243,7 @@ class Acquisition {
 async function acquireFolders(
   cache: PrefetchCache,
   signal: AbortSignal,
+  userId: string,
   tree: FolderRecord[],
   counts: Counts,
   acquisition: Acquisition,
@@ -232,19 +260,27 @@ async function acquireFolders(
       ordered,
       (item) => priority?.kind === "folder" && item.id === priority.id,
     );
+    const orderingToken = await prefetchIo(signal, "storage", () =>
+      cache.beginFolderRead(folder.id),
+    );
     const folderResult = await acquisition.run(
-      () => fetchFolder(folder.id, { signal }),
+      () => fetchFolder(folder.id, { signal, viewerId: userId }),
       { rawFetchErrors: true },
     );
     if (!folderResult) {
       continue;
     }
     if (!folderResult.ok) {
-      return isAuthStatus(folderResult.status) ? "auth" : "network";
+      if (folderResult.status === 403 || folderResult.status === 404) {
+        await prefetchIo(signal, "storage", () => cache.denyFolder(folder.id));
+        continue;
+      }
+      return folderResult.status === 401 ? "auth" : "network";
     }
     await prefetchIo(signal, "storage", () =>
       cache.putFolder(folderResult.data, {
         asDriveRoot: folder.id === root.id,
+        orderingToken,
         signal,
       }),
     );
@@ -261,9 +297,10 @@ async function acquireDrive(
   getPriority: GetPriority = () => null,
 ): Promise<MyDrivePrefetchResult> {
   const acquisition = new Acquisition(signal);
-  const treeResult = await acquisition.run(() => fetchFolderTree({ signal }), {
-    rawFetchErrors: true,
-  });
+  const treeResult = await acquisition.run(
+    () => fetchFolderTree({ signal, viewerId: userId }),
+    { rawFetchErrors: true },
+  );
   if (!treeResult) {
     return stopped("network", counts);
   }
@@ -276,6 +313,7 @@ async function acquireDrive(
   const folderStop = await acquireFolders(
     cache,
     signal,
+    userId,
     treeResult.data,
     counts,
     acquisition,
@@ -307,9 +345,17 @@ async function acquireNotes(
   acquisition: Acquisition,
   getPriority: GetPriority,
 ): Promise<"aborted" | "auth" | "network" | "storage" | null> {
-  const summaries = await acquisition.run(() => fetchNotes({ signal }), {
-    rawFetchErrors: true,
-  });
+  const scope = await captureOfflineCacheScope(userId);
+  const images = new Map<string, AttachedImage>();
+  const collectImages = (markdown: string) => {
+    for (const image of collectAttachedImages(markdown)) {
+      images.set(image.url, image);
+    }
+  };
+  const summaries = await acquisition.run(
+    () => fetchNotes({ signal, viewerId: userId }),
+    { rawFetchErrors: true },
+  );
   if (!summaries) {
     return "network";
   }
@@ -328,13 +374,22 @@ async function acquireNotes(
       cache.getNote(summary.id),
     );
     if (existing && existing.note.updatedAt >= summary.updatedAt) {
+      collectImages(existing.note.markdown);
       continue;
     }
     const orderingToken = await prefetchIo(signal, "storage", () =>
       cache.beginNoteRead(summary.id),
     );
+    const authority = await prefetchIo(signal, "storage", () =>
+      capturePrefetchNoteAuthority(scope, summary.id),
+    );
     const noteResult = await acquisition.run(() =>
-      fetchNote(summary.id, { signal, viewerId: userId }),
+      fetchNote(summary.id, {
+        noteAuthorityEpoch: authority.epoch,
+        noteAuthorityGeneration: authority.generation,
+        signal,
+        viewerId: userId,
+      }),
     );
     if (!noteResult) {
       continue;
@@ -349,14 +404,38 @@ async function acquireNotes(
       continue;
     }
     await prefetchIo(signal, "storage", () =>
-      cache.putNote(noteResult.data, { orderingToken, signal }),
+      cache.putNote(noteResult.data, {
+        authorityGeneration: authority.generation,
+        orderingToken,
+        signal,
+      }),
     );
     await prefetchIo(signal, "storage", () =>
-      cache.clearNoteDenial(summary.id, orderingToken),
+      cache.clearNoteDenial(summary.id, orderingToken, authority.generation),
     );
+    collectImages(noteResult.data.markdown);
     counts.notes += 1;
   }
+  await acquireImages(images, scope, signal);
   return null;
+}
+
+// Attachments are the final, sequential, lowest-priority stage. In particular
+// neither a slow nor a denied image can delay another note's body acquisition.
+async function acquireImages(
+  images: Map<string, AttachedImage>,
+  scope: OfflineCacheScope,
+  signal: AbortSignal,
+): Promise<void> {
+  for (const image of images.values()) {
+    throwIfPrefetchAborted(signal);
+    try {
+      await acquireAttachedImage(image, { cacheOnly: false, scope, signal });
+    } catch {
+      throwIfPrefetchAborted(signal);
+      // Image storage and permission failures are partial attachment misses.
+    }
+  }
 }
 
 export async function prefetchMyDrive(

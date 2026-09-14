@@ -42,6 +42,7 @@ import {
   type NoteReadResult,
   OfflineNoteUnavailableError,
 } from "../lib/note-read-session.ts";
+import type { ImageViewContext } from "../lib/preview-images.ts";
 import {
   applySplitScroll,
   bindEditorCollab,
@@ -119,17 +120,20 @@ function EditorPreviewPane({
   splitScroll,
   onSplitScroll,
   taskNoteId,
+  imageContext,
 }: {
   viewMode: EditorMode;
   markdown: string;
   splitScroll: number;
   onSplitScroll: (ratio: number) => void;
   taskNoteId?: string;
+  imageContext?: ImageViewContext;
 }) {
   if (viewMode === "preview") {
     return (
       <PreviewWithToc
         documentScroll={true}
+        imageContext={imageContext}
         markdown={markdown}
         taskNoteId={taskNoteId}
       />
@@ -137,6 +141,7 @@ function EditorPreviewPane({
   }
   return (
     <MarkdownPreview
+      imageContext={imageContext}
       markdown={markdown}
       onScrollRatio={onSplitScroll}
       scrollRatio={splitScroll}
@@ -220,6 +225,7 @@ function EditorShareDialog({
 function EditorWorkspace({
   note,
   markdown,
+  imageContext,
   accessDraft,
   saveError,
   articleSource,
@@ -243,6 +249,7 @@ function EditorWorkspace({
 }: {
   note: Note;
   markdown: string;
+  imageContext?: ImageViewContext;
   accessDraft: AccessDraft;
   saveError: string | null;
   articleSource: ArticleSource | null;
@@ -288,6 +295,7 @@ function EditorWorkspace({
         )}
         {showPreview && (
           <EditorPreviewPane
+            imageContext={imageContext}
             markdown={markdown}
             onSplitScroll={onSplitScroll}
             splitScroll={splitScroll}
@@ -322,6 +330,7 @@ function EditorWorkspace({
           canEdit={canEdit}
           noteId={note.id}
           onClose={onCloseHistory}
+          user={user}
         />
       )}
     </section>
@@ -725,6 +734,7 @@ export function EditorPage() {
             canEdit={canMutate}
             headingTitle={headingTitle}
             historyOpen={historyOpen}
+            imageContext={currentReadState.result}
             isOwner={flags.isOwner}
             markdown={markdown}
             note={note}

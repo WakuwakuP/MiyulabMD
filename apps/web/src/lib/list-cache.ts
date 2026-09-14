@@ -57,17 +57,27 @@ export async function loadNotes(force = false): Promise<NoteSummary[]> {
   }
 
   const previous = notesCache;
-  const promise = fetchNotes()
+  const assertCurrent = (): void => {
+    if (notesInflight !== promise) {
+      throw new DOMException("List cache read invalidated", "AbortError");
+    }
+  };
+  const promise: Promise<NoteSummary[]> = fetchNotes()
     .then((notes) => {
+      assertCurrent();
       notesCache = notes;
       notesInflight = null;
       return notes;
     })
-    .catch(() => {
+    .catch((error: unknown) => {
+      assertCurrent();
       notesInflight = null;
       if (previous) {
         notesCache = previous;
         return previous;
+      }
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
       }
       return [];
     });
@@ -91,17 +101,24 @@ export async function loadFolder(
     }
   }
 
-  const promise = fetchFolder(id).then((result) => {
-    folderInflight.delete(key);
-    if (result.ok) {
-      folderCache.set(key, result.data);
-    }
-    return result;
-  });
+  const promise: Promise<ApiResult<FolderAccess>> = fetchFolder(id).then(
+    (result) => {
+      if (folderInflight.get(key) !== promise) {
+        throw new DOMException("Folder cache read invalidated", "AbortError");
+      }
+      folderInflight.delete(key);
+      if (result.ok) {
+        folderCache.set(key, result.data);
+      }
+      return result;
+    },
+  );
   folderInflight.set(key, promise);
   return await promise;
 }
 
 export function prefetchFolder(id?: string | null): void {
-  void loadFolder(id);
+  void loadFolder(id).catch(() => {
+    // Prefetch is best effort, including identity invalidation.
+  });
 }

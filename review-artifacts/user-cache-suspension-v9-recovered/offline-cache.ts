@@ -192,7 +192,8 @@ const lifecycleListeners = new Set<
 >();
 function createLifecycleChannel(): BroadcastChannel | null {
   try {
-    return typeof BroadcastChannel === "undefined"
+    return typeof window === "undefined" ||
+      typeof BroadcastChannel === "undefined"
       ? null
       : new BroadcastChannel("miyulabmd-offline-cache-lifecycle");
   } catch {

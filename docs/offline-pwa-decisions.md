@@ -2270,6 +2270,22 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   の29ファイルとhashに限定し、2つのflat candidateの先頭コメント以外はbyte一致させる。
   全端末削除UI・安全な回収・表示中拒否通知・残取得入口・実Worker追加受入れは未完。
 
+## D126：候補29ファイルを本体へ採用し、Nodeと実Workerでも確認する
+
+- 状態：対象範囲は本体反映・親検証済み。端末全体削除／回収／表示中拒否通知などは未完。
+- 採用時の29ファイルはD125 manifestどおりbyte一致（flat2ファイルの先頭コメントのみ除外）。
+  adopterの実行ではbrowser197/198、unit101成功・5ファイル構文失敗となった。
+- 新しい`ApiIdentityError`のparameter propertyはNode24のstrip-only実行と互換でなかった。
+  明示field/constructor代入へ変更し、Nodeにwindow用BroadcastChannelを作らない。
+  残subscriberテストも公開authority捕捉とtransport検証のphaseを分離した。
+- 親の本体検証：Web/SW型成功、browser **198成功**、Web unit **117成功**、
+  production build＋PWA **9成功**。実Workerの追加画像／logoutは双方REDからGREEN。
+  既存経路を含む全実Worker suiteは **11成功**。
+- 画像テストのonline→offline移行中の観測はCDP loader IDで旧documentとreload後を
+  区別する。最初の全体run10/11の未分類requestは失敗記録として残し、後から帰属を捏造しない。
+- 詳細と更新hashはcandidate manifestのD126追記、実配信結果は
+  `docs/worker-private-cache-acceptance.md`。deploy、共有upstreamへのpushは行っていない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

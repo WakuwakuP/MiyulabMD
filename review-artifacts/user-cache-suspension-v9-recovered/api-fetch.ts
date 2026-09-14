@@ -13,12 +13,14 @@ export type ApiRequestOptions = {
 
 /** A local publication rejection, not an HTTP denial or communication failure. */
 export class ApiIdentityError extends Error {
-  constructor(
-    readonly status: number,
-    readonly expectedViewerId: string | null,
-  ) {
+  readonly status: number;
+  readonly expectedViewerId: string | null;
+
+  constructor(status: number, expectedViewerId: string | null) {
     super("API response session identity did not match the expected viewer");
     this.name = "ApiIdentityError";
+    this.status = status;
+    this.expectedViewerId = expectedViewerId;
   }
 }
 

@@ -74,3 +74,25 @@ Expected live hashes for the two comment-line exceptions:
 Remaining: mounted note/folder denial notifications, manual device clear/UI,
 safe orphan GC/quota handling, remaining list/hover integration, production
 image/logout acceptance, and final all-requirements validation.
+
+## D126 runtime compatibility follow-up
+
+The adopter verified the exact29-file mapping above, but native Node strip-only
+unit execution rejected `ApiIdentityError` parameter properties. Parent replaced
+them with ordinary declared fields and constructor assignments, retaining class,
+status, message and expected actor behavior. Browser lifecycle channels are now
+created only in a window environment, not by Node's global BroadcastChannel.
+The final result-copy subscriber fixture now supplies its publicly captured
+authority before testing transport settlement, like the other subscriber cases.
+
+Only these original source hash rows are superseded by this follow-up:
+
+| Source | Current candidate SHA-256 | Current live SHA-256 |
+|---|---|---|
+| `api-fetch.ts` | `764989a56160c4cc81aa7e8e4db182d164da42f09edf37184c3ab3655a6db2a9` | `764989a56160c4cc81aa7e8e4db182d164da42f09edf37184c3ab3655a6db2a9` |
+| `offline-cache.ts` | `619be66981f9a8cebea597422508825d3b9294de426ebe4fcdf340ce3b1ebdea` | `3b279bd4f6370f5ea95c8be8351f70512a85e73f97f8e08a64d32d42aa01ad99` |
+| `identity-lifecycle.ts` | `6c16411ef99e6a670254bde76d02a184fcc70218f2f7a95a90621913fab30c28` | `6c16411ef99e6a670254bde76d02a184fcc70218f2f7a95a90621913fab30c28` |
+
+Parent live verification: browser198, unit117, PWA9, app/SW typecheck passed.
+Actual Worker suite11 passed, including the new image and logout cases; see
+`docs/worker-private-cache-acceptance.md` for failed attempts and final evidence.

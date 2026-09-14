@@ -1,6 +1,11 @@
-import type { NoteEditEvent } from "@miyulabmd/shared";
-import { useEffect, useState } from "react";
+import type {
+  NoteEditEvent,
+  NoteHistoryPage,
+  SessionUser,
+} from "@miyulabmd/shared";
+import { useEffect, useRef, useState } from "react";
 import {
+  type ApiResult,
   fetchNoteHistory,
   fetchNoteRevision,
   restoreNoteRevision,
@@ -18,11 +23,13 @@ import { MarkdownPreview } from "./MarkdownPreview.tsx";
 
 type Props = {
   noteId: string;
+  user: SessionUser | null;
   canEdit: boolean;
   onClose: () => void;
 };
 
-export function HistoryPanel({ noteId, canEdit, onClose }: Props) {
+export function HistoryPanel({ noteId, user, canEdit, onClose }: Props) {
+  const lifetime = useRef<AbortController | null>(null);
   const [events, setEvents] = useState<NoteEditEvent[]>([]);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -38,46 +45,98 @@ export function HistoryPanel({ noteId, canEdit, onClose }: Props) {
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
 
-  async function loadHistory(selectFirst: boolean) {
-    setLoadingList(true);
-    setListError(null);
-    const result = await fetchNoteHistory(noteId, { limit: 30 });
-    setLoadingList(false);
+  function publishHistory(
+    result: ApiResult<NoteHistoryPage>,
+    selectFirst: boolean,
+    before?: number,
+  ) {
     if (!result.ok) {
       setListError(result.error);
       return;
     }
-    setEvents(result.data.events);
-    setNextBefore(result.data.nextBefore);
+    const data = result.data;
+    setEvents((current) =>
+      before === undefined ? data.events : [...current, ...data.events],
+    );
+    setNextBefore(data.nextBefore);
     if (selectFirst) {
-      setSelectedId(result.data.events[0]?.id ?? null);
+      setSelectedId(data.events[0]?.id ?? null);
+    }
+  }
+
+  async function loadHistory(selectFirst: boolean, before?: number) {
+    const controller = lifetime.current;
+    if (!controller) {
+      return;
+    }
+    const setPending = before === undefined ? setLoadingList : setLoadingMore;
+    setPending(true);
+    setListError(null);
+    try {
+      const result = await fetchNoteHistory(
+        noteId,
+        { before, limit: 30 },
+        { signal: controller.signal, viewerId: user?.id ?? null },
+      );
+      if (controller.signal.aborted) {
+        return;
+      }
+      publishHistory(result, selectFirst, before);
+    } catch {
+      if (!controller.signal.aborted) {
+        setListError("履歴を取得できませんでした。");
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setPending(false);
+      }
     }
   }
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    lifetime.current = controller;
+    setEvents([]);
+    setSelectedId(null);
+    setPreview(null);
+    setLoadingMore(false);
     setLoadingList(true);
     setListError(null);
     setConfirming(false);
     setRestoreError(null);
     setRestoreNotice(null);
-    void fetchNoteHistory(noteId, { limit: 30 }).then((result) => {
-      if (cancelled) {
-        return;
-      }
-      setLoadingList(false);
-      if (!result.ok) {
-        setListError(result.error);
-        return;
-      }
-      setEvents(result.data.events);
-      setNextBefore(result.data.nextBefore);
-      setSelectedId(result.data.events[0]?.id ?? null);
-    });
+    void fetchNoteHistory(
+      noteId,
+      { limit: 30 },
+      { signal: controller.signal, viewerId: user?.id ?? null },
+    ).then(
+      (result) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setLoadingList(false);
+        if (!result.ok) {
+          setListError(result.error);
+          return;
+        }
+        setEvents(result.data.events);
+        setNextBefore(result.data.nextBefore);
+        setSelectedId(result.data.events[0]?.id ?? null);
+      },
+      () => {
+        if (!controller.signal.aborted) {
+          setListError("履歴を取得できませんでした。");
+          setLoadingList(false);
+        }
+      },
+    );
     return () => {
-      cancelled = true;
+      if (lifetime.current === controller) {
+        lifetime.current = null;
+      }
+      controller.abort();
     };
-  }, [noteId]);
+  }, [noteId, user?.id]);
 
   const selected = events.find((event) => event.id === selectedId) ?? null;
   const selectedRevisionId = selected?.revisionId ?? null;
@@ -99,26 +158,39 @@ export function HistoryPanel({ noteId, canEdit, onClose }: Props) {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setLoadingPreview(true);
     setPreview(null);
     setPreviewError(null);
     setPreviewHint(null);
-    void fetchNoteRevision(noteId, selectedRevisionId).then((result) => {
-      if (cancelled) {
-        return;
-      }
-      setLoadingPreview(false);
-      if (!result.ok) {
-        setPreview(null);
-        setPreviewError(result.error);
-        return;
-      }
-      setPreview(result.data.markdown);
-    });
+    void fetchNoteRevision(noteId, selectedRevisionId, {
+      signal: controller.signal,
+      viewerId: user?.id ?? null,
+    }).then(
+      (result) => {
+        if (cancelled || controller.signal.aborted) {
+          return;
+        }
+        setLoadingPreview(false);
+        if (!result.ok) {
+          setPreview(null);
+          setPreviewError(result.error);
+          return;
+        }
+        setPreview(result.data.markdown);
+      },
+      () => {
+        if (!controller.signal.aborted) {
+          setLoadingPreview(false);
+          setPreviewError("プレビューを取得できませんでした。");
+        }
+      },
+    );
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [noteId, selectedId, selectedRevisionId]);
+  }, [noteId, selectedId, selectedRevisionId, user?.id]);
 
   return (
     <Modal
@@ -136,23 +208,9 @@ export function HistoryPanel({ noteId, canEdit, onClose }: Props) {
           loadingMore={loadingMore}
           nextBefore={nextBefore}
           onLoadMore={() => {
-            void (async () => {
-              if (nextBefore === null) {
-                return;
-              }
-              setLoadingMore(true);
-              const result = await fetchNoteHistory(noteId, {
-                before: nextBefore,
-                limit: 30,
-              });
-              setLoadingMore(false);
-              if (!result.ok) {
-                setListError(result.error);
-                return;
-              }
-              setEvents((current) => [...current, ...result.data.events]);
-              setNextBefore(result.data.nextBefore);
-            })();
+            if (nextBefore !== null) {
+              void loadHistory(false, nextBefore);
+            }
           }}
           onSelect={(id) => {
             setSelectedId(id);
@@ -181,6 +239,10 @@ export function HistoryPanel({ noteId, canEdit, onClose }: Props) {
               onCancel={() => setConfirming(false)}
               onConfirm={() => setConfirming(true)}
               onRestore={() => {
+                const controller = lifetime.current;
+                if (!controller || controller.signal.aborted) {
+                  return;
+                }
                 void (async () => {
                   setRestoring(true);
                   setRestoreError(null);
@@ -188,6 +250,9 @@ export function HistoryPanel({ noteId, canEdit, onClose }: Props) {
                     noteId,
                     selectedRevisionId,
                   );
+                  if (controller.signal.aborted) {
+                    return;
+                  }
                   setRestoring(false);
                   if (!result.ok) {
                     setRestoreError(result.error);
@@ -196,7 +261,12 @@ export function HistoryPanel({ noteId, canEdit, onClose }: Props) {
                   setConfirming(false);
                   setRestoreNotice(result.data.message);
                   await loadHistory(true);
-                })();
+                })().catch(() => {
+                  if (!controller.signal.aborted) {
+                    setRestoring(false);
+                    setRestoreError("履歴を復元できませんでした。");
+                  }
+                });
               }}
               restoreError={restoreError}
               restoreNotice={restoreNotice}

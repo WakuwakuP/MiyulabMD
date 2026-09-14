@@ -40,7 +40,18 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
 
-export { ApiCommunicationError, ApiHttpError } from "./api-transport.ts";
+export type ReadOptions = {
+  signal?: AbortSignal;
+  viewerId?: string | null;
+  noteAuthorityGeneration?: number;
+  noteAuthorityEpoch?: string;
+};
+
+export {
+  ApiCommunicationError,
+  ApiHttpError,
+  ApiIdentityError,
+} from "./api-transport.ts";
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -76,12 +87,13 @@ export async function fetchMe(): Promise<SessionUser | null> {
 }
 
 export async function fetchNotes(
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
 ): Promise<NoteSummary[]> {
-  const res = await fetch("/api/notes", {
-    ...fetchOpts,
-    signal: options.signal,
-  });
+  const res = await fetch(
+    "/api/notes",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     throw new ApiHttpError(await parseError(res), res.status);
   }
@@ -91,7 +103,7 @@ export async function fetchNotes(
 
 export function fetchNote(
   id: string,
-  options: { signal?: AbortSignal; viewerId?: string } = {},
+  options: ReadOptions = {},
 ): Promise<ApiResult<Note>> {
   return fetchNoteRequest(id, options);
 }
@@ -115,6 +127,7 @@ export async function updateTaskCheckbox(
 export async function fetchNoteHistory(
   id: string,
   query: { limit?: number; before?: number } = {},
+  options: ReadOptions = {},
 ): Promise<ApiResult<NoteHistoryPage>> {
   const params = new URLSearchParams();
   if (query.limit !== undefined) {
@@ -124,7 +137,11 @@ export async function fetchNoteHistory(
     params.set("before", String(query.before));
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  const res = await fetch(`/api/notes/${id}/history${suffix}`, fetchOpts);
+  const res = await fetch(
+    `/api/notes/${id}/history${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -134,10 +151,12 @@ export async function fetchNoteHistory(
 export async function fetchNoteRevision(
   id: string,
   revisionId: string,
+  options: ReadOptions = {},
 ): Promise<ApiResult<NoteRevisionBody>> {
   const res = await fetch(
     `/api/notes/${id}/revisions/${revisionId}`,
-    fetchOpts,
+    { ...fetchOpts, signal: options.signal },
+    options,
   );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
@@ -217,12 +236,13 @@ export async function updateNote(
 }
 
 export async function fetchFolderTree(
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
 ): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/tree", {
-    ...fetchOpts,
-    signal: options.signal,
-  });
+  const res = await fetch(
+    "/api/folders/tree",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -231,12 +251,13 @@ export async function fetchFolderTree(
 }
 
 export async function fetchPublicFolders(
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
 ): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/public", {
-    ...fetchOpts,
-    signal: options.signal,
-  });
+  const res = await fetch(
+    "/api/folders/public",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -244,8 +265,14 @@ export async function fetchPublicFolders(
   return { data: body.folders, ok: true };
 }
 
-export async function fetchSharedFolders(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/shared", fetchOpts);
+export async function fetchSharedFolders(
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<FolderRecord[]>> {
+  const res = await fetch(
+    "/api/folders/shared",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -271,12 +298,13 @@ export async function createFolder(input: {
 
 export async function fetchFolder(
   id?: string | null,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
 ): Promise<ApiResult<FolderAccess>> {
-  const res = await fetch(id ? `/api/folders/${id}` : "/api/folders", {
-    ...fetchOpts,
-    signal: options.signal,
-  });
+  const res = await fetch(
+    id ? `/api/folders/${id}` : "/api/folders",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -434,8 +462,14 @@ export type ApiTokenCreated = ApiTokenSummary & {
   token: string;
 };
 
-export async function fetchTokens(): Promise<ApiResult<ApiTokenSummary[]>> {
-  const res = await fetch("/api/tokens", fetchOpts);
+export async function fetchTokens(
+  options: ReadOptions = {},
+): Promise<ApiResult<ApiTokenSummary[]>> {
+  const res = await fetch(
+    "/api/tokens",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -467,10 +501,14 @@ export type ArticleSourceWrite = {
   webhookAuthorization?: string | null;
 };
 
-export async function fetchArticleSources(): Promise<
-  ApiResult<ArticleSource[]>
-> {
-  const res = await fetch("/api/article-sources", fetchOpts);
+export async function fetchArticleSources(
+  options: ReadOptions = {},
+): Promise<ApiResult<ArticleSource[]>> {
+  const res = await fetch(
+    "/api/article-sources",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -478,10 +516,14 @@ export async function fetchArticleSources(): Promise<
   return { data: body.sources, ok: true };
 }
 
-export async function fetchArticleSourceStatus(): Promise<
-  ApiResult<ArticleSourceStatus>
-> {
-  const res = await fetch("/api/article-sources/status", fetchOpts);
+export async function fetchArticleSourceStatus(
+  options: ReadOptions = {},
+): Promise<ApiResult<ArticleSourceStatus>> {
+  const res = await fetch(
+    "/api/article-sources/status",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }

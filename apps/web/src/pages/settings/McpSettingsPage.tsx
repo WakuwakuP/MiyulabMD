@@ -1,4 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
+import { useOutletContext } from "react-router";
+import type { AppShellContext } from "../../components/layout/AppShellContext.ts";
 import { McpClientGuide } from "../../components/settings/McpClientGuide.tsx";
 import { McpSetupHelp } from "../../components/settings/McpSetupHelp.tsx";
 import { Button } from "../../components/ui/Button.tsx";
@@ -9,7 +11,6 @@ import {
   type ApiTokenCreated,
   type ApiTokenSummary,
   createToken,
-  fetchMe,
   fetchTokens,
   revokeToken,
 } from "../../lib/api.ts";
@@ -22,6 +23,7 @@ function formatTimestamp(ms: number | null): string {
 }
 
 export function McpSettingsPage() {
+  const { user } = useOutletContext<AppShellContext>();
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,34 +32,49 @@ export function McpSettingsPage() {
   const [createdToken, setCreatedToken] = useState<ApiTokenCreated | null>(
     null,
   );
-  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
-  async function loadTokens() {
-    setLoading(true);
-    setError(null);
-
-    const nextUser = await fetchMe();
-    setLoggedIn(nextUser !== null);
-    if (!nextUser) {
-      setTokens([]);
-      setLoading(false);
-      return;
-    }
-
-    const result = await fetchTokens();
-    if (!result.ok) {
-      setError(result.error);
-      setLoading(false);
-      return;
-    }
-
-    setTokens(result.data);
-    setLoading(false);
+  async function loadTokens(actorId: string | null) {
+    const result = await fetchTokens({ viewerId: actorId });
+    return result;
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Preserve the existing request lifecycle.
   useEffect(() => {
-    void loadTokens();
-  }, []);
+    let current = true;
+    setLoading(Boolean(user));
+    setError(null);
+    if (!user) {
+      setTokens([]);
+      setLoading(false);
+      return () => {
+        current = false;
+      };
+    }
+    void loadTokens(user.id)
+      .then((result) => {
+        if (!current) {
+          return;
+        }
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setTokens(result.data);
+      })
+      .catch((reason: unknown) => {
+        if (current) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      })
+      .finally(() => {
+        if (current) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [user]);
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
@@ -84,7 +101,12 @@ export function McpSettingsPage() {
     setCreatedToken(result.data);
     setName("");
     setCreating(false);
-    await loadTokens();
+    if (user) {
+      const refreshed = await loadTokens(user.id);
+      if (refreshed.ok) {
+        setTokens(refreshed.data);
+      }
+    }
   }
 
   async function handleRevoke(id: string) {
@@ -97,7 +119,12 @@ export function McpSettingsPage() {
     if (createdToken?.id === id) {
       setCreatedToken(null);
     }
-    await loadTokens();
+    if (user) {
+      const refreshed = await loadTokens(user.id);
+      if (refreshed.ok) {
+        setTokens(refreshed.data);
+      }
+    }
   }
 
   return (
@@ -114,13 +141,13 @@ export function McpSettingsPage() {
         <code className="font-mono">{"/{shortId}"}</code> では開けません。
       </p>
 
-      {loggedIn === false && (
+      {!user && (
         <ErrorText>トークンを管理するにはログインしてください。</ErrorText>
       )}
 
       {error && <ErrorText>{error}</ErrorText>}
 
-      {loggedIn && (
+      {user && (
         <>
           <form onSubmit={(event) => void handleCreate(event)}>
             <Field htmlFor="token-name" label="トークン名">

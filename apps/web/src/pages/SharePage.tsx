@@ -90,7 +90,11 @@ function ShareResult({ state }: { state: ReadState | null }) {
           )}
         </p>
       )}
-      <PreviewWithToc documentScroll={true} markdown={result.data.markdown} />
+      <PreviewWithToc
+        documentScroll={true}
+        imageContext={{ source: result.source, viewer: result.viewer }}
+        markdown={result.data.markdown}
+      />
     </>
   );
 }

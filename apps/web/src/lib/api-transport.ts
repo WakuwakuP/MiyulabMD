@@ -1,4 +1,10 @@
-import { apiFetch } from "./api-fetch.ts";
+import {
+  type ApiRequestOptions,
+  apiFetch,
+  requestSignal,
+} from "./api-fetch.ts";
+
+export { ApiIdentityError } from "./api-fetch.ts";
 
 export type ApiResult<T> =
   | { ok: true; data: T }
@@ -66,16 +72,13 @@ function parseErrorBody(response: Response, body: string): string {
 export async function requestJson<T>(
   input: RequestInfo | URL,
   init?: RequestInit,
+  options: ApiRequestOptions = {},
 ): Promise<ApiResult<T>> {
-  const requestSignal = input instanceof Request ? input.signal : undefined;
-  const signal =
-    init?.signal === undefined
-      ? requestSignal
-      : (init.signal as AbortSignal | null);
+  const signal = requestSignal(input, init);
 
   let response: Response;
   try {
-    response = await apiFetch(input, init);
+    response = await apiFetch(input, init, options);
   } catch (error) {
     rethrowTransportError(error, signal);
   }
@@ -101,6 +104,9 @@ export async function requestJson<T>(
     rethrowTransportError(error, signal);
   }
 
+  if (signal?.aborted) {
+    throw signal.reason;
+  }
   if (!response.ok) {
     return {
       error: parseErrorBody(response, body),

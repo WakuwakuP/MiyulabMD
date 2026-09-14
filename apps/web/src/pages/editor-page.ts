@@ -119,15 +119,23 @@ export function subscribeArticleSources(
     setArticleSources([]);
     return undefined;
   }
-  let cancelled = false;
-  void fetchArticleSources().then((result) => {
-    if (cancelled || !result.ok) {
-      return;
-    }
-    setArticleSources(result.data);
-  });
+  const controller = new AbortController();
+  void fetchArticleSources({
+    signal: controller.signal,
+    viewerId: user.id,
+  }).then(
+    (result) => {
+      if (controller.signal.aborted || !result.ok) {
+        return;
+      }
+      setArticleSources(result.data);
+    },
+    () => {
+      // Aborted or failed source discovery is non-fatal to the editor.
+    },
+  );
   return () => {
-    cancelled = true;
+    controller.abort();
   };
 }
 

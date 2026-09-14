@@ -248,6 +248,14 @@ test("one result-copy failure settles that subscriber without abandoning the oth
   const result = await page.evaluate(async (note) => {
     const apiUrl = "/src/lib/api.ts";
     const { fetchNote } = await import(apiUrl);
+    const cacheUrl = "/src/lib/offline-cache.ts";
+    const { captureOfflineNoteAuthority } = await import(cacheUrl);
+    const authority = await captureOfflineNoteAuthority("alice", note.id);
+    const readOptions = {
+      noteAuthorityEpoch: authority.epoch,
+      noteAuthorityGeneration: authority.generation,
+      viewerId: "alice",
+    };
     const originalFetch = globalThis.fetch;
     const originalClone = globalThis.structuredClone;
     const fault = new Error("Injected copy failure");
@@ -282,8 +290,8 @@ test("one result-copy failure settles that subscriber without abandoning the oth
     };
     try {
       void fetchNote(note.id, {
+        ...readOptions,
         signal: first.signal,
-        viewerId: "alice",
       }).then(
         () => {
           outcome.first = "fulfilled";
@@ -294,8 +302,8 @@ test("one result-copy failure settles that subscriber without abandoning the oth
         },
       );
       void fetchNote(note.id, {
+        ...readOptions,
         signal: second.signal,
-        viewerId: "alice",
       }).then(
         () => {
           outcome.second = "fulfilled";

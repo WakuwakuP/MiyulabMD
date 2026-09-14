@@ -50,27 +50,26 @@ export function SharedPage() {
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     setPending(true);
     setError(null);
-    void Promise.all([loadNotes(true), fetchSharedFolders()]).then(
-      ([noteList, folderResult]) => {
-        if (cancelled) {
-          return;
-        }
-        setPending(false);
-        setNotes(noteList);
-        if (!folderResult.ok) {
-          setError(folderResult.error);
-          return;
-        }
-        setFolders(folderResult.data);
-      },
-    );
+    void Promise.all([
+      loadNotes(true),
+      fetchSharedFolders({ signal: controller.signal, viewerId: user.id }),
+    ]).then(([noteList, folderResult]) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+      setPending(false);
+      setNotes(noteList);
+      if (!folderResult.ok) {
+        setError(folderResult.error);
+        return;
+      }
+      setFolders(folderResult.data);
+    });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [user, userLoading, navigate]);
 
   if (!user) {

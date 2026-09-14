@@ -2,6 +2,7 @@ import type { SessionUser } from "@miyulabmd/shared";
 import { type FormEvent, useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import type { AuthConfig } from "../../lib/api.ts";
+import { logoutAndClearIdentity } from "../../lib/identity-lifecycle.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -75,7 +76,19 @@ export function AccountMenu({ user, authConfig }: Props) {
               <MenuItem onClick={() => setOpen(false)} to="/settings">
                 設定
               </MenuItem>
-              <MenuItem href="/auth/logout">ログアウト</MenuItem>
+              <MenuItem
+                onClick={() => {
+                  setOpen(false);
+                  void logoutAndClearIdentity(user.id).catch(
+                    (error: unknown) => {
+                      // AppShell owns the warning after this menu's user disappears.
+                      console.error("Logout did not complete", error);
+                    },
+                  );
+                }}
+              >
+                ログアウト
+              </MenuItem>
             </>
           )}
           {!user && mockLogin && (

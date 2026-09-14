@@ -23,7 +23,6 @@ import {
 import { hasSelectableSourceFolders } from "../../lib/folder-tree.ts";
 
 type DraftField = ArticleSchemaField & { rowId: string };
-
 type Draft = {
   id?: string;
   name: string;
@@ -33,11 +32,9 @@ type Draft = {
   webhookAuthorization: string;
   webhookAuthorizationSet: boolean;
 };
-
 function newRowId(): string {
   return crypto.randomUUID();
 }
-
 function emptyDraft(): Draft {
   return {
     folder: "",
@@ -48,7 +45,6 @@ function emptyDraft(): Draft {
     webhookUrl: "",
   };
 }
-
 function draftFromSource(source: ArticleSource): Draft {
   return {
     folder: source.folder,
@@ -60,20 +56,12 @@ function draftFromSource(source: ArticleSource): Draft {
     webhookUrl: source.webhookUrl ?? "",
   };
 }
-
 function defaultForType(type: ArticleSchemaField["type"]): string {
   if (type === "boolean") {
     return "false";
   }
-  if (type === "number") {
-    return "";
-  }
-  if (type === "string[]") {
-    return "";
-  }
   return "";
 }
-
 function parseDefault(
   type: ArticleSchemaField["type"],
   raw: string,
@@ -97,7 +85,6 @@ function parseDefault(
   }
   return trimmed;
 }
-
 function defaultToInput(
   type: ArticleSchemaField["type"],
   value: unknown,
@@ -120,31 +107,57 @@ export function SiteSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function reload() {
+  async function reload(actorId: string) {
     const [sourceResult, folderResult] = await Promise.all([
-      fetchArticleSources(),
-      fetchFolderTree(),
+      fetchArticleSources({ viewerId: actorId }),
+      fetchFolderTree({ viewerId: actorId }),
     ]);
-    if (sourceResult.ok) {
-      setSources(sourceResult.data);
-    } else {
-      setError(sourceResult.error);
-      setSources([]);
-    }
-    if (folderResult.ok) {
-      setFolders(folderResult.data);
-    }
-    setLoading(false);
+    return { folderResult, sourceResult };
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Preserve the existing request lifecycle.
   useEffect(() => {
+    let current = true;
     if (!user) {
       setLoading(false);
-      return;
+      return () => {
+        current = false;
+      };
     }
-    void reload();
+    setLoading(true);
+    void reload(user.id)
+      .then(({ sourceResult, folderResult }) => {
+        if (!current) {
+          return;
+        }
+        if (sourceResult.ok) {
+          setSources(sourceResult.data);
+        } else {
+          setError(sourceResult.error);
+          setSources([]);
+        }
+        if (folderResult.ok) {
+          setFolders(folderResult.data);
+        } else {
+          setError(folderResult.error);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (current) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      })
+      .finally(() => {
+        if (current) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      current = false;
+    };
   }, [user]);
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Preserve the existing save flow.
   async function handleSave(event: FormEvent) {
     event.preventDefault();
     if (!draft) {
@@ -156,7 +169,6 @@ export function SiteSettingsPage() {
     }
     setSaving(true);
     setError(null);
-
     const schema = draft.schema
       .filter((field) => field.key.trim())
       .map((field) => {
@@ -182,7 +194,6 @@ export function SiteSettingsPage() {
         }
         return next;
       });
-
     const input = {
       folder: draft.folder,
       name: draft.name.trim(),
@@ -192,7 +203,6 @@ export function SiteSettingsPage() {
         ? { webhookAuthorization: draft.webhookAuthorization.trim() }
         : {}),
     };
-
     const result = draft.id
       ? await updateArticleSource(draft.id, input)
       : await createArticleSource(input);
@@ -201,12 +211,24 @@ export function SiteSettingsPage() {
       setSaving(false);
       return;
     }
-
     setDraft(null);
     setSaving(false);
-    await reload();
+    if (user) {
+      try {
+        const refreshed = await reload(user.id);
+        if (refreshed.sourceResult.ok) {
+          setSources(refreshed.sourceResult.data);
+        }
+        if (refreshed.folderResult.ok) {
+          setFolders(refreshed.folderResult.data);
+        }
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    }
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Preserve the existing delete flow.
   async function handleDelete(id: string) {
     setError(null);
     const result = await deleteArticleSource(id);
@@ -217,19 +239,32 @@ export function SiteSettingsPage() {
     if (draft?.id === id) {
       setDraft(null);
     }
-    await reload();
+    if (user) {
+      try {
+        const refreshed = await reload(user.id);
+        if (refreshed.sourceResult.ok) {
+          setSources(refreshed.sourceResult.data);
+        }
+        if (refreshed.folderResult.ok) {
+          setFolders(refreshed.folderResult.data);
+        }
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    }
   }
 
   function updateField(index: number, patch: Partial<DraftField>) {
     if (!draft) {
       return;
     }
-    const schema = draft.schema.map((field, i) =>
-      i === index ? { ...field, ...patch } : field,
-    );
-    setDraft({ ...draft, schema });
+    setDraft({
+      ...draft,
+      schema: draft.schema.map((field, i) =>
+        i === index ? { ...field, ...patch } : field,
+      ),
+    });
   }
-
   if (!user) {
     return (
       <section>
@@ -238,9 +273,7 @@ export function SiteSettingsPage() {
       </section>
     );
   }
-
   const canPickSourceFolder = hasSelectableSourceFolders(folders);
-
   return (
     <section>
       <h2 className="m-0 text-[1.5em] font-bold">サイト設定</h2>
@@ -251,7 +284,6 @@ export function SiteSettingsPage() {
         <code className="font-mono">/openapi.json</code> を読めます。Webhook
         はヘッダーの「サイトを更新」から送ります。
       </p>
-
       {error && <ErrorText>{error}</ErrorText>}
       {loading ? (
         <p>読み込み中…</p>
@@ -289,7 +321,6 @@ export function SiteSettingsPage() {
           ))}
         </ul>
       )}
-
       {!draft && (
         <Button
           className="mt-4"
@@ -303,7 +334,6 @@ export function SiteSettingsPage() {
       {!(draft || canPickSourceFolder) && (
         <MutedText className="mt-2">先にフォルダを作成してください。</MutedText>
       )}
-
       {draft && (
         <form
           className="mt-6 grid gap-4"
@@ -331,7 +361,6 @@ export function SiteSettingsPage() {
               value={draft.folder}
             />
           </div>
-
           <div>
             <p className="m-0 mb-2 text-[0.85rem] text-muted">
               スキーマ（新規ノートの frontmatter と形式チェック）
@@ -412,7 +441,9 @@ export function SiteSettingsPage() {
                       <input
                         checked={Boolean(field.required)}
                         onChange={(event) =>
-                          updateField(index, { required: event.target.checked })
+                          updateField(index, {
+                            required: event.target.checked,
+                          })
                         }
                         type="checkbox"
                       />
@@ -453,7 +484,6 @@ export function SiteSettingsPage() {
               フィールドを追加
             </Button>
           </div>
-
           <Field htmlFor="webhook-url" label="Webhook URL">
             <Input
               id="webhook-url"
@@ -484,7 +514,6 @@ export function SiteSettingsPage() {
               value={draft.webhookAuthorization}
             />
           </Field>
-
           <Row>
             <Button disabled={saving} type="submit" variant="accent">
               {saving ? "保存中…" : "保存"}

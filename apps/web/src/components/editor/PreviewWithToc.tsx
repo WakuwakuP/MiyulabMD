@@ -5,6 +5,7 @@ import {
   shouldShowPreviewToc,
   type TocEntry,
 } from "../../lib/note-toc.ts";
+import type { ImageViewContext } from "../../lib/preview-images.ts";
 import {
   documentColumnWidthClass,
   documentViewColumnClass,
@@ -19,6 +20,7 @@ type Props = {
   onScrollRatio?: (ratio: number) => void;
   documentScroll?: boolean;
   taskNoteId?: string;
+  imageContext?: ImageViewContext;
 };
 
 function TocNav({ entries }: { entries: TocEntry[] }) {
@@ -67,6 +69,7 @@ export function PreviewWithToc({
   onScrollRatio,
   documentScroll = true,
   taskNoteId,
+  imageContext,
 }: Props) {
   const layoutRef = useRef<HTMLDivElement>(null);
   const [showToc, setShowToc] = useState(false);
@@ -111,6 +114,7 @@ export function PreviewWithToc({
         <MarkdownPreview
           className={columnClass}
           documentScroll={documentScroll}
+          imageContext={imageContext}
           markdown={markdown}
           onScrollRatio={onScrollRatio}
           scrollRatio={scrollRatio}

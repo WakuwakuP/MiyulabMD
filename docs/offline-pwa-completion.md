@@ -27,17 +27,17 @@
 
 | ID | 作業 | 完了条件 | 状態 |
 |---|---|---|---|
-| C1 | user切替・明示logout・端末cache削除 | 旧userの表示・メモリ・IDB・OPFSを規則どおり除去し、全タブの進行中処理が復元しない。app起動資産とserverデータは残す | 実装中：user purgeとcross-tab fence本体反映済み。logout/switch UI候補17件確認、端末全体削除は未実装 |
-| C2 | 認証と拒否のタブ間整合性 | 別タブの認証変更を検出し、誤ったuser領域への保存・表示を防ぐ。確定拒否後の古い保存／公開が他タブでも復活しない | 実装中：server identity本体反映済み、client照合候補あり。残るprivate read入口とnote/folder拒否のタブ間世代を実装中 |
-| C3 | folder HTTP拒否・解除 | canonical ID/root alias、独立した子孫、パンくず・参照、失敗時のfail-closed、古い応答、新しい成功による解除を検証 | 実装中：Home拒否REDを保持、永続世代によるcandidate修正中。realm-local案は未採用 |
+| C1 | user切替・明示logout・端末cache削除 | 旧userの表示・メモリ・IDB・OPFSを規則どおり除去し、全タブの進行中処理が復元しない。app起動資産とserverデータは残す | logout/switch・user purge本体反映済み、実Workerでpeer本文・IDB・OPFS削除確認。端末全体削除UIは未実装 |
+| C2 | 認証と拒否のタブ間整合性 | 別タブの認証変更を検出し、誤ったuser領域への保存・表示を防ぐ。確定拒否後の古い保存／公開が他タブでも復活しない | 本体に応答identity・note/folder永続世代・purgeをまたぐ取得共有防止を反映。表示中note/folderの拒否通知が残る |
+| C3 | folder HTTP拒否・解除 | canonical ID/root alias、独立した子孫、パンくず・参照、失敗時のfail-closed、古い応答、新しい成功による解除を検証 | 本体反映・対象検証済み：非衝突root、永続世代、atomic保存／解除、Home警告、独立prefetch。表示中通知はC2で継続 |
 | C4 | 短縮ID・alias・`/s` | serverの実際の識別子契約に合わせ、対応URLのoffline直接アクセス／reloadと拒否・別名変更を検証 | 本体反映・対象検証済み：canonical/short IDと`/s`。記事aliasはgeneric note APIの契約外。C2との最終統合検証待ち |
 | C5 | read入口の残る統合 | folder/list・hoverをviewer所有の共通取得へ接続。通常取得と背景取得の重複、中断、guest/readonly、既存UIを検証 | 調査中 |
 | C6 | prefetch完備 | 現在表示対象の優先、完全一覧／所属追従、単発失敗の限定再試行、連続通信・auth・quota停止、不要ダウンロード抑止を検証 | 実装中：D113 retry関連19件・D116 priority関連8件を親確認、全体統合は未完 |
 | C7 | Yjsと切断 | server保存確認後の取得契機。オンライン編集中の切断で新規入力を止め、入力済みbufferは破棄・上書きしない | 本体反映・対象検証済み：IME/HTTP境界、永続alarm、保存通知。実Workerで入力→D1→cache→offline本文を確認。最終統合待ち |
-| C8 | アプリ内添付画像 | 権限付き取得、参照抽出・重複共有、IDB/OPFS保存、cached preview解決、欠落時の説明。本文だけでも表示できる | 候補検証中：画像15件成功、タブ間拒否世代と表示中blob除去を含む。未採用、実Worker画像受入れ待ち |
+| C8 | アプリ内添付画像 | 権限付き取得、参照抽出・重複共有、IDB/OPFS保存、cached preview解決、欠落時の説明。本文だけでも表示できる | 本体反映・対象検証済み：画像15件と実Workerの別親note添付→OPFS→offline画像表示を確認。不要ファイル回収はC9 |
 | C9 | storage保持・安全な回収 | persist/estimateをbest-effortに利用。参照中・書込中を壊さないorphan回収、quota停止、旧版保持、migration失敗縮退を検証 | 調査中 |
 | C10 | UI説明と操作 | 端末cache削除の確認、保存限界・共有端末上の非公開dataの制約、session切れの案内、必要な非致命的warning | 調査中 |
-| C11 | 実配信経路の受け入れ | Web本番成果物＋実WorkerのSSR/auth/API経路でonline→offline再起動、全対応URL、更新、複数タブを検証 | 実装中：既存実Worker8件確認、logout準備1件追加成功。画像・全タブlogout/clear・更新の統合受入れは未完 |
+| C11 | 実配信経路の受け入れ | Web本番成果物＋実WorkerのSSR/auth/API経路でonline→offline再起動、全対応URL、更新、複数タブを検証 | 実Worker全11件成功：本文URL3経路、編集保存、画像、logout peer削除を含む。手動clearと更新の最終統合が残る |
 | C12 | 最終統合・記録 | 全suite、型・lint・build、チェックリストの未完項目0、README/仕様/台帳の整合、署名なしcheckpoint、最終変更ガイド | 未実施 |
 
 ## 進め方

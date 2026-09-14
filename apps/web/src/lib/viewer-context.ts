@@ -1,6 +1,7 @@
 import type { SessionUser } from "@miyulabmd/shared";
 
 import { ApiCommunicationError, requestJson } from "./api-transport.ts";
+import { clearIdentityCache } from "./identity-lifecycle.ts";
 import { persistCachedViewerId, readCachedViewerId } from "./offline-cache.ts";
 
 export type ViewerContext = {
@@ -9,9 +10,7 @@ export type ViewerContext = {
   cacheViewerId: string | null;
 };
 
-type MeResponse = {
-  user: SessionUser | null;
-};
+type MeResponse = { user: SessionUser | null };
 
 function isSessionUser(value: unknown): value is SessionUser {
   if (typeof value !== "object" || value === null) {
@@ -52,33 +51,93 @@ async function cachedOrUnavailable(
       ? context("cached", cacheViewerId)
       : context("unavailable", null);
   } catch {
-    if (signal?.aborted) {
-      throw signal.reason;
-    }
+    signal?.throwIfAborted();
     return context("unavailable", null);
   }
 }
 
 async function authenticatedContext(
   user: SessionUser,
-  signal?: AbortSignal,
+  options: ResolveViewerOptions,
 ): Promise<ViewerContext> {
+  const { signal } = options;
+  let storageWarning = false;
+  let remembered: string | null = null;
+  try {
+    remembered = await readCachedViewerId({ signal });
+  } catch {
+    signal?.throwIfAborted();
+    storageWarning = true;
+  }
+  const priorIds = new Set([
+    remembered,
+    options.previousViewer?.user?.id,
+    options.previousViewer?.cacheViewerId,
+  ]);
+  for (const priorId of priorIds) {
+    signal?.throwIfAborted();
+    if (priorId && priorId !== user.id) {
+      try {
+        await clearIdentityCache(priorId);
+      } catch {
+        signal?.throwIfAborted();
+        storageWarning = true;
+      }
+    }
+  }
+  signal?.throwIfAborted();
+  if (storageWarning) {
+    options.onWarning?.(
+      "本人確認は完了しましたが、ローカルキャッシュを確認または削除できませんでした。キャッシュを利用せずオンラインデータを表示しています。",
+    );
+    return context("authenticated", null, user);
+  }
   try {
     await persistCachedViewerId(user.id, { signal });
-    if (signal?.aborted) {
-      throw signal.reason;
-    }
+    signal?.throwIfAborted();
     return context("authenticated", user.id, user);
   } catch {
-    if (signal?.aborted) {
-      throw signal.reason;
-    }
+    signal?.throwIfAborted();
+    options.onWarning?.(
+      "本人確認は完了しましたが、ローカルキャッシュを保存できませんでした。キャッシュを利用せずオンラインデータを表示しています。",
+    );
     return context("authenticated", null, user);
   }
 }
 
+export type ResolveViewerOptions = {
+  signal?: AbortSignal;
+  previousViewer?: ViewerContext;
+  onWarning?: (message: string) => void;
+};
+
+async function resolveViewerResult(
+  result: Awaited<ReturnType<typeof requestJson<MeResponse>>>,
+  options: ResolveViewerOptions,
+): Promise<ViewerContext> {
+  const { signal } = options;
+  if (result.ok) {
+    if (!isMeResponse(result.data)) {
+      return context("unavailable", null);
+    }
+    if (result.data.user) {
+      return authenticatedContext(result.data.user, options);
+    }
+    const cached = await cachedOrUnavailable(signal);
+    return cached.mode === "cached" ? cached : context("guest", null);
+  }
+  if (result.status === 401) {
+    const cached = await cachedOrUnavailable(signal);
+    return cached.mode === "cached" ? cached : context("guest", null);
+  }
+  if (result.status >= 500 && result.status <= 599) {
+    return cachedOrUnavailable(signal);
+  }
+  return context("unavailable", null);
+}
+
 export async function resolveViewerContext(
-  options: { signal?: AbortSignal } = {},
+  options: ResolveViewerOptions = {},
 ): Promise<ViewerContext> {
   const { signal } = options;
   let result: Awaited<ReturnType<typeof requestJson<MeResponse>>>;
@@ -93,30 +152,6 @@ export async function resolveViewerContext(
     }
     throw error;
   }
-
-  if (result.ok) {
-    if (!isMeResponse(result.data)) {
-      return context("unavailable", null);
-    }
-    if (!result.data.user) {
-      return cachedOrUnavailable(signal).then((cached) =>
-        cached.mode === "cached"
-          ? cached
-          : context("guest", cached.cacheViewerId),
-      );
-    }
-    return authenticatedContext(result.data.user, signal);
-  }
-
-  if (result.status === 401) {
-    return cachedOrUnavailable(signal).then((cached) =>
-      cached.mode === "cached"
-        ? cached
-        : context("guest", cached.cacheViewerId),
-    );
-  }
-  if (result.status >= 500 && result.status <= 599) {
-    return cachedOrUnavailable(signal);
-  }
-  return context("unavailable", null);
+  signal?.throwIfAborted();
+  return resolveViewerResult(result, options);
 }
