@@ -120,3 +120,10 @@ predicate). The candidate hook now exposes the literal status union
 `"loading" | "ready" | "unavailable"` without an unsafe cast. The parent should
 rerun the focused browser regression and static checks after this style-only
 commit; the mounted-folder test change remains excluded.
+
+## Candidate-only final style correction
+
+The parent measured candidate typecheck as passing and found one remaining
+image-side Biome error: both SSR-safe `origin` default parameters used a
+line break after `origin =`. Those two defaults now use Biome's expected
+format. No live or folder test was run.
