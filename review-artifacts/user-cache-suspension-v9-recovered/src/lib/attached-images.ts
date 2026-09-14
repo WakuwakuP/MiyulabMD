@@ -1,5 +1,5 @@
 import { apiFetch } from "./api-fetch.ts";
-import type { AttachedImage } from "./attached-image-target.ts";
+import { type AttachedImage, attachedImage } from "./attached-image-target.ts";
 import {
   assertOfflineCacheScope,
   isSupportedCachedImageMime,

@@ -66,7 +66,7 @@ export function acquireAttachedImageNetworkOnly(
     target.noteId !== image.noteId ||
     target.imageId !== image.imageId
   ) {
-    return null;
+    return Promise.resolve(null);
   }
   const key = JSON.stringify([expectedViewerId, image.url]);
   let entry = inFlight.get(key);

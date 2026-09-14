@@ -78,3 +78,13 @@ network-only browser suite and web typecheck were not runnable because this
 worktree has no installed dependencies (`node_modules` is absent). The
 browser spec passes `node --experimental-strip-types --check`, and
 `git diff --check` passes. No browser GREEN result is claimed.
+
+## Parent validation after candidate fixes
+
+The parent worker measured the network-only browser suite at 10/10 passing,
+including DOM, storage, actor, status, MIME, and abort coverage. The focused
+network plus existing-image/quota run measured 17/29 passing. Candidate
+typecheck reported two errors: the missing local `attachedImage` binding in
+`attached-images.ts` and the invalid-target `Promise<Blob | null>` return in
+`network-attached-images.ts`; both are addressed by this candidate fix. The
+five checked candidate files passed Biome.
