@@ -1,4 +1,4 @@
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import {
   EditorView,
   highlightActiveLine,
@@ -6,8 +6,8 @@ import {
   lineNumbers,
   scrollPastEnd,
 } from "@codemirror/view";
-import { useEffect, useRef, useState } from "react";
-import { yCollab } from "y-codemirror.next";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { yCollab, ySyncAnnotation } from "y-codemirror.next";
 import * as Y from "yjs";
 import { uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
@@ -74,6 +74,9 @@ function dataTransferHasImage(data: DataTransfer | null): boolean {
 }
 
 function insertMarkdownImage(view: EditorView, yText: Y.Text, url: string) {
+  if (view.state.readOnly) {
+    return;
+  }
   const markdown = `![](${url})`;
   const pos = view.state.selection.main.head;
   yText.insert(pos, markdown);
@@ -86,21 +89,26 @@ function insertMarkdownImage(view: EditorView, yText: Y.Text, url: string) {
 function imageUploadHandlers(
   noteId: string,
   yText: Y.Text,
-  readOnly: boolean,
+  isReadOnly: () => boolean,
   onContextMenu: (event: MouseEvent, view: EditorView) => void,
 ) {
   async function handleImageFile(view: EditorView, file: File) {
+    if (isReadOnly()) {
+      return;
+    }
     const result = await uploadImage(noteId, file);
     if (!result.ok) {
       console.error("image upload failed:", result.error);
       return;
     }
-    insertMarkdownImage(view, yText, result.data.url);
+    if (!isReadOnly() && view.dom.isConnected) {
+      insertMarkdownImage(view, yText, result.data.url);
+    }
   }
 
   return EditorView.domEventHandlers({
     contextmenu(event, view) {
-      if (readOnly) {
+      if (isReadOnly()) {
         return false;
       }
       event.preventDefault();
@@ -112,7 +120,7 @@ function imageUploadHandlers(
       return true;
     },
     dragover(event) {
-      if (readOnly) {
+      if (isReadOnly()) {
         return false;
       }
       if (!dataTransferHasImage(event.dataTransfer)) {
@@ -122,7 +130,7 @@ function imageUploadHandlers(
       return true;
     },
     drop(event, view) {
-      if (readOnly) {
+      if (isReadOnly()) {
         return false;
       }
       const file = imageFileFromDataTransfer(event.dataTransfer);
@@ -135,7 +143,7 @@ function imageUploadHandlers(
       return true;
     },
     paste(event, view) {
-      if (readOnly) {
+      if (isReadOnly()) {
         return false;
       }
       const file = imageFileFromClipboard(event.clipboardData);
@@ -163,6 +171,10 @@ function applyScrollRatio(el: HTMLElement, ratio: number) {
   el.scrollTop = max * ratio;
 }
 
+function editingExtensions(readOnly: boolean) {
+  return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+}
+
 export function MarkdownEditor({
   noteId,
   yText,
@@ -179,6 +191,8 @@ export function MarkdownEditor({
     (event: MouseEvent, view: EditorView) => void
   >(() => undefined);
   const onScrollRatioRef = useRef(onScrollRatio);
+  const readOnlyRef = useRef(readOnly);
+  const editing = useRef(new Compartment());
   const applyingScroll = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -186,6 +200,7 @@ export function MarkdownEditor({
     setMenu({ x: event.clientX, y: event.clientY });
   };
   onScrollRatioRef.current = onScrollRatio;
+  readOnlyRef.current = readOnly;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -193,7 +208,13 @@ export function MarkdownEditor({
       return;
     }
 
-    const undoManager = readOnly ? false : new Y.UndoManager(yText);
+    const undoManager = new Y.UndoManager(yText);
+    // y-codemirror's undo commands mutate Y.Text before a CM transaction, so
+    // guard the manager as well as local CodeMirror document transactions.
+    const undo = undoManager.undo.bind(undoManager);
+    const redo = undoManager.redo.bind(undoManager);
+    undoManager.undo = () => (readOnlyRef.current ? null : undo());
+    undoManager.redo = () => (readOnlyRef.current ? null : redo());
 
     const state = EditorState.create({
       doc: yText.toString(),
@@ -230,10 +251,23 @@ export function MarkdownEditor({
           },
         }),
         yCollab(yText, awareness, { undoManager }),
-        EditorView.editable.of(!readOnly),
-        imageUploadHandlers(noteId, yText, readOnly, (event, view) => {
-          onContextMenuRef.current(event, view);
-        }),
+        EditorView.contentAttributes.of({ tabindex: "0" }),
+        editing.current.of(editingExtensions(readOnlyRef.current)),
+        EditorState.transactionFilter.of((transaction) =>
+          readOnlyRef.current &&
+          transaction.docChanged &&
+          !transaction.annotation(ySyncAnnotation)
+            ? []
+            : transaction,
+        ),
+        imageUploadHandlers(
+          noteId,
+          yText,
+          () => readOnlyRef.current,
+          (event, view) => {
+            onContextMenuRef.current(event, view);
+          },
+        ),
         EditorView.domEventHandlers({
           scroll(_event, view) {
             if (applyingScroll.current) {
@@ -251,9 +285,16 @@ export function MarkdownEditor({
 
     return () => {
       view.destroy();
+      undoManager.destroy();
       viewRef.current = null;
     };
-  }, [noteId, yText, awareness, readOnly, showLineNumbers]);
+  }, [noteId, yText, awareness, showLineNumbers]);
+
+  useLayoutEffect(() => {
+    viewRef.current?.dispatch({
+      effects: editing.current.reconfigure(editingExtensions(readOnly)),
+    });
+  }, [readOnly]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -273,7 +314,7 @@ export function MarkdownEditor({
 
   async function uploadAtCursor(file: File) {
     const view = viewRef.current;
-    if (!view) {
+    if (!view || readOnlyRef.current) {
       return;
     }
     const result = await uploadImage(noteId, file);
@@ -281,7 +322,9 @@ export function MarkdownEditor({
       console.error("image upload failed:", result.error);
       return;
     }
-    insertMarkdownImage(view, yText, result.data.url);
+    if (!readOnlyRef.current && viewRef.current === view) {
+      insertMarkdownImage(view, yText, result.data.url);
+    }
   }
 
   return (
@@ -302,6 +345,7 @@ export function MarkdownEditor({
       <FileInput
         accept={[...IMAGE_TYPES].join(",")}
         aria-label="画像をアップロード"
+        disabled={readOnly}
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";

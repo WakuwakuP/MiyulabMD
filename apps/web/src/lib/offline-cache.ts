@@ -2,10 +2,12 @@ import type { FolderAccess, Note, NoteSummary } from "@miyulabmd/shared";
 
 import {
   beginNoteReadOrder,
+  bindNoteIdentity,
   clearUserNoteReadOrder,
   currentNoteReadGeneration,
   enterNoteDenialOrder,
   isCurrentNoteReadOrder,
+  noteIdentityIds,
 } from "./note-access-order.ts";
 
 const DATABASE_NAME = "miyulabmd-offline-cache";
@@ -431,6 +433,39 @@ function readRecord(
     const transaction = database.transaction(NOTE_STORE, "readonly");
     const request = transaction.objectStore(NOTE_STORE).get(key);
     request.onsuccess = () => resolve(request.result as NoteRecord | undefined);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readNoteForRoute(
+  database: IDBDatabase,
+  userId: string,
+  id: string,
+): Promise<NoteRecord | undefined> {
+  const canonical = await readRecord(database, noteKey(userId, id));
+  if (canonical) {
+    return canonical.userId === userId ? canonical : undefined;
+  }
+  // Scan only this user's canonical rows; the current snapshot owns its short ID.
+  const prefix = `${noteListKey(userId)}:`;
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(NOTE_STORE, "readonly");
+    const request = transaction
+      .objectStore(NOTE_STORE)
+      .openCursor(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(undefined);
+        return;
+      }
+      const record = cursor.value as NoteRecord;
+      if (record.userId === userId && record.note.shortId === id) {
+        resolve(record);
+        return;
+      }
+      cursor.continue();
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -932,7 +967,15 @@ export async function openOfflineCache(
       ) {
         return;
       }
-      await deleteMetadata(database, deniedNoteKey(userId, id), userId);
+      for (const identity of noteIdentityIds(userId, id)) {
+        if (
+          orderingToken !== undefined &&
+          orderingToken !== currentNoteGeneration(userId, identity)
+        ) {
+          return;
+        }
+        await deleteMetadata(database, deniedNoteKey(userId, identity), userId);
+      }
     },
     close() {
       if (!closed) {
@@ -959,6 +1002,7 @@ export async function openOfflineCache(
       assertUserActive(userId, lifetime);
     },
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: identity discovery, durable fencing, and cleanup have distinct failure boundaries.
     async denyNote(id, orderingToken) {
       if (closed) {
         throw new Error("Offline cache is closed");
@@ -971,13 +1015,27 @@ export async function openOfflineCache(
         return;
       }
       try {
-        await commitTransaction(
+        const record = await readNoteForRoute(database, userId, id);
+        if (record) {
+          bindNoteIdentity(userId, record.noteId, record.note.shortId);
+        } else {
+          const list = await readNoteListRecord(database, noteListKey(userId));
+          const note = list?.notes.find(
+            (item) => item.id === id || item.shortId === id,
+          );
+          if (note) {
+            bindNoteIdentity(userId, note.id, note.shortId);
+          }
+        }
+        if (denialToken !== currentNoteGeneration(userId, id)) {
+          return;
+        }
+        await commitStoreRecords(
           database,
-          METADATA_STORE,
-          {
-            key: deniedNoteKey(userId, id),
-            value: "1",
-          },
+          noteIdentityIds(userId, id).map((identity) => ({
+            record: { key: deniedNoteKey(userId, identity), value: "1" },
+            storeName: METADATA_STORE,
+          })),
           userId,
         );
       } catch (error) {
@@ -985,9 +1043,10 @@ export async function openOfflineCache(
         throw error;
       }
       try {
-        const fileName = await removeCachedNote(database, userId, id);
+        const canonical = noteIdentityIds(userId, id)[0] ?? id;
+        const fileName = await removeCachedNote(database, userId, canonical);
         if (fileName) {
-          await removeUnreferencedNoteFile(userId, id, fileName);
+          await removeUnreferencedNoteFile(userId, canonical, fileName);
         }
       } catch {
         // The durable denial remains authoritative; cleanup is retryable.
@@ -1037,7 +1096,7 @@ export async function openOfflineCache(
       ) {
         return null;
       }
-      const record = await readRecord(database, noteKey(userId, id));
+      const record = await readNoteForRoute(database, userId, id);
       if (
         !record ||
         isUserSuspended(userId) ||
@@ -1045,14 +1104,27 @@ export async function openOfflineCache(
       ) {
         return null;
       }
+      const canonicalGeneration = currentNoteGeneration(userId, record.noteId);
+      if (await readDeniedNote(database, userId, record.noteId)) {
+        return null;
+      }
 
       try {
-        const file = await noteFile(userId, id, record.fileName);
+        const file = await noteFile(userId, record.noteId, record.fileName);
         const markdown = await (await file.getFile()).text();
+        // Both route and canonical denials remain authoritative after OPFS awaits.
+        if (
+          (await readDeniedNote(database, userId, id)) ||
+          (id !== record.noteId &&
+            (await readDeniedNote(database, userId, record.noteId)))
+        ) {
+          return null;
+        }
         if (
           isUserSuspended(userId) ||
           currentUserLifetime(userId) !== lifetime ||
-          currentNoteGeneration(userId, id) !== generation
+          currentNoteGeneration(userId, id) !== generation ||
+          currentNoteGeneration(userId, record.noteId) !== canonicalGeneration
         ) {
           return null;
         }
@@ -1159,10 +1231,7 @@ export async function openOfflineCache(
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
       const orderingToken = options.orderingToken;
-      if (
-        orderingToken !== undefined &&
-        orderingToken !== currentNoteGeneration(userId, note.id)
-      ) {
+      if (!bindNoteIdentity(userId, note.id, note.shortId, orderingToken)) {
         return;
       }
       // Register before the first path await and settle only after metadata and

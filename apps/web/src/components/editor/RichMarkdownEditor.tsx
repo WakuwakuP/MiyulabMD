@@ -1,15 +1,23 @@
 import { markdownBody, withClosedFrontmatter } from "@miyulabmd/shared";
+import { Extension } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import { NodeRange } from "@tiptap/extension-node-range";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TableKit } from "@tiptap/extension-table";
 import Youtube from "@tiptap/extension-youtube";
 import { Markdown } from "@tiptap/markdown";
+import { Plugin } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import type { Editor } from "@tiptap/react";
 import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type * as Y from "yjs";
 import { fetchOgPreview, uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
@@ -178,87 +186,108 @@ export function RichMarkdownEditor({
   const lastYMarkdown = useRef(yText.toString());
   const mapRef = useRef<OffsetMap | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
-  const refreshMap = (
-    editor: Editor,
-    markdown = markdownBody(yText.toString()),
-  ) => {
-    mapRef.current = buildOffsetMap(editor.state.doc, markdown);
-    return mapRef.current;
-  };
+  const refreshMap = useCallback(
+    (editor: Editor, markdown = markdownBody(yText.toString())) => {
+      mapRef.current = buildOffsetMap(editor.state.doc, markdown);
+      return mapRef.current;
+    },
+    [yText],
+  );
 
-  const publishCursor = (editor: Editor) => {
-    const full = yText.toString();
-    const body = markdownBody(full);
-    const offset = full.length - body.length;
-    const map = refreshMap(editor, body);
-    writeMarkdownCursor(
-      awareness,
-      yText,
-      pmToMd(map, editor.state.selection.anchor) + offset,
-      pmToMd(map, editor.state.selection.head) + offset,
-    );
-  };
+  const publishCursor = useCallback(
+    (editor: Editor) => {
+      const full = yText.toString();
+      const body = markdownBody(full);
+      const offset = full.length - body.length;
+      const map = refreshMap(editor, body);
+      writeMarkdownCursor(
+        awareness,
+        yText,
+        pmToMd(map, editor.state.selection.anchor) + offset,
+        pmToMd(map, editor.state.selection.head) + offset,
+      );
+    },
+    [awareness, yText, refreshMap],
+  );
 
-  const refreshCarets = (editor: Editor) => {
-    refreshMap(editor);
-    editor.view.dispatch(editor.state.tr.setMeta(collabCaretsKey, true));
-  };
+  const refreshCarets = useCallback(
+    (editor: Editor) => {
+      refreshMap(editor);
+      editor.view.dispatch(editor.state.tr.setMeta(collabCaretsKey, true));
+    },
+    [refreshMap],
+  );
 
-  const applyRemote = (editor: Editor, delta: YTextDeltaItem[]) => {
-    const next = yText.toString();
-    const nextBody = markdownBody(next);
-    if (markdownEquivalent(editorMarkdown(editor), nextBody)) {
+  const applyRemote = useCallback(
+    (editor: Editor, delta: YTextDeltaItem[]) => {
+      const next = yText.toString();
+      const nextBody = markdownBody(next);
+      if (markdownEquivalent(editorMarkdown(editor), nextBody)) {
+        lastYMarkdown.current = next;
+        refreshMap(editor, nextBody);
+        return;
+      }
+
+      const prevBody = markdownBody(lastYMarkdown.current);
+      const map = buildOffsetMap(editor.state.doc, prevBody);
+      const mdFrom = pmToMd(map, editor.state.selection.from);
+      const mdTo = pmToMd(map, editor.state.selection.to);
+
+      applyingRemote.current = true;
+      const surgical =
+        nextBody === next ? trySurgicalApply(editor, map, delta) : false;
+      if (!surgical) {
+        editor.commands.setContent(normalizeEmbedMarkdown(nextBody), {
+          contentType: "markdown",
+          emitUpdate: false,
+        });
+        const restored = buildOffsetMap(editor.state.doc, nextBody);
+        editor.commands.setTextSelection({
+          from: clampPos(editor.state.doc, mdToPm(restored, mdFrom)),
+          to: clampPos(editor.state.doc, mdToPm(restored, mdTo)),
+        });
+      }
+      applyingRemote.current = false;
       lastYMarkdown.current = next;
-      refreshMap(editor, nextBody);
-      return;
-    }
+      refreshCarets(editor);
+      publishCursor(editor);
+    },
+    [yText, refreshMap, refreshCarets, publishCursor],
+  );
 
-    const prevBody = markdownBody(lastYMarkdown.current);
-    const map = buildOffsetMap(editor.state.doc, prevBody);
-    const mdFrom = pmToMd(map, editor.state.selection.from);
-    const mdTo = pmToMd(map, editor.state.selection.to);
-
-    applyingRemote.current = true;
-    const surgical =
-      nextBody === next ? trySurgicalApply(editor, map, delta) : false;
-    if (!surgical) {
-      editor.commands.setContent(normalizeEmbedMarkdown(nextBody), {
-        contentType: "markdown",
-        emitUpdate: false,
-      });
-      const restored = buildOffsetMap(editor.state.doc, nextBody);
-      editor.commands.setTextSelection({
-        from: clampPos(editor.state.doc, mdToPm(restored, mdFrom)),
-        to: clampPos(editor.state.doc, mdToPm(restored, mdTo)),
-      });
-    }
-    applyingRemote.current = false;
-    lastYMarkdown.current = next;
-    refreshCarets(editor);
-    publishCursor(editor);
-  };
-
-  const flushLocal = (editor: Editor) => {
-    if (applyingRemote.current || composing.current || readOnly) {
-      return;
-    }
-    const next = withClosedFrontmatter(
-      lastYMarkdown.current || yText.toString(),
-      editorMarkdown(editor),
-    );
-    if (
-      markdownEquivalent(lastYMarkdown.current, next) ||
-      markdownEquivalent(yText.toString(), next)
-    ) {
+  // Persist the already-accepted ProseMirror state, not new DOM input.
+  // Ordinary updates defer this during IME; the writable -> paused boundary
+  // must commit it before remote reconciliation can replace the document.
+  const commitLocal = useCallback(
+    (editor: Editor) => {
+      const next = withClosedFrontmatter(
+        lastYMarkdown.current || yText.toString(),
+        editorMarkdown(editor),
+      );
+      if (
+        markdownEquivalent(lastYMarkdown.current, next) ||
+        markdownEquivalent(yText.toString(), next)
+      ) {
+        lastYMarkdown.current = yText.toString();
+        refreshMap(editor);
+        return;
+      }
+      applyTextDiff(yText, next, "rich");
       lastYMarkdown.current = yText.toString();
       refreshMap(editor);
+      publishCursor(editor);
+    },
+    [yText, refreshMap, publishCursor],
+  );
+
+  const flushLocal = (editor: Editor) => {
+    if (applyingRemote.current || composing.current || readOnlyRef.current) {
       return;
     }
-    applyTextDiff(yText, next, "rich");
-    lastYMarkdown.current = yText.toString();
-    refreshMap(editor);
-    publishCursor(editor);
+    commitLocal(editor);
   };
 
   const editor = useEditor({
@@ -268,6 +297,7 @@ export function RichMarkdownEditor({
     editorProps: {
       attributes: {
         class: richEditorTiptapClass,
+        tabindex: "0",
       },
       handleDOMEvents: {
         compositionend: () => {
@@ -286,9 +316,22 @@ export function RichMarkdownEditor({
           composing.current = true;
           return false;
         },
+        keydown: (_view, event) => {
+          if (
+            readOnlyRef.current &&
+            (event.ctrlKey || event.metaKey) &&
+            ["z", "y"].includes(event.key.toLowerCase())
+          ) {
+            // ProseMirror skips editable keymaps when setEditable(false).
+            // Do not let the browser's native undo move the retained caret.
+            event.preventDefault();
+            return true;
+          }
+          return false;
+        },
       },
       handleDrop(_view, event) {
-        if (readOnly) {
+        if (readOnlyRef.current) {
           return false;
         }
         const file = firstImageFile(event.dataTransfer);
@@ -296,15 +339,11 @@ export function RichMarkdownEditor({
           return false;
         }
         event.preventDefault();
-        void uploadImage(noteId, file).then((result) => {
-          if (result.ok) {
-            editor?.chain().focus().setImage({ src: result.data.url }).run();
-          }
-        });
+        void insertImageFile(file);
         return true;
       },
       handlePaste(_view, event) {
-        if (readOnly) {
+        if (readOnlyRef.current) {
           return false;
         }
         const file = firstImageFile(event.clipboardData);
@@ -312,11 +351,7 @@ export function RichMarkdownEditor({
           return false;
         }
         event.preventDefault();
-        void uploadImage(noteId, file).then((result) => {
-          if (result.ok) {
-            editor?.chain().focus().setImage({ src: result.data.url }).run();
-          }
-        });
+        void insertImageFile(file);
         return true;
       },
       handleScrollToSelection: scrollRichSelectionIntoView,
@@ -324,6 +359,20 @@ export function RichMarkdownEditor({
       scrollThreshold: readEditorScrollPadPx(),
     },
     extensions: [
+      // setEditable controls DOM input; the transaction filter also rejects
+      // commands (including undo and delayed UI callbacks) while paused.
+      Extension.create({
+        addProseMirrorPlugins() {
+          return [
+            new Plugin({
+              filterTransaction: (transaction) =>
+                !(transaction.docChanged && readOnlyRef.current) ||
+                applyingRemote.current,
+            }),
+          ];
+        },
+        name: "editorReadOnly",
+      }),
       StarterKit.configure({
         codeBlock: false,
         dropcursor: {
@@ -401,7 +450,7 @@ export function RichMarkdownEditor({
     if (editor) {
       refreshMap(editor);
     }
-  }, [editor]);
+  }, [editor, refreshMap]);
 
   useEffect(() => {
     if (!editor) {
@@ -422,7 +471,7 @@ export function RichMarkdownEditor({
 
     yText.observe(sync);
     return () => yText.unobserve(sync);
-  }, [editor, yText]);
+  }, [editor, yText, applyRemote]);
 
   useEffect(() => {
     if (!editor) {
@@ -434,25 +483,39 @@ export function RichMarkdownEditor({
     return () => {
       awareness.off("change", onAwareness);
     };
-  }, [editor, awareness]);
+  }, [editor, awareness, refreshCarets]);
 
-  useEffect(() => {
-    editor?.setEditable(!readOnly);
-  }, [editor, readOnly]);
+  useLayoutEffect(() => {
+    if (editor?.isEditable && readOnly) {
+      commitLocal(editor);
+      composing.current = false;
+      if (pendingRemote.current) {
+        pendingRemote.current = false;
+        applyRemote(editor, []);
+      }
+    }
+    editor?.setEditable(!readOnly, false);
+  }, [editor, readOnly, commitLocal, applyRemote]);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [linkModal, setLinkModal] = useState<"card" | "inline" | null>(null);
 
   async function insertImageFile(file: File) {
+    if (readOnlyRef.current || !editor || editor.isDestroyed) {
+      return;
+    }
     const result = await uploadImage(noteId, file);
-    if (result.ok) {
-      editor?.chain().focus().setImage({ src: result.data.url }).run();
+    if (result.ok && !readOnlyRef.current && !editor.isDestroyed) {
+      editor.chain().focus().setImage({ src: result.data.url }).run();
     }
   }
 
   function insertYoutube() {
+    if (readOnlyRef.current) {
+      return;
+    }
     const url = window.prompt("YouTube の URL");
-    if (!(url && editor)) {
+    if (!(url && editor) || readOnlyRef.current) {
       return;
     }
     editor
@@ -463,7 +526,7 @@ export function RichMarkdownEditor({
   }
 
   async function insertStandaloneLink(url: string) {
-    if (!editor) {
+    if (!editor || readOnlyRef.current || editor.isDestroyed) {
       return;
     }
     if (youtubeId(url)) {
@@ -475,6 +538,9 @@ export function RichMarkdownEditor({
       return;
     }
     await fetchOgPreview(url);
+    if (readOnlyRef.current || editor.isDestroyed) {
+      return;
+    }
     editor
       .chain()
       .focus()
@@ -483,7 +549,9 @@ export function RichMarkdownEditor({
   }
 
   function applyInlineLink(url: string) {
-    editor?.chain().focus().setLink({ href: url }).run();
+    if (!readOnlyRef.current) {
+      editor?.chain().focus().setLink({ href: url }).run();
+    }
   }
 
   if (!editor) {
@@ -501,6 +569,7 @@ export function RichMarkdownEditor({
       <FileInput
         accept={[...IMAGE_TYPES].join(",")}
         aria-label="画像をアップロード"
+        disabled={readOnly}
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
@@ -527,7 +596,7 @@ export function RichMarkdownEditor({
           />
         </>
       )}
-      {linkModal && (
+      {linkModal && !readOnly && (
         <LinkModal
           initial={
             linkModal === "inline"

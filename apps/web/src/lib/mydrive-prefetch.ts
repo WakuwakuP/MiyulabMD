@@ -6,8 +6,13 @@ import {
   fetchNote,
   fetchNotes,
 } from "./api.ts";
+import { ApiCommunicationError } from "./api-transport.ts";
 import { openOfflineCache } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
+
+export const PREFETCH_MAX_ATTEMPTS = 2;
+export const PREFETCH_RETRY_DELAY_MS = 500;
+export const PREFETCH_MAX_CONSECUTIVE_FAILURES = 4;
 
 export type MyDrivePrefetchResult =
   | { status: "success"; folders: number; notes: number }
@@ -91,39 +96,120 @@ function stopReason(
 
 type PrefetchCache = Awaited<ReturnType<typeof openOfflineCache>>;
 
+function transientStatus(status: unknown): boolean {
+  return typeof status === "number" && status >= 500 && status <= 599;
+}
+
+function transientError(error: unknown, rawFetchErrors: boolean): boolean {
+  return (
+    error instanceof ApiCommunicationError ||
+    (rawFetchErrors && error instanceof TypeError) ||
+    (error instanceof ApiHttpError && transientStatus(error.status))
+  );
+}
+
+function noteDenied(status: number): boolean {
+  return status === 403 || status === 404;
+}
+
+function retryDelay(signal: AbortSignal): Promise<void> {
+  throwIfPrefetchAborted(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, PREFETCH_RETRY_DELAY_MS);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+// One cycle owns the budget. Only communication errors and HTTP 5xx
+// are retryable; storage, cancellation, malformed data and denial are not.
+class Acquisition {
+  consecutiveFailures = 0;
+  incomplete = false;
+
+  constructor(readonly signal: AbortSignal) {}
+
+  async run<T>(
+    operation: () => Promise<T>,
+    { rawFetchErrors = false } = {},
+  ): Promise<T | undefined> {
+    for (let attempt = 1; attempt <= PREFETCH_MAX_ATTEMPTS; attempt += 1) {
+      throwIfPrefetchAborted(this.signal);
+      try {
+        const result = await operation();
+        throwIfPrefetchAborted(this.signal);
+        if (
+          !(
+            result &&
+            typeof result === "object" &&
+            "ok" in result &&
+            result.ok === false &&
+            "status" in result &&
+            transientStatus(result.status)
+          )
+        ) {
+          this.consecutiveFailures = 0;
+          return result;
+        }
+      } catch (error) {
+        if (
+          isAbort(error, this.signal) ||
+          !transientError(error, rawFetchErrors)
+        ) {
+          throw new PrefetchIoError("network", error);
+        }
+      }
+      this.consecutiveFailures += 1;
+      if (this.consecutiveFailures >= PREFETCH_MAX_CONSECUTIVE_FAILURES) {
+        throw new PrefetchIoError(
+          "network",
+          new Error("Communication stopped"),
+        );
+      }
+      if (attempt < PREFETCH_MAX_ATTEMPTS) {
+        await retryDelay(this.signal);
+      }
+    }
+    this.incomplete = true;
+    return undefined;
+  }
+}
+
 async function acquireFolders(
   cache: PrefetchCache,
   signal: AbortSignal,
   tree: FolderRecord[],
   counts: Counts,
+  acquisition: Acquisition,
 ): Promise<"aborted" | "auth" | "network" | "storage" | null> {
   const root = rootFolder(tree);
   if (!root) {
     return "network";
   }
-  const rootResult = await prefetchIo(signal, "network", () =>
-    fetchFolder(root.id, { signal }),
-  );
-  if (!rootResult.ok) {
-    return isAuthStatus(rootResult.status) ? "auth" : "network";
-  }
-  await prefetchIo(signal, "storage", () =>
-    cache.putFolder(rootResult.data, { asDriveRoot: true, signal }),
-  );
-  counts.folders += 1;
-
-  for (const folder of tree) {
-    if (folder.id === root.id) {
+  const ordered = [root, ...tree.filter((folder) => folder.id !== root.id)];
+  for (const folder of ordered) {
+    const folderResult = await acquisition.run(
+      () => fetchFolder(folder.id, { signal }),
+      { rawFetchErrors: true },
+    );
+    if (!folderResult) {
       continue;
     }
-    const folderResult = await prefetchIo(signal, "network", () =>
-      fetchFolder(folder.id, { signal }),
-    );
     if (!folderResult.ok) {
       return isAuthStatus(folderResult.status) ? "auth" : "network";
     }
     await prefetchIo(signal, "storage", () =>
-      cache.putFolder(folderResult.data, { signal }),
+      cache.putFolder(folderResult.data, {
+        asDriveRoot: folder.id === root.id,
+        signal,
+      }),
     );
     counts.folders += 1;
   }
@@ -136,9 +222,13 @@ async function acquireDrive(
   userId: string,
   counts: Counts,
 ): Promise<MyDrivePrefetchResult> {
-  const treeResult = await prefetchIo(signal, "network", () =>
-    fetchFolderTree({ signal }),
-  );
+  const acquisition = new Acquisition(signal);
+  const treeResult = await acquisition.run(() => fetchFolderTree({ signal }), {
+    rawFetchErrors: true,
+  });
+  if (!treeResult) {
+    return stopped("network", counts);
+  }
   if (!treeResult.ok) {
     return stopped(
       isAuthStatus(treeResult.status) ? "auth" : "network",
@@ -150,6 +240,7 @@ async function acquireDrive(
     signal,
     treeResult.data,
     counts,
+    acquisition,
   );
   if (folderStop) {
     return stopped(folderStop, counts);
@@ -160,9 +251,10 @@ async function acquireDrive(
     userId,
     folderIds(treeResult.data),
     counts,
+    acquisition,
   );
-  return notesStop
-    ? stopped(notesStop, counts)
+  return notesStop || acquisition.incomplete
+    ? stopped(notesStop ?? "network", counts)
     : { ...counts, status: "success" };
 }
 
@@ -172,10 +264,14 @@ async function acquireNotes(
   userId: string,
   ownedFolders: Set<string>,
   counts: Counts,
+  acquisition: Acquisition,
 ): Promise<"aborted" | "auth" | "network" | "storage" | null> {
-  const summaries = await prefetchIo(signal, "network", () =>
-    fetchNotes({ signal }),
-  );
+  const summaries = await acquisition.run(() => fetchNotes({ signal }), {
+    rawFetchErrors: true,
+  });
+  if (!summaries) {
+    return "network";
+  }
   await prefetchIo(signal, "storage", () =>
     cache.putNoteList(summaries, { signal }),
   );
@@ -195,14 +291,17 @@ async function acquireNotes(
     const orderingToken = await prefetchIo(signal, "storage", () =>
       cache.beginNoteRead(summary.id),
     );
-    const noteResult = await prefetchIo(signal, "network", () =>
+    const noteResult = await acquisition.run(() =>
       fetchNote(summary.id, { signal, viewerId: userId }),
     );
+    if (!noteResult) {
+      continue;
+    }
     if (!noteResult.ok) {
       if (noteResult.status === 401) {
         return "auth";
       }
-      if (noteResult.status === 403 || noteResult.status === 404) {
+      if (noteDenied(noteResult.status)) {
         await prefetchIo(signal, "storage", () => cache.denyNote(summary.id));
       }
       continue;

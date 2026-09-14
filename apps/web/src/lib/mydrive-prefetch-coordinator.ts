@@ -5,6 +5,7 @@ import type { ViewerContext } from "./viewer-context.ts";
 export const PREFETCH_DEBOUNCE_MS = 200;
 export const PREFETCH_MIN_INTERVAL_MS = 1000;
 export const PREFETCH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+export const PREFETCH_FAILURE_COOLDOWN_MS = 30_000;
 const PREFETCH_LOCK_PREFIX = "miyulabmd:mydrive-prefetch:";
 
 type PrefetchCoordinator = {
@@ -46,6 +47,7 @@ export function attachMyDrivePrefetchCoordinator(
   let pending = false;
   let lastAttemptAt: number | null = null;
   let refreshInterval: number | null = null;
+  let cooldownUntil = 0;
 
   const schedule = () => {
     if (disposed || timer !== null) {
@@ -83,7 +85,12 @@ export function attachMyDrivePrefetchCoordinator(
               if (!lock || disposed || controller.signal.aborted) {
                 return;
               }
-              await prefetchMyDrive(snapshot, { signal: controller.signal });
+              const result = await prefetchMyDrive(snapshot, {
+                signal: controller.signal,
+              });
+              if (result.status === "stopped" && result.reason !== "aborted") {
+                cooldownUntil = Date.now() + PREFETCH_FAILURE_COOLDOWN_MS;
+              }
             },
           )
           .catch(() => {
@@ -99,7 +106,11 @@ export function attachMyDrivePrefetchCoordinator(
             }
           });
       },
-      Math.max(PREFETCH_DEBOUNCE_MS, waitForInterval),
+      Math.max(
+        PREFETCH_DEBOUNCE_MS,
+        waitForInterval,
+        cooldownUntil - Date.now(),
+      ),
     );
   };
 
