@@ -16,6 +16,11 @@ type Images = {
   status: "ready" | "unavailable";
   urls: Map<string, string | null>;
 };
+export type PreviewImages = {
+  enabled: boolean;
+  status: "loading" | "ready" | "unavailable";
+  urls: Map<string, string | null>;
+};
 type AcquisitionMode =
   | "cache"
   | "cache-backed-network"
@@ -70,7 +75,10 @@ function expectedViewerIdForMode(
 }
 
 /** Blob URLs belong to the preview, never to the acquisition/cache or Markdown. */
-export function usePreviewImages(markdown: string, context?: ImageViewContext) {
+export function usePreviewImages(
+  markdown: string,
+  context?: ImageViewContext,
+): PreviewImages {
   const mode = acquisitionMode(context);
   const cacheOnly = mode === "cache";
   const userId = context?.viewer.cacheViewerId ?? null;
@@ -250,14 +258,14 @@ export function usePreviewImages(markdown: string, context?: ImageViewContext) {
       revoke();
     };
   }, [cacheOnly, enabled, markdown, owner, userId, expectedViewerId, mode]);
-  return useMemo(
+  return useMemo<PreviewImages>(
     () => ({
       enabled,
+      status: images?.owner === owner ? images.status : "loading",
       urls:
         images?.owner === owner
           ? images.urls
           : new Map<string, string | null>(),
-      status: images?.owner === owner ? images.status : "loading",
     }),
     [enabled, images, owner],
   );
@@ -318,7 +326,7 @@ export function sanitizePreviewImagesWithoutDocument(html: string): string {
         : tag;
     }
     const candidate = attachedImage(source[2] ?? "");
-    if (!candidate && !looksLikeManagedImage(source[2] ?? "")) {
+    if (!(candidate || looksLikeManagedImage(source[2] ?? ""))) {
       return tag;
     }
     return tag.replace(source[0], "");

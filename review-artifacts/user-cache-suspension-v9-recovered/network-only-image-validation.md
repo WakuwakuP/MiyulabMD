@@ -109,3 +109,14 @@ The reviewer findings were addressed in the candidate source:
 Not verified in this worker: live adoption of the two new files, the complete
 browser suite, and a deliberately failed dynamic-import fixture. The
 pre-existing mounted-folder worktree diff was not staged.
+
+## Final static checks
+
+The parent worker's final candidate checks found and fixed the remaining four
+static diagnostics: one typecheck error from the widened `status` value passed
+to `MarkdownPreview`, plus three image-side Biome diagnostics (the two default
+origin ternaries, the `useMemo` return-key order, and the managed-image
+predicate). The candidate hook now exposes the literal status union
+`"loading" | "ready" | "unavailable"` without an unsafe cast. The parent should
+rerun the focused browser regression and static checks after this style-only
+commit; the mounted-folder test change remains excluded.
