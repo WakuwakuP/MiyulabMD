@@ -535,9 +535,7 @@ test("mounted note list removes only a peer-denied note", async ({
   try {
     await denyNoteFromPeer(peer, target.id);
     await expect
-      .poll(
-        () => apiRequests.filter((path) => path === "/api/notes").length,
-      )
+      .poll(() => apiRequests.filter((path) => path === "/api/notes").length)
       .toBeGreaterThan(noteRequestCount);
     await expect(page.getByRole("link", { name: target.title })).toHaveCount(0);
     await expect(page.getByRole("link", { name: sibling.title })).toBeVisible();
@@ -547,12 +545,20 @@ test("mounted note list removes only a peer-denied note", async ({
 });
 
 test("route switch fences a delayed folder denial", async ({ page }) => {
-  const folderA = folderFixture("mounted-route-a", "Route A", null, [], [
-    { id: "mounted-route-a", name: "Route A" },
-  ]);
-  const folderB = folderFixture("mounted-route-b", "Route B", null, [], [
-    { id: "mounted-route-b", name: "Route B" },
-  ]);
+  const folderA = folderFixture(
+    "mounted-route-a",
+    "Route A",
+    null,
+    [],
+    [{ id: "mounted-route-a", name: "Route A" }],
+  );
+  const folderB = folderFixture(
+    "mounted-route-b",
+    "Route B",
+    null,
+    [],
+    [{ id: "mounted-route-b", name: "Route B" }],
+  );
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -600,7 +606,9 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
     await page.goto(`/f/${folderB.id}`);
     await secondNavigation;
     await expect(
-      page.getByRole("navigation", { name: "フォルダ" }).getByText(folderB.name),
+      page
+        .getByRole("navigation", { name: "フォルダ" })
+        .getByText(folderB.name),
     ).toBeVisible();
     await expect(page.getByText(/キャッシュ|停止|警告/)).toHaveCount(0);
   } finally {
