@@ -741,6 +741,237 @@ async function clearUserFiles(userId: string): Promise<void> {
   }
 }
 
+export type OfflineCacheOrphanCollection = {
+  removedFiles: number;
+};
+
+type OfflineCacheFileSnapshot = {
+  files: Set<string>;
+};
+
+function isFileName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value !== "." &&
+    value !== ".." &&
+    !value.includes("/") &&
+    !value.includes("\\")
+  );
+}
+
+function readUserFileSnapshot(
+  database: IDBDatabase,
+  userId: string,
+): Promise<OfflineCacheFileSnapshot> {
+  return new Promise((resolve, reject) => {
+    const files = new Set<string>();
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(
+        [NOTE_STORE, METADATA_STORE],
+        "readonly",
+      );
+      const notePrefix = `${noteListKey(userId)}:`;
+      const notes = transaction
+        .objectStore(NOTE_STORE)
+        .openCursor(IDBKeyRange.bound(notePrefix, `${notePrefix}\uffff`));
+      notes.onsuccess = () => {
+        const cursor = notes.result;
+        if (!cursor) {
+          return;
+        }
+        const record = cursor.value as Partial<NoteRecord>;
+        if (
+          record.userId !== userId ||
+          !isFileName(record.fileName) ||
+          typeof record.noteId !== "string" ||
+          record.key !== cursor.key ||
+          record.key !== noteKey(userId, record.noteId)
+        ) {
+          transaction.abort();
+          return;
+        }
+        files.add(`${encodePathPart(record.noteId)}/${record.fileName}`);
+        cursor.continue();
+      };
+      notes.onerror = () => transaction.abort();
+
+      const prefix = `${IMAGE_METADATA_PREFIX}${encodePathPart(userId)}:`;
+      const metadata = transaction
+        .objectStore(METADATA_STORE)
+        .openCursor(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+      metadata.onsuccess = () => {
+        const cursor = metadata.result;
+        if (!cursor) {
+          return;
+        }
+        const key = String(cursor.key);
+        try {
+          const reference = imageFileReference(
+            key.slice(prefix.length),
+            cursor.value,
+          );
+          if (reference) {
+            files.add(reference);
+          }
+        } catch {
+          transaction.abort();
+          return;
+        }
+        cursor.continue();
+      };
+      metadata.onerror = () => transaction.abort();
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    transaction.oncomplete = () => resolve({ files });
+    transaction.onerror = () => undefined;
+    transaction.onabort = () =>
+      reject(
+        transaction.error ??
+          new Error("Offline cache reference snapshot failed"),
+      );
+  });
+}
+
+function imageFileReference(suffix: string, value: unknown): string | null {
+  const record = value as Partial<MetadataRecord> | null;
+  if (typeof record?.value !== "string") {
+    throw new Error("Invalid image reference");
+  }
+  if (record.value === "denied") {
+    return null;
+  }
+  const image = JSON.parse(record.value) as Partial<ImageRecord> | null;
+  const parts = suffix.split(":");
+  if (
+    !isFileName(image?.fileName) ||
+    typeof image?.mime !== "string" ||
+    parts.length !== 2 ||
+    !parts[0] ||
+    !parts[1] ||
+    decodePathPart(parts[0]) === null ||
+    decodePathPart(parts[1]) === null
+  ) {
+    throw new Error("Invalid image reference");
+  }
+  return `${parts[0]}/${image.fileName}`;
+}
+
+function decodePathPart(value: string): string | null {
+  try {
+    const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
+    const binary = atob(
+      base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "="),
+    );
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(
+      Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+    );
+    return decoded && encodePathPart(decoded) === value ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+async function optionalDirectory(
+  parent: FileSystemDirectoryHandle,
+  name: string,
+): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    return await parent.getDirectoryHandle(name);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function userNotesDirectory(
+  userId: string,
+): Promise<FileSystemDirectoryHandle | null> {
+  const root = await navigator.storage.getDirectory();
+  const app = await optionalDirectory(root, OPFS_ROOT);
+  if (!app) {
+    return null;
+  }
+  const user = await optionalDirectory(app, encodePathPart(userId));
+  return user ? optionalDirectory(user, "notes") : null;
+}
+
+type CacheFileCandidate = {
+  directory: FileSystemDirectoryHandle;
+  name: string;
+};
+
+function isManagedSnapshotFile(name: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(md|image)$/.test(
+    name,
+  );
+}
+
+async function findCacheOrphans(
+  notes: FileSystemDirectoryHandle,
+  references: OfflineCacheFileSnapshot,
+): Promise<CacheFileCandidate[]> {
+  const candidates: CacheFileCandidate[] = [];
+  for await (const [noteName, entry] of notes.entries()) {
+    if (entry.kind !== "directory" || decodePathPart(noteName) === null) {
+      continue;
+    }
+    for await (const [name, file] of entry.entries()) {
+      if (
+        file.kind === "file" &&
+        isManagedSnapshotFile(name) &&
+        !references.files.has(`${noteName}/${name}`)
+      ) {
+        candidates.push({ directory: entry, name });
+      }
+    }
+  }
+  return candidates;
+}
+
+export async function collectOfflineCacheOrphans(
+  userId: string,
+): Promise<OfflineCacheOrphanCollection> {
+  if (!userId) {
+    throw new Error("A user ID is required");
+  }
+  if (!("indexedDB" in globalThis && navigator.storage?.getDirectory)) {
+    throw new Error("Offline cache storage is unavailable");
+  }
+  const capturedScope = await captureOfflineCacheScope(userId);
+  if (capturedScope.epoch === null) {
+    throw new Error("Offline cache metadata is unavailable");
+  }
+  return userStorageLock(userId, "exclusive", async () => {
+    const database = await openDatabase();
+    try {
+      await assertOfflineCacheScope(capturedScope, true);
+      const references = await readUserFileSnapshot(database, userId);
+      await assertOfflineCacheScope(capturedScope, true);
+
+      const notes = await userNotesDirectory(userId);
+      if (!notes) {
+        return { removedFiles: 0 };
+      }
+
+      const candidates = await findCacheOrphans(notes, references);
+      let removedFiles = 0;
+      for (const candidate of candidates) {
+        await candidate.directory.removeEntry(candidate.name);
+        removedFiles += 1;
+      }
+      return { removedFiles };
+    } finally {
+      database.close();
+    }
+  });
+}
+
 async function purgeOfflineCacheUser(userId: string): Promise<void> {
   if (!userId) {
     throw new Error("A user ID is required");

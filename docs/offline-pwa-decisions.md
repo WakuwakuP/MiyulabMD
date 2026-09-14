@@ -2286,6 +2286,20 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
 - 詳細と更新hashはcandidate manifestのD126追記、実配信結果は
   `docs/worker-private-cache-acceptance.md`。deploy、共有upstreamへのpushは行っていない。
 
+## D127：参照情報が不確かな場合は回収せず、実writeと排他する
+
+- 状態：user単位の安全なorphan回収primitiveを本体反映・親検証済み。
+- 最初のGC候補で、Aliceのkey範囲にあるrecordのuserIdが壊れると参照を無視し、
+  本文を誤削除することを実ブラウザで再現した。user key範囲とrecordの整合を検証し、
+  不明な参照が一つでもあれば削除前に停止するルールへ修正した。
+- 参照はnoteディレクトリ＋fileNameで照合する。canonicalなUTF-8 pathと既知の
+  UUID `.md` / `.image`だけを回収し、未知ファイル・他user・shell Cache Storageは残す。
+- 実際のpublic `putNote`をOPFS close後に止め、exclusive GCがshared writeの完了を
+  待つことを確認した。手動lock内の未参照ファイルをvalid writeとは扱わない。
+- candidate GC5件、本体GC/clear/image17件、Web unit117件、Web/SW型、lint、diffcheck成功。
+  詳細・失敗履歴・hashはcandidateの`offline-cache-gc-validation.md`。
+- quota時の呼出し、端末全体削除UI、表示中拒否通知は依然未完。自動LRUは導入しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

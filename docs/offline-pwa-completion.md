@@ -35,7 +35,7 @@
 | C6 | prefetch完備 | 現在表示対象の優先、完全一覧／所属追従、単発失敗の限定再試行、連続通信・auth・quota停止、不要ダウンロード抑止を検証 | 実装中：D113 retry関連19件・D116 priority関連8件を親確認、全体統合は未完 |
 | C7 | Yjsと切断 | server保存確認後の取得契機。オンライン編集中の切断で新規入力を止め、入力済みbufferは破棄・上書きしない | 本体反映・対象検証済み：IME/HTTP境界、永続alarm、保存通知。実Workerで入力→D1→cache→offline本文を確認。最終統合待ち |
 | C8 | アプリ内添付画像 | 権限付き取得、参照抽出・重複共有、IDB/OPFS保存、cached preview解決、欠落時の説明。本文だけでも表示できる | 本体反映・対象検証済み：画像15件と実Workerの別親note添付→OPFS→offline画像表示を確認。不要ファイル回収はC9 |
-| C9 | storage保持・安全な回収 | persist/estimateをbest-effortに利用。参照中・書込中を壊さないorphan回収、quota停止、旧版保持、migration失敗縮退を検証 | 調査中 |
+| C9 | storage保持・安全な回収 | persist/estimateをbest-effortに利用。参照中・書込中を壊さないorphan回収、quota停止、旧版保持、migration失敗縮退を検証 | 保持要求・容量概算・user単位安全GCを本体反映。実write排他／壊れた参照の停止を検証済み。quota連携と最終統合が残る |
 | C10 | UI説明と操作 | 端末cache削除の確認、保存限界・共有端末上の非公開dataの制約、session切れの案内、必要な非致命的warning | 調査中 |
 | C11 | 実配信経路の受け入れ | Web本番成果物＋実WorkerのSSR/auth/API経路でonline→offline再起動、全対応URL、更新、複数タブを検証 | 実Worker全11件成功：本文URL3経路、編集保存、画像、logout peer削除を含む。手動clearと更新の最終統合が残る |
 | C12 | 最終統合・記録 | 全suite、型・lint・build、チェックリストの未完項目0、README/仕様/台帳の整合、署名なしcheckpoint、最終変更ガイド | 未実施 |
