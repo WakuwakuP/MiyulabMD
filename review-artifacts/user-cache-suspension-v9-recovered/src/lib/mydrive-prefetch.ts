@@ -245,6 +245,9 @@ async function acquireFolders(
       ordered,
       (item) => priority?.kind === "folder" && item.id === priority.id,
     );
+    const orderingToken = await prefetchIo(signal, "storage", () =>
+      cache.beginFolderRead(folder.id),
+    );
     const folderResult = await acquisition.run(
       () => fetchFolder(folder.id, { signal, viewerId: userId }),
       { rawFetchErrors: true },
@@ -253,11 +256,16 @@ async function acquireFolders(
       continue;
     }
     if (!folderResult.ok) {
-      return isAuthStatus(folderResult.status) ? "auth" : "network";
+      if (folderResult.status === 403 || folderResult.status === 404) {
+        await prefetchIo(signal, "storage", () => cache.denyFolder(folder.id));
+        continue;
+      }
+      return folderResult.status === 401 ? "auth" : "network";
     }
     await prefetchIo(signal, "storage", () =>
       cache.putFolder(folderResult.data, {
         asDriveRoot: folder.id === root.id,
+        orderingToken,
         signal,
       }),
     );

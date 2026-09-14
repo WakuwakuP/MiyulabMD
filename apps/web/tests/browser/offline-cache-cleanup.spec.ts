@@ -184,7 +184,10 @@ test("committed data survives late cancellation while disposed readers do not pu
 }) => {
   const updated = { ...note, markdown: "# Committed update", updatedAt: 3 };
   await page.route(`**/api/notes/${note.id}`, (route) =>
-    route.fulfill({ json: updated }),
+    route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "user:alice" },
+      json: updated,
+    }),
   );
   await page.goto("/tests/browser/fixtures/storage.html");
 

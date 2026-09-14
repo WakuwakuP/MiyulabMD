@@ -21,6 +21,7 @@ const VIEWER_ID_METADATA_KEY = "viewer-id";
 const DRIVE_ROOT_METADATA_PREFIX = "drive-root:";
 const DENIED_NOTE_PREFIX = "denied-note:";
 const DENIED_FOLDER_PREFIX = "denied-folder:";
+const FOLDER_STATE_PREFIX = "folder-state:";
 const IMAGE_METADATA_PREFIX = "image:";
 const IMAGE_ORDER_PREFIX = "resource-order:image:";
 const OPFS_ROOT = "miyulabmd-offline-cache-v1";
@@ -89,7 +90,9 @@ type OfflineCache = {
   beginNoteRead(id: string): number;
   denyNote(id: string, orderingToken?: number): Promise<void>;
   clearNoteDenial(id: string, orderingToken?: number): Promise<void>;
-  denyFolder(id: string): Promise<void>;
+  beginFolderRead(id: string | null): Promise<number>;
+  denyFolder(id: string | null): Promise<void>;
+  clearFolderDenial(id: string | null, orderingToken: number): Promise<void>;
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
   putNoteList(
     notes: NoteSummary[],
@@ -98,7 +101,10 @@ type OfflineCache = {
   getNoteList(): Promise<{ notes: NoteSummary[]; cachedAt: number } | null>;
   putFolder(
     folder: FolderAccess,
-    options?: { asDriveRoot?: boolean } & CancellationOptions,
+    options?: {
+      asDriveRoot?: boolean;
+      orderingToken?: number;
+    } & CancellationOptions,
   ): Promise<void>;
   getFolder(
     id: string | null,
@@ -335,8 +341,9 @@ function userStorageLock<T>(
 function guardTransaction(
   database: IDBDatabase,
   transaction: IDBTransaction,
+  expectedScope?: OfflineCacheScope,
 ): void {
-  const scope = databaseScopes.get(database);
+  const scope = expectedScope ?? databaseScopes.get(database);
   if (!scope) {
     return;
   }
@@ -451,8 +458,10 @@ function driveRootMetadataKey(userId: string): string {
   return `${DRIVE_ROOT_METADATA_PREFIX}${encodePathPart(userId)}`;
 }
 
-function deniedFolderKey(userId: string, folderId: string): string {
-  return `${DENIED_FOLDER_PREFIX}${encodePathPart(userId)}:${encodePathPart(folderId)}`;
+function deniedFolderKey(userId: string, folderId: string | null): string {
+  return `${FOLDER_STATE_PREFIX}${encodePathPart(userId)}:${encodePathPart(
+    JSON.stringify(["folder", folderId]),
+  )}`;
 }
 
 function imageMetadataKey(
@@ -555,6 +564,8 @@ function clearUserRecords(
         const key = String(cursor.key);
         if (
           key === driveRootMetadataKey(userId) ||
+          key === folderSequenceKey(userId) ||
+          key.startsWith(`${FOLDER_STATE_PREFIX}${encodePathPart(userId)}:`) ||
           key.startsWith(
             `${IMAGE_METADATA_PREFIX}${encodePathPart(userId)}:`,
           ) ||
@@ -1034,36 +1045,353 @@ async function readDeniedNote(
   );
 }
 
-function readDeniedFolderIds(
+type FolderDenialMarker = {
+  denied: boolean;
+  folderId: string | null;
+  generation: number;
+};
+
+function folderSequenceKey(userId: string): string {
+  return `folder-denial-sequence:${encodePathPart(userId)}`;
+}
+
+function legacyDeniedFolderKey(userId: string, id: string): string {
+  return `${DENIED_FOLDER_PREFIX}${encodePathPart(userId)}:${encodePathPart(id)}`;
+}
+
+function parseFolderDenialMarker(
+  record: MetadataRecord | undefined,
+  fallbackId: string | null,
+): FolderDenialMarker | null {
+  if (!record) {
+    return null;
+  }
+  try {
+    const marker = JSON.parse(record.value) as Partial<FolderDenialMarker>;
+    if (
+      marker.folderId === fallbackId &&
+      Number.isSafeInteger(marker.generation) &&
+      (marker.generation ?? 0) >= 1
+    ) {
+      return {
+        denied: marker.denied !== false,
+        folderId: fallbackId,
+        generation: marker.generation as number,
+      };
+    }
+  } catch {
+    // Markers written by D60 contain only the folder ID.
+  }
+  return { denied: true, folderId: fallbackId, generation: 1 };
+}
+
+function rootReferenceId(record: MetadataRecord | undefined): string | null {
+  try {
+    const id: unknown = record ? JSON.parse(record.value) : null;
+    return typeof id === "string" ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function readMetadataBatch(
+  store: IDBObjectStore,
+  keys: string[],
+  complete: (records: Map<string, MetadataRecord>) => void,
+  fail: (error: unknown) => void,
+): void {
+  const records = new Map<string, MetadataRecord>();
+  let remaining = keys.length;
+  for (const key of keys) {
+    const request = store.get(key);
+    request.onerror = () => fail(request.error);
+    request.onsuccess = () => {
+      if (request.result) {
+        records.set(key, request.result as MetadataRecord);
+      }
+      remaining -= 1;
+      if (remaining === 0) {
+        try {
+          complete(records);
+        } catch (error) {
+          fail(error);
+        }
+      }
+    };
+  }
+}
+
+function folderSequence(record: MetadataRecord | undefined): number {
+  const value = Number(record?.value);
+  return Number.isSafeInteger(value) && value >= 1 ? value : 1;
+}
+
+export async function captureOfflineFolderRead(
+  scope: OfflineCacheScope,
+): Promise<number | undefined> {
+  if (scope.epoch === null) {
+    return;
+  }
+  try {
+    const database = await getEpochDatabase();
+    if (database) {
+      return folderSequence(
+        await readMetadataRecord(database, folderSequenceKey(scope.userId)),
+      );
+    }
+  } catch {
+    // Unknown ordering cannot authorize a cache write; online display survives.
+  }
+}
+
+export async function assertOfflineFolderRead(
+  scope: OfflineCacheScope,
+  id: string | null,
+  orderingToken: number,
+): Promise<void> {
+  const database = await getEpochDatabase();
+  if (!database) {
+    throw new Error("Offline folder ordering is unavailable");
+  }
+  await updateFolderDenial(
+    database,
+    scope.userId,
+    id,
+    orderingToken,
+    "check",
+    undefined,
+    undefined,
+    scope,
+  );
+  if (!isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime)) {
+    throw invalidatedError();
+  }
+}
+
+type FolderOperation = {
+  userId: string;
+  folderId: string | null;
+  orderingToken: number | undefined;
+  action: "deny" | "clear" | "check";
+  save?: { record: FolderRecord; asDriveRoot: boolean };
+};
+
+function folderOperationIds(
+  operation: FolderOperation,
+  rootId: string | null,
+): (string | null)[] {
+  const { folderId, save } = operation;
+  const ids = new Set<string | null>([folderId]);
+  if (folderId === null || folderId === rootId || save?.asDriveRoot) {
+    ids.add(null);
+    if (rootId !== null) {
+      ids.add(rootId);
+    }
+  }
+  if (save) {
+    ids.add(save.record.folderId);
+  }
+  return [...ids];
+}
+
+function applyFolderOperation(
+  transaction: IDBTransaction,
+  operation: FolderOperation,
+  sequence: number,
+  ids: (string | null)[],
+  records: Map<string, MetadataRecord>,
+): void {
+  const { userId, action, orderingToken, save } = operation;
+  const store = transaction.objectStore(METADATA_STORE);
+  const current = ids.map((id) => ({
+    generation:
+      parseFolderDenialMarker(records.get(deniedFolderKey(userId, id)), id)
+        ?.generation ?? 1,
+    id,
+  }));
+  if (
+    action !== "deny" &&
+    (orderingToken === undefined ||
+      current.some((marker) => marker.generation > orderingToken))
+  ) {
+    throw invalidatedError();
+  }
+  if (action === "check") {
+    return;
+  }
+  const generation = sequence + 1;
+  if (action === "deny") {
+    store.put({
+      key: folderSequenceKey(userId),
+      value: String(generation),
+    } satisfies MetadataRecord);
+  }
+  for (const marker of current) {
+    store.put({
+      key: deniedFolderKey(userId, marker.id),
+      value: JSON.stringify({
+        denied: action === "deny",
+        folderId: marker.id,
+        generation: action === "deny" ? generation : marker.generation,
+      } satisfies FolderDenialMarker),
+    } satisfies MetadataRecord);
+    if (marker.id !== null) {
+      store.delete(legacyDeniedFolderKey(userId, marker.id));
+    }
+  }
+  if (!save) {
+    return;
+  }
+  transaction.objectStore(FOLDER_STORE).put(save.record);
+  if (save.asDriveRoot) {
+    store.put({
+      key: driveRootMetadataKey(userId),
+      value: JSON.stringify(save.record.folderId),
+    } satisfies MetadataRecord);
+  }
+}
+
+function queueFolderOperation(
+  transaction: IDBTransaction,
+  operation: FolderOperation,
+  fail: (error: unknown) => void,
+): void {
+  const store = transaction.objectStore(METADATA_STORE);
+  const rootKey = driveRootMetadataKey(operation.userId);
+  const sequenceKey = folderSequenceKey(operation.userId);
+  readMetadataBatch(
+    store,
+    [rootKey, sequenceKey],
+    (initial) => {
+      const ids = folderOperationIds(
+        operation,
+        rootReferenceId(initial.get(rootKey)),
+      );
+      readMetadataBatch(
+        store,
+        ids.map((id) => deniedFolderKey(operation.userId, id)),
+        (records) =>
+          applyFolderOperation(
+            transaction,
+            operation,
+            folderSequence(initial.get(sequenceKey)),
+            ids,
+            records,
+          ),
+        fail,
+      );
+    },
+    fail,
+  );
+}
+
+// One metadata transaction orders root aliases, denial, revalidation and writes.
+function updateFolderDenial(
   database: IDBDatabase,
   userId: string,
-): Promise<Set<string>> {
-  const prefix = `${DENIED_FOLDER_PREFIX}${encodePathPart(userId)}:`;
+  folderId: string | null,
+  orderingToken: number | undefined,
+  action: "deny" | "clear" | "check",
+  save?: { record: FolderRecord; asDriveRoot: boolean },
+  signal?: AbortSignal,
+  scope?: OfflineCacheScope,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let transaction: IDBTransaction;
+    let failure: unknown;
+    try {
+      transaction = database.transaction(
+        [METADATA_STORE, FOLDER_STORE],
+        "readwrite",
+      );
+      guardTransaction(database, transaction, scope);
+      const fail = (error: unknown) => {
+        failure = error;
+        transaction.abort();
+      };
+      queueFolderOperation(
+        transaction,
+        { action, folderId, orderingToken, save, userId },
+        fail,
+      );
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const operations =
+      pendingUserOperations.get(userId) ?? new Set<() => void>();
+    pendingUserOperations.set(userId, operations);
+    const abort = () => {
+      try {
+        transaction.abort();
+      } catch {
+        // Transaction completion is authoritative if it already committed.
+      }
+    };
+    const unregister = () => {
+      operations.delete(abort);
+      signal?.removeEventListener("abort", abort);
+    };
+    operations.add(abort);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) {
+      abort();
+    }
+    transaction.oncomplete = () => {
+      unregister();
+      resolve();
+    };
+    transaction.onabort = () => {
+      unregister();
+      reject(
+        signal?.aborted
+          ? signal.reason
+          : (failure ?? transaction.error ?? invalidatedError()),
+      );
+    };
+  });
+}
+
+function readMetadataRange(
+  database: IDBDatabase,
+  prefix: string,
+): Promise<MetadataRecord[]> {
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(METADATA_STORE, "readonly");
     const request = transaction
       .objectStore(METADATA_STORE)
-      .openCursor(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
-    const denied = new Set<string>();
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (!cursor) {
-        resolve(denied);
-        return;
-      }
-      const record = cursor.value as MetadataRecord;
-      if (record.value) {
-        denied.add(record.value);
-      }
-      cursor.continue();
-    };
+      .getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+    transaction.oncomplete = () => resolve(request.result as MetadataRecord[]);
     request.onerror = () => reject(request.error);
+    transaction.onabort = () => reject(transaction.error ?? invalidatedError());
   });
+}
+
+async function readDeniedFolderIds(
+  database: IDBDatabase,
+  userId: string,
+): Promise<Set<string | null>> {
+  const suffix = `${encodePathPart(userId)}:`;
+  const [legacy, current] = await Promise.all([
+    readMetadataRange(database, `${DENIED_FOLDER_PREFIX}${suffix}`),
+    readMetadataRange(database, `${FOLDER_STATE_PREFIX}${suffix}`),
+  ]);
+  const denied = new Set<string | null>(legacy.map((record) => record.value));
+  for (const record of current) {
+    const marker = JSON.parse(record.value) as FolderDenialMarker;
+    if (marker.folderId !== null && typeof marker.folderId !== "string") {
+      throw new Error("Invalid folder denial metadata");
+    }
+    if (marker.denied !== false) {
+      denied.add(marker.folderId);
+    }
+  }
+  return denied;
 }
 
 function projectDeniedFolder(
   folder: FolderAccess,
-  deniedFolderIds: Set<string>,
+  deniedFolderIds: Set<string | null>,
 ): FolderAccess | null {
   if (folder.id !== null && deniedFolderIds.has(folder.id)) {
     return null;
@@ -1377,6 +1705,14 @@ export async function openOfflineCache(
   let closed = false;
 
   const cache: OfflineCache = {
+    async beginFolderRead() {
+      if (closed) {
+        throw new Error("Offline cache is closed");
+      }
+      return folderSequence(
+        await readMetadataRecord(database, folderSequenceKey(userId)),
+      );
+    },
     async beginImageRead(noteId, imageId) {
       if (closed) {
         throw new Error("Offline cache is closed");
@@ -1396,6 +1732,12 @@ export async function openOfflineCache(
     },
     beginNoteRead(id) {
       return currentNoteGeneration(userId, id);
+    },
+    async clearFolderDenial(id, orderingToken) {
+      if (closed) {
+        throw new Error("Offline cache is closed");
+      }
+      await updateFolderDenial(database, userId, id, orderingToken, "clear");
     },
     async clearNoteDenial(id, orderingToken) {
       if (closed) {
@@ -1433,15 +1775,12 @@ export async function openOfflineCache(
       }
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
-      await commitTransaction(
-        database,
-        METADATA_STORE,
-        {
-          key: deniedFolderKey(userId, id),
-          value: id,
-        },
-        userId,
-      );
+      try {
+        await updateFolderDenial(database, userId, id, undefined, "deny");
+      } catch (error) {
+        suspendOfflineCacheUser(userId);
+        throw error;
+      }
       assertUserActive(userId, lifetime);
     },
 
@@ -1520,6 +1859,7 @@ export async function openOfflineCache(
       }
     },
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: explicit cache lifetime and denial fences
     async getFolder(id) {
       if (closed) {
         throw new Error("Offline cache is closed");
@@ -1537,6 +1877,12 @@ export async function openOfflineCache(
         return null;
       }
       if (!record) {
+        return null;
+      }
+      if (
+        deniedFolderIds.has(record.folderId) ||
+        (id === null && deniedFolderIds.has(null))
+      ) {
         return null;
       }
       const folder = projectDeniedFolder(record.folder, deniedFolderIds);
@@ -1714,6 +2060,18 @@ export async function openOfflineCache(
         key: folderKey(userId, folder.id),
         userId,
       };
+      if (options.orderingToken !== undefined) {
+        await updateFolderDenial(
+          database,
+          userId,
+          options.asDriveRoot ? null : folder.id,
+          options.orderingToken,
+          "clear",
+          { asDriveRoot: options.asDriveRoot === true, record },
+          options.signal,
+        );
+        return;
+      }
       if (options.asDriveRoot) {
         await commitStoreRecords(
           database,
@@ -1909,6 +2267,7 @@ export async function openOfflineCache(
   // The post-lock durable check rejects queued work from an expired handle even
   // when its tab missed every lifecycle message.
   for (const name of [
+    "beginFolderRead",
     "putImage",
     "getImage",
     "denyImage",
@@ -1918,6 +2277,7 @@ export async function openOfflineCache(
     "denyNote",
     "denyFolder",
     "clearNoteDenial",
+    "clearFolderDenial",
     "getNote",
     "getFolder",
     "getNoteList",

@@ -30,6 +30,7 @@ test("keyboard navigation joins an in-flight background note request", async ({
     switch (path) {
       case "/api/me":
         return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
           json: {
             user: {
               displayName: "Alice",
@@ -39,7 +40,10 @@ test("keyboard navigation joins an in-flight background note request", async ({
           },
         });
       case "/api/auth/config":
-        return route.fulfill({ json: { access: false, mock: true } });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { access: false, mock: true },
+        });
       case "/api/folders/tree":
         return route.fulfill({
           headers: { "X-MiyulabMD-Session-User": "user:alice" },
@@ -69,7 +73,11 @@ test("keyboard navigation joins an in-flight background note request", async ({
           json: owned,
         });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
   try {

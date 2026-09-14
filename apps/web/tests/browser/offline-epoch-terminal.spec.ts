@@ -80,6 +80,7 @@ for (const scenario of [
   "home-abort",
   "home-abort-failure",
   "home-owner",
+  "home-folder-denial",
   "note-dispose",
   "note-denial",
 ] as const) {
@@ -92,9 +93,11 @@ for (const scenario of [
       const cacheUrl = "/src/lib/offline-cache.ts";
       const sessionUrl = "/src/lib/note-read-session.ts";
       const homeUrl = "/src/lib/home-metadata-reader.ts";
-      const { captureOfflineCacheScope, enterOfflineNoteDenial } = await import(
-        cacheUrl
-      );
+      const {
+        captureOfflineCacheScope,
+        enterOfflineNoteDenial,
+        openOfflineCache,
+      } = await import(cacheUrl);
       const { createNoteReadSession } = await import(sessionUrl);
       const { readHomeMetadata } = await import(homeUrl);
       await captureOfflineCacheScope("alice");
@@ -204,6 +207,10 @@ for (const scenario of [
           controller.abort(reason);
         } else if (scenario === "home-owner") {
           owner = false;
+        } else if (scenario === "home-folder-denial") {
+          const cache = await openOfflineCache({ userId: "alice" });
+          await cache.denyFolder("alice-root");
+          cache.close();
         } else if (scenario === "note-dispose") {
           session.dispose();
         } else {

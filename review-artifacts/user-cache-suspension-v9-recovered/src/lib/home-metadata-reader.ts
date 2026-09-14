@@ -6,17 +6,21 @@ import type {
 import { fetchFolder, fetchNotes, fetchPublicFolders } from "./api.ts";
 import {
   assertOfflineCacheScope,
+  assertOfflineFolderRead,
   captureOfflineCacheScope,
   captureOfflineCacheUserClearLifetime,
+  captureOfflineFolderRead,
   isOfflineCacheUserClearLifetimeCurrent,
   type OfflineCacheScope,
   openOfflineCache,
   subscribeOfflineCacheInvalidation,
+  suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export class HomeMetadataError extends Error {
   readonly status: number | undefined;
+  cacheWarning?: string;
 
   constructor(message: string, status?: number) {
     super(message);
@@ -71,11 +75,16 @@ async function saveHomeMetadata(
   isCurrentOwner: () => boolean,
   clearLifetime: number,
   scope: OfflineCacheScope | null,
+  orderingToken: number | undefined,
 ): Promise<void> {
   if (viewer.mode !== "authenticated" || !viewer.user) {
     return;
   }
   if (viewer.cacheViewerId !== viewer.user.id) {
+    snapshot.cacheWarning = "オフラインキャッシュを利用できません。";
+    return;
+  }
+  if (orderingToken === undefined) {
     snapshot.cacheWarning = "オフラインキャッシュを利用できません。";
     return;
   }
@@ -95,18 +104,79 @@ async function saveHomeMetadata(
     }
     await cache.putFolder(snapshot.visibleFolder, {
       asDriveRoot: folderId == null,
+      orderingToken,
       signal,
     });
     throwIfCancelled(signal, isCurrentOwner);
     await cache.putNoteList(snapshot.notes, { signal });
     throwIfCancelled(signal, isCurrentOwner);
   } catch (error) {
-    if (signal.aborted || !isCurrentOwner()) {
+    if (
+      signal.aborted ||
+      !isCurrentOwner() ||
+      (error instanceof DOMException && error.name === "AbortError")
+    ) {
       throw error;
     }
     snapshot.cacheWarning = "オフラインキャッシュを保存できませんでした。";
   } finally {
     cache?.close();
+  }
+}
+
+async function rejectDeniedFolder(
+  result: { ok: false; error: string; status: number },
+  viewer: ViewerContext,
+  folderId: string | undefined,
+  scope: OfflineCacheScope | null,
+  signal: AbortSignal,
+  isCurrentOwner: () => boolean,
+): Promise<never> {
+  const error = new HomeMetadataError(
+    result.status === 404 ? "フォルダが見つかりません。" : result.error,
+    result.status,
+  );
+  if (viewer.user && (result.status === 403 || result.status === 404)) {
+    let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
+    try {
+      cache = await openOfflineCache({
+        scope: scope ?? undefined,
+        signal,
+        userId: viewer.user.id,
+      });
+      await cache.denyFolder(folderId ?? null);
+    } catch {
+      suspendOfflineCacheUser(viewer.user.id);
+      error.cacheWarning =
+        "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
+    } finally {
+      cache?.close();
+    }
+  }
+  throwIfCancelled(signal, isCurrentOwner);
+  throw error;
+}
+
+async function validateHomePublication(
+  snapshot: HomeMetadataSnapshot,
+  scope: OfflineCacheScope | null,
+  folderId: string | undefined,
+  orderingToken: number | undefined,
+): Promise<void> {
+  if (!scope) {
+    return;
+  }
+  await assertOfflineCacheScope(scope);
+  if (orderingToken === undefined) {
+    return;
+  }
+  try {
+    await assertOfflineFolderRead(scope, folderId ?? null, orderingToken);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    snapshot.cacheWarning = "オフラインキャッシュを確認できませんでした。";
   }
 }
 
@@ -132,11 +202,29 @@ async function readHomeMetadataSnapshot({
     : null;
   throwIfCancelled(signal, isCurrentOwner);
   const viewerId = viewer.user?.id ?? null;
+  const folderReadGeneration = scope
+    ? await captureOfflineFolderRead(scope)
+    : undefined;
+  throwIfCancelled(signal, isCurrentOwner);
   const notesPromise = fetchNotes({ signal, viewerId });
-  const folderPromise =
+  const folderPromise = (
     viewer.user || folderId
       ? fetchFolder(folderId, { signal, viewerId })
-      : fetchPublicFolders({ signal, viewerId });
+      : fetchPublicFolders({ signal, viewerId })
+  ).then((result) => {
+    throwIfCancelled(signal, isCurrentOwner);
+    if (!result.ok) {
+      return rejectDeniedFolder(
+        result,
+        viewer,
+        folderId,
+        scope,
+        signal,
+        isCurrentOwner,
+      );
+    }
+    return result;
+  });
   const [notes, folderResult] = await Promise.all([
     notesPromise,
     folderPromise,
@@ -171,12 +259,16 @@ async function readHomeMetadataSnapshot({
     isCurrentOwner,
     clearLifetime,
     scope,
+    folderReadGeneration,
   );
   throwIfCancelled(signal, isCurrentOwner);
   try {
-    if (scope) {
-      await assertOfflineCacheScope(scope);
-    }
+    await validateHomePublication(
+      snapshot,
+      scope,
+      folderId,
+      folderReadGeneration,
+    );
   } finally {
     throwIfCancelled(signal, isCurrentOwner);
   }

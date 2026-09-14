@@ -88,7 +88,10 @@ for (const fault of ["open", "commit"] as const) {
         );
         await started;
         globalThis.fetch = async () =>
-          new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
+          new Response(JSON.stringify({ error: "Forbidden" }), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            status: 403,
+          });
         if (fault === "open") {
           IDBFactory.prototype.open = () => {
             throw new DOMException("Database unavailable", "UnknownError");
@@ -122,7 +125,10 @@ for (const fault of ["open", "commit"] as const) {
         );
         // Optional cache storage must not prevent a valid online view.
         globalThis.fetch = async () =>
-          new Response(JSON.stringify(otherNote), { status: 200 });
+          new Response(JSON.stringify(otherNote), {
+            headers: { "X-MiyulabMD-Session-User": "user:alice" },
+            status: 200,
+          });
         const online = await onlineReader.read(otherNote.id);
         return {
           denial,

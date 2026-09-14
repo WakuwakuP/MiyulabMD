@@ -213,3 +213,33 @@ Candidate reader bytes remain
 `e2b6c93e08ab21b820077dde2bb8e11c0cec37698410dbb8037ac74ad8e75fb2`.
 This verifies the bounded D72 folder-publication rule; HTTP denial wiring and
 other compound lifetime boundaries remain separate work.
+
+## C3 validation
+
+Candidate typecheck and lint passed (`exit 0` each). After the authorized
+Chromium installation, the existing parent folder-denial browser spec passed
+(`5 passed`). The new focused boundary spec passed the null-root/literal-ID
+case, while its two-page late-200 case still fails because the second page's
+denial is not observed by the first page before stale clear. This remains a
+recorded C3 failure rather than an exclusion. Live `apps/web/src` was not
+edited.
+
+## Parent merged correction evidence
+
+- Corrected the child test to use two pages in **one browser context**, and
+  require rejection of stale revalidation. Added a separate real routed-HTTP
+  Home test: held 200, other-tab 403, stale result rejected, fresh read succeeds.
+- Added null versus literal `"root"`, `"null"`, former sentinel, and structured
+  ID boundaries, plus repeated denial/revalidation and independent folders.
+- Added Home denial during the final epoch await to the existing terminal
+  regression without removing any abort/ownership cases.
+- Candidate typecheck passed. Focused cache/Home/terminal run before the last
+  added cases: **25 passed**.
+- Unfiltered candidate `all --workers=1`: typecheck and source lint passed;
+  **188 passed / 5 failed**, total193. All new folder/terminal cases passed.
+  Failures were the separate known note-denial-tabs RED and four old response
+  fixtures missing verified actor headers after broader caller enforcement.
+- Parent migrated only those fixture responses, preserving assertions:
+  `note-request-sharing.spec.ts`, `user-cache-suspension.spec.ts`,
+  `offline-cache-cleanup.spec.ts`. Their serial rerun: **7 passed**.
+  This does not retroactively turn the preceding full run into a green result.

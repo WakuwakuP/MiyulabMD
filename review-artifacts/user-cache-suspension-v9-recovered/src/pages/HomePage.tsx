@@ -369,6 +369,9 @@ function NetworkHomePage() {
         setFolderPending(false);
         setVisibleFolder(null);
         setPublicFolders([]);
+        if (error instanceof HomeMetadataError) {
+          setCacheWarning(error.cacheWarning ?? null);
+        }
         if (error instanceof HomeMetadataError || error instanceof Error) {
           setError(error.message);
         } else {

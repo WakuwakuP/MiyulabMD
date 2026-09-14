@@ -79,3 +79,44 @@ list-first/folder-last order, D63 denial projection, timestamps, missing flags,
 and single close boundary are unchanged. No deletion, compensation write,
 additional cache close, or error weakening was added. This remains a
 candidate-only correction and does not address the separate prefetch test.
+
+## C3 durable HTTP denial ordering
+
+Folder markers now carry a persisted generation. `beginFolderRead` captures the
+current marker generation, `denyFolder` advances it transactionally, and
+`clearFolderDenial` deletes only a matching generation. Ordinary `putFolder`
+never clears a marker, so a late 200 cannot revive a newer 403 while a later
+successful read can revalidate. Root routes use a tagged namespace and resolve
+the canonical drive root when known; literal `"root"` remains independent.
+
+## Parent correction: transactional authority and publication
+
+The first C3 implementation did not enforce its generation comparison:
+`clearFolderDenial` silently discarded a mismatch, Home swallowed it, and the
+successful body could still be saved/published. Deleting the generation on
+successful clear also allowed generation reuse. Its two-page test incorrectly
+created two independent browser contexts, which cannot share IndexedDB.
+
+The parent corrected the rule:
+
+- Reads capture a persisted user-local **folder denial sequence**. Only a denial
+  advances it. A folder's last-denial generation must not exceed that captured
+  sequence. A denial of a different folder does not invalidate the read.
+- Revalidation retains generation state with `denied: false`; it does not reset
+  ordering by deleting the state.
+- Marker validation, root/canonical alias resolution, optional snapshot write,
+  root reference update, and authorized marker clear share one epoch-guarded
+  IDB write transaction. Mismatch rejects instead of pretending success.
+- Root routing uses actual `null` in a separate `folder-state:` key namespace.
+  It cannot collide with string IDs or legacy `denied-folder:` records.
+- Home captures authority without opening/closing an extra cache handle before
+  HTTP, preserving the established storage-lifetime boundary. Denial persistence
+  failure suspends the known user and preserves HTTP status plus a cache warning.
+- Final Home publication checks folder authority after the general epoch check;
+  its own transaction checks the expected purge epoch as well.
+- MyDrive uses the same guarded folder write. No latest-request-wins behavior,
+  permanent denial, or new valid-cache deletion policy was introduced.
+
+Targeted mounted-view invalidation and the separate note-denial cross-tab repair
+remain part of the broader C2 integration; these cache/HTTP tests alone are not
+full offline completion.
