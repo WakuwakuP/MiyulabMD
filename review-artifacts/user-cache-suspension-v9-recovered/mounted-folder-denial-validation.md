@@ -178,6 +178,26 @@ candidate typecheck/lint: not executed (prepared candidate dependencies unavaila
 mounted browser validation: not executed (prepared candidate dependencies unavailable)
 ```
 
+## Parent 13/15 follow-up diagnosis
+
+The parent's prepared candidate run reached 13/15: candidate typecheck and
+full lint passed, while two browser fixtures remained RED. The list-race
+fixture gated `IDBTransaction.prototype.oncomplete`, but the gate was installed
+after the relevant `get` and `readMetadataRecord` assigned
+`IDBRequest.prototype.onsuccess`; consequently `__listRaceEntered` was never
+reached. The fixture now marks the next `denied-note:` request in
+`IDBObjectStore.prototype.get` and wraps the following native request
+`onsuccess`, restoring both descriptors in `finally`.
+
+The stale-receipt fixture also used a hard-coded epoch/generation and omitted
+the required third `clearNoteDenial` argument. It now captures note authority
+after denial, fails if the epoch is null, builds the old event from that
+authority, clears with its generation, and verifies the old event is false
+after the `denied: false` marker.
+
+This worker changed only the browser fixture and this validation record.
+Candidate typecheck/lint and browser execution were not rerun here.
+
 ## Remaining mounted RED corrections
 
 The Home metadata projection now applies the cached root folder and denied root

@@ -605,34 +605,32 @@ test("note list read is invalidated when folder denial sequence changes", async 
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const descriptor = Object.getOwnPropertyDescriptor(
-      IDBTransaction.prototype,
-      "oncomplete",
+      IDBRequest.prototype,
+      "onsuccess",
     );
     if (!descriptor?.set || !descriptor.get) {
-      throw new Error("IDB transaction completion hook is unavailable");
+      throw new Error("IDB request success hook is unavailable");
     }
     let gateNext = false;
     const originalGet = IDBObjectStore.prototype.get;
-    const originalGetAll = IDBObjectStore.prototype.getAll;
     IDBObjectStore.prototype.get = function (key) {
       if (String(key).includes("denied-note:")) {
         gateNext = true;
       }
       return originalGet.call(this, key);
     };
-    IDBObjectStore.prototype.getAll = function (...args) {
-      return originalGetAll.apply(this, args);
-    };
-    Object.defineProperty(IDBTransaction.prototype, "oncomplete", {
+    Object.defineProperty(IDBRequest.prototype, "onsuccess", {
       ...descriptor,
-      set(callback) {
-        if (gateNext) {
+      set(callback: ((this: IDBRequest, event: Event) => unknown) | null) {
+        if (gateNext && callback) {
           gateNext = false;
-          const gated = callback;
-          callback = function (event) {
-            (globalThis as typeof globalThis & { __listRaceEntered?: boolean }).__listRaceEntered = true;
+          const originalCallback = callback;
+          callback = function (this: IDBRequest, event: Event) {
+            (globalThis as typeof globalThis & {
+              __listRaceEntered?: boolean;
+            }).__listRaceEntered = true;
             entered.resolve();
-            void release.promise.then(() => gated.call(this, event));
+            void release.promise.then(() => originalCallback.call(this, event));
           };
         }
         descriptor.set?.call(this, callback);
@@ -641,8 +639,7 @@ test("note list read is invalidated when folder denial sequence changes", async 
     (globalThis as typeof globalThis & { __releaseListRace?: () => void }).__releaseListRace = release.resolve;
     return cache.getNoteList().finally(() => {
       IDBObjectStore.prototype.get = originalGet;
-      IDBObjectStore.prototype.getAll = originalGetAll;
-      Object.defineProperty(IDBTransaction.prototype, "oncomplete", descriptor);
+      Object.defineProperty(IDBRequest.prototype, "onsuccess", descriptor);
       cache.close();
     });
   }, note);
@@ -690,12 +687,28 @@ test("stale note denial receipt is false after a newer clear generation", async 
     const id = "stale-note-receipt-note";
     try {
       await cache.denyNote(id);
+      const authority = await module.captureOfflineNoteAuthority(
+        "stale-note-receipt",
+        id,
+      );
+      if (authority.epoch === null) {
+        throw new Error("note authority epoch is unavailable");
+      }
       const oldEvent = {
-        resource: { aliases: [id], epoch: "0", generation: 1, type: "note" },
+        resource: {
+          aliases: [id],
+          epoch: authority.epoch,
+          generation: authority.generation,
+          type: "note",
+        },
         type: "invalidate",
         userId: "stale-note-receipt",
       } as const;
-      await cache.clearNoteDenial(id, cache.beginNoteRead(id));
+      await cache.clearNoteDenial(
+        id,
+        cache.beginNoteRead(id),
+        authority.generation,
+      );
       return module.readOfflineNoteDenial(oldEvent, [id]);
     } finally {
       cache.close();
