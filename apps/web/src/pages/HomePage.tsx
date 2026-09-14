@@ -8,7 +8,6 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useRef,
   useState,
 } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
@@ -27,10 +26,6 @@ import {
   HomeMetadataError,
   readHomeMetadata,
 } from "../lib/home-metadata-reader.ts";
-import {
-  readOfflineNoteDenial,
-  subscribeOfflineCacheNoteDenial,
-} from "../lib/offline-cache.ts";
 import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
   type ConfirmState,
@@ -305,8 +300,6 @@ function NetworkHomePage() {
   const { user, userLoading, viewer, setHeader } =
     useOutletContext<AppShellContext>();
   const [notes, setNotes] = useState<NoteSummary[]>([]);
-  const [noteReload, setNoteReload] = useState(0);
-  const notesRef = useRef<NoteSummary[]>([]);
   const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(null);
   const [folderPending, setFolderPending] = useState(true);
   const [publicFolders, setPublicFolders] = useState<FolderRecord[]>([]);
@@ -363,7 +356,6 @@ function NetworkHomePage() {
         if (!current || controller.signal.aborted) {
           return;
         }
-        notesRef.current = snapshot.notes;
         setNotes(snapshot.notes);
         setVisibleFolder(snapshot.visibleFolder);
         setPublicFolders(snapshot.publicFolders);
@@ -390,41 +382,7 @@ function NetworkHomePage() {
       current = false;
       controller.abort();
     };
-  }, [folderId, noteReload, userLoading, viewer]);
-
-  useEffect(() => {
-    if (viewer.cacheViewerId === null) {
-      return;
-    }
-    let active = true;
-    const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
-      if (event.userId !== viewer.cacheViewerId || !active) {
-        return;
-      }
-      const identities = event.resource.aliases.filter((alias) =>
-        notesRef.current.some(
-          (note) => note.id === alias || note.shortId === alias,
-        ),
-      );
-      if (identities.length === 0) {
-        return;
-      }
-      void readOfflineNoteDenial(event, identities).then((denied) => {
-        if (
-          denied === false ||
-          !active ||
-          viewer.cacheViewerId !== event.userId
-        ) {
-          return;
-        }
-        setNoteReload((current) => current + 1);
-      });
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [viewer.cacheViewerId]);
+  }, [folderId, userLoading, viewer]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.

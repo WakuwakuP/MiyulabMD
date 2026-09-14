@@ -1547,11 +1547,6 @@ type FolderDenialMarker = {
   generation: number;
 };
 
-type FolderDenialSnapshot = {
-  deniedFolderIds: Set<string | null>;
-  sequence: number;
-};
-
 function folderSequenceKey(userId: string): string {
   return `folder-denial-sequence:${encodePathPart(userId)}`;
 }
@@ -1853,84 +1848,41 @@ function updateFolderDenial(
   });
 }
 
-function parseFolderDenialSnapshot(
-  legacy: MetadataRecord[],
-  current: MetadataRecord[],
-  sequenceRecord: MetadataRecord | undefined,
-): FolderDenialSnapshot {
-  const deniedFolderIds = new Set<string | null>(
-    legacy.map((record) => record.value),
-  );
-  for (const record of current) {
-    let marker: unknown;
-    try {
-      marker = JSON.parse(record.value);
-    } catch {
-      throw new Error("Invalid folder denial metadata");
-    }
-    if (
-      marker === null ||
-      typeof marker !== "object" ||
-      !("folderId" in marker) ||
-      !("denied" in marker) ||
-      !("generation" in marker) ||
-      (marker.folderId !== null && typeof marker.folderId !== "string") ||
-      typeof marker.denied !== "boolean" ||
-      !Number.isSafeInteger(marker.generation) ||
-      marker.generation < 1
-    ) {
-      throw new Error("Invalid folder denial metadata");
-    }
-    if (marker.denied) {
-      deniedFolderIds.add(marker.folderId);
-    }
-  }
-  const sequence = Number(sequenceRecord?.value ?? 1);
-  if (!Number.isSafeInteger(sequence) || sequence < 1) {
-    throw new Error("Invalid folder denial sequence");
-  }
-  return { deniedFolderIds, sequence };
-}
-
-async function readDeniedFolderSnapshot(
+function readMetadataRange(
   database: IDBDatabase,
-  userId: string,
-): Promise<FolderDenialSnapshot> {
-  const suffix = `${encodePathPart(userId)}:`;
-  const records = await new Promise<{
-    legacy: MetadataRecord[];
-    current: MetadataRecord[];
-    sequence: MetadataRecord | undefined;
-  }>((resolve, reject) => {
+  prefix: string,
+): Promise<MetadataRecord[]> {
+  return new Promise((resolve, reject) => {
     const transaction = database.transaction(METADATA_STORE, "readonly");
-    const store = transaction.objectStore(METADATA_STORE);
-    const legacyRequest = store.getAll(
-      IDBKeyRange.bound(
-        `${DENIED_FOLDER_PREFIX}${suffix}`,
-        `${DENIED_FOLDER_PREFIX}${suffix}\uffff`,
-      ),
-    );
-    const currentRequest = store.getAll(
-      IDBKeyRange.bound(
-        `${FOLDER_STATE_PREFIX}${suffix}`,
-        `${FOLDER_STATE_PREFIX}${suffix}\uffff`,
-      ),
-    );
-    const sequenceRequest = store.get(folderSequenceKey(userId));
-    transaction.oncomplete = () =>
-      resolve({
-        current: currentRequest.result as MetadataRecord[],
-        legacy: legacyRequest.result as MetadataRecord[],
-        sequence: sequenceRequest.result as MetadataRecord | undefined,
-      });
-    transaction.onerror = () => reject(transaction.error);
+    const request = transaction
+      .objectStore(METADATA_STORE)
+      .getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+    transaction.oncomplete = () => resolve(request.result as MetadataRecord[]);
+    request.onerror = () => reject(request.error);
     transaction.onabort = () => reject(transaction.error ?? invalidatedError());
   });
-  return parseFolderDenialSnapshot(
-    records.legacy,
-    records.current,
-    records.sequence,
-  );
+}
+
+async function readDeniedFolderIds(
+  database: IDBDatabase,
+  userId: string,
+): Promise<Set<string | null>> {
+  const suffix = `${encodePathPart(userId)}:`;
+  const [legacy, current] = await Promise.all([
+    readMetadataRange(database, `${DENIED_FOLDER_PREFIX}${suffix}`),
+    readMetadataRange(database, `${FOLDER_STATE_PREFIX}${suffix}`),
+  ]);
+  const denied = new Set<string | null>(legacy.map((record) => record.value));
+  for (const record of current) {
+    const marker = JSON.parse(record.value) as FolderDenialMarker;
+    if (marker.folderId !== null && typeof marker.folderId !== "string") {
+      throw new Error("Invalid folder denial metadata");
+    }
+    if (marker.denied !== false) {
+      denied.add(marker.folderId);
+    }
+  }
+  return denied;
 }
 
 function projectDeniedFolder(
@@ -2475,9 +2427,7 @@ export async function openOfflineCache(
       if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
         return null;
       }
-      const deniedFolderIds = (
-        await readDeniedFolderSnapshot(database, userId)
-      ).deniedFolderIds;
+      const deniedFolderIds = await readDeniedFolderIds(database, userId);
       if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
         return null;
       }
