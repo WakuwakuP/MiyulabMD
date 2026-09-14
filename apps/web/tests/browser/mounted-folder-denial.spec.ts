@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 const folder = {
   children: [],
@@ -17,7 +17,7 @@ const folder = {
   writeScope: "self" as const,
 };
 
-async function inCache(page: Page, body: string) {
+function inCache(page: Page, body: string) {
   return page.evaluate(
     async ({ body, folder }) => {
       const module = await import("/src/lib/offline-cache.ts");
@@ -42,7 +42,9 @@ async function open(page: Page) {
   await page.goto("/tests/browser/fixtures/storage.html");
 }
 
-test("delayed old deny cannot erase a newer verified folder", async ({ page }) => {
+test("delayed old deny cannot erase a newer verified folder", async ({
+  page,
+}) => {
   await open(page);
   const result = await inCache(
     page,
@@ -56,13 +58,15 @@ test("delayed old deny cannot erase a newer verified folder", async ({ page }) =
       await cache.putFolder(folder, { orderingToken: fresh });
       const committed = await pending;
       stop();
-      return { committed, retained: Boolean(await cache.getFolder(folder.id)), events };
+      return { committed, events, retained: Boolean(await cache.getFolder(folder.id)) };
     }`,
   );
-  expect(result).toEqual({ committed: false, retained: true, events: [] });
+  expect(result).toEqual({ committed: false, events: [], retained: true });
 });
 
-test("current deny commits receipt authority and generation", async ({ page }) => {
+test("current deny commits receipt authority and generation", async ({
+  page,
+}) => {
   await open(page);
   const result = await inCache(
     page,
@@ -85,7 +89,9 @@ test("current deny commits receipt authority and generation", async ({ page }) =
   expect(result.receipt.resource.epoch).toBe("0");
 });
 
-test("null and canonical root aliases are denied together", async ({ page }) => {
+test("null and canonical root aliases are denied together", async ({
+  page,
+}) => {
   await open(page);
   const result = await inCache(
     page,
@@ -112,7 +118,9 @@ test("literal root and sentinel ids are not aliases", async ({ page }) => {
   expect(result).toEqual([true, true]);
 });
 
-test("authority reads every alias when only alias one is missing", async ({ page }) => {
+test("authority reads every alias when only alias one is missing", async ({
+  page,
+}) => {
   await open(page);
   const result = await inCache(
     page,
@@ -129,7 +137,9 @@ test("authority reads every alias when only alias one is missing", async ({ page
   expect(result).toBe(true);
 });
 
-test("old receipt after fresh clear reports false and keeps mounted state", async ({ page }) => {
+test("old receipt after fresh clear reports false and keeps mounted state", async ({
+  page,
+}) => {
   await open(page);
   const result = await inCache(
     page,
@@ -148,7 +158,9 @@ test("old receipt after fresh clear reports false and keeps mounted state", asyn
   expect(result).toEqual({ authority: false, retained: true });
 });
 
-test("unrelated folder denial leaves current mounted target unchanged", async ({ page }) => {
+test("unrelated folder denial leaves current mounted target unchanged", async ({
+  page,
+}) => {
   await open(page);
   const result = await inCache(
     page,
@@ -162,7 +174,9 @@ test("unrelated folder denial leaves current mounted target unchanged", async ({
   expect(result).toBe("mounted-folder");
 });
 
-test("direct denied note is removed while descendant note remains", async ({ page }) => {
+test("direct denied note is removed while descendant note remains", async ({
+  page,
+}) => {
   await open(page);
   const result = await inCache(
     page,
@@ -195,7 +209,10 @@ function folderFixture(
     effectiveReadScope: "all" as const,
     effectiveWriteScope: "self" as const,
     flags: { canAdmin: false, canEdit: false, canView: true },
-    folder: crumbs.map((crumb) => crumb.name).concat(parentId ? [name] : []).join("/"),
+    folder: crumbs
+      .map((crumb) => crumb.name)
+      .concat(parentId ? [name] : [])
+      .join("/"),
     grants: [],
     id,
     inherit: false,
@@ -216,7 +233,10 @@ async function routeAuthenticatedHome(
   await page.route("**/api/**", (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/me") {
-      return route.fulfill({ headers: sessionHeaders, json: { user: authenticatedUser } });
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: { user: authenticatedUser },
+      });
     }
     if (pathname === "/api/auth/config") {
       return route.fulfill({
@@ -235,7 +255,10 @@ async function routeAuthenticatedHome(
     }
     const folderId = pathname.match(/^\/api\/folders\/([^/]+)$/)?.[1];
     if (folderId && folders[folderId]) {
-      return route.fulfill({ headers: sessionHeaders, json: folders[folderId] });
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: folders[folderId],
+      });
     }
     return route.fulfill({
       headers: sessionHeaders,
@@ -245,11 +268,7 @@ async function routeAuthenticatedHome(
   });
 }
 
-async function denyFolderFromPeer(
-  peer: Page,
-  id: string,
-  token?: number,
-) {
+async function denyFolderFromPeer(peer: Page, id: string, token?: number) {
   await peer.goto("/tests/browser/fixtures/storage.html");
   await peer.evaluate(
     async ({ id, token }) => {
@@ -282,15 +301,19 @@ test("mounted network folder removes only the denied current view", async ({
   page,
   context,
 }) => {
-  const current = folderFixture("mounted-current", "Mounted Current", null, [], [
-    { id: "mounted-current", name: "Mounted Current" },
-  ]);
+  const current = folderFixture(
+    "mounted-current",
+    "Mounted Current",
+    null,
+    [],
+    [{ id: "mounted-current", name: "Mounted Current" }],
+  );
   const other = folderFixture("mounted-other", "Mounted Other", null, []);
   const targetNote = {
+    folderId: current.id,
     id: "mounted-target-note",
     shortId: "mounted-target-short",
     title: "Mounted Target Note",
-    folderId: current.id,
   };
   const unrelatedNote = {
     ...targetNote,
@@ -307,9 +330,13 @@ test("mounted network folder removes only the denied current view", async ({
   await expect(
     page.getByRole("navigation", { name: "フォルダ" }).getByText(current.name),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: targetNote.title })).toBeVisible();
   await expect(
-    page.getByRole("navigation", { name: "フォルダ" }).getByText("マイドライブ"),
+    page.getByRole("link", { name: targetNote.title }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("navigation", { name: "フォルダ" })
+      .getByText("マイドライブ"),
   ).toBeVisible();
 
   const peer = await context.newPage();
@@ -325,13 +352,21 @@ test("mounted network folder removes only the denied current view", async ({
     }, current.id);
     await denyFolderFromPeer(peer, "not-current", token);
     await expect(
-      page.getByRole("navigation", { name: "フォルダ" }).getByText(current.name),
+      page
+        .getByRole("navigation", { name: "フォルダ" })
+        .getByText(current.name),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: targetNote.title })).toBeVisible();
-    await denyFolderFromPeer(peer, current.id, token);
-    await expect(page.getByText(/キャッシュに保存されていません/)).toBeVisible();
     await expect(
-      page.getByRole("navigation", { name: "フォルダ" }).getByText("マイドライブ"),
+      page.getByRole("link", { name: targetNote.title }),
+    ).toBeVisible();
+    await denyFolderFromPeer(peer, current.id, token);
+    await expect(
+      page.getByText(/キャッシュに保存されていません/),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "フォルダ" })
+        .getByText("マイドライブ"),
     ).toBeVisible();
   } finally {
     await peer.close();
@@ -342,45 +377,103 @@ test("mounted root reprojects a denied child without hiding an allowed descendan
   page,
   context,
 }) => {
-  const deniedChild = folderFixture("mounted-denied-child", "Denied Child", "mounted-root", []);
-  const allowedChild = folderFixture("mounted-allowed-child", "Allowed Child", "mounted-root", []);
-  const root = folderFixture(
+  const deniedChild = folderFixture(
+    "mounted-denied-child",
+    "Denied Child",
     "mounted-root",
-    "Mounted Network Root",
-    null,
-    [
-      { id: deniedChild.id, name: deniedChild.name, parentId: "mounted-root" },
-      { id: allowedChild.id, name: allowedChild.name, parentId: "mounted-root" },
-    ],
+    [],
   );
-  const directNote = { id: "mounted-direct-note", shortId: "mounted-direct", title: "Denied Direct Note", folderId: deniedChild.id };
-  const descendantNote = { id: "mounted-descendant-note", shortId: "mounted-descendant", title: "Allowed Descendant Note", folderId: allowedChild.id };
-  await routeAuthenticatedHome(page, { root, [deniedChild.id]: deniedChild, [allowedChild.id]: allowedChild }, [directNote, descendantNote]);
+  const allowedChild = folderFixture(
+    "mounted-allowed-child",
+    "Allowed Child",
+    "mounted-root",
+    [],
+  );
+  const root = folderFixture("mounted-root", "Mounted Network Root", null, [
+    { id: deniedChild.id, name: deniedChild.name, parentId: "mounted-root" },
+    { id: allowedChild.id, name: allowedChild.name, parentId: "mounted-root" },
+  ]);
+  const directNote = {
+    folderId: deniedChild.id,
+    id: "mounted-direct-note",
+    shortId: "mounted-direct",
+    title: "Denied Direct Note",
+  };
+  const descendantNote = {
+    folderId: allowedChild.id,
+    id: "mounted-descendant-note",
+    shortId: "mounted-descendant",
+    title: "Allowed Descendant Note",
+  };
+  await routeAuthenticatedHome(
+    page,
+    { root, [deniedChild.id]: deniedChild, [allowedChild.id]: allowedChild },
+    [directNote, descendantNote],
+  );
   await page.goto("/");
-  await expect(page.getByRole("link", { name: deniedChild.name })).toBeVisible();
-  await expect(page.getByRole("link", { name: allowedChild.name })).toBeVisible();
-  await expect(page.getByRole("link", { name: directNote.title })).toBeVisible();
-  await expect(page.getByRole("link", { name: descendantNote.title })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: deniedChild.name }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: allowedChild.name }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: directNote.title }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: descendantNote.title }),
+  ).toBeVisible();
   const peer = await context.newPage();
   try {
     await denyFolderFromPeer(peer, deniedChild.id);
-    await expect(page.getByRole("link", { name: deniedChild.name })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: directNote.title })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: allowedChild.name })).toBeVisible();
-    await expect(page.getByRole("link", { name: descendantNote.title })).toBeVisible();
     await expect(
-      page.getByRole("navigation", { name: "フォルダ" }).getByText("マイドライブ"),
+      page.getByRole("link", { name: deniedChild.name }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: directNote.title }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: allowedChild.name }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: descendantNote.title }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "フォルダ" })
+        .getByText("マイドライブ"),
     ).toBeVisible();
   } finally {
     await peer.close();
   }
 });
 
-test("mounted note list removes only a peer-denied note", async ({ page, context }) => {
-  const root = folderFixture("mounted-note-root", "Mounted Note Home", null, []);
-  const target = { id: "peer-denied-note", shortId: "peer-denied-short", title: "Peer Denied Note", folderId: root.id };
-  const sibling = { id: "peer-kept-note", shortId: "peer-kept-short", title: "Peer Kept Note", folderId: root.id };
-  await routeAuthenticatedHome(page, { root, [root.id]: root }, [target, sibling]);
+test("mounted note list removes only a peer-denied note", async ({
+  page,
+  context,
+}) => {
+  const root = folderFixture(
+    "mounted-note-root",
+    "Mounted Note Home",
+    null,
+    [],
+  );
+  const target = {
+    folderId: root.id,
+    id: "peer-denied-note",
+    shortId: "peer-denied-short",
+    title: "Peer Denied Note",
+  };
+  const sibling = {
+    folderId: root.id,
+    id: "peer-kept-note",
+    shortId: "peer-kept-short",
+    title: "Peer Kept Note",
+  };
+  await routeAuthenticatedHome(page, { root, [root.id]: root }, [
+    target,
+    sibling,
+  ]);
   await page.goto("/");
   await expect(page.getByRole("link", { name: target.title })).toBeVisible();
   await expect(page.getByRole("link", { name: sibling.title })).toBeVisible();
@@ -405,13 +498,23 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === `/api/folders/${folderA.id}`) {
       await gate;
-      return route.fulfill({ headers: sessionHeaders, json: { error: "Denied" }, status: 403 });
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: { error: "Denied" },
+        status: 403,
+      });
     }
     if (pathname === "/api/me") {
-      return route.fulfill({ headers: sessionHeaders, json: { user: authenticatedUser } });
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: { user: authenticatedUser },
+      });
     }
     if (pathname === "/api/auth/config") {
-      return route.fulfill({ headers: sessionHeaders, json: { access: false, mock: true } });
+      return route.fulfill({
+        headers: sessionHeaders,
+        json: { access: false, mock: true },
+      });
     }
     if (pathname === `/api/folders/${folderB.id}`) {
       return route.fulfill({ headers: sessionHeaders, json: folderB });

@@ -96,3 +96,17 @@ Each fixture uses authenticated API route responses with the explicit
 API from a same-context peer page, and waits on locators or a response gate
 rather than `page.waitForTimeout`. The candidate/live source was not edited.
 These browser tests were not executed in this isolated checkout.
+
+## Biome formatting cleanup
+
+Parent Biome measurement reported nine formatting errors in
+`mounted-folder-denial.spec.ts`. The test-only cleanup applies the formatter's
+import, property-order, callback, fixture, route, and locator formatting, and
+removes the unnecessary `async` from `inCache` without changing test gates,
+assertions, or DOM cases.
+
+```text
+Biome check apps/web/tests/browser/mounted-folder-denial.spec.ts: PASS
+git diff --check: PASS
+browser tests: not executed (candidate dependencies are not installed)
+```
