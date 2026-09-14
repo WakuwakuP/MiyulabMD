@@ -30,6 +30,8 @@ import {
 import {
   readOfflineFolderDenial,
   subscribeOfflineCacheFolderDenial,
+  readOfflineNoteDenial,
+  subscribeOfflineCacheNoteDenial,
 } from "../lib/offline-cache.ts";
 import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
@@ -314,6 +316,9 @@ function NetworkHomePage() {
   const [reloadRequest, setReloadRequest] = useState(0);
   const latestReloadRequest = useRef(reloadRequest);
   latestReloadRequest.current = reloadRequest;
+  const [noteReload, setNoteReload] = useState(0);
+  const notesRef = useRef<NoteSummary[]>([]);
+  const reloadOwnerRef = useRef(0);
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -357,6 +362,7 @@ function NetworkHomePage() {
     setError(null);
     setCacheWarning(null);
     setFolderPending(true);
+    ++reloadOwnerRef.current;
     void readHomeMetadata({
       folderId,
       isCurrentOwner,
@@ -367,6 +373,7 @@ function NetworkHomePage() {
         if (!isCurrentOwner() || controller.signal.aborted) {
           return;
         }
+        notesRef.current = snapshot.notes;
         setNotes(snapshot.notes);
         setVisibleFolder(snapshot.visibleFolder);
         setPublicFolders(snapshot.publicFolders);
@@ -393,7 +400,41 @@ function NetworkHomePage() {
       current = false;
       controller.abort();
     };
-  }, [folderId, reloadRequest, userLoading, viewer]);
+  }, [folderId, noteReload, reloadRequest, userLoading, viewer]);
+
+  useEffect(() => {
+    if (viewer.cacheViewerId === null) {
+      return;
+    }
+    const owner = reloadOwnerRef.current;
+    const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
+      if (
+        event.userId !== viewer.cacheViewerId ||
+        owner !== reloadOwnerRef.current
+      ) {
+        return;
+      }
+      const identities = event.resource.aliases.filter((alias) =>
+        notesRef.current.some(
+          (current) => current.id === alias || current.shortId === alias,
+        ),
+      );
+      if (identities.length === 0) {
+        return;
+      }
+      void readOfflineNoteDenial(event, identities).then((denied) => {
+        if (
+          denied === false ||
+          owner !== reloadOwnerRef.current ||
+          viewer.cacheViewerId !== event.userId
+        ) {
+          return;
+        }
+        setNoteReload((current) => current + 1);
+      });
+    });
+    return unsubscribe;
+  }, [viewer.cacheViewerId]);
 
   useEffect(() => {
     let active = true;

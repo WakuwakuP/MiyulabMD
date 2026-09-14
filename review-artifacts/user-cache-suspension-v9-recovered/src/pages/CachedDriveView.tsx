@@ -10,6 +10,8 @@ import {
 import {
   readOfflineFolderDenial,
   subscribeOfflineCacheFolderDenial,
+  readOfflineNoteDenial,
+  subscribeOfflineCacheNoteDenial,
 } from "../lib/offline-cache.ts";
 
 const emptyView: CachedDriveData = {
@@ -32,12 +34,16 @@ export function CachedDriveView() {
   const latestReloadRequest = useRef(reloadRequest);
   latestReloadRequest.current = reloadRequest;
   const cacheViewerId = viewer.cacheViewerId;
+  const [noteReload, setNoteReload] = useState(0);
+  const notesRef = useRef(view.notes);
+  const reloadOwnerRef = useRef(0);
 
   useEffect(() => {
     setHeader(null);
     const scope = viewing.beginView(viewer);
     const controller = new AbortController();
     const requestOwner = reloadRequest;
+    ++reloadOwnerRef.current;
     const isCurrentRequest = () =>
       !controller.signal.aborted &&
       scope.isCurrent() &&
@@ -65,6 +71,7 @@ export function CachedDriveView() {
               viewer,
             });
           if (published || (!next.folderMissing && isCurrentRequest())) {
+            notesRef.current = next.notes;
             setView(next);
           }
         }
@@ -85,8 +92,9 @@ export function CachedDriveView() {
     };
   }, [
     cacheViewerId,
-    reloadRequest,
     folderId,
+    noteReload,
+    reloadRequest,
     setHeader,
     userLoading,
     viewer,
@@ -112,6 +120,41 @@ export function CachedDriveView() {
       unsubscribe();
     };
   }, [cacheViewerId]);
+
+  useEffect(() => {
+    if (cacheViewerId === null || viewer.mode !== "cached") {
+      return;
+    }
+    const owner = reloadOwnerRef.current;
+    const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
+      if (
+        event.userId !== cacheViewerId ||
+        owner !== reloadOwnerRef.current
+      ) {
+        return;
+      }
+      const identities = event.resource.aliases.filter((alias) =>
+        notesRef.current.some(
+          (note) => note.id === alias || note.shortId === alias,
+        ),
+      );
+      if (identities.length === 0) {
+        return;
+      }
+      void readOfflineNoteDenial(event, identities).then((denied) => {
+        if (
+          denied !== false &&
+          owner === reloadOwnerRef.current &&
+          cacheViewerId === event.userId
+        ) {
+          setNoteReload((current) => current + 1);
+        }
+      });
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [cacheViewerId, viewer.mode]);
 
   const folder = view.folder;
   const children = (folder?.children ?? []) as FolderRecord[];
