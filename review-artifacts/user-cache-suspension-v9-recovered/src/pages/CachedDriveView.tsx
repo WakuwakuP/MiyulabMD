@@ -7,6 +7,10 @@ import {
   type CachedDriveView as CachedDriveData,
   readCachedDrive,
 } from "../lib/cached-drive-reader.ts";
+import {
+  readOfflineFolderDenial,
+  subscribeOfflineCacheFolderDenial,
+} from "../lib/offline-cache.ts";
 
 const emptyView: CachedDriveData = {
   folder: null,
@@ -24,6 +28,7 @@ export function CachedDriveView() {
   const [view, setView] = useState(emptyView);
   const [pending, setPending] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadRequest, setReloadRequest] = useState(0);
   const cacheViewerId = viewer.cacheViewerId;
 
   useEffect(() => {
@@ -71,7 +76,32 @@ export function CachedDriveView() {
       controller.abort();
       scope.dispose();
     };
-  }, [cacheViewerId, folderId, setHeader, userLoading, viewer, viewing]);
+  }, [
+    cacheViewerId,
+    reloadRequest,
+    folderId,
+    setHeader,
+    userLoading,
+    viewer,
+    viewing,
+  ]);
+
+  useEffect(
+    () =>
+      subscribeOfflineCacheFolderDenial((event) => {
+        if (
+          event.userId === cacheViewerId &&
+          event.resource.aliases.includes(folderId ?? null)
+        ) {
+          void readOfflineFolderDenial(event).then((denied) => {
+            if (denied === true) {
+              setReloadRequest((value) => value + 1);
+            }
+          });
+        }
+      }),
+    [cacheViewerId, folderId],
+  );
 
   const folder = view.folder;
   const children = (folder?.children ?? []) as FolderRecord[];

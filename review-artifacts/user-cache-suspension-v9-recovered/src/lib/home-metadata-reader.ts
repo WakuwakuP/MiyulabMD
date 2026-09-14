@@ -131,6 +131,7 @@ async function rejectDeniedFolder(
   scope: OfflineCacheScope | null,
   signal: AbortSignal,
   isCurrentOwner: () => boolean,
+  orderingToken: number | undefined,
 ): Promise<never> {
   const error = new HomeMetadataError(
     result.status === 404 ? "フォルダが見つかりません。" : result.error,
@@ -144,7 +145,10 @@ async function rejectDeniedFolder(
         signal,
         userId: viewer.user.id,
       });
-      await cache.denyFolder(folderId ?? null);
+      const committed = await cache.denyFolder(folderId ?? null, orderingToken);
+      if (!committed) {
+        throw new DOMException("Home read is no longer current", "AbortError");
+      }
     } catch {
       suspendOfflineCacheUser(viewer.user.id);
       error.cacheWarning =
@@ -221,6 +225,7 @@ async function readHomeMetadataSnapshot({
         scope,
         signal,
         isCurrentOwner,
+        folderReadGeneration,
       );
     }
     return result;
@@ -261,6 +266,33 @@ async function readHomeMetadataSnapshot({
     scope,
     folderReadGeneration,
   );
+  if (viewer.user) {
+    let projectionCache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
+    try {
+      projectionCache = await openOfflineCache({
+        scope: scope ?? undefined,
+        signal,
+        userId: viewer.user.id,
+      });
+      const projectedList = await projectionCache.getNoteList();
+      const projectedFolder = await projectionCache.getFolder(folderId ?? null);
+      if (projectedList) snapshot.notes = projectedList.notes;
+      if (folderId !== undefined && projectedFolder) {
+        snapshot.visibleFolder = projectedFolder.folder;
+      }
+    } catch (error) {
+      if (
+        signal.aborted ||
+        !isCurrentOwner() ||
+        (error instanceof DOMException && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
+    } finally {
+      projectionCache?.close();
+    }
+  }
   throwIfCancelled(signal, isCurrentOwner);
   try {
     await validateHomePublication(
