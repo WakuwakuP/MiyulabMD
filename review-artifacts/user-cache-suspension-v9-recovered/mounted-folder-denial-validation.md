@@ -110,3 +110,24 @@ Biome check apps/web/tests/browser/mounted-folder-denial.spec.ts: PASS
 git diff --check: PASS
 browser tests: not executed (candidate dependencies are not installed)
 ```
+
+## Parent follow-up diagnosis
+
+The parent's prepared run measured 7/12 browser cases passing and five
+failures. This fixture-only correction addresses the reviewed causes:
+
+1. The core old-denial race now captures the old token, awaits the fresh token
+   and `putFolder`, and only then invokes the old deny; it still asserts
+   `committed: false`, no events, and retained state.
+2. Every DOM note summary spreads the complete `note` fixture and overrides
+   only its identity, folder, title, and timestamps, preserving access data.
+3. Authenticated folder fixtures expose owner `canAdmin`/`canEdit` flags, and
+   route A/B fixtures include self crumbs in the API shape expected by
+   navigation.
+4. The route-switch test observes the B folder request and releases its gate
+   from `finally`, while retaining the stale-denial assertions.
+5. Each DOM test now polls for a post-receipt folder or notes API request,
+   proving subscription-driven reload rather than manual navigation.
+
+No live or candidate source was edited. Biome and browser execution for this
+follow-up remain unverified in this checkout.
