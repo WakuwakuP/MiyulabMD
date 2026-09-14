@@ -2333,12 +2333,11 @@ async function readVisibleNoteList(
   return { cachedAt: record.cachedAt, notes };
 }
 
-async function readNoteListState(
-  database: IDBDatabase,
+function readNoteListState(
   userId: string,
   lifetime: number,
   record: NoteListRecord | undefined,
-): Promise<"available" | "denied" | "missing"> {
+): "available" | "denied" | "missing" {
   if (!record) {
     return "missing";
   }
@@ -2945,7 +2944,7 @@ export async function openOfflineCache(
         return "denied";
       }
       const record = await readNoteListRecord(database, noteListKey(userId));
-      return readNoteListState(database, userId, lifetime, record);
+      return readNoteListState(userId, lifetime, record);
     },
 
     async putFolder(folder, options = {}) {
