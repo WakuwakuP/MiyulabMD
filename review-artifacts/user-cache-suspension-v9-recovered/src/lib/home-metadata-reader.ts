@@ -276,7 +276,6 @@ async function projectCachedHomeMetadata(
       ]);
     applyCachedHomeMetadataProjection(
       snapshot,
-      folderId,
       projectedList,
       projectedFolder,
       listState,
@@ -304,7 +303,6 @@ async function projectCachedHomeMetadata(
 
 function applyCachedHomeMetadataProjection(
   snapshot: HomeMetadataSnapshot,
-  folderId: string | undefined,
   projectedList: { notes: NoteSummary[]; cachedAt: number } | null,
   projectedFolder: { folder: FolderAccess; cachedAt: number } | null,
   listState: "available" | "denied" | "missing",
