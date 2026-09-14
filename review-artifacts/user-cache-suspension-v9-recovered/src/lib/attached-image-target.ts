@@ -21,10 +21,14 @@ export function attachedImage(
     const match = /^\/api\/notes\/([^/]+)\/images\/([^/]+)$/.exec(
       parsed.pathname,
     );
-    if (!match) return null;
+    if (!match) {
+      return null;
+    }
     const noteId = decodeURIComponent(match[1] as string);
     const imageId = decodeURIComponent(match[2] as string);
-    if (!(noteId && imageId) || /[/\\]/.test(noteId + imageId)) return null;
+    if (!(noteId && imageId) || /[/\\]/.test(noteId + imageId)) {
+      return null;
+    }
     return {
       imageId,
       noteId,
@@ -42,7 +46,9 @@ export function collectAttachedImages(
   const images = new Map<string, AttachedImage>();
   for (const url of collectImageUrls(markdown)) {
     const image = attachedImage(url, origin);
-    if (image) images.set(image.url, image);
+    if (image) {
+      images.set(image.url, image);
+    }
   }
   return [...images.values()];
 }

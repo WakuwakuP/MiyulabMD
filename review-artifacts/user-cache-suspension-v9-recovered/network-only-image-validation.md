@@ -70,3 +70,11 @@ baseline had one MIME parse error. Dependencies are absent here, so the
 browser matrix, typecheck, and Biome remain unexecuted; these measurements
 must be re-run by the parent worker. The node strip-types syntax check and
 `git diff --check` were run successfully.
+
+## Candidate style pass
+
+The five checked candidate files pass `pnpm dlx @biomejs/biome check`. The
+network-only browser suite and web typecheck were not runnable because this
+worktree has no installed dependencies (`node_modules` is absent). The
+browser spec passes `node --experimental-strip-types --check`, and
+`git diff --check` passes. No browser GREEN result is claimed.

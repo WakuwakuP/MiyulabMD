@@ -1,6 +1,6 @@
 import { apiFetch } from "./api-fetch.ts";
 import { ApiIdentityError } from "./api-transport.ts";
-import { attachedImage, type AttachedImage } from "./attached-image-target.ts";
+import { type AttachedImage, attachedImage } from "./attached-image-target.ts";
 
 type NetworkEntry = {
   controller: AbortController;
@@ -19,11 +19,13 @@ const supportedImageMimes = new Set([
 ]);
 
 function checkAbort(signal: AbortSignal): void {
-  if (signal.aborted) throw signal.reason;
+  if (signal.aborted) {
+    throw signal.reason;
+  }
 }
 
 function discard(response: Response): void {
-  void response.body?.cancel().catch(() => {});
+  void response.body?.cancel().catch(() => undefined);
 }
 
 async function readResponse(
@@ -39,7 +41,9 @@ async function readResponse(
     discard(response);
     return null;
   }
-  const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
+  const mime =
+    response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ??
+    "";
   if (!supportedImageMimes.has(mime)) {
     discard(response);
     return null;
@@ -50,7 +54,7 @@ async function readResponse(
 }
 
 /** Network-only attachment acquisition; this module has no cache/OPFS imports. */
-export async function acquireAttachedImageNetworkOnly(
+export function acquireAttachedImageNetworkOnly(
   image: AttachedImage,
   options: { expectedViewerId: string | null; signal?: AbortSignal },
 ): Promise<Blob | null> {
@@ -98,10 +102,14 @@ export async function acquireAttachedImageNetworkOnly(
     const current = entry;
     void entry.promise.then(
       () => {
-        if (inFlight.get(key) === current) inFlight.delete(key);
+        if (inFlight.get(key) === current) {
+          inFlight.delete(key);
+        }
       },
       () => {
-        if (inFlight.get(key) === current) inFlight.delete(key);
+        if (inFlight.get(key) === current) {
+          inFlight.delete(key);
+        }
       },
     );
   }
@@ -110,28 +118,40 @@ export async function acquireAttachedImageNetworkOnly(
   return new Promise<Blob | null>((resolve, reject) => {
     let settled = false;
     const cleanup = () => {
-      if (settled) return false;
+      if (settled) {
+        return false;
+      }
       settled = true;
       signal.removeEventListener("abort", abort);
       current.users -= 1;
       if (!current.users) {
-        if (inFlight.get(key) === current) inFlight.delete(key);
+        if (inFlight.get(key) === current) {
+          inFlight.delete(key);
+        }
         current.controller.abort();
       }
       return true;
     };
     const abort = () => {
-      if (cleanup()) reject(signal.reason);
+      if (cleanup()) {
+        reject(signal.reason);
+      }
     };
     signal.addEventListener("abort", abort, { once: true });
     void current.promise.then(
       (value) => {
-        if (cleanup()) resolve(value.bytes);
+        if (cleanup()) {
+          resolve(value.bytes);
+        }
       },
       (error) => {
-        if (cleanup()) reject(error);
+        if (cleanup()) {
+          reject(error);
+        }
       },
     );
-    if (signal.aborted) abort();
+    if (signal.aborted) {
+      abort();
+    }
   });
 }

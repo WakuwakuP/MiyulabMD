@@ -1,4 +1,5 @@
 import { apiFetch } from "./api-fetch.ts";
+import type { AttachedImage } from "./attached-image-target.ts";
 import {
   assertOfflineCacheScope,
   isSupportedCachedImageMime,
@@ -7,11 +8,11 @@ import {
   suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { StorageWriteRecovery } from "./storage-write-recovery.ts";
-import type { AttachedImage } from "./attached-image-target.ts";
+
 export {
+  type AttachedImage,
   attachedImage,
   collectAttachedImages,
-  type AttachedImage,
 } from "./attached-image-target.ts";
 
 type Options = {

@@ -25,7 +25,7 @@ test("network-only preview verifies guest and authenticated actors without stora
     let requests = 0;
     let opens = 0;
     let directories = 0;
-    globalThis.fetch = async (_input, init) => {
+    globalThis.fetch = (_input, init) => {
       requests += 1;
       const expected = (init?.headers as Headers | undefined)?.get(
         "X-MiyulabMD-Session-User",
@@ -33,20 +33,22 @@ test("network-only preview verifies guest and authenticated actors without stora
       // apiFetch carries the expected identity in its own option, while the
       // fixture response represents the server's checked session identity.
       const actor = expected ?? (requests === 2 ? "guest" : "user:alice");
-      return new Response("png", {
-        headers: {
-          "Content-Type": "image/png",
-          "X-MiyulabMD-Session-User": actor,
-        },
-      });
+      return Promise.resolve(
+        new Response("png", {
+          headers: {
+            "Content-Type": "image/png",
+            "X-MiyulabMD-Session-User": actor,
+          },
+        }),
+      );
     };
     indexedDB.open = ((...args: Parameters<typeof indexedDB.open>) => {
       opens += 1;
       return originalOpen.apply(indexedDB, args);
     }) as typeof indexedDB.open;
-    navigator.storage.getDirectory = async () => {
+    navigator.storage.getDirectory = () => {
       directories += 1;
-      throw new Error("network-only opened OPFS");
+      return Promise.reject(new Error("network-only opened OPFS"));
     };
     try {
       const guestWrong = await acquireAttachedImageNetworkOnly(target, {
@@ -61,10 +63,10 @@ test("network-only preview verifies guest and authenticated actors without stora
       return {
         alice: Boolean(alice),
         aliceBytes: await alice?.text(),
+        directories,
         guest: Boolean(guest),
         guestBytes: await guest?.text(),
         guestWrong: Boolean(guestWrong),
-        directories,
         opens,
         requests,
       };
@@ -147,7 +149,7 @@ test("managed images are hidden without context while external images remain", a
       { enabled: false, urls: new Map() },
     );
   });
-  expect(html).not.toContain('/api/notes/note-1/images/image-1');
+  expect(html).not.toContain("/api/notes/note-1/images/image-1");
   expect(html).toContain("https://example.com/x.png");
 });
 
@@ -178,12 +180,12 @@ test("guest MarkdownPreview displays checked attachments through a blob URL", as
     }
     if (pathname === `/api/notes/${note.id}`) {
       return route.fulfill({
-        json: displayed,
         headers: { "X-MiyulabMD-Session-User": "guest" },
+        json: displayed,
       });
     }
     if (pathname === "/api/me") {
-      return route.fulfill({ status: 401, body: "guest" });
+      return route.fulfill({ body: "guest", status: 401 });
     }
     return route.fulfill({ json: {} });
   });
@@ -195,9 +197,7 @@ test("guest MarkdownPreview displays checked attachments through a blob URL", as
   wrongActor = false;
   await page.reload();
   await expect(previewImage).toBeVisible();
-  await expect
-    .poll(() => previewImage.getAttribute("src"))
-    .toMatch(/^blob:/);
+  await expect.poll(() => previewImage.getAttribute("src")).toMatch(/^blob:/);
   expect(imageRequests).toEqual([]);
 });
 
@@ -209,14 +209,16 @@ test("guest and Alice requests never share the same URL transport", async ({
       "/src/lib/network-attached-images.ts"
     );
     let count = 0;
-    globalThis.fetch = async () => {
+    globalThis.fetch = () => {
       count += 1;
-      return new Response("png", {
-        headers: {
-          "Content-Type": "image/png",
-          "X-MiyulabMD-Session-User": count === 1 ? "guest" : "user:alice",
-        },
-      });
+      return Promise.resolve(
+        new Response("png", {
+          headers: {
+            "Content-Type": "image/png",
+            "X-MiyulabMD-Session-User": count === 1 ? "guest" : "user:alice",
+          },
+        }),
+      );
     };
     await Promise.all([
       acquireAttachedImageNetworkOnly(target, { expectedViewerId: null }),
@@ -233,13 +235,15 @@ test("unsupported MIME and empty bodies are rejected", async ({ page }) => {
       "/src/lib/network-attached-images.ts"
     );
     let call = 0;
-    globalThis.fetch = async () =>
-      new Response(call++ === 0 ? "text" : "", {
-        headers: {
-          "Content-Type": call === 1 ? "text/plain" : "image/png",
-          "X-MiyulabMD-Session-User": "guest",
-        },
-      });
+    globalThis.fetch = () =>
+      Promise.resolve(
+        new Response(call++ === 0 ? "text" : "", {
+          headers: {
+            "Content-Type": call === 1 ? "text/plain" : "image/png",
+            "X-MiyulabMD-Session-User": "guest",
+          },
+        }),
+      );
     return [
       await acquireAttachedImageNetworkOnly(target, { expectedViewerId: null }),
       await acquireAttachedImageNetworkOnly(target, { expectedViewerId: null }),
@@ -248,7 +252,9 @@ test("unsupported MIME and empty bodies are rejected", async ({ page }) => {
   expect(results).toEqual([false, false]);
 });
 
-test("401, 403, 404, and 500 never produce raw preview bytes", async ({ page }) => {
+test("401, 403, 404, and 500 never produce raw preview bytes", async ({
+  page,
+}) => {
   const results = await page.evaluate(async (baseImage) => {
     const { acquireAttachedImageNetworkOnly } = await import(
       "/src/lib/network-attached-images.ts"
@@ -257,8 +263,8 @@ test("401, 403, 404, and 500 never produce raw preview bytes", async ({ page }) 
     let index = 0;
     globalThis.fetch = () =>
       new Response("", {
-        status: statuses[index++] ?? 500,
         headers: { "X-MiyulabMD-Session-User": "guest" },
+        status: statuses[index++] ?? 500,
       });
     return Promise.all(
       statuses.map((status) =>
@@ -277,22 +283,31 @@ test("missing or mismatched identity is rejected", async ({ page }) => {
     const { acquireAttachedImageNetworkOnly } = await import(
       "/src/lib/network-attached-images.ts"
     );
-    globalThis.fetch = async () =>
-      new Response("png", { headers: { "Content-Type": "image/png" } });
+    globalThis.fetch = () =>
+      Promise.resolve(
+        new Response("png", { headers: { "Content-Type": "image/png" } }),
+      );
     return Boolean(
-      await acquireAttachedImageNetworkOnly(target, { expectedViewerId: "alice" }),
+      await acquireAttachedImageNetworkOnly(target, {
+        expectedViewerId: "alice",
+      }),
     );
   }, image);
   expect(result).toBe(false);
 });
 
-test("late response after consumer abort is not published", async ({ page }) => {
+test("late response after consumer abort is not published", async ({
+  page,
+}) => {
   const result = await page.evaluate(async (target) => {
     const { acquireAttachedImageNetworkOnly } = await import(
       "/src/lib/network-attached-images.ts"
     );
     const controller = new AbortController();
-    globalThis.fetch = () => new Promise<Response>(() => {});
+    globalThis.fetch = () =>
+      new Promise<Response>((_resolve, _reject) => {
+        // Keep transport pending to verify a late response cannot publish.
+      });
     const pending = acquireAttachedImageNetworkOnly(target, {
       expectedViewerId: "alice",
       signal: controller.signal,
@@ -315,21 +330,23 @@ test("cache-disabled authenticated preview performs zero local storage calls", a
     }) as typeof indexedDB.open;
     const originalDirectory = navigator.storage.getDirectory;
     let directories = 0;
-    navigator.storage.getDirectory = async () => {
+    navigator.storage.getDirectory = () => {
       directories += 1;
-      throw new Error("network-only opened OPFS");
+      return Promise.reject(new Error("network-only opened OPFS"));
     };
     try {
       const { acquireAttachedImageNetworkOnly } = await import(
         "/src/lib/network-attached-images.ts"
       );
-      globalThis.fetch = async () =>
-        new Response("png", {
-          headers: {
-            "Content-Type": "image/png",
-            "X-MiyulabMD-Session-User": "guest",
-          },
-        });
+      globalThis.fetch = () =>
+        Promise.resolve(
+          new Response("png", {
+            headers: {
+              "Content-Type": "image/png",
+              "X-MiyulabMD-Session-User": "guest",
+            },
+          }),
+        );
       await acquireAttachedImageNetworkOnly(target, { expectedViewerId: null });
       return { directories, opens };
     } finally {
