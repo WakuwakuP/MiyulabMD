@@ -51,6 +51,7 @@ import {
   SnapshotPersistence,
   STORAGE_YJS_KEY,
 } from "./snapshot-persistence.ts";
+import { writeSnapshotAndNotify } from "./snapshot-saved.ts";
 import { applyTaskCheckbox } from "./task-checkbox.ts";
 
 /** y-websocket 互換のトップレベルメッセージ種別。 */
@@ -122,7 +123,11 @@ export class DocumentRoom extends DurableObject<Env> {
       if (!noteId) {
         throw new Error("Cannot persist snapshot without note ID");
       }
-      await persistMarkdownSnapshot(this.env, noteId, markdown);
+      await writeSnapshotAndNotify(
+        () => persistMarkdownSnapshot(this.env, noteId, markdown),
+        noteId,
+        () => this.ctx.getWebSockets(),
+      );
     },
   );
   private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;

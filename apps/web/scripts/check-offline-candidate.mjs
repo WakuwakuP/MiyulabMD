@@ -229,12 +229,14 @@ async function browser() {
     await writeFile(
       config,
       `export default ${JSON.stringify({
+        forbidOnly: true,
         outputDir: path.join(runRoot, "results"),
         projects: [{ name: "chromium", use: { browserName: "chromium" } }],
         reporter: "list",
         retries: 0,
         testDir: path.join(webRoot, "tests/browser"),
         use: { baseURL: `http://127.0.0.1:${port}` },
+        workers: 1,
       })};`,
     );
     const specs = process.argv.slice(4);
@@ -243,55 +245,10 @@ async function browser() {
       "test",
       "--config",
       config,
-      ...(specs.length
-        ? specs
-        : [
-            "mydrive-prefetch.spec.ts",
-            "mydrive-prefetch-ownership.spec.ts",
-            "mydrive-prefetch-denial.spec.ts",
-            "mydrive-prefetch-stops.spec.ts",
-            "mydrive-prefetch-resilience.spec.ts",
-            "mydrive-prefetch-metadata-retry.spec.ts",
-            "mydrive-prefetch-priority.spec.ts",
-            "mydrive-prefetch-membership.spec.ts",
-            "mydrive-prefetch-triggers.spec.ts",
-            "mydrive-prefetch-tabs.spec.ts",
-            "mydrive-prefetch-periodic.spec.ts",
-            "mydrive-prefetch-mutations.spec.ts",
-            "drive-change-notification.spec.ts",
-            "viewer-recovery.spec.ts",
-            "note-request-sharing.spec.ts",
-            "note-request-subscribers.spec.ts",
-            "offline-cache-clear.spec.ts",
-            "offline-cache-tabs.spec.ts",
-            "cached-drive-lifecycle.spec.ts",
-            "offline-folder-denial.spec.ts",
-            "home-metadata.spec.ts",
-            "offline-drive-view.spec.ts",
-            "editor-read-lifecycle.spec.ts",
-            "offline-note-view.spec.ts",
-            "offline-share-view.spec.ts",
-            "mutation-api-access.spec.ts",
-            "viewing-access.spec.ts",
-            "app-shell-viewer.spec.ts",
-            "cached-viewer-note-read.spec.ts",
-            "offline-direct-denial.spec.ts",
-            "note-denial-entry-ordering.spec.ts",
-            "user-cache-write-lifecycle.spec.ts",
-            "user-cache-suspension.spec.ts",
-            "note-denial-ordering.spec.ts",
-            "note-denial-failure.spec.ts",
-            "note-read-denial.spec.ts",
-            "note-read-session.spec.ts",
-            "note-read-publication.spec.ts",
-            "viewer-context.spec.ts",
-            "offline-cache.spec.ts",
-            "offline-cache-cleanup.spec.ts",
-            "offline-folder-cache.spec.ts",
-            "offline-note-list-cache.spec.ts",
-            "storage-platform.spec.ts",
-            "editor-disconnect.spec.ts",
-          ]),
+      // Playwright's testDir is the single source of suite membership. With
+      // no positional filters, include new specs automatically, with or without
+      // CLI options such as --workers. Focused runs pass their filters unchanged.
+      ...specs,
     ]);
     if (loaded.size === 0) {
       throw new Error("The selected tests did not load any candidate module");

@@ -1,12 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 
 test.use({ serviceWorkers: "allow" });
 
-test("real private note reloads readonly from the production shell while offline", async ({
-  page,
-  context,
-  baseURL,
-}) => {
+async function verifyOfflineNote(
+  page: Page,
+  context: BrowserContext,
+  baseURL: string | undefined,
+  route: "canonical" | "short" | "share",
+) {
   await context.route("**/*", (route) =>
     new URL(route.request().url()).origin === baseURL
       ? route.continue()
@@ -48,6 +49,13 @@ test("real private note reloads readonly from the production shell while offline
     )
     .toBe(true);
 
+  if (route !== "canonical") {
+    await page.goto(`/${route === "share" ? "s" : "n"}/${note.shortId}`);
+    await expect(
+      page.getByText("Stored private body.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("#ssr-preview")).toHaveCount(0);
+  }
   const sockets: string[] = [];
   page.on("websocket", (socket) => sockets.push(socket.url()));
   await context.setOffline(true);
@@ -65,4 +73,14 @@ test("real private note reloads readonly from the production shell while offline
   ).toHaveCount(0);
   await expect(page.getByRole("checkbox")).toBeDisabled();
   expect(sockets).toEqual([]);
-});
+}
+
+for (const route of ["canonical", "short", "share"] as const) {
+  test(`real private note reloads readonly through ${route} from the production shell while offline`, async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await verifyOfflineNote(page, context, baseURL, route);
+  });
+}

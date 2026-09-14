@@ -2151,6 +2151,35 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   API応答に明示する基盤を担当へ依頼した。client入力のechoではなく、private
   responseのcache境界を守ることを条件とする。client照合は次の接続作業。
 
+## D117：本体の段階反映とテスト集合の単一化
+
+- 親レビュー済みの9ファイル（short ID/Share、切断時editor、retry/coordinator）を
+  本体へ正確に反映した。担当の本体focused42件・unit117件・PWA9件、
+  型・Biome・byte一致を確認。cross-tabと画像まで完了したとは扱わない。
+- 親は実Worker＋production SWでcanonical `/n/:id`、短縮 `/n/:shortId`、
+  共有 `/s/:shortId` のprivate本文offline reloadを検証し、3件成功した。
+  shell応答にprivate本文を含めず、cached readonly UIから表示する。
+- candidate runnerの手書きspec一覧は、CLI optionだけが渡された場合に全testDirへ
+  切り替わるため、無引数時と対象集合が異なっていた。PlaywrightのtestDirを唯一の
+  集合にし、新specを自動発見する。既定は1 worker、`.only`は禁止、明示filterは保持。
+- 親の無引数browser検証は136件成功・画像1件RED。画像を一覧から落として
+  greenにすることはしない。別途レビューでfinal epoch await後の中止／所有権チェックと
+  cache openのcleanup不足が見つかり、公開境界テストと修正を担当が進めている。
+
+## D118：server保存確認の通知を既存取得契機へ接続
+
+- D1 writer成功後だけ、WebSocket拡張type4/version1/room IDの通知を送る。
+  本文・認証情報をpayloadに含めず、送信失敗を保存失敗へ変えない。
+  clientは正しいroom/versionかつ実WebSocket由来だけを認め、既存のpayload-free
+  drive-changed eventへ接続する。入力やYjs updateそのものは保存確認としない。
+- 親はcandidate通知1件、shared24件、Worker74件、実Worker alarm通知1件を
+  確認した後、collaborationを本体へ反映。通知と切断の本体7件が成功した。
+- テストがrequire経由のCJS Yjsと既存ESM Yjsを混在させてwarningを出したため、
+  直接使用するlib0/y-protocolsをWeb devDependenciesへ明示し、ESM importへ統一。
+  既存lock内の同版をoffline installで使用し、lock差分はimporter6行のみ。
+  再検証の本体7件はYjs二重import warningなし。観測された他のpeer warningは
+  この変更でpackage versionを更新したものではない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

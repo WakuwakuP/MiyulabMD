@@ -1,12 +1,9 @@
-import { createRequire } from "node:module";
+import { encodeSnapshotSaved, MESSAGE_SNAPSHOT_SAVED } from "@miyulabmd/shared";
 import { expect, test } from "@playwright/test";
-
-// Use the same framing libraries as y-websocket without adding dependencies.
-const require = createRequire(import.meta.resolve("y-websocket"));
-const decoding = require("lib0/decoding");
-const encoding = require("lib0/encoding");
-const sync = require("y-protocols/sync");
-const Y: typeof import("yjs") = require("yjs");
+import * as decoding from "lib0/decoding";
+import * as encoding from "lib0/encoding";
+import * as sync from "y-protocols/sync";
+import * as Y from "yjs";
 
 test("real Worker alarm projects a WebSocket Yjs edit to D1 after debounce", async ({
   page,
@@ -35,12 +32,13 @@ test("real Worker alarm projects a WebSocket Yjs edit to D1 after debounce", asy
     // Browser WebSocket carries the real HttpOnly login cookie. Keep this
     // socket open for the edit; no editor bundle or API mutation does the work.
     const frame = await page.evaluate(
-      ({ id, request }) =>
+      ({ id, request, savedType }) =>
         new Promise<number[]>((resolve, reject) => {
           const socket = new WebSocket(
             `${location.origin.replace("http", "ws")}/ws/notes/${id}`,
           );
           Object.assign(window, { snapshotSocket: socket });
+          Object.assign(window, { savedFrames: [] });
           socket.binaryType = "arraybuffer";
           const timer = setTimeout(() => {
             socket.close();
@@ -53,6 +51,11 @@ test("real Worker alarm projects a WebSocket Yjs edit to D1 after debounce", asy
           };
           socket.onmessage = (event) => {
             const bytes = new Uint8Array(event.data);
+            if (bytes[0] === savedType) {
+              (window as Window & { savedFrames: number[][] }).savedFrames.push(
+                Array.from(bytes),
+              );
+            }
             // Standard y-websocket sync / sync-step-2, not awareness.
             if (bytes[0] === 0 && bytes[1] === 1) {
               clearTimeout(timer);
@@ -60,7 +63,11 @@ test("real Worker alarm projects a WebSocket Yjs edit to D1 after debounce", asy
             }
           };
         }),
-      { id, request: Array.from(encoding.toUint8Array(encoder)) as number[] },
+      {
+        id,
+        request: Array.from(encoding.toUint8Array(encoder)) as number[],
+        savedType: MESSAGE_SNAPSHOT_SAVED,
+      },
     );
     const decoder = decoding.createDecoder(new Uint8Array(frame));
     expect(decoding.readVarUint(decoder)).toBe(0);
@@ -92,6 +99,11 @@ test("real Worker alarm projects a WebSocket Yjs edit to D1 after debounce", asy
       markdown: initial,
       title: "Before alarm",
     });
+    expect(
+      await page.evaluate(
+        () => (window as Window & { savedFrames: number[][] }).savedFrames,
+      ),
+    ).toEqual([]);
     await expect
       .poll(
         async () => {
@@ -103,6 +115,13 @@ test("real Worker alarm projects a WebSocket Yjs edit to D1 after debounce", asy
         { intervals: [100, 250, 500], timeout: 20_000 },
       )
       .toEqual({ markdown, title: "After alarm" });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { savedFrames: number[][] }).savedFrames,
+        ),
+      )
+      .toEqual([Array.from(encodeSnapshotSaved(id))]);
     expect(Date.now() - sentAt).toBeGreaterThanOrEqual(3000);
   } finally {
     await page.evaluate(() => {

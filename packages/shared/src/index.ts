@@ -108,6 +108,12 @@ export {
   scopesFromPreset,
 } from "./permission.ts";
 export {
+  encodeSnapshotSaved,
+  isSnapshotSavedForRoom,
+  MESSAGE_SNAPSHOT_SAVED,
+  SNAPSHOT_SAVED_VERSION,
+} from "./snapshot-saved.ts";
+export {
   defaultNoteMarkdown,
   folderUrl,
   isDriveRootPath,
