@@ -27,17 +27,17 @@
 
 | ID | 作業 | 完了条件 | 状態 |
 |---|---|---|---|
-| C1 | user切替・明示logout・端末cache削除 | 旧userの表示・メモリ・IDB・OPFSを規則どおり除去し、全タブの進行中処理が復元しない。app起動資産とserverデータは残す | 実装中：D108本体反映済み、cross-tab fence候補検証中、UI未接続 |
-| C2 | 認証と拒否のタブ間整合性 | 別タブの認証変更を検出し、誤ったuser領域への保存・表示を防ぐ。確定拒否後の古い保存／公開が他タブでも復活しない | 実装中：D116 server-verified応答identity基盤、client照合は後続 |
-| C3 | folder HTTP拒否・解除 | canonical ID/root alias、独立した子孫、パンくず・参照、失敗時のfail-closed、古い応答、新しい成功による解除を検証 | 調査中 |
-| C4 | 短縮ID・alias・`/s` | serverの実際の識別子契約に合わせ、対応URLのoffline直接アクセス／reloadと拒否・別名変更を検証 | 実装中：D109 `/s` shell検証済み、本文reader候補を検証中 |
+| C1 | user切替・明示logout・端末cache削除 | 旧userの表示・メモリ・IDB・OPFSを規則どおり除去し、全タブの進行中処理が復元しない。app起動資産とserverデータは残す | 実装中：user purgeとcross-tab fence本体反映済み。logout/switch UI候補17件確認、端末全体削除は未実装 |
+| C2 | 認証と拒否のタブ間整合性 | 別タブの認証変更を検出し、誤ったuser領域への保存・表示を防ぐ。確定拒否後の古い保存／公開が他タブでも復活しない | 実装中：server identity本体反映済み、client照合候補あり。残るprivate read入口とnote/folder拒否のタブ間世代を実装中 |
+| C3 | folder HTTP拒否・解除 | canonical ID/root alias、独立した子孫、パンくず・参照、失敗時のfail-closed、古い応答、新しい成功による解除を検証 | 実装中：Home拒否REDを保持、永続世代によるcandidate修正中。realm-local案は未採用 |
+| C4 | 短縮ID・alias・`/s` | serverの実際の識別子契約に合わせ、対応URLのoffline直接アクセス／reloadと拒否・別名変更を検証 | 本体反映・対象検証済み：canonical/short IDと`/s`。記事aliasはgeneric note APIの契約外。C2との最終統合検証待ち |
 | C5 | read入口の残る統合 | folder/list・hoverをviewer所有の共通取得へ接続。通常取得と背景取得の重複、中断、guest/readonly、既存UIを検証 | 調査中 |
 | C6 | prefetch完備 | 現在表示対象の優先、完全一覧／所属追従、単発失敗の限定再試行、連続通信・auth・quota停止、不要ダウンロード抑止を検証 | 実装中：D113 retry関連19件・D116 priority関連8件を親確認、全体統合は未完 |
-| C7 | Yjsと切断 | server保存確認後の取得契機。オンライン編集中の切断で新規入力を止め、入力済みbufferは破棄・上書きしない | 実装中：IME/HTTP境界を含め候補14件親確認、永続alarm本体反映、保存通知を接続中 |
-| C8 | アプリ内添付画像 | 権限付き取得、参照抽出・重複共有、IDB/OPFS保存、cached preview解決、欠落時の説明。本文だけでも表示できる | 実装中：parser検証済み、D115 offline画像表示RED、保存・表示は未接続 |
+| C7 | Yjsと切断 | server保存確認後の取得契機。オンライン編集中の切断で新規入力を止め、入力済みbufferは破棄・上書きしない | 本体反映・対象検証済み：IME/HTTP境界、永続alarm、保存通知。実Workerで入力→D1→cache→offline本文を確認。最終統合待ち |
+| C8 | アプリ内添付画像 | 権限付き取得、参照抽出・重複共有、IDB/OPFS保存、cached preview解決、欠落時の説明。本文だけでも表示できる | 候補検証中：画像15件成功、タブ間拒否世代と表示中blob除去を含む。未採用、実Worker画像受入れ待ち |
 | C9 | storage保持・安全な回収 | persist/estimateをbest-effortに利用。参照中・書込中を壊さないorphan回収、quota停止、旧版保持、migration失敗縮退を検証 | 調査中 |
 | C10 | UI説明と操作 | 端末cache削除の確認、保存限界・共有端末上の非公開dataの制約、session切れの案内、必要な非致命的warning | 調査中 |
-| C11 | 実配信経路の受け入れ | Web本番成果物＋実WorkerのSSR/auth/API経路でonline→offline再起動、全対応URL、更新、複数タブを検証 | 実装中：実Worker online2件・canonical note offline1件・失敗時cleanup1件を親確認 |
+| C11 | 実配信経路の受け入れ | Web本番成果物＋実WorkerのSSR/auth/API経路でonline→offline再起動、全対応URL、更新、複数タブを検証 | 実装中：既存実Worker8件確認、logout準備1件追加成功。画像・全タブlogout/clear・更新の統合受入れは未完 |
 | C12 | 最終統合・記録 | 全suite、型・lint・build、チェックリストの未完項目0、README/仕様/台帳の整合、署名なしcheckpoint、最終変更ガイド | 未実施 |
 
 ## 進め方
@@ -53,3 +53,18 @@
 
 各行の状態を変更するときは、対応する台帳番号、変更commit、実行したcommand、
 実際の成功／失敗件数、対象がcandidateかliveかを追記する。
+
+### `aaa3a15`候補チェックポイント／`aa2eea1` logout準備
+
+- D121–D124および候補内のidentity/image検証記録を反映して状態を更新した。
+  `aaa3a15`は未採用候補と明示的なREDを含む保存点であり、完了commitではない。
+- candidateのidentity/recovery/context対象17件、image対象15件、
+  actor fixture移行の対象92件を親で確認。対象集合は重複し得るため合計しない。
+  source typecheckとlint34ファイルも成功。完全suite成功の主張はしない。
+- `aa2eea1`の本体backend:
+  `pnpm --filter @miyulabmd/worker typecheck` 成功、
+  `pnpm --filter @miyulabmd/worker test` **76件成功**。
+  `node apps/web/scripts/test-worker.mjs --grep 'logout preparation clears'`
+  **実Worker1件成功**。詳細は `docs/api-response-identity.md`。
+- 未採用のlive編集は`review/unadopted-reader-folder-work`の`12ac659`へ保全した。
+  mainの`apps/web/src`に未検証の部分API変更を残さず、候補から再構成する。

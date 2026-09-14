@@ -3,6 +3,10 @@ import {
   type MyDrivePrefetchPriority,
   prefetchMyDrive,
 } from "./mydrive-prefetch.ts";
+import {
+  estimateOfflineStorage,
+  requestOfflineStoragePersistence,
+} from "./offline-storage-retention.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
 export const PREFETCH_DEBOUNCE_MS = 200;
@@ -59,6 +63,9 @@ export function attachMyDrivePrefetchCoordinator(
     mode: viewer.mode,
     user: { ...user },
   };
+  // Browser storage hints must not delay acquisition, even if a prompt hangs.
+  void requestOfflineStoragePersistence();
+  void estimateOfflineStorage();
   let disposed = false;
   let timer: number | null = null;
   let activeController: AbortController | null = null;
