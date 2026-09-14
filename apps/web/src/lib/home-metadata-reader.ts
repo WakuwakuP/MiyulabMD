@@ -144,8 +144,15 @@ async function rejectDeniedFolder(
         signal,
         userId: viewer.user.id,
       });
-      await cache.denyFolder(folderId ?? null);
-    } catch {
+      await cache.denyFolder(folderId ?? null, undefined, signal);
+    } catch (cause) {
+      if (
+        signal.aborted ||
+        !isCurrentOwner() ||
+        (cause instanceof DOMException && cause.name === "AbortError")
+      ) {
+        throw cause;
+      }
       suspendOfflineCacheUser(viewer.user.id);
       error.cacheWarning =
         "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
