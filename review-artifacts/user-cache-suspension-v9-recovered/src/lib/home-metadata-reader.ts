@@ -5,9 +5,13 @@ import type {
 } from "@miyulabmd/shared";
 import { fetchFolder, fetchNotes, fetchPublicFolders } from "./api.ts";
 import {
+  assertOfflineCacheScope,
+  captureOfflineCacheScope,
   captureOfflineCacheUserClearLifetime,
   isOfflineCacheUserClearLifetimeCurrent,
+  type OfflineCacheScope,
   openOfflineCache,
+  subscribeOfflineCacheInvalidation,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
@@ -66,6 +70,7 @@ async function saveHomeMetadata(
   signal: AbortSignal,
   isCurrentOwner: () => boolean,
   clearLifetime: number,
+  scope: OfflineCacheScope | null,
 ): Promise<void> {
   if (viewer.mode !== "authenticated" || !viewer.user) {
     return;
@@ -79,7 +84,11 @@ async function saveHomeMetadata(
   }
   let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
   try {
-    cache = await openOfflineCache({ signal, userId: viewer.user.id });
+    cache = await openOfflineCache({
+      scope: scope ?? undefined,
+      signal,
+      userId: viewer.user.id,
+    });
     throwIfCancelled(signal, isCurrentOwner);
     if (!snapshot.visibleFolder) {
       throw new Error("Authenticated Home response did not include a folder");
@@ -101,7 +110,7 @@ async function saveHomeMetadata(
   }
 }
 
-export async function readHomeMetadata({
+async function readHomeMetadataSnapshot({
   viewer: inputViewer,
   folderId,
   signal,
@@ -118,6 +127,10 @@ export async function readHomeMetadata({
   const clearLifetime = viewer.user
     ? captureOfflineCacheUserClearLifetime(viewer.user.id)
     : 0;
+  const scope = viewer.user
+    ? await captureOfflineCacheScope(viewer.user.id)
+    : null;
+  throwIfCancelled(signal, isCurrentOwner);
   const notesPromise = fetchNotes({ signal });
   const folderPromise =
     viewer.user || folderId
@@ -128,6 +141,9 @@ export async function readHomeMetadata({
     folderPromise,
   ]);
   throwIfCancelled(signal, isCurrentOwner);
+  if (scope) {
+    await assertOfflineCacheScope(scope);
+  }
 
   const snapshot: HomeMetadataSnapshot =
     viewer.user || folderId
@@ -153,8 +169,16 @@ export async function readHomeMetadata({
     signal,
     isCurrentOwner,
     clearLifetime,
+    scope,
   );
   throwIfCancelled(signal, isCurrentOwner);
+  try {
+    if (scope) {
+      await assertOfflineCacheScope(scope);
+    }
+  } finally {
+    throwIfCancelled(signal, isCurrentOwner);
+  }
   if (
     viewer.user &&
     !isOfflineCacheUserClearLifetimeCurrent(viewer.user.id, clearLifetime)
@@ -162,4 +186,32 @@ export async function readHomeMetadata({
     throw new DOMException("Home read is no longer current", "AbortError");
   }
   return snapshot;
+}
+
+export async function readHomeMetadata(
+  options: ReadHomeMetadataOptions,
+): Promise<HomeMetadataSnapshot> {
+  const controller = new AbortController();
+  const userId = options.viewer.user?.id;
+  const cancel = () => controller.abort(options.signal.reason);
+  options.signal.addEventListener("abort", cancel, { once: true });
+  if (options.signal.aborted) {
+    cancel();
+  }
+  const unsubscribe = subscribeOfflineCacheInvalidation((invalidatedUserId) => {
+    if (invalidatedUserId === userId) {
+      controller.abort(new DOMException("Home read invalidated", "AbortError"));
+    }
+  });
+  try {
+    const snapshot = await readHomeMetadataSnapshot({
+      ...options,
+      signal: controller.signal,
+    });
+    throwIfCancelled(controller.signal, options.isCurrentOwner);
+    return snapshot;
+  } finally {
+    options.signal.removeEventListener("abort", cancel);
+    unsubscribe();
+  }
 }

@@ -3,11 +3,15 @@ import type { Note } from "@miyulabmd/shared";
 
 import { ApiCommunicationError, type ApiResult, fetchNote } from "./api.ts";
 import {
+  assertOfflineCacheScope,
   beginOfflineNoteRead,
+  captureOfflineCacheScope,
   enterOfflineNoteDenial,
   isOfflineCacheUserSuspended,
   isOfflineNoteReadCurrent,
+  type OfflineCacheScope,
   openOfflineCache,
+  subscribeOfflineCacheInvalidation,
   suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
@@ -125,6 +129,11 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
   const capturedViewer = snapshotViewer(viewer);
   const controller = new AbortController();
   const { signal } = controller;
+  const unsubscribe = subscribeOfflineCacheInvalidation((userId) => {
+    if (userId === capturedViewer.cacheViewerId) {
+      controller.abort(new DOMException("Note read invalidated", "AbortError"));
+    }
+  });
   let cachePromise:
     | Promise<Awaited<ReturnType<typeof openOfflineCache>> | null>
     | undefined;
@@ -132,10 +141,36 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
   let cache: Awaited<ReturnType<typeof openOfflineCache>> | null = null;
   let cacheOpenFailed = false;
 
-  const getCache = async () => {
+  const ensurePublishable = (
+    result: NoteReadResult,
+    id: string,
+    orderingToken: number,
+  ) => {
+    if (signal.aborted) {
+      throw signal.reason;
+    }
+    if (
+      result.ok &&
+      result.source === "cache" &&
+      capturedViewer.cacheViewerId &&
+      isOfflineCacheUserSuspended(capturedViewer.cacheViewerId)
+    ) {
+      throw new DOMException("Offline cache is suspended");
+    }
+    if (
+      result.ok &&
+      capturedViewer.cacheViewerId &&
+      !isOfflineNoteReadCurrent(capturedViewer.cacheViewerId, id, orderingToken)
+    ) {
+      throw new DOMException("Note read superseded by denial");
+    }
+  };
+
+  const getCache = async (scope?: OfflineCacheScope) => {
     if (!cachePromise) {
       cachePromise = capturedViewer.cacheViewerId
         ? openOfflineCache({
+            scope,
             signal,
             userId: capturedViewer.cacheViewerId,
           }).then(
@@ -234,11 +269,13 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
   const readNetworkNote = async (
     note: Note,
     orderingToken: number,
+    scope: OfflineCacheScope | null,
   ): Promise<NoteReadResult> => {
     if (signal.aborted) {
       throw signal.reason;
     }
-    const openedCache = await getCache();
+    const openedCache =
+      scope?.epoch === null ? null : await getCache(scope ?? undefined);
     if (openedCache) {
       await persistNote(openedCache, note, signal, orderingToken);
     }
@@ -300,6 +337,7 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
         return;
       }
       disposed = true;
+      unsubscribe();
       controller.abort();
       cache?.close();
       cache = null;
@@ -313,15 +351,24 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
       const orderingToken = capturedViewer.cacheViewerId
         ? beginOfflineNoteRead(capturedViewer.cacheViewerId, id)
         : 0;
+      const scope = capturedViewer.cacheViewerId
+        ? await captureOfflineCacheScope(capturedViewer.cacheViewerId)
+        : null;
+      if (signal.aborted) {
+        throw signal.reason;
+      }
       const result =
         capturedViewer.mode === "cached"
           ? await readCachedOnly(id)
           : await fetchWithFallback(id, orderingToken);
+      if (scope) {
+        await assertOfflineCacheScope(scope);
+      }
       let published: NoteReadResult;
       if (isPublishedReadResult(result)) {
         published = result;
       } else if (result.ok) {
-        published = await readNetworkNote(result.data, orderingToken);
+        published = await readNetworkNote(result.data, orderingToken, scope);
       } else {
         if (signal.aborted) {
           throw signal.reason;
@@ -349,27 +396,13 @@ export function createNoteReadSession(viewer: ViewerContext): NoteReadSession {
         }
         published = failedReadResult(result, capturedViewer, cacheWarning);
       }
-      if (signal.aborted) {
-        throw signal.reason;
-      }
-      if (
-        published.ok &&
-        published.source === "cache" &&
-        capturedViewer.cacheViewerId &&
-        isOfflineCacheUserSuspended(capturedViewer.cacheViewerId)
-      ) {
-        throw new DOMException("Offline cache is suspended");
-      }
-      if (
-        published.ok &&
-        capturedViewer.cacheViewerId &&
-        !isOfflineNoteReadCurrent(
-          capturedViewer.cacheViewerId,
-          id,
-          orderingToken,
-        )
-      ) {
-        throw new DOMException("Note read superseded by denial");
+      ensurePublishable(published, id, orderingToken);
+      try {
+        if (scope) {
+          await assertOfflineCacheScope(scope);
+        }
+      } finally {
+        ensurePublishable(published, id, orderingToken);
       }
       return published;
     },

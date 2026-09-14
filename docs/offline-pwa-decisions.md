@@ -2180,6 +2180,33 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   再検証の本体7件はYjs二重import warningなし。観測された他のpeer warningは
   この変更でpackage versionを更新したものではない。
 
+## D119：トークン上限停止からの再開とepoch終端ガード
+
+- 利用者から停止理由がtoken limitと確認できたので作業を再開した。
+  停止した3件の未統合成果は親workspaceに存在せず、既に共有されたレビュー結果を
+  基に再現・再実装する。失われた検証結果を現コードの成功として流用しない。
+- 親が実IDBのopen epoch取得を止める2件、その後にHome/Noteの最終epoch確認を
+  止める4件でREDを再確認した。DB接続はerror/abortでcloseし、最終awaitの後に
+  signal・view所有権・note拒否世代を確認する。authority側の失敗と同時でも
+  callerの明示abort理由を維持する。Homeの外側wrapperの返却前も確認する。
+- 同時失敗2件を追加したfocusedは計27件成功（新規8件）。合成candidate全体は
+  144件成功・添付画像1件RED。型・Biomeも確認した。画像は別担当が実装中。
+- server応答identityと実editor→保存→cache受け入れは再起動した担当が完了報告。
+  親レビュー・独立確認とclient側identity照合は続行する。
+
+## D120：再開後の実Worker統合確認
+
+- server API境界は同じRequestの検証済みsessionをrouteと共有し、
+  `X-MiyulabMD-Session-User: user:<id>` または `guest` を返す。
+  clientが送った同名headerを採用せず、全API応答をprivate/no-storeにする。
+  shared noteのownerと閲覧者を混同しない。client照合は未接続なのでC2完了ではない。
+- 親がWorker型・74件・実Worker全8件・関連Biomeを確認した。
+  実editorのkeyboard入力がYjs/D1へ保存され、保存frameを受信したcoordinatorが
+  新しいupdatedAtのcache transactionを確定し、その後offline reloadで新本文が
+  readonly表示された。元のeditor bufferもcache更新で上書きされていない。
+- synthetic保存frame、API PATCH、書込改変、固定sleepで結果を作っていない。
+  native IDB observerのtimestamp型は実Note契約どおりnumberへ修正した。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

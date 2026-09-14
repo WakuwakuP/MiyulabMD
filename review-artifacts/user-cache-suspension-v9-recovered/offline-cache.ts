@@ -84,6 +84,7 @@ type OfflineCache = {
 
 export type OpenOfflineCacheOptions = {
   userId: string;
+  scope?: OfflineCacheScope;
 };
 
 type CancellationOptions = {
@@ -97,6 +98,217 @@ const openUserCaches = new Map<string, Set<() => void>>();
 const clearLifetimes = new Map<string, number>();
 const userClearOperations = new Map<string, Promise<void>>();
 const pendingUserWrites = new Map<string, Set<Promise<void>>>();
+
+export type OfflineCacheScope = {
+  userId: string;
+  epoch: string | null;
+  lifetime: number;
+};
+
+const databaseScopes = new WeakMap<IDBDatabase, OfflineCacheScope>();
+let epochDatabase: Promise<IDBDatabase | null> | undefined;
+
+// A realm reader for the existing database, not another persistence layer.
+// Epoch checks must not repeatedly open/close cache handles or acquire OPFS locks.
+function getEpochDatabase(): Promise<IDBDatabase | null> {
+  if (!epochDatabase) {
+    epochDatabase = openDatabase().then(
+      (database) => {
+        database.onversionchange = () => {
+          database.close();
+          epochDatabase = undefined;
+        };
+        database.onclose = () => {
+          epochDatabase = undefined;
+        };
+        return database;
+      },
+      () => {
+        epochDatabase = undefined;
+        return null;
+      },
+    );
+  }
+  return epochDatabase;
+}
+
+void getEpochDatabase();
+
+export type OfflineCacheLifecycleEvent = {
+  type: "identity" | "invalidate";
+  userId: string;
+};
+const lifecycleListeners = new Set<
+  (event: OfflineCacheLifecycleEvent) => void
+>();
+function createLifecycleChannel(): BroadcastChannel | null {
+  try {
+    return typeof BroadcastChannel === "undefined"
+      ? null
+      : new BroadcastChannel("miyulabmd-offline-cache-lifecycle");
+  } catch {
+    // Messaging is an optimization. The persisted epoch remains authoritative.
+    return null;
+  }
+}
+
+const lifecycleChannel = createLifecycleChannel();
+
+export function subscribeOfflineCacheInvalidation(
+  listener: (userId: string) => void,
+): () => void {
+  return subscribeOfflineCacheLifecycle((event) => {
+    if (event.type === "invalidate") {
+      listener(event.userId);
+    }
+  });
+}
+
+export function subscribeOfflineCacheLifecycle(
+  listener: (event: OfflineCacheLifecycleEvent) => void,
+): () => void {
+  lifecycleListeners.add(listener);
+  return () => lifecycleListeners.delete(listener);
+}
+
+function notifyLifecycle(event: OfflineCacheLifecycleEvent): void {
+  for (const listener of lifecycleListeners) {
+    try {
+      listener(event);
+    } catch (error) {
+      console.error("Offline cache lifecycle listener failed", error);
+    }
+  }
+}
+
+function invalidateRealm(userId: string): void {
+  clearLifetimes.set(userId, captureOfflineCacheUserClearLifetime(userId) + 1);
+  clearUserNoteReadOrder(userId);
+  userLifetimes.set(userId, currentUserLifetime(userId) + 1);
+  for (const abort of pendingUserOperations.get(userId) ?? []) {
+    abort();
+  }
+  for (const close of openUserCaches.get(userId) ?? []) {
+    close();
+  }
+  notifyLifecycle({ type: "invalidate", userId });
+}
+
+if (lifecycleChannel) {
+  lifecycleChannel.onmessage = ({ data }) => {
+    if (data?.type === "invalidate" && typeof data.userId === "string") {
+      invalidateRealm(data.userId);
+    } else if (data?.type === "identity" && typeof data.userId === "string") {
+      notifyLifecycle({ type: "identity", userId: data.userId });
+    }
+  };
+}
+
+function epochKey(userId: string): string {
+  return `user-epoch:${encodePathPart(userId)}`;
+}
+
+function invalidatedError(): DOMException {
+  return new DOMException("Offline cache scope invalidated", "AbortError");
+}
+
+function isPurgingEpoch(epoch: string | null): boolean {
+  return epoch?.endsWith(":purging") ?? false;
+}
+
+export async function captureOfflineCacheScope(
+  userId: string,
+): Promise<OfflineCacheScope> {
+  const lifetime = captureOfflineCacheUserClearLifetime(userId);
+  let epoch: string | null = null;
+  try {
+    const database = await getEpochDatabase();
+    if (!database) {
+      throw new Error("Offline cache metadata is unavailable");
+    }
+    epoch =
+      (await readMetadataRecord(database, epochKey(userId)))?.value ?? "0";
+  } catch {
+    // Cache availability must not gate healthy network display.
+  }
+  const scope = { epoch, lifetime, userId };
+  if (
+    isPurgingEpoch(epoch) ||
+    !isOfflineCacheUserClearLifetimeCurrent(userId, lifetime)
+  ) {
+    throw invalidatedError();
+  }
+  return scope;
+}
+
+export async function assertOfflineCacheScope(
+  scope: OfflineCacheScope,
+  requireStorage = false,
+): Promise<void> {
+  if (!isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime)) {
+    throw invalidatedError();
+  }
+  let epoch: string | null = null;
+  try {
+    const database = await getEpochDatabase();
+    if (!database) {
+      throw new Error("Offline cache metadata is unavailable");
+    }
+    epoch =
+      (await readMetadataRecord(database, epochKey(scope.userId)))?.value ??
+      "0";
+  } catch (error) {
+    if (requireStorage) {
+      throw error;
+    }
+    // Ordinary storage failures do not invalidate online data.
+  }
+  if (
+    !isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime) ||
+    (scope.epoch !== null && epoch !== null && scope.epoch !== epoch)
+  ) {
+    throw invalidatedError();
+  }
+}
+
+function userStorageLock<T>(
+  userId: string,
+  mode: "shared" | "exclusive",
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (!navigator.locks) {
+    return Promise.reject(new Error("Offline cache locking is unavailable"));
+  }
+  return navigator.locks.request(
+    `miyulabmd-offline-cache:${encodePathPart(userId)}`,
+    { mode },
+    operation,
+  );
+}
+
+// Every handle mutation includes this read in its own write transaction.
+// IDB serializes the epoch read with a purge's epoch increment.
+function guardTransaction(
+  database: IDBDatabase,
+  transaction: IDBTransaction,
+): void {
+  const scope = databaseScopes.get(database);
+  if (!scope) {
+    return;
+  }
+  const request = transaction
+    .objectStore(METADATA_STORE)
+    .get(epochKey(scope.userId));
+  request.onsuccess = () => {
+    if (
+      ((request.result as MetadataRecord | undefined)?.value ?? "0") !==
+        scope.epoch ||
+      !isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime)
+    ) {
+      transaction.abort();
+    }
+  };
+}
 
 export function suspendOfflineCacheUser(userId: string): void {
   suspendedUsers.add(userId);
@@ -249,6 +461,7 @@ function openDatabase(signal?: AbortSignal): Promise<IDBDatabase> {
 function clearUserRecords(
   database: IDBDatabase,
   userId: string,
+  epoch: string,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let transaction: IDBTransaction;
@@ -272,6 +485,7 @@ function clearUserRecords(
         request.onerror = () => transaction.abort();
       }
       const metadata = transaction.objectStore(METADATA_STORE);
+      metadata.put({ key: epochKey(userId), value: `${epoch}:purging` });
       const request = metadata.openCursor();
       request.onsuccess = () => {
         const cursor = request.result;
@@ -324,8 +538,8 @@ async function purgeOfflineCacheUser(userId: string): Promise<void> {
   if (!("indexedDB" in globalThis && navigator.storage?.getDirectory)) {
     throw new Error("Offline cache storage is unavailable");
   }
-  clearLifetimes.set(userId, captureOfflineCacheUserClearLifetime(userId) + 1);
-  clearUserNoteReadOrder(userId);
+  invalidateRealm(userId);
+  lifecycleChannel?.postMessage({ type: "invalidate", userId });
   suspendOfflineCacheUser(userId);
   for (const close of openUserCaches.get(userId) ?? []) {
     close();
@@ -333,8 +547,17 @@ async function purgeOfflineCacheUser(userId: string): Promise<void> {
   await Promise.all(pendingUserWrites.get(userId) ?? []);
   const database = await openDatabase();
   try {
-    await clearUserRecords(database, userId);
-    await clearUserFiles(userId);
+    await userStorageLock(userId, "exclusive", async () => {
+      const epoch = crypto.randomUUID();
+      await clearUserRecords(database, userId, epoch);
+      await clearUserFiles(userId);
+      await commitTransaction(
+        database,
+        METADATA_STORE,
+        { key: epochKey(userId), value: epoch },
+        userId,
+      );
+    });
     suspendedUsers.delete(userId);
   } finally {
     database.close();
@@ -364,7 +587,11 @@ function commitTransaction(
     let transaction: IDBTransaction;
     try {
       throwIfAborted(signal);
-      transaction = database.transaction(storeName, "readwrite");
+      transaction = database.transaction(
+        [...new Set([storeName, METADATA_STORE])],
+        "readwrite",
+      );
+      guardTransaction(database, transaction);
     } catch (error) {
       reject(error);
       return;
@@ -546,9 +773,15 @@ function commitStoreRecords(
     try {
       throwIfAborted(signal);
       transaction = database.transaction(
-        [...new Set(records.map(({ storeName }) => storeName))],
+        [
+          ...new Set([
+            METADATA_STORE,
+            ...records.map(({ storeName }) => storeName),
+          ]),
+        ],
         "readwrite",
       );
+      guardTransaction(database, transaction);
     } catch (error) {
       reject(error);
       return;
@@ -707,9 +940,10 @@ function removeCachedNote(
     let removedFileName: string | null = null;
     try {
       transaction = database.transaction(
-        [NOTE_STORE, NOTE_LIST_STORE],
+        [NOTE_STORE, NOTE_LIST_STORE, METADATA_STORE],
         "readwrite",
       );
+      guardTransaction(database, transaction);
       const notes = transaction.objectStore(NOTE_STORE);
       const noteRequest = notes.get(noteKey(userId, noteId));
       noteRequest.onsuccess = () => {
@@ -750,6 +984,7 @@ function deleteMetadata(
     let transaction: IDBTransaction;
     try {
       transaction = database.transaction(METADATA_STORE, "readwrite");
+      guardTransaction(database, transaction);
       transaction.objectStore(METADATA_STORE).delete(key);
     } catch (error) {
       reject(error);
@@ -795,7 +1030,12 @@ export async function persistCachedViewerId(
     throw new Error("Viewer identity storage is unavailable");
   }
   const clearLifetime = captureOfflineCacheUserClearLifetime(viewerId);
+  const scope = await captureOfflineCacheScope(viewerId);
+  if (scope.epoch === null) {
+    throw new Error("Viewer identity storage is unavailable");
+  }
   const database = await openDatabase(signal);
+  databaseScopes.set(database, scope);
   try {
     if (
       userClearOperations.has(viewerId) ||
@@ -813,6 +1053,12 @@ export async function persistCachedViewerId(
       viewerId,
       signal,
     );
+    const event: OfflineCacheLifecycleEvent = {
+      type: "identity",
+      userId: viewerId,
+    };
+    notifyLifecycle(event);
+    lifecycleChannel?.postMessage(event);
   } finally {
     database.close();
   }
@@ -942,12 +1188,31 @@ export async function openOfflineCache(
   const userId = options.userId;
   const clearLifetime = captureOfflineCacheUserClearLifetime(userId);
   const database = await openDatabase(options.signal);
-  if (
-    userClearOperations.has(userId) ||
-    !isOfflineCacheUserClearLifetimeCurrent(userId, clearLifetime)
-  ) {
+  let scope: OfflineCacheScope;
+  try {
+    const epoch =
+      (await readMetadataRecord(database, epochKey(userId)))?.value ?? "0";
+    throwIfAborted(options.signal);
+    scope = { epoch, lifetime: clearLifetime, userId };
+    if (
+      isPurgingEpoch(epoch) ||
+      userClearOperations.has(userId) ||
+      !isOfflineCacheUserClearLifetimeCurrent(userId, clearLifetime) ||
+      (options.scope &&
+        (options.scope.userId !== userId ||
+          options.scope.epoch !== epoch ||
+          !isOfflineCacheUserClearLifetimeCurrent(
+            userId,
+            options.scope.lifetime,
+          )))
+    ) {
+      throw invalidatedError();
+    }
+    databaseScopes.set(database, scope);
+  } catch (error) {
     database.close();
-    throw new Error("Offline cache is suspended");
+    throwIfAborted(options.signal);
+    throw error;
   }
   let closed = false;
 
@@ -1312,6 +1577,33 @@ export async function openOfflineCache(
       );
     },
   };
+  // Locks cover actual local storage work only, never a handle's lifetime or HTTP.
+  // The post-lock durable check rejects queued work from an expired handle even
+  // when its tab missed every lifecycle message.
+  for (const name of [
+    "putNote",
+    "putFolder",
+    "putNoteList",
+    "denyNote",
+    "denyFolder",
+    "clearNoteDenial",
+    "getNote",
+    "getFolder",
+    "getNoteList",
+  ] as const) {
+    const operation = cache[name].bind(cache) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    Object.assign(cache, {
+      [name]: (...args: unknown[]) =>
+        userStorageLock(userId, "shared", async () => {
+          await assertOfflineCacheScope(scope, true);
+          const result = await operation(...args);
+          await assertOfflineCacheScope(scope, true);
+          return result;
+        }),
+    });
+  }
   const trackedClose = () => cache.close();
   const caches = openUserCaches.get(userId) ?? new Set<() => void>();
   openUserCaches.set(userId, caches);
