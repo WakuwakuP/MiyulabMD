@@ -189,11 +189,7 @@ export function usePreviewImages(
         });
         unsubscribeRealm = cache.subscribeOfflineCacheInvalidation(
           (invalidatedUser) => {
-            if (
-              invalidatedUser !== userId ||
-              !active ||
-              realmInvalidated
-            ) {
+            if (invalidatedUser !== userId || !active || realmInvalidated) {
               return;
             }
             realmInvalidated = true;

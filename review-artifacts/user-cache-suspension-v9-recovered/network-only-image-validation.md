@@ -121,6 +121,14 @@ predicate). The candidate hook now exposes the literal status union
 rerun the focused browser regression and static checks after this style-only
 commit; the mounted-folder test change remains excluded.
 
+## Mounted image invalidation style correction
+
+The parent measured four source/artifact hash pairs as matching, with live app
+and service-worker typechecks passing. One Biome diagnostic remained in the
+mounted image invalidation predicate; both source copies now use the exact
+single-line formatter output. The corrected `preview-images.ts` pair has SHA-256
+`52b3187ec4c2296fdf8e5576302e265134a2199783aead887e1ee06566f056f2`.
+
 ## Candidate-only final style correction
 
 The parent measured candidate typecheck as passing and found one remaining
