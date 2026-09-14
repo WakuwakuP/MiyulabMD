@@ -26,10 +26,6 @@ import {
   HomeMetadataError,
   readHomeMetadata,
 } from "../lib/home-metadata-reader.ts";
-import {
-  readOfflineFolderDenial,
-  subscribeOfflineCacheFolderDenial,
-} from "../lib/offline-cache.ts";
 import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
   type ConfirmState,
@@ -329,7 +325,6 @@ function NetworkHomePage() {
   const [folderRenameError, setFolderRenameError] = useState<string | null>(
     null,
   );
-  const [reloadRequest, setReloadRequest] = useState(0);
 
   const flags = homeListFlags({
     error,
@@ -341,18 +336,6 @@ function NetworkHomePage() {
   });
   const headerFolder = headerFolderFor(visibleFolder, folderId);
   const shareLink = shareLinkFor(share);
-
-  useEffect(() => {
-    const userId = viewer.user?.id;
-    if (!userId) return;
-    return subscribeOfflineCacheFolderDenial((event) => {
-      if (event.userId !== userId) return;
-      void readOfflineFolderDenial(event).then((authority) => {
-        if (authority === true) setReloadRequest((request) => request + 1);
-        if (authority === null) setCacheWarning("オフラインキャッシュを確認できませんでした。");
-      });
-    });
-  }, [viewer.user?.id]);
 
   useEffect(() => {
     if (userLoading) {
@@ -399,7 +382,7 @@ function NetworkHomePage() {
       current = false;
       controller.abort();
     };
-  }, [folderId, reloadRequest, userLoading, viewer]);
+  }, [folderId, userLoading, viewer]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.

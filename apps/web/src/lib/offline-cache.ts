@@ -103,11 +103,7 @@ type OfflineCache = {
     authorityGeneration: number,
   ): Promise<void>;
   beginFolderRead(id: string | null): Promise<number>;
-  denyFolder(
-    id: string | null,
-    orderingToken?: number,
-    signal?: AbortSignal,
-  ): Promise<boolean>;
+  denyFolder(id: string | null): Promise<void>;
   clearFolderDenial(id: string | null, orderingToken: number): Promise<void>;
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
   putNoteList(
@@ -185,24 +181,13 @@ export type OfflineCacheLifecycleEvent = {
   userId: string;
   resource?:
     | { type: "image"; noteId: string; imageId: string }
-    | NoteDenialEvent["resource"]
-    | FolderDenialEvent["resource"];
+    | NoteDenialEvent["resource"];
 };
 export type NoteDenialEvent = {
   type: "invalidate";
   userId: string;
   resource: {
     type: "note";
-    aliases: string[];
-    epoch: string | null;
-    generation: number | null;
-  };
-};
-export type FolderDenialEvent = {
-  type: "invalidate";
-  userId: string;
-  resource: {
-    type: "folder";
     aliases: string[];
     epoch: string | null;
     generation: number | null;
@@ -258,65 +243,6 @@ export function subscribeOfflineCacheNoteDenial(
       listener(event as NoteDenialEvent);
     }
   });
-}
-
-export function subscribeOfflineCacheFolderDenial(
-  listener: (event: FolderDenialEvent) => void,
-): () => void {
-  return subscribeOfflineCacheLifecycle((event) => {
-    if (event.type === "invalidate" && event.resource?.type === "folder") {
-      listener(event as FolderDenialEvent);
-    }
-  });
-}
-
-export async function readOfflineFolderDenial(
-  event: FolderDenialEvent,
-): Promise<boolean | null> {
-  try {
-    const database = await getEpochDatabase();
-    if (!database) return null;
-    return await new Promise<boolean | null>((resolve, reject) => {
-      const transaction = database.transaction(METADATA_STORE, "readonly");
-      readMetadataBatch(
-        transaction.objectStore(METADATA_STORE),
-        [
-          epochKey(event.userId),
-          ...event.resource.aliases.map((id) =>
-            deniedFolderKey(event.userId, id === "" ? null : id),
-          ),
-        ],
-        (records) => {
-          const epoch = records.get(epochKey(event.userId))?.value ?? "0";
-          if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
-            resolve(false);
-            return;
-          }
-          resolve(
-            event.resource.generation !== null &&
-              event.resource.aliases.some((id) => {
-                const key = deniedFolderKey(
-                  event.userId,
-                  id === "" ? null : id,
-                );
-                const marker = parseFolderDenialMarker(
-                  records.get(key),
-                  id === "" ? null : id,
-                );
-                return (
-                  marker?.denied === true &&
-                  marker.generation >= event.resource.generation!
-                );
-              }),
-          );
-        },
-        () => transaction.abort(),
-      );
-      transaction.onabort = () => reject(transaction.error);
-    });
-  } catch {
-    return null;
-  }
 }
 
 function isNoteDenialEvent(value: unknown): value is NoteDenialEvent {
@@ -397,16 +323,6 @@ if (lifecycleChannel) {
           suspendOfflineCacheUser(data.userId);
         }
         notifyLifecycle(data);
-      } else if (
-        data.resource?.type === "folder" &&
-        Array.isArray(data.resource.aliases) &&
-        data.resource.aliases.every((id: unknown) => typeof id === "string") &&
-        (data.resource.epoch === null || typeof data.resource.epoch === "string") &&
-        (data.resource.generation === null ||
-          (Number.isSafeInteger(data.resource.generation) &&
-            data.resource.generation >= 0))
-      ) {
-        notifyLifecycle(data as FolderDenialEvent);
       } else if (
         data.resource?.type === "image" &&
         typeof data.resource.noteId === "string" &&
@@ -2407,51 +2323,19 @@ export async function openOfflineCache(
       }
     },
 
-    async denyFolder(id, orderingToken, signal) {
+    async denyFolder(id) {
       if (closed) {
         throw new Error("Offline cache is closed");
       }
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
-      if (signal?.aborted) {
-        throw signal.reason;
-      }
       try {
-        await updateFolderDenial(
-          database,
-          userId,
-          id,
-          orderingToken,
-          "deny",
-          undefined,
-          signal,
-        );
+        await updateFolderDenial(database, userId, id, undefined, "deny");
       } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          if (signal?.aborted) throw error;
-          return false;
-        }
         suspendOfflineCacheUser(userId);
         throw error;
       }
       assertUserActive(userId, lifetime);
-      const event: FolderDenialEvent = {
-        resource: {
-          aliases: [id ?? ""],
-          epoch: databaseScopes.get(database)?.epoch ?? null,
-          generation: 2,
-          type: "folder",
-        },
-        type: "invalidate",
-        userId,
-      };
-      notifyLifecycle(event);
-      try {
-        lifecycleChannel?.postMessage(event);
-      } catch {
-        // Durable authority remains authoritative if delivery fails.
-      }
-      return true;
     },
 
     async denyImage(noteId, imageId, orderingToken) {
