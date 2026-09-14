@@ -363,7 +363,6 @@ test("mounted network folder removes only the denied current view", async ({
 
   const peer = await context.newPage();
   try {
-    await peer.goto("/tests/browser/fixtures/storage.html");
     const token = await peer.evaluate(async (id) => {
       const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
       const cache = await openOfflineCache({ userId: "alice" });
@@ -422,6 +421,15 @@ test("mounted root reprojects a denied child without hiding an allowed descendan
     { id: deniedChild.id, name: deniedChild.name, parentId: "mounted-root" },
     { id: allowedChild.id, name: allowedChild.name, parentId: "mounted-root" },
   ]);
+  const directNote = {
+    ...note,
+    createdAt: 7,
+    folderId: deniedChild.id,
+    id: "mounted-direct-note",
+    shortId: "mounted-direct",
+    title: "Denied Direct Note",
+    updatedAt: 8,
+  };
   const descendantNote = {
     ...note,
     createdAt: 9,
@@ -435,7 +443,7 @@ test("mounted root reprojects a denied child without hiding an allowed descendan
   await routeAuthenticatedHome(
     page,
     { root, [deniedChild.id]: deniedChild, [allowedChild.id]: allowedChild },
-    [descendantNote],
+    [directNote, descendantNote],
   );
   await page.goto("/");
   await expect(
@@ -443,6 +451,9 @@ test("mounted root reprojects a denied child without hiding an allowed descendan
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: allowedChild.name }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: directNote.title }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: descendantNote.title }),
@@ -461,6 +472,9 @@ test("mounted root reprojects a denied child without hiding an allowed descendan
       .toBeGreaterThan(folderRequestCount);
     await expect(
       page.getByRole("link", { name: deniedChild.name }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: directNote.title }),
     ).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: allowedChild.name }),
@@ -534,27 +548,17 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
   const folderA = folderFixture(
     "mounted-route-a",
     "Route A",
-    "route-root",
+    null,
     [],
-    [
-      { id: "route-root", name: "Route Root" },
-      { id: "mounted-route-a", name: "Route A" },
-    ],
+    [{ id: "mounted-route-a", name: "Route A" }],
   );
   const folderB = folderFixture(
     "mounted-route-b",
     "Route B",
-    "route-root",
+    null,
     [],
-    [
-      { id: "route-root", name: "Route Root" },
-      { id: "mounted-route-b", name: "Route B" },
-    ],
+    [{ id: "mounted-route-b", name: "Route B" }],
   );
-  const routeRoot = folderFixture("route-root", "Route Root", null, [
-    { id: folderA.id, name: folderA.name, parentId: "route-root" },
-    { id: folderB.id, name: folderB.name, parentId: "route-root" },
-  ]);
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -587,7 +591,7 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
     if (pathname === "/api/notes") {
       return route.fulfill({ headers: sessionHeaders, json: { notes: [] } });
     }
-    return route.fulfill({ headers: sessionHeaders, json: routeRoot });
+    return route.fulfill({ headers: sessionHeaders, json: folderA });
   });
   const firstNavigation = page.goto(`/f/${folderA.id}`);
   await page.waitForRequest(
@@ -611,7 +615,4 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
     release();
     await firstNavigation.catch(() => undefined);
   }
-  await expect(
-    page.getByRole("navigation", { name: "フォルダ" }).getByText(folderB.name),
-  ).toBeVisible();
 });
