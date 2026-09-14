@@ -1,5 +1,6 @@
 import { collectImageUrls } from "@miyulabmd/markdown";
 import { apiFetch } from "./api-fetch.ts";
+import { ApiIdentityError } from "./api-transport.ts";
 import {
   assertOfflineCacheScope,
   isSupportedCachedImageMime,
@@ -83,6 +84,7 @@ type Entry = {
   users: number;
 };
 const inFlight = new Map<string, Entry>();
+const networkInFlight = new Map<string, Entry>();
 type ImageCache = Awaited<ReturnType<typeof openOfflineCache>>;
 
 export class AttachedImageCacheError extends Error {
@@ -358,4 +360,128 @@ export async function acquireAttachedImage(
     }
   }
   return loaded.bytes;
+}
+
+function discardImageResponse(response: Response): void {
+  void response.body?.cancel().catch(() => {
+    // A rejected body must not become a preview fallback.
+  });
+}
+
+async function readNetworkOnlyResponse(
+  response: Response,
+  signal: AbortSignal,
+): Promise<Blob | null> {
+  if (
+    response.redirected ||
+    !response.ok ||
+    response.status < 200 ||
+    response.status >= 300
+  ) {
+    discardImageResponse(response);
+    return null;
+  }
+  const mime =
+    response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() ??
+    "";
+  if (!isSupportedCachedImageMime(mime)) {
+    discardImageResponse(response);
+    return null;
+  }
+  const body = await response.blob();
+  checkAbort(signal);
+  return body.size === 0 ? null : new Blob([body], { type: mime });
+}
+
+/**
+ * Read an attachment over the network without opening or consulting local
+ * storage. The expected identity is captured in the transport key and is
+ * never inferred from the response.
+ */
+export async function acquireAttachedImageNetworkOnly(
+  image: AttachedImage,
+  options: { expectedViewerId: string | null; signal?: AbortSignal },
+): Promise<Blob | null> {
+  const { expectedViewerId, signal = new AbortController().signal } = options;
+  checkAbort(signal);
+  const target = attachedImage(image.url);
+  if (
+    !target ||
+    target.noteId !== image.noteId ||
+    target.imageId !== image.imageId
+  ) {
+    return null;
+  }
+  const key = JSON.stringify([expectedViewerId, image.url]);
+  let entry = networkInFlight.get(key);
+  if (!entry) {
+    const controller = new AbortController();
+    entry = {
+      controller,
+      promise: (async () => {
+        try {
+          const response = await apiFetch(
+            image.url,
+            {
+              cache: "no-store",
+              credentials: "include",
+              redirect: "error",
+              signal: controller.signal,
+            },
+            { viewerId: expectedViewerId },
+          );
+          checkAbort(controller.signal);
+          return {
+            bytes: await readNetworkOnlyResponse(response, controller.signal),
+          };
+        } catch (error) {
+          checkAbort(controller.signal);
+          // Identity mismatches are already published to identity listeners
+          // by apiFetch; their response body is intentionally not exposed.
+          if (error instanceof TypeError || error instanceof ApiIdentityError) {
+            return { bytes: null };
+          }
+          throw error;
+        }
+      })(),
+      users: 0,
+    };
+    networkInFlight.set(key, entry);
+    const current = entry;
+    const remove = () => {
+      if (networkInFlight.get(key) === current) {
+        networkInFlight.delete(key);
+      }
+    };
+    void entry.promise.then(remove, remove);
+  }
+  const current = entry;
+  current.users += 1;
+  return new Promise<Blob | null>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      if (settled) return false;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      current.users -= 1;
+      if (!current.users) {
+        if (networkInFlight.get(key) === current) networkInFlight.delete(key);
+        current.controller.abort();
+      }
+      return true;
+    };
+    const abort = () => {
+      if (cleanup()) reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    void current.promise.then(
+      (value) => {
+        if (cleanup()) resolve(value.bytes);
+      },
+      (error) => {
+        if (cleanup()) reject(error);
+      },
+    );
+    if (signal.aborted) abort();
+  });
 }
