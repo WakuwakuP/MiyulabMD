@@ -587,47 +587,18 @@ test("route switch fences a delayed folder denial", async ({ page }) => {
     { id: folderB.id, name: folderB.name, parentId: "route-root" },
   ]);
   const apiRequests = trackApiRequests(page);
-  await page.route("**/api/**", async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
-    if (pathname === `/api/folders/${folderA.id}`) {
-      return route.fulfill({
-        headers: sessionHeaders,
-        json: folderA,
-      });
-    }
-    if (pathname === "/api/me") {
-      return route.fulfill({
-        headers: sessionHeaders,
-        json: { user: authenticatedUser },
-      });
-    }
-    if (pathname === "/api/auth/config") {
-      return route.fulfill({
-        headers: sessionHeaders,
-        json: { access: false, mock: true },
-      });
-    }
-    if (pathname === `/api/folders/${folderB.id}`) {
-      return route.fulfill({ headers: sessionHeaders, json: folderB });
-    }
-    if (pathname === "/api/notes") {
-      return route.fulfill({
-        headers: sessionHeaders,
-        json: {
-          notes: [
-            {
-              ...note,
-              folderId: folderB.id,
-              id: "route-b-note",
-              shortId: "route-b-note",
-              title: "Route B Note",
-            },
-          ],
-        },
-      });
-    }
-    return route.fulfill({ headers: sessionHeaders, json: routeRoot });
-  });
+  const routeBNote = {
+    ...note,
+    folderId: folderB.id,
+    id: "route-b-note",
+    shortId: "route-b-note",
+    title: "Route B Note",
+  };
+  await routeAuthenticatedHome(
+    page,
+    { root: routeRoot, [folderA.id]: folderA, [folderB.id]: folderB },
+    [routeBNote],
+  );
   await page.goto(`/f/${folderA.id}`);
   await expect(
     page.getByRole("navigation", { name: "フォルダ" }).getByText(folderA.name),
