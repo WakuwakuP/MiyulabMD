@@ -4,6 +4,16 @@ The candidate uses one canonical Web Lock, `miyulabmd-offline-cache:global`, as
 the realm fence. Existing user operations acquire it shared before acquiring
 their user lock; device clear acquires it exclusively and never acquires a user
 lock. This gives the lock order `global -> user` without a re-entrant request.
+User clear preserves `global shared -> user exclusive`; only device clear uses
+`global exclusive`.
+
+| Operation | Global lock | User lock | Internal helper |
+| --- | --- | --- | --- |
+| Public scope/authority/folder/viewer reads | shared | shared | `*Unlocked` |
+| Open-cache handle wrapper and `getNote` | already held by open | shared | `*Unlocked` |
+| Orphan collection | shared | exclusive | `assertOfflineCacheScopeUnlocked` |
+| User clear | shared | exclusive | clear/purge helpers |
+| Device clear | exclusive | none | device purge helpers |
 
 `captureOfflineCacheScope` reads `device-epoch`, `user-epoch:<encoded user>`,
 and the device state in one readonly IndexedDB transaction. The public epoch is
