@@ -693,19 +693,27 @@ function guardTransaction(
   const metadata = transaction.objectStore(METADATA_STORE);
   const global = metadata.get(DEVICE_EPOCH_METADATA_KEY);
   const user = metadata.get(epochKey(scope.userId));
+  const state = metadata.get(DEVICE_CLEAR_STATE_METADATA_KEY);
   global.onsuccess = () => {
     user.onsuccess = () => {
-      const actual = composeEpoch(
-        (global.result as MetadataRecord | undefined)?.value ?? "0",
-        (user.result as MetadataRecord | undefined)?.value ?? "0",
-      );
-      if (
-        actual !== scope.epoch ||
-        globalSuspended ||
-        !isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime)
-      ) {
-        transaction.abort();
-      }
+      state.onsuccess = () => {
+        const globalEpoch =
+          (global.result as MetadataRecord | undefined)?.value ?? "0";
+        const userEpoch =
+          (user.result as MetadataRecord | undefined)?.value ?? "0";
+        const clearState =
+          (state.result as MetadataRecord | undefined)?.value ??
+          DEVICE_CLEAR_ACTIVE;
+        const actual = composeEpoch(globalEpoch, userEpoch);
+        if (
+          actual !== scope.epoch ||
+          isInvalidActiveEpochFence(globalEpoch, userEpoch, clearState) ||
+          globalSuspended ||
+          !isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime)
+        ) {
+          transaction.abort();
+        }
+      };
     };
   };
 }
@@ -2662,14 +2670,14 @@ function removeCachedNote(
 
 async function persistCachedViewerIdUnlocked(
   viewerId: string,
+  scope: OfflineCacheScope,
+  clearLifetime: number,
   options: CancellationOptions = {},
 ): Promise<void> {
   const { signal } = options;
   if (!(viewerId && "indexedDB" in globalThis)) {
     throw new Error("Viewer identity storage is unavailable");
   }
-  const clearLifetime = captureOfflineCacheUserClearLifetime(viewerId);
-  const scope = await captureOfflineCacheScopeUnlocked(viewerId);
   if (scope.epoch === null) {
     throw new Error("Viewer identity storage is unavailable");
   }
@@ -2678,10 +2686,13 @@ async function persistCachedViewerIdUnlocked(
   try {
     if (
       userClearOperations.has(viewerId) ||
+      globalSuspended ||
+      isUserSuspended(viewerId) ||
       !isOfflineCacheUserClearLifetimeCurrent(viewerId, clearLifetime)
     ) {
       throw new Error("Offline cache is suspended");
     }
+    await assertOfflineCacheScopeUnlocked(scope, true);
     await commitTransaction(
       database,
       METADATA_STORE,
@@ -2725,8 +2736,15 @@ export function persistCachedViewerId(
   viewerId: string,
   options: CancellationOptions = {},
 ): Promise<void> {
-  return userStorageLock(viewerId, "shared", () =>
-    persistCachedViewerIdUnlocked(viewerId, options),
+  return userStorageLock(viewerId, "shared", async () => {
+    const clearLifetime = captureOfflineCacheUserClearLifetime(viewerId);
+    const scope = await captureOfflineCacheScopeUnlocked(viewerId);
+    if (scope.epoch === null) {
+      throw new Error("Viewer identity storage is unavailable");
+    }
+    return { clearLifetime, scope };
+  }).then(({ clearLifetime, scope }) =>
+    persistCachedViewerIdUnlocked(viewerId, scope, clearLifetime, options),
   );
 }
 
@@ -3699,6 +3717,13 @@ export function openOfflineCache(
 ): Promise<OfflineCache> {
   if (!options.userId) {
     return Promise.reject(new Error("A user ID is required"));
+  }
+  if (
+    userClearOperations.has(options.userId) ||
+    isUserSuspended(options.userId) ||
+    globalSuspended
+  ) {
+    return Promise.reject(invalidatedError());
   }
   return userStorageLock(options.userId, "shared", () =>
     openOfflineCacheUnlocked(options),
