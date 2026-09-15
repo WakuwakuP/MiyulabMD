@@ -414,7 +414,10 @@ function invalidateRealm(userId: string): void {
 function invalidateDeviceRealm(): void {
   globalLifetime += 1;
   globalSuspended = true;
-  for (const userId of new Set([...openUserCaches.keys(), ...userLifetimes.keys()])) {
+  for (const userId of new Set([
+    ...openUserCaches.keys(),
+    ...userLifetimes.keys(),
+  ])) {
     invalidateRealm(userId);
   }
   notifyLifecycle({ type: "device-invalidate", userId: "" });
@@ -470,7 +473,10 @@ function epochKey(userId: string): string {
 
 function composeEpoch(globalEpoch: string, userEpoch: string): string {
   const json = JSON.stringify([globalEpoch, userEpoch]);
-  return btoa(json).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return btoa(json)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/[=]+$/, "");
 }
 
 function readScopeEpochs(
@@ -644,14 +650,22 @@ function globalSharedStorageLock<T>(operation: () => Promise<T>): Promise<T> {
   if (!navigator.locks) {
     return Promise.reject(new Error("Offline cache locking is unavailable"));
   }
-  return navigator.locks.request(GLOBAL_LOCK_NAME, { mode: "shared" }, operation);
+  return navigator.locks.request(
+    GLOBAL_LOCK_NAME,
+    { mode: "shared" },
+    operation,
+  );
 }
 
 function globalStorageLock<T>(operation: () => Promise<T>): Promise<T> {
   if (!navigator.locks) {
     return Promise.reject(new Error("Offline cache locking is unavailable"));
   }
-  return navigator.locks.request(GLOBAL_LOCK_NAME, { mode: "exclusive" }, operation);
+  return navigator.locks.request(
+    GLOBAL_LOCK_NAME,
+    { mode: "exclusive" },
+    operation,
+  );
 }
 
 // Every handle mutation includes this read in its own write transaction.
@@ -962,7 +976,7 @@ function encodePathPart(value: string): string {
   return btoa(binary)
     .replaceAll("+", "-")
     .replaceAll("/", "_")
-    .replace(/=+$/, "");
+    .replace(/[=]+$/, "");
 }
 
 function noteKey(userId: string, noteId: string): string {
@@ -1484,7 +1498,7 @@ async function removeDeviceFiles(): Promise<void> {
 async function purgeOfflineCacheDevice(
   options: OfflineCacheDeviceClearOptions = {},
 ): Promise<void> {
-  if (!(("indexedDB" in globalThis) && navigator.storage?.getDirectory)) {
+  if (!("indexedDB" in globalThis && navigator.storage?.getDirectory)) {
     throw new Error("Offline cache storage is unavailable");
   }
   throwIfAborted(options.signal);
