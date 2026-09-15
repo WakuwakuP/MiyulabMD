@@ -9,6 +9,15 @@ BroadcastChannel and held transport; unknown-user writes draining; held image
 acquisition; OPFS failure with retry; IndexedDB failure before OPFS deletion;
 lock-order progress; and abort with no implicit retry.
 
+The lock-order audit is: `global` shared, then `user:<encoded user>` shared or
+exclusive for every user-scoped IDB/OPFS operation (including handle methods,
+authority wrappers, open/persist, orphan collection, and user clear).
+`readCachedViewerId` takes only global shared; device clear takes only global
+exclusive. No path reacquires a lock already held. Epoch authority capture and
+note/folder denial readers read and compare the composed
+`composeEpoch(global,user)` from one readonly metadata transaction, while
+malformed and purging metadata remains fail-closed.
+
 This change was implemented without the browser dependencies available in this
 environment, so the browser matrix and candidate typecheck remain unexecuted.
 UI, prefetch, editor, and live `apps/web/src/**` integration are intentionally

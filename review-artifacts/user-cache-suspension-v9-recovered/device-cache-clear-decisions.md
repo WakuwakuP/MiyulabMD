@@ -2,18 +2,20 @@
 
 The candidate uses one canonical Web Lock, `miyulabmd-offline-cache:global`, as
 the realm fence. Device clear acquires it exclusively and never acquires a user
-lock. User-scoped operations acquire only their user lock, so no operation
-requests the same global lock recursively.
+lock. Every user-scoped storage operation acquires the global lock shared first,
+then its user lock shared or exclusive, and releases them in reverse order. The
+single helper composes that order around `*Unlocked` internals, so operations
+that already hold the pair never request either lock recursively.
 
 | Operation | Global lock | User lock | Internal helper |
 | --- | --- | --- | --- |
-| Public scope/authority/folder reads | none | shared | `*Unlocked` |
-| `persistCachedViewerId` | none | shared | `*Unlocked` |
+| Public scope/authority/folder reads | shared | shared | `*Unlocked` |
+| `persistCachedViewerId` | shared | shared | `*Unlocked` |
 | `readCachedViewerId` | shared | none | `*Unlocked` |
-| Open-cache initialization | none | shared | `*Unlocked` |
-| Open-cache handle wrapper and `getNote` | none | shared | `*Unlocked` |
-| Orphan collection | none | exclusive | `assertOfflineCacheScopeUnlocked` |
-| User clear | none | exclusive | clear/purge helpers |
+| Open-cache initialization | shared | shared | `*Unlocked` |
+| Open-cache handle wrapper and `getNote` | shared | shared | `*Unlocked` |
+| Orphan collection | shared | exclusive | `assertOfflineCacheScopeUnlocked` |
+| User clear | shared | exclusive | clear/purge helpers |
 | Device clear | exclusive | none | device purge helpers |
 
 `captureOfflineCacheScope` reads `device-epoch`, `user-epoch:<encoded user>`,
@@ -21,6 +23,12 @@ and the device state in one readonly IndexedDB transaction. The public epoch is
 an opaque base64url encoding of a JSON tuple, so global and user epochs cannot
 collide through delimiters. The global epoch invalidates every old scope after a
 device clear.
+
+Note authority capture and both note/folder denial readers use the same
+readonly snapshot of global epoch, user epoch, and device state. They compare
+and report `composeEpoch(global,user)`, never the raw user epoch; malformed or
+purging metadata remains fail-closed, and note/folder generation fences are
+unchanged.
 
 The clear commits `device-clear-state=purging` before clearing the private
 stores, recursively removes only the OPFS application root
