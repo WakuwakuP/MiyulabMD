@@ -103,7 +103,11 @@ type OfflineCache = {
     authorityGeneration: number,
   ): Promise<void>;
   beginFolderRead(id: string | null): Promise<number>;
-  denyFolder(id: string | null): Promise<void>;
+  denyFolder(
+    id: string | null,
+    orderingToken?: number,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
   clearFolderDenial(id: string | null, orderingToken: number): Promise<void>;
   getNote(id: string): Promise<{ note: Note; cachedAt: number } | null>;
   putNoteList(
@@ -111,6 +115,7 @@ type OfflineCache = {
     options?: CancellationOptions,
   ): Promise<void>;
   getNoteList(): Promise<{ notes: NoteSummary[]; cachedAt: number } | null>;
+  getNoteListState(): Promise<"available" | "denied" | "missing">;
   putFolder(
     folder: FolderAccess,
     options?: {
@@ -121,6 +126,9 @@ type OfflineCache = {
   getFolder(
     id: string | null,
   ): Promise<{ folder: FolderAccess; cachedAt: number } | null>;
+  getFolderState(
+    id: string | null,
+  ): Promise<"available" | "denied" | "missing">;
   close(): void;
 };
 
@@ -181,7 +189,8 @@ export type OfflineCacheLifecycleEvent = {
   userId: string;
   resource?:
     | { type: "image"; noteId: string; imageId: string }
-    | NoteDenialEvent["resource"];
+    | NoteDenialEvent["resource"]
+    | FolderDenialEvent["resource"];
 };
 export type NoteDenialEvent = {
   type: "invalidate";
@@ -189,6 +198,16 @@ export type NoteDenialEvent = {
   resource: {
     type: "note";
     aliases: string[];
+    epoch: string | null;
+    generation: number | null;
+  };
+};
+export type FolderDenialEvent = {
+  type: "invalidate";
+  userId: string;
+  resource: {
+    type: "folder";
+    aliases: (string | null)[];
     epoch: string | null;
     generation: number | null;
   };
@@ -245,6 +264,16 @@ export function subscribeOfflineCacheNoteDenial(
   });
 }
 
+export function subscribeOfflineCacheFolderDenial(
+  listener: (event: FolderDenialEvent) => void,
+): () => void {
+  return subscribeOfflineCacheLifecycle((event) => {
+    if (event.type === "invalidate" && event.resource?.type === "folder") {
+      listener(event as FolderDenialEvent);
+    }
+  });
+}
+
 function isNoteDenialEvent(value: unknown): value is NoteDenialEvent {
   const event = value as Partial<NoteDenialEvent> | null;
   const resource = event?.resource;
@@ -258,6 +287,38 @@ function isNoteDenialEvent(value: unknown): value is NoteDenialEvent {
     (resource.epoch === null || typeof resource.epoch === "string") &&
     (resource.generation === null ||
       (Number.isSafeInteger(resource.generation) && resource.generation >= 0))
+  );
+}
+
+function isFolderDenialEvent(value: unknown): value is FolderDenialEvent {
+  const event = value as Partial<FolderDenialEvent> | null;
+  const resource = event?.resource;
+  return (
+    event?.type === "invalidate" &&
+    typeof event.userId === "string" &&
+    resource?.type === "folder" &&
+    Array.isArray(resource.aliases) &&
+    resource.aliases.length > 0 &&
+    resource.aliases.every(
+      (id) => id === null || (typeof id === "string" && id.length > 0),
+    ) &&
+    (resource.epoch === null || typeof resource.epoch === "string") &&
+    (resource.generation === null ||
+      (Number.isSafeInteger(resource.generation) && resource.generation >= 1))
+  );
+}
+
+function isImageInvalidationEvent(
+  value: unknown,
+): value is ImageInvalidationEvent {
+  const event = value as Partial<ImageInvalidationEvent> | null;
+  const resource = event?.resource;
+  return (
+    event?.type === "invalidate" &&
+    typeof event.userId === "string" &&
+    resource?.type === "image" &&
+    typeof resource.noteId === "string" &&
+    typeof resource.imageId === "string"
   );
 }
 
@@ -282,6 +343,31 @@ export function reportOfflineNoteDenial(
     lifecycleChannel?.postMessage(event);
   } catch {
     // A missing notification does not undo the durable authority marker.
+  }
+}
+
+export function reportOfflineFolderDenial(
+  userId: string,
+  id: string | null,
+  epoch: string | null,
+  generation: number | null,
+  aliases: readonly (string | null)[] = [id],
+): void {
+  const event: FolderDenialEvent = {
+    resource: {
+      aliases: [...new Set(aliases)],
+      epoch,
+      generation,
+      type: "folder",
+    },
+    type: "invalidate",
+    userId,
+  };
+  notifyLifecycle(event);
+  try {
+    lifecycleChannel?.postMessage(event);
+  } catch {
+    // The durable marker remains authoritative when delivery is unavailable.
   }
 }
 
@@ -315,27 +401,46 @@ function invalidateRealm(userId: string): void {
   notifyLifecycle({ type: "invalidate", userId });
 }
 
+function handleDenialLifecycleMessage(
+  event: NoteDenialEvent | FolderDenialEvent,
+): void {
+  if (event.resource.generation === null) {
+    suspendOfflineCacheUser(event.userId);
+  }
+  notifyLifecycle(event);
+}
+
+function handleImageLifecycleMessage(event: ImageInvalidationEvent): void {
+  notifyLifecycle(event);
+}
+
+function handleInvalidationLifecycleMessage(
+  data: unknown,
+  event: Partial<OfflineCacheLifecycleEvent>,
+): void {
+  if (isNoteDenialEvent(data) || isFolderDenialEvent(data)) {
+    handleDenialLifecycleMessage(data);
+  } else if (isImageInvalidationEvent(data)) {
+    handleImageLifecycleMessage(data);
+  } else if (!event.resource && typeof event.userId === "string") {
+    invalidateRealm(event.userId);
+  }
+}
+
+function handleLifecycleMessage(data: unknown): void {
+  if (!data || typeof data !== "object" || !("type" in data)) {
+    return;
+  }
+  const event = data as Partial<OfflineCacheLifecycleEvent>;
+  if (event.type === "invalidate" && typeof event.userId === "string") {
+    handleInvalidationLifecycleMessage(data, event);
+  } else if (event.type === "identity" && typeof event.userId === "string") {
+    notifyLifecycle({ type: "identity", userId: event.userId });
+  }
+}
+
 if (lifecycleChannel) {
-  lifecycleChannel.onmessage = ({ data }) => {
-    if (data?.type === "invalidate" && typeof data.userId === "string") {
-      if (isNoteDenialEvent(data)) {
-        if (data.resource.generation === null) {
-          suspendOfflineCacheUser(data.userId);
-        }
-        notifyLifecycle(data);
-      } else if (
-        data.resource?.type === "image" &&
-        typeof data.resource.noteId === "string" &&
-        typeof data.resource.imageId === "string"
-      ) {
-        notifyLifecycle(data);
-      } else if (!data.resource) {
-        invalidateRealm(data.userId);
-      }
-    } else if (data?.type === "identity" && typeof data.userId === "string") {
-      notifyLifecycle({ type: "identity", userId: data.userId });
-    }
-  };
+  lifecycleChannel.onmessage = ({ data }) => handleLifecycleMessage(data);
 }
 
 function epochKey(userId: string): string {
@@ -526,11 +631,20 @@ export async function readOfflineNoteDenial(
           if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
             denied = false;
           } else if (event.resource.generation !== null) {
-            denied = identities.some(
-              (id) =>
-                parseNoteAuthority(records.get(deniedNoteKey(event.userId, id)))
-                  ?.denied,
-            );
+            const generation = event.resource.generation;
+            const authorities = identities
+              .map((id) =>
+                parseNoteAuthority(
+                  records.get(deniedNoteKey(event.userId, id)),
+                ),
+              )
+              .filter(
+                (authority): authority is NoteAuthorityMarker =>
+                  authority !== null && authority.generation >= generation,
+              );
+            denied =
+              authorities.length > 0 &&
+              authorities.some((authority) => authority.denied);
           }
         },
         () => transaction.abort(),
@@ -1547,6 +1661,13 @@ type FolderDenialMarker = {
   generation: number;
 };
 
+type FolderDenialReceipt = {
+  aliases: (string | null)[];
+  epoch: string | null;
+  generation: number | null;
+  committed: boolean;
+};
+
 function folderSequenceKey(userId: string): string {
   return `folder-denial-sequence:${encodePathPart(userId)}`;
 }
@@ -1576,9 +1697,9 @@ function parseFolderDenialMarker(
       };
     }
   } catch {
-    // Markers written by D60 contain only the folder ID.
+    return null;
   }
-  return { denied: true, folderId: fallbackId, generation: 1 };
+  return null;
 }
 
 function rootReferenceId(record: MetadataRecord | undefined): string | null {
@@ -1620,6 +1741,17 @@ function readMetadataBatch(
 function folderSequence(record: MetadataRecord | undefined): number {
   const value = Number(record?.value);
   return Number.isSafeInteger(value) && value >= 1 ? value : 1;
+}
+
+function requiredFolderSequence(record: MetadataRecord | undefined): number {
+  if (!record) {
+    return 1;
+  }
+  const value = Number(record.value);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error("Invalid folder denial sequence");
+  }
+  return value;
 }
 
 export async function captureOfflineFolderRead(
@@ -1690,12 +1822,73 @@ function folderOperationIds(
   return [...ids];
 }
 
+function commitFolderDenial(
+  database: IDBDatabase,
+  userId: string,
+  id: string | null,
+  orderingToken: number | undefined,
+  signal: AbortSignal | undefined,
+  scope: OfflineCacheScope,
+): Promise<FolderDenialReceipt> {
+  return updateFolderDenial(
+    database,
+    userId,
+    id,
+    orderingToken,
+    "deny",
+    undefined,
+    signal,
+    scope,
+  );
+}
+
+function reportCommittedFolderDenial(
+  userId: string,
+  id: string | null,
+  receipt: FolderDenialReceipt,
+): void {
+  if (receipt.committed) {
+    reportOfflineFolderDenial(
+      userId,
+      id,
+      receipt.epoch,
+      receipt.generation,
+      receipt.aliases,
+    );
+  }
+}
+
+function throwFolderDenialFailure(
+  error: unknown,
+  userId: string,
+  id: string | null,
+  lifetime: number,
+  signal: AbortSignal | undefined,
+  scope: OfflineCacheScope,
+): never {
+  if (signal?.aborted) {
+    throw signal.reason;
+  }
+  if (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    isUserSuspended(userId) ||
+    currentUserLifetime(userId) !== lifetime
+  ) {
+    throw error instanceof DOMException ? error : invalidatedError();
+  }
+  suspendOfflineCacheUser(userId);
+  reportOfflineFolderDenial(userId, id, scope.epoch, null, [id]);
+  throw error;
+}
+
 function applyFolderOperation(
   transaction: IDBTransaction,
   operation: FolderOperation,
   sequence: number,
   ids: (string | null)[],
   records: Map<string, MetadataRecord>,
+  epoch: string | null,
+  receipt: { value?: FolderDenialReceipt },
 ): void {
   const { userId, action, orderingToken, save } = operation;
   const store = transaction.objectStore(METADATA_STORE);
@@ -1705,6 +1898,25 @@ function applyFolderOperation(
         ?.generation ?? 1,
     id,
   }));
+  const currentGeneration = Math.max(
+    ...current.map((marker) => marker.generation),
+  );
+  receipt.value = {
+    aliases: ids,
+    committed: false,
+    epoch,
+    generation: currentGeneration,
+  };
+  if (
+    action === "deny" &&
+    orderingToken !== undefined &&
+    currentGeneration > orderingToken
+  ) {
+    return;
+  }
+  if (action === "check") {
+    return;
+  }
   if (
     action !== "deny" &&
     (orderingToken === undefined ||
@@ -1712,11 +1924,8 @@ function applyFolderOperation(
   ) {
     throw invalidatedError();
   }
-  if (action === "check") {
-    return;
-  }
   const generation = sequence + 1;
-  if (action === "deny") {
+  if (action === "deny" || action === "clear") {
     store.put({
       key: folderSequenceKey(userId),
       value: String(generation),
@@ -1728,13 +1937,19 @@ function applyFolderOperation(
       value: JSON.stringify({
         denied: action === "deny",
         folderId: marker.id,
-        generation: action === "deny" ? generation : marker.generation,
+        generation,
       } satisfies FolderDenialMarker),
     } satisfies MetadataRecord);
     if (marker.id !== null) {
       store.delete(legacyDeniedFolderKey(userId, marker.id));
     }
   }
+  receipt.value = {
+    aliases: ids,
+    committed: true,
+    epoch,
+    generation,
+  };
   if (!save) {
     return;
   }
@@ -1751,13 +1966,14 @@ function queueFolderOperation(
   transaction: IDBTransaction,
   operation: FolderOperation,
   fail: (error: unknown) => void,
+  receipt: { value?: FolderDenialReceipt },
 ): void {
   const store = transaction.objectStore(METADATA_STORE);
   const rootKey = driveRootMetadataKey(operation.userId);
   const sequenceKey = folderSequenceKey(operation.userId);
   readMetadataBatch(
     store,
-    [rootKey, sequenceKey],
+    [rootKey, sequenceKey, epochKey(operation.userId)],
     (initial) => {
       const ids = folderOperationIds(
         operation,
@@ -1773,6 +1989,12 @@ function queueFolderOperation(
             folderSequence(initial.get(sequenceKey)),
             ids,
             records,
+            // A cache scope uses "0" until the first purge establishes an
+            // epoch. Keep that opaque default in the receipt as well; null
+            // means that the transaction failed and is reserved for failure
+            // notifications.
+            initial.get(epochKey(operation.userId))?.value ?? "0",
+            receipt,
           ),
         fail,
       );
@@ -1791,10 +2013,11 @@ function updateFolderDenial(
   save?: { record: FolderRecord; asDriveRoot: boolean },
   signal?: AbortSignal,
   scope?: OfflineCacheScope,
-): Promise<void> {
+): Promise<FolderDenialReceipt> {
   return new Promise((resolve, reject) => {
     let transaction: IDBTransaction;
     let failure: unknown;
+    const receipt: { value?: FolderDenialReceipt } = {};
     try {
       transaction = database.transaction(
         [METADATA_STORE, FOLDER_STORE],
@@ -1809,6 +2032,7 @@ function updateFolderDenial(
         transaction,
         { action, folderId, orderingToken, save, userId },
         fail,
+        receipt,
       );
     } catch (error) {
       reject(error);
@@ -1835,7 +2059,14 @@ function updateFolderDenial(
     }
     transaction.oncomplete = () => {
       unregister();
-      resolve();
+      resolve(
+        receipt.value ?? {
+          aliases: [folderId],
+          committed: false,
+          epoch: scope?.epoch ?? null,
+          generation: null,
+        },
+      );
     };
     transaction.onabort = () => {
       unregister();
@@ -1848,41 +2079,141 @@ function updateFolderDenial(
   });
 }
 
-function readMetadataRange(
-  database: IDBDatabase,
-  prefix: string,
-): Promise<MetadataRecord[]> {
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(METADATA_STORE, "readonly");
-    const request = transaction
-      .objectStore(METADATA_STORE)
-      .getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
-    transaction.oncomplete = () => resolve(request.result as MetadataRecord[]);
-    request.onerror = () => reject(request.error);
-    transaction.onabort = () => reject(transaction.error ?? invalidatedError());
-  });
-}
-
 async function readDeniedFolderIds(
   database: IDBDatabase,
   userId: string,
 ): Promise<Set<string | null>> {
+  return (await readFolderDenialSnapshot(database, userId)).deniedFolderIds;
+}
+
+type FolderDenialSnapshot = {
+  deniedFolderIds: Set<string | null>;
+  sequence: number;
+};
+
+function readFolderDenialSnapshot(
+  database: IDBDatabase,
+  userId: string,
+): Promise<FolderDenialSnapshot> {
   const suffix = `${encodePathPart(userId)}:`;
-  const [legacy, current] = await Promise.all([
-    readMetadataRange(database, `${DENIED_FOLDER_PREFIX}${suffix}`),
-    readMetadataRange(database, `${FOLDER_STATE_PREFIX}${suffix}`),
-  ]);
-  const denied = new Set<string | null>(legacy.map((record) => record.value));
-  for (const record of current) {
-    const marker = JSON.parse(record.value) as FolderDenialMarker;
-    if (marker.folderId !== null && typeof marker.folderId !== "string") {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(METADATA_STORE, "readonly");
+    const store = transaction.objectStore(METADATA_STORE);
+    const legacyRequest = store.getAll(
+      IDBKeyRange.bound(
+        `${DENIED_FOLDER_PREFIX}${suffix}`,
+        `${DENIED_FOLDER_PREFIX}${suffix}\uffff`,
+      ),
+    );
+    const currentRequest = store.getAll(
+      IDBKeyRange.bound(
+        `${FOLDER_STATE_PREFIX}${suffix}`,
+        `${FOLDER_STATE_PREFIX}${suffix}\uffff`,
+      ),
+    );
+    const sequenceRequest = store.get(folderSequenceKey(userId));
+    transaction.oncomplete = () => {
+      try {
+        resolve(
+          parseFolderDenialSnapshot(
+            legacyRequest.result as MetadataRecord[],
+            currentRequest.result as MetadataRecord[],
+            sequenceRequest.result as MetadataRecord | undefined,
+          ),
+        );
+      } catch (error) {
+        reject(error);
+      }
+    };
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error ?? invalidatedError());
+  });
+}
+
+function parseFolderDenialSnapshot(
+  legacyRecords: MetadataRecord[],
+  currentRecords: MetadataRecord[],
+  sequenceRecord: MetadataRecord | undefined,
+): FolderDenialSnapshot {
+  const deniedFolderIds = new Set<string | null>(
+    legacyRecords.map((record) => record.value),
+  );
+  for (const record of currentRecords) {
+    let marker: Partial<FolderDenialMarker>;
+    try {
+      marker = JSON.parse(record.value) as Partial<FolderDenialMarker>;
+    } catch {
+      throw new Error("Invalid folder denial metadata");
+    }
+    if (
+      (marker.folderId !== null && typeof marker.folderId !== "string") ||
+      !Number.isSafeInteger(marker.generation) ||
+      (marker.generation ?? 0) < 1 ||
+      typeof marker.denied !== "boolean"
+    ) {
       throw new Error("Invalid folder denial metadata");
     }
     if (marker.denied !== false) {
-      denied.add(marker.folderId);
+      deniedFolderIds.add(marker.folderId ?? null);
     }
   }
-  return denied;
+  return {
+    deniedFolderIds,
+    sequence: requiredFolderSequence(sequenceRecord),
+  };
+}
+
+/** Null means the durable folder authority could not be inspected. */
+export async function readOfflineFolderDenial(
+  event: FolderDenialEvent,
+): Promise<boolean | null> {
+  try {
+    const database = await getEpochDatabase();
+    if (!database) {
+      return null;
+    }
+    return await new Promise<boolean | null>((resolve, reject) => {
+      const transaction = database.transaction(METADATA_STORE, "readonly");
+      const store = transaction.objectStore(METADATA_STORE);
+      const aliases = [...new Set(event.resource.aliases)];
+      const requests = aliases.map((alias) => ({
+        alias,
+        request: store.get(deniedFolderKey(event.userId, alias)),
+      }));
+      const epochRequest = store.get(epochKey(event.userId));
+      transaction.oncomplete = () => {
+        const epoch =
+          (epochRequest.result as MetadataRecord | undefined)?.value ?? "0";
+        if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
+          resolve(false);
+          return;
+        }
+        const parsed = requests.map(({ alias, request }) => ({
+          marker: parseFolderDenialMarker(
+            request.result as MetadataRecord | undefined,
+            alias,
+          ),
+          present: request.result !== undefined,
+        }));
+        if (parsed.some(({ marker, present }) => present && marker === null)) {
+          resolve(null);
+          return;
+        }
+        const generation = event.resource.generation;
+        resolve(
+          parsed.some(
+            ({ marker }) =>
+              marker?.denied === true &&
+              (generation === null || marker.generation >= generation),
+          ),
+        );
+      };
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } catch {
+    return null;
+  }
 }
 
 function projectDeniedFolder(
@@ -2018,6 +2349,74 @@ export async function readCachedViewerId(
   } finally {
     database.close();
   }
+}
+
+function cacheLifetimeCurrent(userId: string, lifetime: number): boolean {
+  return !isUserSuspended(userId) && currentUserLifetime(userId) === lifetime;
+}
+
+async function readVisibleNoteList(
+  database: IDBDatabase,
+  userId: string,
+  lifetime: number,
+  record: NoteListRecord,
+): Promise<{ notes: NoteSummary[]; cachedAt: number } | null> {
+  const generations = new Map(
+    record.notes.map((note) => [
+      note.id,
+      currentNoteGeneration(userId, note.id),
+    ]),
+  );
+  const folderSnapshot = await readFolderDenialSnapshot(database, userId);
+  const { deniedFolderIds } = folderSnapshot;
+  if (!cacheLifetimeCurrent(userId, lifetime)) {
+    return null;
+  }
+  const notes: NoteSummary[] = [];
+  for (const note of record.notes) {
+    const denied =
+      deniedFolderIds.has(note.folderId) ||
+      (await readDeniedNote(database, userId, note.id));
+    if (denied) {
+      continue;
+    }
+    if (
+      !cacheLifetimeCurrent(userId, lifetime) ||
+      currentNoteGeneration(userId, note.id) !== generations.get(note.id)
+    ) {
+      return null;
+    }
+    notes.push(note);
+  }
+  if (
+    !cacheLifetimeCurrent(userId, lifetime) ||
+    requiredFolderSequence(
+      await readMetadataRecord(database, folderSequenceKey(userId)),
+    ) !== folderSnapshot.sequence ||
+    record.notes.some(
+      (note) =>
+        currentNoteGeneration(userId, note.id) !== generations.get(note.id),
+    )
+  ) {
+    return null;
+  }
+  return { cachedAt: record.cachedAt, notes };
+}
+
+function readNoteListState(
+  userId: string,
+  lifetime: number,
+  record: NoteListRecord | undefined,
+): "available" | "denied" | "missing" {
+  if (!record) {
+    return "missing";
+  }
+  if (!cacheLifetimeCurrent(userId, lifetime)) {
+    return "denied";
+  }
+  // Individual denials are projected by getNoteList. They do not make the
+  // list itself unavailable; only an invalid lifetime denies it.
+  return "available";
 }
 
 async function noteFile(
@@ -2323,19 +2722,33 @@ export async function openOfflineCache(
       }
     },
 
-    async denyFolder(id) {
+    async denyFolder(id, orderingToken, signal) {
       if (closed) {
         throw new Error("Offline cache is closed");
       }
       const lifetime = currentUserLifetime(userId);
       assertUserActive(userId, lifetime);
-      try {
-        await updateFolderDenial(database, userId, id, undefined, "deny");
-      } catch (error) {
-        suspendOfflineCacheUser(userId);
-        throw error;
+      if (signal?.aborted) {
+        throw signal.reason;
       }
-      assertUserActive(userId, lifetime);
+      try {
+        const receipt = await commitFolderDenial(
+          database,
+          userId,
+          id,
+          orderingToken,
+          signal,
+          scope,
+        );
+        assertUserActive(userId, lifetime);
+        if (signal?.aborted) {
+          throw signal.reason;
+        }
+        reportCommittedFolderDenial(userId, id, receipt);
+        return receipt.committed;
+      } catch (error) {
+        throwFolderDenialFailure(error, userId, id, lifetime, signal, scope);
+      }
     },
 
     async denyImage(noteId, imageId, orderingToken) {
@@ -2442,6 +2855,28 @@ export async function openOfflineCache(
       }
       const folder = projectDeniedFolder(record.folder, deniedFolderIds);
       return folder ? { cachedAt: record.cachedAt, folder } : null;
+    },
+
+    async getFolderState(id) {
+      if (closed) {
+        throw new Error("Offline cache is closed");
+      }
+      const lifetime = currentUserLifetime(userId);
+      if (isUserSuspended(userId)) {
+        return "denied";
+      }
+      const record = await readFolderForRoute(database, userId, id);
+      if (isUserSuspended(userId) || currentUserLifetime(userId) !== lifetime) {
+        return "denied";
+      }
+      if (!record) {
+        return "missing";
+      }
+      const denied = await readDeniedFolderIds(database, userId);
+      if (denied.has(record.folderId) || (id === null && denied.has(null))) {
+        return "denied";
+      }
+      return "available";
     },
 
     async getImage(noteId, imageId) {
@@ -2551,7 +2986,6 @@ export async function openOfflineCache(
       }
     },
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-item denial and terminal publication guards are intentionally explicit.
     async getNoteList() {
       if (closed) {
         throw new Error("Offline cache is closed");
@@ -2568,36 +3002,19 @@ export async function openOfflineCache(
       ) {
         return null;
       }
-      const generations = new Map(
-        record.notes.map((note) => [
-          note.id,
-          currentNoteGeneration(userId, note.id),
-        ]),
-      );
-      const notes: NoteSummary[] = [];
-      for (const note of record.notes) {
-        if (!(await readDeniedNote(database, userId, note.id))) {
-          if (
-            isUserSuspended(userId) ||
-            currentUserLifetime(userId) !== lifetime ||
-            currentNoteGeneration(userId, note.id) !== generations.get(note.id)
-          ) {
-            return null;
-          }
-          notes.push(note);
-        }
+      return readVisibleNoteList(database, userId, lifetime, record);
+    },
+
+    async getNoteListState() {
+      if (closed) {
+        throw new Error("Offline cache is closed");
       }
-      if (
-        isUserSuspended(userId) ||
-        currentUserLifetime(userId) !== lifetime ||
-        record.notes.some(
-          (note) =>
-            currentNoteGeneration(userId, note.id) !== generations.get(note.id),
-        )
-      ) {
-        return null;
+      const lifetime = currentUserLifetime(userId);
+      if (isUserSuspended(userId)) {
+        return "denied";
       }
-      return { cachedAt: record.cachedAt, notes };
+      const record = await readNoteListRecord(database, noteListKey(userId));
+      return readNoteListState(userId, lifetime, record);
     },
 
     async putFolder(folder, options = {}) {
