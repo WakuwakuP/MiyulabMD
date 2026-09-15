@@ -2420,3 +2420,29 @@ workflow の完了を意味しない。
 - 実ブラウザのオフライン再起動、フォルダ探索、本文表示、本番配信の結果。
 - 容量不足・中断・認証変更・複数タブ・アップデートに残る制約。
 - 決定台帳、主要実装、復帰可能なコミットへの参照。
+
+## Device-clear global lock coverage
+
+The public offline-cache authority APIs are lock boundaries: each user-scoped
+read is protected by the global shared storage lock followed by that user's
+shared lock. Their implementations are private `Unlocked` functions so cache
+handle wrappers and existing user-lock callbacks do not reacquire a lock.
+
+| Public API | Internal implementation | Lock boundary |
+|---|---|---|
+| `assertOfflineCacheScope` | `assertOfflineCacheScopeUnlocked` | global shared → user shared |
+| `readOfflineNoteDenial` | `readOfflineNoteDenialUnlocked` | global shared → user shared |
+| `captureOfflineNoteAuthority` | `captureOfflineNoteAuthorityUnlocked` | global shared → user shared |
+| `assertOfflineNoteAuthority` | `assertOfflineNoteAuthorityUnlocked` | global shared → user shared |
+| `captureOfflineFolderRead` | `captureOfflineFolderReadUnlocked` | global shared → user shared |
+| `assertOfflineFolderRead` | `assertOfflineFolderReadUnlocked` | global shared → user shared |
+| `readOfflineFolderDenial` | `readOfflineFolderDenialUnlocked` | global shared → user shared |
+| `persistCachedViewerId` | `persistCachedViewerIdUnlocked` | global shared → user shared |
+| `readCachedViewerId` | `readCachedViewerIdUnlocked` | global shared |
+| `openOfflineCache` | `openOfflineCacheUnlocked` | global shared during initialization |
+| `captureOfflineCacheScope` | — | no storage lock; snapshot used to enter a user lock |
+| `collectOfflineCacheOrphans` | — | existing user exclusive lock |
+
+`collectOfflineCacheOrphans` and user clear retain their existing user lock
+ownership and do not double-wrap it. Device clear remains exclusive. Sync
+lifecycle/order helpers do not acquire storage locks.
