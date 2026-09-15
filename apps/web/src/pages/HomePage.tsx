@@ -8,6 +8,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
@@ -26,6 +27,12 @@ import {
   HomeMetadataError,
   readHomeMetadata,
 } from "../lib/home-metadata-reader.ts";
+import {
+  readOfflineFolderDenial,
+  readOfflineNoteDenial,
+  subscribeOfflineCacheFolderDenial,
+  subscribeOfflineCacheNoteDenial,
+} from "../lib/offline-cache.ts";
 import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
   type ConfirmState,
@@ -306,6 +313,14 @@ function NetworkHomePage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cacheWarning, setCacheWarning] = useState<string | null>(null);
+  const [reloadRequest, setReloadRequest] = useState(0);
+  const latestReloadRequest = useRef(reloadRequest);
+  latestReloadRequest.current = reloadRequest;
+  const notesRef = useRef<NoteSummary[]>([]);
+  const visibleFolderRef = useRef<FolderAccess | null>(null);
+  const reloadOwnerRef = useRef(0);
+  const homeReadOwnerRef = useRef<object | null>(null);
+  const homeReadActiveRef = useRef(false);
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -342,20 +357,40 @@ function NetworkHomePage() {
       return;
     }
     const controller = new AbortController();
+    const owner = {};
     let current = true;
+    const requestOwner = reloadRequest;
+    homeReadOwnerRef.current = owner;
+    homeReadActiveRef.current = true;
+    const finishRead = () => {
+      if (homeReadOwnerRef.current === owner) {
+        homeReadOwnerRef.current = null;
+        homeReadActiveRef.current = false;
+      }
+    };
+    const isCurrentOwner = () =>
+      current &&
+      latestReloadRequest.current === requestOwner &&
+      homeReadOwnerRef.current === owner &&
+      homeReadActiveRef.current;
     setError(null);
     setCacheWarning(null);
     setFolderPending(true);
+    ++reloadOwnerRef.current;
     void readHomeMetadata({
       folderId,
-      isCurrentOwner: () => current,
+      isCurrentOwner,
       signal: controller.signal,
       viewer,
     })
       .then((snapshot) => {
-        if (!current || controller.signal.aborted) {
+        const ownerCurrent = isCurrentOwner();
+        finishRead();
+        if (!ownerCurrent || controller.signal.aborted) {
           return;
         }
+        notesRef.current = snapshot.notes;
+        visibleFolderRef.current = snapshot.visibleFolder;
         setNotes(snapshot.notes);
         setVisibleFolder(snapshot.visibleFolder);
         setPublicFolders(snapshot.publicFolders);
@@ -363,12 +398,17 @@ function NetworkHomePage() {
         setFolderPending(false);
       })
       .catch((error: unknown) => {
-        if (!current || controller.signal.aborted) {
+        const ownerCurrent = isCurrentOwner();
+        finishRead();
+        if (!ownerCurrent || controller.signal.aborted) {
           return;
         }
         setFolderPending(false);
+        notesRef.current = [];
         setVisibleFolder(null);
+        visibleFolderRef.current = null;
         setPublicFolders([]);
+        setNotes([]);
         if (error instanceof HomeMetadataError) {
           setCacheWarning(error.cacheWarning ?? null);
         }
@@ -381,8 +421,88 @@ function NetworkHomePage() {
     return () => {
       current = false;
       controller.abort();
+      finishRead();
     };
-  }, [folderId, userLoading, viewer]);
+  }, [folderId, reloadRequest, userLoading, viewer]);
+
+  useEffect(() => {
+    if (viewer.cacheViewerId === null) {
+      return;
+    }
+    let active = true;
+    const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
+      const receiptOwner = reloadOwnerRef.current;
+      if (event.userId !== viewer.cacheViewerId || !active) {
+        return;
+      }
+      const identities = event.resource.aliases.filter((alias) =>
+        notesRef.current.some(
+          (current) => current.id === alias || current.shortId === alias,
+        ),
+      );
+      if (identities.length === 0) {
+        return;
+      }
+      void readOfflineNoteDenial(event, identities).then((denied) => {
+        if (
+          denied === false ||
+          !active ||
+          receiptOwner !== reloadOwnerRef.current ||
+          viewer.cacheViewerId !== event.userId
+        ) {
+          return;
+        }
+        setReloadRequest((value) => value + 1);
+      });
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [viewer.cacheViewerId]);
+
+  useEffect(() => {
+    let active = true;
+    const targetUserId = viewer.user?.id;
+    const unsubscribe = subscribeOfflineCacheFolderDenial((event) => {
+      const relationIds = new Set<string | null>([
+        folderId ?? null,
+        visibleFolderRef.current?.id ?? null,
+        ...(visibleFolderRef.current?.children ?? []).map((child) => child.id),
+        ...(visibleFolderRef.current?.crumbs ?? []).map((crumb) => crumb.id),
+        ...notesRef.current.map((note) => note.folderId),
+      ]);
+      const relevant = event.resource.aliases.some((id) => relationIds.has(id));
+      if (
+        active &&
+        !homeReadActiveRef.current &&
+        event.userId === targetUserId &&
+        relevant
+      ) {
+        const receiptOwner = homeReadOwnerRef.current;
+        void readOfflineFolderDenial(event).then((denied) => {
+          if (
+            active &&
+            homeReadOwnerRef.current === receiptOwner &&
+            !homeReadActiveRef.current &&
+            denied !== null
+          ) {
+            setReloadRequest((value) => value + 1);
+          } else if (
+            active &&
+            homeReadOwnerRef.current === receiptOwner &&
+            !homeReadActiveRef.current
+          ) {
+            setCacheWarning("オフラインキャッシュを確認できませんでした。");
+          }
+        });
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [folderId, viewer.user?.id]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.
