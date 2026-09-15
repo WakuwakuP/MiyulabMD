@@ -55,6 +55,32 @@ function requireResult<T>(
   return result.data;
 }
 
+function buildHomeSnapshot(
+  viewer: ViewerContext,
+  folderId: string | undefined,
+  notes: NoteSummary[],
+  folderResult:
+    | Awaited<ReturnType<typeof fetchFolder>>
+    | Awaited<ReturnType<typeof fetchPublicFolders>>,
+): HomeMetadataSnapshot {
+  if (viewer.user || folderId) {
+    return {
+      notes,
+      publicFolders: [],
+      visibleFolder: requireResult(
+        folderResult as Awaited<ReturnType<typeof fetchFolder>>,
+      ),
+    };
+  }
+  return {
+    notes,
+    publicFolders: requireResult(
+      folderResult as Awaited<ReturnType<typeof fetchPublicFolders>>,
+    ),
+    visibleFolder: null,
+  };
+}
+
 function throwIfCancelled(
   signal: AbortSignal,
   isCurrentOwner: () => boolean,
@@ -124,6 +150,59 @@ async function saveHomeMetadata(
   }
 }
 
+function deniedFolderError(result: {
+  error: string;
+  status: number;
+}): HomeMetadataError {
+  return new HomeMetadataError(
+    result.status === 404 ? "フォルダが見つかりません。" : result.error,
+    result.status,
+  );
+}
+
+async function persistDeniedFolder(
+  error: HomeMetadataError,
+  viewer: ViewerContext,
+  folderId: string | undefined,
+  scope: OfflineCacheScope | null,
+  signal: AbortSignal,
+  isCurrentOwner: () => boolean,
+  orderingToken: number | undefined,
+): Promise<void> {
+  if (!viewer.user || (error.status !== 403 && error.status !== 404)) {
+    return;
+  }
+  let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
+  try {
+    cache = await openOfflineCache({
+      scope: scope ?? undefined,
+      signal,
+      userId: viewer.user.id,
+    });
+    const committed = await cache.denyFolder(
+      folderId ?? null,
+      orderingToken,
+      signal,
+    );
+    if (!committed) {
+      throw new DOMException("Home read is no longer current", "AbortError");
+    }
+  } catch (cause) {
+    if (
+      signal.aborted ||
+      !isCurrentOwner() ||
+      (cause instanceof DOMException && cause.name === "AbortError")
+    ) {
+      throw cause;
+    }
+    suspendOfflineCacheUser(viewer.user.id);
+    error.cacheWarning =
+      "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
+  } finally {
+    cache?.close();
+  }
+}
+
 async function rejectDeniedFolder(
   result: { ok: false; error: string; status: number },
   viewer: ViewerContext,
@@ -131,28 +210,18 @@ async function rejectDeniedFolder(
   scope: OfflineCacheScope | null,
   signal: AbortSignal,
   isCurrentOwner: () => boolean,
+  orderingToken: number | undefined,
 ): Promise<never> {
-  const error = new HomeMetadataError(
-    result.status === 404 ? "フォルダが見つかりません。" : result.error,
-    result.status,
+  const error = deniedFolderError(result);
+  await persistDeniedFolder(
+    error,
+    viewer,
+    folderId,
+    scope,
+    signal,
+    isCurrentOwner,
+    orderingToken,
   );
-  if (viewer.user && (result.status === 403 || result.status === 404)) {
-    let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
-    try {
-      cache = await openOfflineCache({
-        scope: scope ?? undefined,
-        signal,
-        userId: viewer.user.id,
-      });
-      await cache.denyFolder(folderId ?? null);
-    } catch {
-      suspendOfflineCacheUser(viewer.user.id);
-      error.cacheWarning =
-        "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
-    } finally {
-      cache?.close();
-    }
-  }
   throwIfCancelled(signal, isCurrentOwner);
   throw error;
 }
@@ -177,6 +246,77 @@ async function validateHomePublication(
       throw error;
     }
     snapshot.cacheWarning = "オフラインキャッシュを確認できませんでした。";
+  }
+}
+
+async function projectCachedHomeMetadata(
+  snapshot: HomeMetadataSnapshot,
+  folderId: string | undefined,
+  viewer: ViewerContext,
+  scope: OfflineCacheScope | null,
+  signal: AbortSignal,
+  isCurrentOwner: () => boolean,
+): Promise<void> {
+  if (!viewer.user) {
+    return;
+  }
+  let projectionCache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
+  try {
+    projectionCache = await openOfflineCache({
+      scope: scope ?? undefined,
+      signal,
+      userId: viewer.user.id,
+    });
+    const [projectedList, projectedFolder, listState, folderState] =
+      await Promise.all([
+        projectionCache.getNoteList(),
+        projectionCache.getFolder(folderId ?? null),
+        projectionCache.getNoteListState(),
+        projectionCache.getFolderState(folderId ?? null),
+      ]);
+    applyCachedHomeMetadataProjection(
+      snapshot,
+      projectedList,
+      projectedFolder,
+      listState,
+      folderState,
+    );
+  } catch (error) {
+    if (
+      signal.aborted ||
+      !isCurrentOwner() ||
+      (error instanceof DOMException && error.name === "AbortError")
+    ) {
+      throw error;
+    }
+    snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
+    if (scope) {
+      snapshot.notes = [];
+      if (folderId !== undefined) {
+        snapshot.visibleFolder = null;
+      }
+    }
+  } finally {
+    projectionCache?.close();
+  }
+}
+
+function applyCachedHomeMetadataProjection(
+  snapshot: HomeMetadataSnapshot,
+  projectedList: { notes: NoteSummary[]; cachedAt: number } | null,
+  projectedFolder: { folder: FolderAccess; cachedAt: number } | null,
+  listState: "available" | "denied" | "missing",
+  folderState: "available" | "denied" | "missing",
+): void {
+  if (listState === "denied") {
+    snapshot.notes = [];
+  } else if (projectedList) {
+    snapshot.notes = projectedList.notes;
+  }
+  if (folderState === "denied") {
+    snapshot.visibleFolder = null;
+  } else if (projectedFolder) {
+    snapshot.visibleFolder = projectedFolder.folder;
   }
 }
 
@@ -221,6 +361,7 @@ async function readHomeMetadataSnapshot({
         scope,
         signal,
         isCurrentOwner,
+        folderReadGeneration,
       );
     }
     return result;
@@ -234,22 +375,7 @@ async function readHomeMetadataSnapshot({
     await assertOfflineCacheScope(scope);
   }
 
-  const snapshot: HomeMetadataSnapshot =
-    viewer.user || folderId
-      ? {
-          notes,
-          publicFolders: [],
-          visibleFolder: requireResult(
-            folderResult as Awaited<ReturnType<typeof fetchFolder>>,
-          ),
-        }
-      : {
-          notes,
-          publicFolders: requireResult(
-            folderResult as Awaited<ReturnType<typeof fetchPublicFolders>>,
-          ),
-          visibleFolder: null,
-        };
+  const snapshot = buildHomeSnapshot(viewer, folderId, notes, folderResult);
 
   await saveHomeMetadata(
     snapshot,
@@ -260,6 +386,14 @@ async function readHomeMetadataSnapshot({
     clearLifetime,
     scope,
     folderReadGeneration,
+  );
+  await projectCachedHomeMetadata(
+    snapshot,
+    folderId,
+    viewer,
+    scope,
+    signal,
+    isCurrentOwner,
   );
   throwIfCancelled(signal, isCurrentOwner);
   try {
