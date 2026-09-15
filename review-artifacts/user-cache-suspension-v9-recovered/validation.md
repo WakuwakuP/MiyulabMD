@@ -1,5 +1,20 @@
 # 回収したv9と後継修正の親検証
 
+## P1 source validation status
+
+P1で追加した公開ストレージロックのcoverage:
+
+| 公開API群 | coverage |
+| --- | --- |
+| scope capture / viewer ID persist・read | global shared |
+| cache handle methods（`getNoteListState`を含む） | global shared → user shared |
+| orphan collection / user clear | global shared → user exclusive |
+| device clear | global exclusive |
+| 同期 lifecycle・order helper | lockなし |
+
+source APIの型検査・lintと既存folder/image/quota semanticsは次のcandidate
+runnerで確認する。browser tests、UI、prefetch、Service Workerへの反映は次slice。
+
 ## 最新：D30/D31の親レビュー・ライブ反映
 
 候補セッションSHA256

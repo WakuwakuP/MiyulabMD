@@ -476,7 +476,7 @@ function composeEpoch(globalEpoch: string, userEpoch: string): string {
 function readScopeEpochs(
   database: IDBDatabase,
   userId: string,
-): Promise<{ global: string; user: string; state: string }> {
+): Promise<{ global: string; user: string; state: "active" | "purging" }> {
   return new Promise((resolve, reject) => {
     let transaction: IDBTransaction;
     try {
@@ -485,12 +485,19 @@ function readScopeEpochs(
       const global = store.get(DEVICE_EPOCH_METADATA_KEY);
       const user = store.get(epochKey(userId));
       const state = store.get(DEVICE_CLEAR_STATE_METADATA_KEY);
-      transaction.oncomplete = () =>
-        resolve({
-          global: (global.result as MetadataRecord | undefined)?.value ?? "0",
-          state: (state.result as MetadataRecord | undefined)?.value ?? DEVICE_CLEAR_ACTIVE,
-          user: (user.result as MetadataRecord | undefined)?.value ?? "0",
-        });
+      transaction.oncomplete = () => {
+        const globalEpoch = (global.result as MetadataRecord | undefined)?.value ?? "0";
+        const userEpoch = (user.result as MetadataRecord | undefined)?.value ?? "0";
+        const clearState = (state.result as MetadataRecord | undefined)?.value ?? DEVICE_CLEAR_ACTIVE;
+        if (!isValidEpoch(globalEpoch) || !isValidEpoch(userEpoch) ||
+            isPurgingEpoch(globalEpoch) ||
+            isPurgingEpoch(userEpoch) ||
+            (clearState !== DEVICE_CLEAR_ACTIVE && clearState !== DEVICE_CLEAR_PURGING)) {
+          reject(invalidatedError());
+          return;
+        }
+        resolve({ global: globalEpoch, state: clearState, user: userEpoch });
+      };
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error ?? invalidatedError());
     } catch (error) {
@@ -503,11 +510,18 @@ function invalidatedError(): DOMException {
   return new DOMException("Offline cache scope invalidated", "AbortError");
 }
 
-function isPurgingEpoch(epoch: string | null): boolean {
-  return epoch?.endsWith(":purging") ?? false;
+function isValidEpoch(epoch: unknown): epoch is string {
+  return epoch === "0" ||
+    (typeof epoch === "string" &&
+      (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(epoch) ||
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:purging$/.test(epoch)));
 }
 
-export async function captureOfflineCacheScope(
+function isPurgingEpoch(epoch: string | null): boolean {
+  return typeof epoch === "string" && epoch.endsWith(":purging");
+}
+
+async function captureOfflineCacheScopeUnlocked(
   userId: string,
 ): Promise<OfflineCacheScope> {
   const lifetime = captureOfflineCacheUserClearLifetime(userId);
@@ -522,7 +536,10 @@ export async function captureOfflineCacheScope(
     const epochs = await readScopeEpochs(database, userId);
     epoch = composeEpoch(epochs.global, epochs.user);
     devicePurging = epochs.state === DEVICE_CLEAR_PURGING;
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
     // Cache availability must not gate healthy network display.
   }
   const scope = { epoch, lifetime, userId };
@@ -536,6 +553,12 @@ export async function captureOfflineCacheScope(
     throw invalidatedError();
   }
   return scope;
+}
+
+export function captureOfflineCacheScope(
+  userId: string,
+): Promise<OfflineCacheScope> {
+  return globalSharedStorageLock(() => captureOfflineCacheScopeUnlocked(userId));
 }
 
 export async function assertOfflineCacheScope(
@@ -558,6 +581,9 @@ export async function assertOfflineCacheScope(
       throw invalidatedError();
     }
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
     if (requireStorage) {
       throw error;
     }
@@ -588,6 +614,13 @@ function userStorageLock<T>(
       operation,
     ),
   );
+}
+
+function globalSharedStorageLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (!navigator.locks) {
+    return Promise.reject(new Error("Offline cache locking is unavailable"));
+  }
+  return navigator.locks.request(GLOBAL_LOCK_NAME, { mode: "shared" }, operation);
 }
 
 function globalStorageLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -1338,7 +1371,7 @@ function updateDeviceState(
       reject(error);
       return;
     }
-    transaction.oncomplete = resolve;
+    transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error ?? invalidatedError());
   });
@@ -1361,12 +1394,11 @@ function clearPrivateDeviceRecords(database: IDBDatabase): Promise<void> {
         const cursor = request.result;
         if (!cursor) return;
         const key = String(cursor.key);
-        // Epoch/state are authority, and viewer-id is deliberately retained.
+        // Only the viewer identity and device authority survive a device clear.
         if (
           key !== VIEWER_ID_METADATA_KEY &&
           key !== DEVICE_EPOCH_METADATA_KEY &&
-          key !== DEVICE_CLEAR_STATE_METADATA_KEY &&
-          !key.startsWith("user-epoch:")
+          key !== DEVICE_CLEAR_STATE_METADATA_KEY
         ) {
           cursor.delete();
         }
@@ -1377,7 +1409,7 @@ function clearPrivateDeviceRecords(database: IDBDatabase): Promise<void> {
       reject(error);
       return;
     }
-    transaction.oncomplete = resolve;
+    transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error ?? invalidatedError());
   });
@@ -1401,10 +1433,16 @@ async function purgeOfflineCacheDevice(
     throw new Error("Offline cache storage is unavailable");
   }
   throwIfAborted(options.signal);
-  const database = await openDatabase(options.signal);
   invalidateDeviceRealm();
   try {
+    lifecycleChannel?.postMessage({ type: "device-invalidate", userId: "" });
+  } catch {
+    // Durable state remains authoritative.
+  }
+  const database = await openDatabase(options.signal);
+  try {
     await globalStorageLock(async () => {
+      throwIfAborted(options.signal);
       // This marker is durable before either destructive operation.
       await updateDeviceState(database, DEVICE_CLEAR_PURGING);
       globalSuspended = true;
@@ -1417,11 +1455,6 @@ async function purgeOfflineCacheDevice(
       await updateDeviceState(database, DEVICE_CLEAR_ACTIVE, epoch);
       globalSuspended = false;
     });
-    try {
-      lifecycleChannel?.postMessage({ type: "device-invalidate", userId: "" });
-    } catch {
-      // Durable global epoch remains authoritative without BroadcastChannel.
-    }
   } finally {
     database.close();
   }
@@ -2487,7 +2520,7 @@ function removeCachedNote(
   });
 }
 
-export async function persistCachedViewerId(
+async function persistCachedViewerIdUnlocked(
   viewerId: string,
   options: CancellationOptions = {},
 ): Promise<void> {
@@ -2496,7 +2529,7 @@ export async function persistCachedViewerId(
     throw new Error("Viewer identity storage is unavailable");
   }
   const clearLifetime = captureOfflineCacheUserClearLifetime(viewerId);
-  const scope = await captureOfflineCacheScope(viewerId);
+  const scope = await captureOfflineCacheScopeUnlocked(viewerId);
   if (scope.epoch === null) {
     throw new Error("Viewer identity storage is unavailable");
   }
@@ -2530,7 +2563,7 @@ export async function persistCachedViewerId(
   }
 }
 
-export async function readCachedViewerId(
+async function readCachedViewerIdUnlocked(
   options: CancellationOptions = {},
 ): Promise<string | null> {
   const { signal } = options;
@@ -2546,6 +2579,21 @@ export async function readCachedViewerId(
   } finally {
     database.close();
   }
+}
+
+export function persistCachedViewerId(
+  viewerId: string,
+  options: CancellationOptions = {},
+): Promise<void> {
+  return globalSharedStorageLock(() =>
+    persistCachedViewerIdUnlocked(viewerId, options),
+  );
+}
+
+export function readCachedViewerId(
+  options: CancellationOptions = {},
+): Promise<string | null> {
+  return globalSharedStorageLock(() => readCachedViewerIdUnlocked(options));
 }
 
 function cacheLifetimeCurrent(userId: string, lifetime: number): boolean {
@@ -3451,6 +3499,7 @@ export async function openOfflineCache(
     "clearFolderDenial",
     "getFolder",
     "getNoteList",
+    "getNoteListState",
   ] as const) {
     const operation = cache[name].bind(cache) as (
       ...args: unknown[]

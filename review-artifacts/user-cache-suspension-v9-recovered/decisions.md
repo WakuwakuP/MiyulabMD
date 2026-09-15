@@ -115,3 +115,31 @@ The D32 decision and validation records are preserved in:
 
 - [`app-shell-decisions.md`](app-shell-decisions.md)
 - [`app-shell-validation.md`](app-shell-validation.md)
+
+## P1 device-clear authority and locking
+
+Device clear retains only `viewer-id`, `device-epoch`, and
+`device-clear-state`. All `user-epoch:*` records and every private note,
+folder, list, denial, ordering, image, drive-root, and folder-state record are
+removed. The global device epoch fences scopes, including a user purge that
+failed before its user epoch could be restored.
+
+The durable `purging` marker is a commit point: cancellation is checked before
+the exclusive lock and once at the lock callback entry, then the clear runs to
+terminal completion and leaves `globalSuspended`/`purging` on failure. A retry
+can use the exclusive path while suspended. A device invalidation is signalled
+at operation start.
+
+The public storage lock coverage is:
+
+| API | lock |
+| --- | --- |
+| `captureOfflineCacheScope`, `persistCachedViewerId`, `readCachedViewerId` | global shared |
+| cache handle methods (including `getNoteListState`) | global shared → user shared |
+| `collectOfflineCacheOrphans` | global shared → user exclusive |
+| `clearOfflineCacheUser` | global shared → user exclusive |
+| `clearOfflineCacheDevice` | global exclusive |
+| synchronous lifecycle/order helpers and BroadcastChannel subscription | none |
+
+Unlocked helpers are used inside lock callbacks; no public locked helper is
+called from another locked helper.
