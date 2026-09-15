@@ -238,3 +238,23 @@ git diff --check: PASS
 Biome/typecheck: not executed (candidate dependencies unavailable)
 mounted browser validation: not executed (candidate dependencies unavailable)
 ```
+
+## Parent live verification record
+
+The parent verification was run against the adopted live tree and passed:
+
+```text
+live/candidate4 comment-stripped manifest: cd0f9cf... (offline-cache.ts)
+live/candidate4 home-metadata manifest: 9ee950... (home-metadata-reader.ts)
+live/candidate4 Home manifest: bc67c... (HomePage.tsx; already committed)
+live/candidate4 Cached manifest: 41350... (CachedDriveView.tsx)
+live app + service worker typecheck: PASS
+Biome live4 + mounted spec/docs: PASS
+browser mounted-folder-denial/folder-denial-http/home-folder-denial/
+  mydrive-prefetch-denial/note-denial-events/mounted-note-denial: 38/38 PASS
+Web unit tests: 117/117 PASS
+git diff --check: PASS
+```
+
+These results validate the listed live workflows and adopted source hashes;
+they do not claim that every offline workflow is complete.

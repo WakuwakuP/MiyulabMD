@@ -2358,6 +2358,43 @@ lockfile とともに現状保存として含めた。この依存更新をエ�
   SSR stripであり、端末全体削除UI・安全な回収・表示中拒否通知・残取得入口・
   実Worker追加受入れを含む全要件は未完のまま残す。
 
+## D131：mounted folder/list denial projectionを候補から本体へ採用する
+
+- 状態：manifest先行で候補4ファイルを採用・検証中。全オフライン要件の完了ではない。
+- 51acba5、0715、7b8で行われたliveの誤編集はrevertして検証baselineへ戻した。
+  今回はcandidateの修正だけを、`mounted-folder-adoption-manifest.md` の4行に限定して
+  liveへ反映する。既存D125 composed manifestは歴史記録として変更しない。
+- 親の候補証拠はcandidate typecheck、full candidate lint、mounted core/DOM/race
+  **15/15**、existing folder/note authority **11/11**。ReviewerはP0/P1/P2なし、
+  採用可と判断した。
+- 今回の失敗履歴・最終判断はcandidateの
+  `mounted-folder-denial-decisions.md` に保持し、test/docsをsource採用と区分する。
+  browser、unit、typecheck、Biome、pair hashの最終結果は採用後に追記する。
+- 端末全体削除UI、安全な回収、quota handling、残取得入口、production acceptanceを
+  含む全要件は未完であり、本判断を「全offline完了」とは扱わない。
+
+### 親検証結果
+
+親検証では、採用後の live tree について次を確認した。
+
+```text
+live/candidate4 comment-stripped hash manifest:
+  offline-cache.ts cd0f9cf...
+  home-metadata-reader.ts 9ee950...
+  HomePage.tsx bc67c...（既コミット）
+  CachedDriveView.tsx 41350...
+live app + service worker typecheck: PASS
+Biome live4 + mounted spec/docs: PASS
+mounted-folder-denial/folder-denial-http/home-folder-denial/
+mydrive-prefetch-denial/note-denial-events/mounted-note-denial browser:
+38/38 PASS
+Web unit: 117/117 PASS
+git diff --check: PASS
+```
+
+これは記載した live workflow と採用 hash の検証結果であり、全 offline
+workflow の完了を意味しない。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
