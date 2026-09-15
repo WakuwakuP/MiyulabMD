@@ -4,13 +4,16 @@ The candidate uses one canonical Web Lock, `miyulabmd-offline-cache:global`, as
 the realm fence. Device clear acquires it exclusively and never acquires a user
 lock. Every user-scoped storage operation acquires the global lock shared first,
 then its user lock shared or exclusive, and releases them in reverse order. The
+identity metadata write is the deliberate exception: only its authority capture
+uses the pair, while its transaction-level fence protects the later write. The
 single helper composes that order around `*Unlocked` internals, so operations
 that already hold the pair never request either lock recursively.
 
 | Operation | Global lock | User lock | Internal helper |
 | --- | --- | --- | --- |
 | Public scope/authority/folder reads | shared | shared | `*Unlocked` |
-| `persistCachedViewerId` | shared | shared | `*Unlocked` |
+| `persistCachedViewerId` authority capture | shared | shared | `capture...Unlocked` |
+| `persistCachedViewerId` metadata write | none | none | `*Unlocked` + transaction fence |
 | `readCachedViewerId` | shared | none | `*Unlocked` |
 | Open-cache initialization | shared | shared | `*Unlocked` |
 | Open-cache handle wrapper and `getNote` | shared | shared | `*Unlocked` |
@@ -43,3 +46,13 @@ IndexedDB and OPFS are not atomic. Any failure leaves the durable purging
 marker and the in-memory global suspension in place; callers must retry the
 clear explicitly. A successful final commit is the only path that re-enables
 new cache scopes.
+
+The identity writer deliberately holds the shared lock only while capturing its
+composed global/user epoch and lifetime. The gated IndexedDB write runs after
+that lock is released, so a user-exclusive clear can make progress. Its
+immediate pre-transaction checks reject a newly suspended or clearing user, and
+`guardTransaction` reads the device-clear state as well as both epochs in the
+same readwrite transaction. A transaction that observes anything other than
+the captured active scope aborts; this durable fence protects against missed
+`BroadcastChannel` invalidations without weakening the device clear's global
+exclusive lock or its retry-on-failure behavior.
