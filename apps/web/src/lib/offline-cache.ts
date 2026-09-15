@@ -480,7 +480,7 @@ export async function captureOfflineCacheScope(
   return scope;
 }
 
-async function assertOfflineCacheScopeUnlocked(
+export async function assertOfflineCacheScope(
   scope: OfflineCacheScope,
   requireStorage = false,
 ): Promise<void> {
@@ -510,17 +510,6 @@ async function assertOfflineCacheScopeUnlocked(
   }
 }
 
-export function assertOfflineCacheScope(
-  scope: OfflineCacheScope,
-  requireStorage = false,
-): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(scope.userId, "shared", () =>
-      assertOfflineCacheScopeUnlocked(scope, requireStorage),
-    ),
-  );
-}
-
 function userStorageLock<T>(
   userId: string,
   mode: "shared" | "exclusive",
@@ -532,30 +521,6 @@ function userStorageLock<T>(
   return navigator.locks.request(
     `miyulabmd-offline-cache:${encodePathPart(userId)}`,
     { mode },
-    operation,
-  );
-}
-
-function globalSharedStorageLock<T>(operation: () => Promise<T>): Promise<T> {
-  if (!navigator.locks) {
-    return Promise.reject(new Error("Offline cache locking is unavailable"));
-  }
-  return navigator.locks.request(
-    "miyulabmd-offline-cache:global",
-    { mode: "shared" },
-    operation,
-  );
-}
-
-function globalExclusiveStorageLock<T>(
-  operation: () => Promise<T>,
-): Promise<T> {
-  if (!navigator.locks) {
-    return Promise.reject(new Error("Offline cache locking is unavailable"));
-  }
-  return navigator.locks.request(
-    "miyulabmd-offline-cache:global",
-    { mode: "exclusive" },
     operation,
   );
 }
@@ -643,7 +608,7 @@ function deniedNoteKey(userId: string, noteId: string): string {
 }
 
 /** Null means authority cannot be inspected, not proof of restored access. */
-async function readOfflineNoteDenialUnlocked(
+export async function readOfflineNoteDenial(
   event: NoteDenialEvent,
   identities: readonly string[],
 ): Promise<boolean | null> {
@@ -692,17 +657,6 @@ async function readOfflineNoteDenialUnlocked(
   }
 }
 
-export function readOfflineNoteDenial(
-  event: NoteDenialEvent,
-  identities: readonly string[],
-): Promise<boolean | null> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(event.userId, "shared", () =>
-      readOfflineNoteDenialUnlocked(event, identities),
-    ),
-  );
-}
-
 function noteOrderKey(userId: string): string {
   return `${NOTE_ORDER_PREFIX}${encodePathPart(userId)}`;
 }
@@ -739,7 +693,7 @@ function parseNoteAuthority(
   }
 }
 
-async function captureOfflineNoteAuthorityUnlocked(
+export async function captureOfflineNoteAuthority(
   userId: string,
   _id: string,
 ): Promise<OfflineNoteAuthority> {
@@ -775,18 +729,7 @@ async function captureOfflineNoteAuthorityUnlocked(
   });
 }
 
-export function captureOfflineNoteAuthority(
-  userId: string,
-  id: string,
-): Promise<OfflineNoteAuthority> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(userId, "shared", () =>
-      captureOfflineNoteAuthorityUnlocked(userId, id),
-    ),
-  );
-}
-
-async function assertOfflineNoteAuthorityUnlocked(
+export async function assertOfflineNoteAuthority(
   authority: OfflineNoteAuthority,
   userId: string,
   id: string | readonly string[],
@@ -832,19 +775,6 @@ async function assertOfflineNoteAuthorityUnlocked(
   ) {
     throw invalidatedError();
   }
-}
-
-export function assertOfflineNoteAuthority(
-  authority: OfflineNoteAuthority,
-  userId: string,
-  id: string | readonly string[],
-  scope?: OfflineCacheScope,
-): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(userId, "shared", () =>
-      assertOfflineNoteAuthorityUnlocked(authority, userId, id, scope),
-    ),
-  );
 }
 
 function currentNoteGeneration(userId: string, noteId: string): number {
@@ -1245,9 +1175,9 @@ export async function collectOfflineCacheOrphans(
   return userStorageLock(userId, "exclusive", async () => {
     const database = await openDatabase();
     try {
-      await assertOfflineCacheScopeUnlocked(capturedScope, true);
+      await assertOfflineCacheScope(capturedScope, true);
       const references = await readUserFileSnapshot(database, userId);
-      await assertOfflineCacheScopeUnlocked(capturedScope, true);
+      await assertOfflineCacheScope(capturedScope, true);
 
       const notes = await userNotesDirectory(userId);
       if (!notes) {
@@ -1283,19 +1213,17 @@ async function purgeOfflineCacheUser(userId: string): Promise<void> {
   await Promise.all(pendingUserWrites.get(userId) ?? []);
   const database = await openDatabase();
   try {
-    await globalExclusiveStorageLock(() =>
-      userStorageLock(userId, "exclusive", async () => {
-        const epoch = crypto.randomUUID();
-        await clearUserRecords(database, userId, epoch);
-        await clearUserFiles(userId);
-        await commitTransaction(
-          database,
-          METADATA_STORE,
-          { key: epochKey(userId), value: epoch },
-          userId,
-        );
-      }),
-    );
+    await userStorageLock(userId, "exclusive", async () => {
+      const epoch = crypto.randomUUID();
+      await clearUserRecords(database, userId, epoch);
+      await clearUserFiles(userId);
+      await commitTransaction(
+        database,
+        METADATA_STORE,
+        { key: epochKey(userId), value: epoch },
+        userId,
+      );
+    });
     suspendedUsers.delete(userId);
   } finally {
     database.close();
@@ -1826,7 +1754,7 @@ function requiredFolderSequence(record: MetadataRecord | undefined): number {
   return value;
 }
 
-async function captureOfflineFolderReadUnlocked(
+export async function captureOfflineFolderRead(
   scope: OfflineCacheScope,
 ): Promise<number | undefined> {
   if (scope.epoch === null) {
@@ -1844,7 +1772,7 @@ async function captureOfflineFolderReadUnlocked(
   }
 }
 
-async function assertOfflineFolderReadUnlocked(
+export async function assertOfflineFolderRead(
   scope: OfflineCacheScope,
   id: string | null,
   orderingToken: number,
@@ -1866,28 +1794,6 @@ async function assertOfflineFolderReadUnlocked(
   if (!isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime)) {
     throw invalidatedError();
   }
-}
-
-export function captureOfflineFolderRead(
-  scope: OfflineCacheScope,
-): Promise<number | undefined> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(scope.userId, "shared", () =>
-      captureOfflineFolderReadUnlocked(scope),
-    ),
-  );
-}
-
-export function assertOfflineFolderRead(
-  scope: OfflineCacheScope,
-  id: string | null,
-  orderingToken: number,
-): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(scope.userId, "shared", () =>
-      assertOfflineFolderReadUnlocked(scope, id, orderingToken),
-    ),
-  );
 }
 
 type FolderOperation = {
@@ -2258,7 +2164,7 @@ function parseFolderDenialSnapshot(
 }
 
 /** Null means the durable folder authority could not be inspected. */
-async function readOfflineFolderDenialUnlocked(
+export async function readOfflineFolderDenial(
   event: FolderDenialEvent,
 ): Promise<boolean | null> {
   try {
@@ -2384,7 +2290,7 @@ function removeCachedNote(
   });
 }
 
-async function persistCachedViewerIdUnlocked(
+export async function persistCachedViewerId(
   viewerId: string,
   options: CancellationOptions = {},
 ): Promise<void> {
@@ -2427,7 +2333,7 @@ async function persistCachedViewerIdUnlocked(
   }
 }
 
-async function readCachedViewerIdUnlocked(
+export async function readCachedViewerId(
   options: CancellationOptions = {},
 ): Promise<string | null> {
   const { signal } = options;
@@ -2443,33 +2349,6 @@ async function readCachedViewerIdUnlocked(
   } finally {
     database.close();
   }
-}
-
-export function persistCachedViewerId(
-  viewerId: string,
-  options: CancellationOptions = {},
-): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(viewerId, "shared", () =>
-      persistCachedViewerIdUnlocked(viewerId, options),
-    ),
-  );
-}
-
-export function readCachedViewerId(
-  options: CancellationOptions = {},
-): Promise<string | null> {
-  return globalSharedStorageLock(() => readCachedViewerIdUnlocked(options));
-}
-
-export function readOfflineFolderDenial(
-  event: FolderDenialEvent,
-): Promise<boolean | null> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(event.userId, "shared", () =>
-      readOfflineFolderDenialUnlocked(event),
-    ),
-  );
 }
 
 function cacheLifetimeCurrent(userId: string, lifetime: number): boolean {
@@ -2738,7 +2617,7 @@ function updateNoteAuthority(
   });
 }
 
-async function openOfflineCacheUnlocked(
+export async function openOfflineCache(
   options: OpenOfflineCacheOptions & CancellationOptions,
 ): Promise<OfflineCache> {
   if (!options.userId) {
@@ -3380,9 +3259,9 @@ async function openOfflineCacheUnlocked(
     Object.assign(cache, {
       [name]: (...args: unknown[]) =>
         userStorageLock(userId, "shared", async () => {
-          await assertOfflineCacheScopeUnlocked(scope, true);
+          await assertOfflineCacheScope(scope, true);
           const result = await operation(...args);
-          await assertOfflineCacheScopeUnlocked(scope, true);
+          await assertOfflineCacheScope(scope, true);
           return result;
         }),
     });
@@ -3390,15 +3269,15 @@ async function openOfflineCacheUnlocked(
   const readCachedNote = cache.getNote.bind(cache);
   cache.getNote = (id) =>
     userStorageLock(userId, "shared", async () => {
-      await assertOfflineCacheScopeUnlocked(scope, true);
-      const authority = await captureOfflineNoteAuthorityUnlocked(userId, id);
+      await assertOfflineCacheScope(scope, true);
+      const authority = await captureOfflineNoteAuthority(userId, id);
       const snapshot = await readCachedNote(id);
-      await assertOfflineCacheScopeUnlocked(scope, true);
+      await assertOfflineCacheScope(scope, true);
       if (!snapshot) {
         return null;
       }
       try {
-        await assertOfflineNoteAuthorityUnlocked(
+        await assertOfflineNoteAuthority(
           authority,
           userId,
           [id, snapshot.note.id],
@@ -3425,10 +3304,4 @@ async function openOfflineCacheUnlocked(
     }
   };
   return cache;
-}
-
-export function openOfflineCache(
-  options: OpenOfflineCacheOptions & CancellationOptions,
-): Promise<OfflineCache> {
-  return globalSharedStorageLock(() => openOfflineCacheUnlocked(options));
 }
