@@ -134,10 +134,12 @@ The public storage lock coverage is:
 
 | API | lock |
 | --- | --- |
-| `captureOfflineCacheScope`, `persistCachedViewerId`, `readCachedViewerId` | global shared |
-| cache handle methods (including `getNoteListState`) | global shared → user shared |
-| `collectOfflineCacheOrphans` | global shared → user exclusive |
-| `clearOfflineCacheUser` | global shared → user exclusive |
+| `captureOfflineCacheScope`, authority/folder reads | user shared |
+| `persistCachedViewerId` | user shared |
+| `readCachedViewerId` | global shared |
+| cache handle methods (including `getNoteListState`) | user shared |
+| `collectOfflineCacheOrphans` | user exclusive |
+| `clearOfflineCacheUser` | user exclusive |
 | `clearOfflineCacheDevice` | global exclusive |
 | synchronous lifecycle/order helpers and BroadcastChannel subscription | none |
 

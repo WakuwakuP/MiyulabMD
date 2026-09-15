@@ -486,20 +486,29 @@ function readScopeEpochs(
       const user = store.get(epochKey(userId));
       const state = store.get(DEVICE_CLEAR_STATE_METADATA_KEY);
       transaction.oncomplete = () => {
-        const globalEpoch = (global.result as MetadataRecord | undefined)?.value ?? "0";
-        const userEpoch = (user.result as MetadataRecord | undefined)?.value ?? "0";
-        const clearState = (state.result as MetadataRecord | undefined)?.value ?? DEVICE_CLEAR_ACTIVE;
-        if (!isValidEpoch(globalEpoch) || !isValidEpoch(userEpoch) ||
-            isPurgingEpoch(globalEpoch) ||
-            isPurgingEpoch(userEpoch) ||
-            (clearState !== DEVICE_CLEAR_ACTIVE && clearState !== DEVICE_CLEAR_PURGING)) {
+        const globalEpoch =
+          (global.result as MetadataRecord | undefined)?.value ?? "0";
+        const userEpoch =
+          (user.result as MetadataRecord | undefined)?.value ?? "0";
+        const clearState =
+          (state.result as MetadataRecord | undefined)?.value ??
+          DEVICE_CLEAR_ACTIVE;
+        if (
+          !isValidEpoch(globalEpoch) ||
+          !isValidEpoch(userEpoch) ||
+          isPurgingEpoch(globalEpoch) ||
+          isPurgingEpoch(userEpoch) ||
+          (clearState !== DEVICE_CLEAR_ACTIVE &&
+            clearState !== DEVICE_CLEAR_PURGING)
+        ) {
           reject(invalidatedError());
           return;
         }
         resolve({ global: globalEpoch, state: clearState, user: userEpoch });
       };
       transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error ?? invalidatedError());
+      transaction.onabort = () =>
+        reject(transaction.error ?? invalidatedError());
     } catch (error) {
       reject(error);
     }
@@ -511,10 +520,16 @@ function invalidatedError(): DOMException {
 }
 
 function isValidEpoch(epoch: unknown): epoch is string {
-  return epoch === "0" ||
-    (typeof epoch === "string" &&
-      (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(epoch) ||
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:purging$/.test(epoch)));
+  return (
+    typeof epoch === "string" &&
+    (epoch === "0" ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        epoch,
+      ) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:purging$/.test(
+        epoch,
+      ))
+  );
 }
 
 function isPurgingEpoch(epoch: string | null): boolean {
@@ -558,7 +573,9 @@ async function captureOfflineCacheScopeUnlocked(
 export function captureOfflineCacheScope(
   userId: string,
 ): Promise<OfflineCacheScope> {
-  return globalSharedStorageLock(() => captureOfflineCacheScopeUnlocked(userId));
+  return userStorageLock(userId, "shared", () =>
+    captureOfflineCacheScopeUnlocked(userId),
+  );
 }
 
 async function assertOfflineCacheScopeUnlocked(
@@ -603,10 +620,8 @@ export function assertOfflineCacheScope(
   scope: OfflineCacheScope,
   requireStorage = false,
 ): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(scope.userId, "shared", () =>
-      assertOfflineCacheScopeUnlocked(scope, requireStorage),
-    ),
+  return userStorageLock(scope.userId, "shared", () =>
+    assertOfflineCacheScopeUnlocked(scope, requireStorage),
   );
 }
 
@@ -781,10 +796,8 @@ export function readOfflineNoteDenial(
   event: NoteDenialEvent,
   identities: readonly string[],
 ): Promise<boolean | null> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(event.userId, "shared", () =>
-      readOfflineNoteDenialUnlocked(event, identities),
-    ),
+  return userStorageLock(event.userId, "shared", () =>
+    readOfflineNoteDenialUnlocked(event, identities),
   );
 }
 
@@ -912,10 +925,8 @@ export function captureOfflineNoteAuthority(
   userId: string,
   id: string,
 ): Promise<OfflineNoteAuthority> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(userId, "shared", () =>
-      captureOfflineNoteAuthorityUnlocked(userId, id),
-    ),
+  return userStorageLock(userId, "shared", () =>
+    captureOfflineNoteAuthorityUnlocked(userId, id),
   );
 }
 
@@ -925,10 +936,8 @@ export function assertOfflineNoteAuthority(
   id: string | readonly string[],
   scope?: OfflineCacheScope,
 ): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(userId, "shared", () =>
-      assertOfflineNoteAuthorityUnlocked(authority, userId, id, scope),
-    ),
+  return userStorageLock(userId, "shared", () =>
+    assertOfflineNoteAuthorityUnlocked(authority, userId, id, scope),
   );
 }
 
@@ -953,7 +962,7 @@ function encodePathPart(value: string): string {
   return btoa(binary)
     .replaceAll("+", "-")
     .replaceAll("/", "_")
-    .replaceAll("=", "");
+    .replace(/=+$/, "");
 }
 
 function noteKey(userId: string, noteId: string): string {
@@ -1327,31 +1336,29 @@ export async function collectOfflineCacheOrphans(
   if (capturedScope.epoch === null) {
     throw new Error("Offline cache metadata is unavailable");
   }
-  return globalSharedStorageLock(() =>
-    userStorageLock(userId, "exclusive", async () => {
-      const database = await openDatabase();
-      try {
-        await assertOfflineCacheScopeUnlocked(capturedScope, true);
-        const references = await readUserFileSnapshot(database, userId);
-        await assertOfflineCacheScopeUnlocked(capturedScope, true);
+  return userStorageLock(userId, "exclusive", async () => {
+    const database = await openDatabase();
+    try {
+      await assertOfflineCacheScopeUnlocked(capturedScope, true);
+      const references = await readUserFileSnapshot(database, userId);
+      await assertOfflineCacheScopeUnlocked(capturedScope, true);
 
-        const notes = await userNotesDirectory(userId);
-        if (!notes) {
-          return { removedFiles: 0 };
-        }
-
-        const candidates = await findCacheOrphans(notes, references);
-        let removedFiles = 0;
-        for (const candidate of candidates) {
-          await candidate.directory.removeEntry(candidate.name);
-          removedFiles += 1;
-        }
-        return { removedFiles };
-      } finally {
-        database.close();
+      const notes = await userNotesDirectory(userId);
+      if (!notes) {
+        return { removedFiles: 0 };
       }
-    }),
-  );
+
+      const candidates = await findCacheOrphans(notes, references);
+      let removedFiles = 0;
+      for (const candidate of candidates) {
+        await candidate.directory.removeEntry(candidate.name);
+        removedFiles += 1;
+      }
+      return { removedFiles };
+    } finally {
+      database.close();
+    }
+  });
 }
 
 async function purgeOfflineCacheUser(userId: string): Promise<void> {
@@ -1370,19 +1377,17 @@ async function purgeOfflineCacheUser(userId: string): Promise<void> {
   await Promise.all(pendingUserWrites.get(userId) ?? []);
   const database = await openDatabase();
   try {
-    await globalSharedStorageLock(() =>
-      userStorageLock(userId, "exclusive", async () => {
-        const epoch = crypto.randomUUID();
-        await clearUserRecords(database, userId, epoch);
-        await clearUserFiles(userId);
-        await commitTransaction(
-          database,
-          METADATA_STORE,
-          { key: epochKey(userId), value: epoch },
-          userId,
-        );
-      }),
-    );
+    await userStorageLock(userId, "exclusive", async () => {
+      const epoch = crypto.randomUUID();
+      await clearUserRecords(database, userId, epoch);
+      await clearUserFiles(userId);
+      await commitTransaction(
+        database,
+        METADATA_STORE,
+        { key: epochKey(userId), value: epoch },
+        userId,
+      );
+    });
     suspendedUsers.delete(userId);
   } finally {
     database.close();
@@ -1440,7 +1445,9 @@ function clearPrivateDeviceRecords(database: IDBDatabase): Promise<void> {
       const request = metadata.openCursor();
       request.onsuccess = () => {
         const cursor = request.result;
-        if (!cursor) return;
+        if (!cursor) {
+          return;
+        }
         const key = String(cursor.key);
         // Only the viewer identity and device authority survive a device clear.
         if (
@@ -2077,10 +2084,8 @@ async function assertOfflineFolderReadUnlocked(
 export function captureOfflineFolderRead(
   scope: OfflineCacheScope,
 ): Promise<number | undefined> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(scope.userId, "shared", () =>
-      captureOfflineFolderReadUnlocked(scope),
-    ),
+  return userStorageLock(scope.userId, "shared", () =>
+    captureOfflineFolderReadUnlocked(scope),
   );
 }
 
@@ -2089,10 +2094,8 @@ export function assertOfflineFolderRead(
   id: string | null,
   orderingToken: number,
 ): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(scope.userId, "shared", () =>
-      assertOfflineFolderReadUnlocked(scope, id, orderingToken),
-    ),
+  return userStorageLock(scope.userId, "shared", () =>
+    assertOfflineFolderReadUnlocked(scope, id, orderingToken),
   );
 }
 
@@ -2519,10 +2522,8 @@ async function readOfflineFolderDenialUnlocked(
 export function readOfflineFolderDenial(
   event: FolderDenialEvent,
 ): Promise<boolean | null> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(event.userId, "shared", () =>
-      readOfflineFolderDenialUnlocked(event),
-    ),
+  return userStorageLock(event.userId, "shared", () =>
+    readOfflineFolderDenialUnlocked(event),
   );
 }
 
@@ -2665,10 +2666,8 @@ export function persistCachedViewerId(
   viewerId: string,
   options: CancellationOptions = {},
 ): Promise<void> {
-  return globalSharedStorageLock(() =>
-    userStorageLock(viewerId, "shared", () =>
-      persistCachedViewerIdUnlocked(viewerId, options),
-    ),
+  return userStorageLock(viewerId, "shared", () =>
+    persistCachedViewerIdUnlocked(viewerId, options),
   );
 }
 
@@ -3639,5 +3638,10 @@ async function openOfflineCacheUnlocked(
 export function openOfflineCache(
   options: OpenOfflineCacheOptions & CancellationOptions,
 ): Promise<OfflineCache> {
-  return globalSharedStorageLock(() => openOfflineCacheUnlocked(options));
+  if (!options.userId) {
+    return Promise.reject(new Error("A user ID is required"));
+  }
+  return userStorageLock(options.userId, "shared", () =>
+    openOfflineCacheUnlocked(options),
+  );
 }
