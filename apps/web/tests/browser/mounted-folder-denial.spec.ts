@@ -127,12 +127,13 @@ test("authority reads every alias when only alias one is missing", async ({
   const result = await inCache(
     page,
     `async (cache, folder) => {
+      const module = await import("/src/lib/offline-cache.ts");
+      const scope = await module.captureOfflineCacheScope("mounted-race");
       const token = await cache.beginFolderRead(folder.id);
       await cache.denyFolder(folder.id, token);
-      const module = await import("/src/lib/offline-cache.ts");
       return module.readOfflineFolderDenial({
         type: "invalidate", userId: "mounted-race",
-        resource: { type: "folder", aliases: ["missing", folder.id], epoch: "0", generation: 2 },
+        resource: { type: "folder", aliases: ["missing", folder.id], epoch: scope.epoch, generation: 2 },
       });
     }`,
   );
