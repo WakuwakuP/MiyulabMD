@@ -500,8 +500,7 @@ function readScopeEpochs(
           (state.result as MetadataRecord | undefined)?.value ??
           DEVICE_CLEAR_ACTIVE;
         if (
-          !isValidEpoch(globalEpoch) ||
-          !isValidEpoch(userEpoch) ||
+          !(isValidEpoch(globalEpoch) && isValidEpoch(userEpoch)) ||
           isPurgingEpoch(globalEpoch) ||
           isPurgingEpoch(userEpoch) ||
           (clearState !== DEVICE_CLEAR_ACTIVE &&
