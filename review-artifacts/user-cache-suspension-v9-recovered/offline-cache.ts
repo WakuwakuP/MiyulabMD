@@ -636,13 +636,12 @@ function userStorageLock<T>(
   mode: "shared" | "exclusive",
   operation: () => Promise<T>,
 ): Promise<T> {
-  if (!navigator.locks) {
-    return Promise.reject(new Error("Offline cache locking is unavailable"));
-  }
-  return navigator.locks.request(
-    `miyulabmd-offline-cache:user:${encodePathPart(userId)}`,
-    { mode },
-    operation,
+  return globalSharedStorageLock(() =>
+    navigator.locks.request(
+      `miyulabmd-offline-cache:user:${encodePathPart(userId)}`,
+      { mode },
+      operation,
+    ),
   );
 }
 
@@ -772,11 +771,28 @@ async function readOfflineNoteDenialUnlocked(
       readMetadataBatch(
         transaction.objectStore(METADATA_STORE),
         [
+          DEVICE_EPOCH_METADATA_KEY,
           epochKey(event.userId),
+          DEVICE_CLEAR_STATE_METADATA_KEY,
           ...identities.map((id) => deniedNoteKey(event.userId, id)),
         ],
         (records) => {
-          const epoch = records.get(epochKey(event.userId))?.value ?? "0";
+          const globalEpoch =
+            records.get(DEVICE_EPOCH_METADATA_KEY)?.value ?? "0";
+          const userEpoch = records.get(epochKey(event.userId))?.value ?? "0";
+          const state =
+            records.get(DEVICE_CLEAR_STATE_METADATA_KEY)?.value ??
+            DEVICE_CLEAR_ACTIVE;
+          if (
+            !isValidEpoch(globalEpoch) ||
+            !isValidEpoch(userEpoch) ||
+            isPurgingEpoch(globalEpoch) ||
+            isPurgingEpoch(userEpoch) ||
+            state !== DEVICE_CLEAR_ACTIVE
+          ) {
+            throw invalidatedError();
+          }
+          const epoch = composeEpoch(globalEpoch, userEpoch);
           if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
             denied = false;
           } else if (event.resource.generation !== null) {
@@ -865,14 +881,30 @@ async function captureOfflineNoteAuthorityUnlocked(
     let failure: unknown;
     readMetadataBatch(
       transaction.objectStore(METADATA_STORE),
-      [noteOrderKey(userId), epochKey(userId)],
+      [
+        noteOrderKey(userId),
+        DEVICE_EPOCH_METADATA_KEY,
+        epochKey(userId),
+        DEVICE_CLEAR_STATE_METADATA_KEY,
+      ],
       (records) => {
-        const epoch = records.get(epochKey(userId))?.value ?? "0";
-        if (isPurgingEpoch(epoch)) {
+        const globalEpoch =
+          records.get(DEVICE_EPOCH_METADATA_KEY)?.value ?? "0";
+        const userEpoch = records.get(epochKey(userId))?.value ?? "0";
+        const state =
+          records.get(DEVICE_CLEAR_STATE_METADATA_KEY)?.value ??
+          DEVICE_CLEAR_ACTIVE;
+        if (
+          !isValidEpoch(globalEpoch) ||
+          !isValidEpoch(userEpoch) ||
+          isPurgingEpoch(globalEpoch) ||
+          isPurgingEpoch(userEpoch) ||
+          state !== DEVICE_CLEAR_ACTIVE
+        ) {
           throw invalidatedError();
         }
         snapshot = {
-          epoch,
+          epoch: composeEpoch(globalEpoch, userEpoch),
           generation: noteSequence(records.get(noteOrderKey(userId))),
         };
       },
@@ -1346,11 +1378,11 @@ export async function collectOfflineCacheOrphans(
   if (!("indexedDB" in globalThis && navigator.storage?.getDirectory)) {
     throw new Error("Offline cache storage is unavailable");
   }
-  const capturedScope = await captureOfflineCacheScope(userId);
-  if (capturedScope.epoch === null) {
-    throw new Error("Offline cache metadata is unavailable");
-  }
   return userStorageLock(userId, "exclusive", async () => {
+    const capturedScope = await captureOfflineCacheScopeUnlocked(userId);
+    if (capturedScope.epoch === null) {
+      throw new Error("Offline cache metadata is unavailable");
+    }
     const database = await openDatabase();
     try {
       await assertOfflineCacheScopeUnlocked(capturedScope, true);
@@ -1389,9 +1421,9 @@ async function purgeOfflineCacheUser(userId: string): Promise<void> {
     close();
   }
   await Promise.all(pendingUserWrites.get(userId) ?? []);
-  const database = await openDatabase();
-  try {
-    await userStorageLock(userId, "exclusive", async () => {
+  await userStorageLock(userId, "exclusive", async () => {
+    const database = await openDatabase();
+    try {
       const epoch = crypto.randomUUID();
       await clearUserRecords(database, userId, epoch);
       await clearUserFiles(userId);
@@ -1401,11 +1433,11 @@ async function purgeOfflineCacheUser(userId: string): Promise<void> {
         { key: epochKey(userId), value: epoch },
         userId,
       );
-    });
-    suspendedUsers.delete(userId);
-  } finally {
-    database.close();
-  }
+    } finally {
+      database.close();
+    }
+  });
+  suspendedUsers.delete(userId);
 }
 
 export function clearOfflineCacheUser(userId: string): Promise<void> {
@@ -1508,9 +1540,9 @@ async function purgeOfflineCacheDevice(
   } catch {
     // Durable state remains authoritative.
   }
-  const database = await openDatabase(options.signal);
-  try {
-    await globalStorageLock(async () => {
+  await globalStorageLock(async () => {
+    const database = await openDatabase(options.signal);
+    try {
       throwIfAborted(options.signal);
       // This marker is durable before either destructive operation.
       await updateDeviceState(database, DEVICE_CLEAR_PURGING);
@@ -1523,10 +1555,10 @@ async function purgeOfflineCacheDevice(
       const epoch = crypto.randomUUID();
       await updateDeviceState(database, DEVICE_CLEAR_ACTIVE, epoch);
       globalSuspended = false;
-    });
-  } finally {
-    database.close();
-  }
+    } finally {
+      database.close();
+    }
+  });
 }
 
 let deviceClearOperation: Promise<void> | undefined;
@@ -2497,10 +2529,29 @@ async function readOfflineFolderDenialUnlocked(
         alias,
         request: store.get(deniedFolderKey(event.userId, alias)),
       }));
+      const globalEpochRequest = store.get(DEVICE_EPOCH_METADATA_KEY);
       const epochRequest = store.get(epochKey(event.userId));
+      const stateRequest = store.get(DEVICE_CLEAR_STATE_METADATA_KEY);
       transaction.oncomplete = () => {
-        const epoch =
+        const globalEpoch =
+          (globalEpochRequest.result as MetadataRecord | undefined)?.value ??
+          "0";
+        const userEpoch =
           (epochRequest.result as MetadataRecord | undefined)?.value ?? "0";
+        const state =
+          (stateRequest.result as MetadataRecord | undefined)?.value ??
+          DEVICE_CLEAR_ACTIVE;
+        if (
+          !isValidEpoch(globalEpoch) ||
+          !isValidEpoch(userEpoch) ||
+          isPurgingEpoch(globalEpoch) ||
+          isPurgingEpoch(userEpoch) ||
+          state !== DEVICE_CLEAR_ACTIVE
+        ) {
+          resolve(null);
+          return;
+        }
+        const epoch = composeEpoch(globalEpoch, userEpoch);
         if (event.resource.epoch !== null && epoch !== event.resource.epoch) {
           resolve(false);
           return;
