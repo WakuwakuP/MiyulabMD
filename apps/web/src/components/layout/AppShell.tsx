@@ -21,6 +21,7 @@ import {
   bindMutationAccess,
   createViewingAccess,
 } from "../../lib/viewing-access.ts";
+import { SearchPalette } from "../search/SearchPalette.tsx";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext } from "./AppShellContext.ts";
 
@@ -66,6 +67,7 @@ export function AppShell() {
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const viewerRef = useRef(viewer);
   const [viewing] = useState(() =>
     createViewingAccess(() => viewerRef.current),
@@ -265,6 +267,17 @@ export function AppShell() {
   }, [viewer]);
 
   useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen((open) => !open);
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     void fetchAuthConfig()
       .then((config) => {
@@ -334,6 +347,7 @@ export function AppShell() {
         end={headerEnd}
         folder={headerFolder}
         loading={loading}
+        onOpenSearch={() => setSearchOpen(true)}
         user={viewer.user}
       />
       <main
@@ -349,6 +363,12 @@ export function AppShell() {
           key={viewer.user?.id ?? viewer.cacheViewerId ?? "unavailable"}
         />
       </main>
+      {searchOpen && (
+        <SearchPalette
+          onClose={() => setSearchOpen(false)}
+          viewerId={viewer.user?.id ?? null}
+        />
+      )}
     </div>
   );
 }

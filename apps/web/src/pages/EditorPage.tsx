@@ -12,7 +12,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useOutletContext, useParams } from "react-router";
+import {
+  Link,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
@@ -85,6 +90,7 @@ function EditorSourcePane({
   viewMode,
   splitScroll,
   onSplitScroll,
+  focusLine,
 }: {
   ready: boolean;
   yMarkdown: YjsSession["yMarkdown"] | undefined;
@@ -94,11 +100,13 @@ function EditorSourcePane({
   viewMode: EditorMode;
   splitScroll: number;
   onSplitScroll: (ratio: number) => void;
+  focusLine?: number;
 }) {
   if (ready && yMarkdown && awareness) {
     return (
       <MarkdownEditor
         awareness={awareness}
+        focusLine={focusLine}
         lineNumbers={sourceLineNumbers(viewMode)}
         noteId={noteId}
         onScrollRatio={viewMode === "split" ? onSplitScroll : undefined}
@@ -122,6 +130,7 @@ function EditorPreviewPane({
   onSplitScroll,
   taskNoteId,
   imageContext,
+  focusLine,
 }: {
   viewMode: EditorMode;
   markdown: string;
@@ -129,11 +138,13 @@ function EditorPreviewPane({
   onSplitScroll: (ratio: number) => void;
   taskNoteId?: string;
   imageContext?: ImageViewContext;
+  focusLine?: number;
 }) {
   if (viewMode === "preview") {
     return (
       <PreviewWithToc
         documentScroll={true}
+        focusLine={focusLine}
         imageContext={imageContext}
         markdown={markdown}
         taskNoteId={taskNoteId}
@@ -247,6 +258,7 @@ function EditorWorkspace({
   onPersistAccess,
   onCloseShare,
   onCloseHistory,
+  focusLine,
 }: {
   note: Note;
   markdown: string;
@@ -271,6 +283,7 @@ function EditorWorkspace({
   onPersistAccess: (next: AccessDraft) => void;
   onCloseShare: () => void;
   onCloseHistory: () => void;
+  focusLine?: number;
 }) {
   const showSource = viewMode === "split" || viewMode === "source";
   const showPreview = viewMode === "split" || viewMode === "preview";
@@ -286,6 +299,7 @@ function EditorWorkspace({
           <EditorSourcePane
             awareness={awareness}
             canEdit={canEdit}
+            focusLine={focusLine}
             noteId={note.id}
             onSplitScroll={onSplitScroll}
             ready={ready}
@@ -296,6 +310,7 @@ function EditorWorkspace({
         )}
         {showPreview && (
           <EditorPreviewPane
+            focusLine={focusLine}
             imageContext={imageContext}
             markdown={markdown}
             onSplitScroll={onSplitScroll}
@@ -464,8 +479,18 @@ function sameViewer(
   );
 }
 
+function parseFocusLine(raw: string | null): number | undefined {
+  if (raw === null) {
+    return undefined;
+  }
+  const line = Number(raw);
+  return Number.isInteger(line) && line > 0 ? line : undefined;
+}
+
 export function EditorPage() {
   const { id = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const focusLine = parseFocusLine(searchParams.get("line"));
   const { user, userLoading, viewer, viewing, setHeader } =
     useOutletContext<AppShellContext>();
   const [note, setNote] = useState<Note | null>(null);
@@ -756,6 +781,7 @@ export function EditorPage() {
             articleSource={articleSource}
             awareness={awareness}
             canEdit={canMutate}
+            focusLine={focusLine}
             headingTitle={headingTitle}
             historyOpen={historyOpen}
             imageContext={currentReadState.result}

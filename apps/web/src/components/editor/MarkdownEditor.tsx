@@ -29,6 +29,8 @@ type Props = {
   lineNumbers?: boolean;
   scrollRatio?: number;
   onScrollRatio?: (ratio: number) => void;
+  /** 1-based source line to scroll into view (e.g. from search results). */
+  focusLine?: number;
 };
 
 const IMAGE_TYPES = new Set([
@@ -183,6 +185,7 @@ export function MarkdownEditor({
   lineNumbers: showLineNumbers = false,
   scrollRatio,
   onScrollRatio,
+  focusLine,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -295,6 +298,19 @@ export function MarkdownEditor({
       effects: editing.current.reconfigure(editingExtensions(readOnly)),
     });
   }, [readOnly]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || focusLine == null) {
+      return;
+    }
+    const target = Math.min(Math.max(1, focusLine), view.state.doc.lines);
+    const pos = view.state.doc.line(target).from;
+    view.dispatch({
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+      selection: { anchor: pos, head: pos },
+    });
+  }, [focusLine]);
 
   useEffect(() => {
     const view = viewRef.current;

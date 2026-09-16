@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import {
   extractNoteToc,
+  headingAnchorForLine,
   shouldShowPreviewToc,
   type TocEntry,
 } from "../../lib/note-toc.ts";
@@ -21,6 +22,8 @@ type Props = {
   documentScroll?: boolean;
   taskNoteId?: string;
   imageContext?: ImageViewContext;
+  /** 1-based source line to scroll toward (jumps to the heading above it). */
+  focusLine?: number;
 };
 
 function TocNav({ entries }: { entries: TocEntry[] }) {
@@ -70,6 +73,7 @@ export function PreviewWithToc({
   documentScroll = true,
   taskNoteId,
   imageContext,
+  focusLine,
 }: Props) {
   const layoutRef = useRef<HTMLDivElement>(null);
   const [showToc, setShowToc] = useState(false);
@@ -78,6 +82,22 @@ export function PreviewWithToc({
     () => extractNoteToc(deferredMarkdown),
     [deferredMarkdown],
   );
+
+  useEffect(() => {
+    if (focusLine == null || entries.length === 0) {
+      return;
+    }
+    const anchor = headingAnchorForLine(entries, focusLine);
+    const frame = window.requestAnimationFrame(() => {
+      const target = anchor ? document.getElementById(anchor) : null;
+      if (target) {
+        target.scrollIntoView({ block: "start" });
+      } else {
+        window.scrollTo({ top: 0 });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [entries, focusLine]);
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1200px)");

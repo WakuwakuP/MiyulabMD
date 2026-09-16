@@ -57,6 +57,8 @@ export type {
   FolderEntryFolder,
   FolderEntryNote,
   FolderRecord,
+  GrepMatch,
+  GrepResult,
   Note,
   NoteAccess,
   NoteCollaborator,
@@ -69,16 +71,22 @@ export type {
   NoteRevision,
   NoteRevisionBody,
   NoteRevisionRestore,
+  NoteSearchHit,
+  NoteSearchPage,
   NoteSummary,
+  SearchScope,
   UpdateFolderAccessInput,
   UpdateNoteMetaInput,
+  WorkspaceSearchResult,
 } from "./note.ts";
 export {
   isNoteEditOp,
   isNoteHistoryActorKind,
+  isSearchScope,
   NOTE_EDIT_OPS,
   NOTE_HISTORY_ACTOR_KINDS,
   NOTE_RESTORE_MESSAGE,
+  SEARCH_SCOPES,
 } from "./note.ts";
 export type {
   AccessGrant,

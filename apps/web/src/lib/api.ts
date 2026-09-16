@@ -15,6 +15,7 @@ import type {
   NoteSummary,
   PermissionPreset,
   SessionUser,
+  WorkspaceSearchResult,
 } from "@miyulabmd/shared";
 import { apiFetch as fetch } from "./api-fetch.ts";
 import { ApiHttpError, requestJson } from "./api-transport.ts";
@@ -279,6 +280,29 @@ export async function fetchSharedFolders(
   }
   const body = (await res.json()) as { folders: FolderRecord[] };
   return { data: body.folders, ok: true };
+}
+
+export async function searchWorkspace(
+  query: string,
+  options: {
+    context?: number;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
+): Promise<ApiResult<WorkspaceSearchResult>> {
+  const params = new URLSearchParams({ query });
+  if (options.context !== undefined) {
+    params.set("context", String(options.context));
+  }
+  const res = await fetch(
+    `/api/search?${params.toString()}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as WorkspaceSearchResult, ok: true };
 }
 
 export async function createFolder(input: {

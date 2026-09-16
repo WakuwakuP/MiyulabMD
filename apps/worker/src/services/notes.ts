@@ -7,19 +7,24 @@ import {
   ensureArticleMarkdown,
   type FolderAccess,
   folderContains,
+  type GrepResult,
   isAccessScope,
   isPermissionPreset,
   matchArticleSource,
   type Note,
+  type NoteSearchHit,
+  type NoteSearchPage,
   type NoteSummary,
   normalizeFolder,
   type PermissionPreset,
   presetFromScopes,
   rewriteFolderPrefix,
+  type SearchScope,
   type SessionUser,
   scopesFromPreset,
   titleFromMarkdown,
   type UpdateNoteMetaInput,
+  type WorkspaceSearchResult,
 } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
@@ -54,8 +59,9 @@ import {
 import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
+import { createLineMatcher, type GrepScanOptions, grepRows } from "./search.ts";
 
-type NoteRow = {
+export type NoteRow = {
   id: string;
   short_id: string;
   alias: string | null;
@@ -66,6 +72,7 @@ type NoteRow = {
   read_scope: string | null;
   write_scope: string | null;
   markdown_snapshot: string;
+  snapshot_updated_at: number | null;
   created_at: number;
   updated_at: number;
   article_meta: string | null;
@@ -75,9 +82,9 @@ const SHORT_ID_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const ANONYMOUS_OWNER_EMAIL = "anonymous@miyulabmd.local";
 const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
-                  markdown_snapshot, created_at, updated_at, article_meta`;
+                  markdown_snapshot, snapshot_updated_at, created_at, updated_at, article_meta`;
 const NOTE_COLUMNS_N = `n.id, n.short_id, n.alias, n.owner_id, n.title, n.folder, n.permission, n.read_scope, n.write_scope,
-                  n.markdown_snapshot, n.created_at, n.updated_at, n.article_meta`;
+                  n.markdown_snapshot, n.snapshot_updated_at, n.created_at, n.updated_at, n.article_meta`;
 
 function parseStoredScope(value: string | null): AccessScope | null {
   return value && isAccessScope(value) ? value : null;
@@ -494,10 +501,6 @@ async function listGuestRows(env: Env): Promise<NoteRow[]> {
   return visible.filter((row): row is NoteRow => row !== null);
 }
 
-export type NoteSearchHit = NoteSummary & {
-  snippet?: string;
-};
-
 function excerptSnapshot(text: string, start: number, length: number): string {
   const radius = 80;
   const from = Math.max(0, start - radius);
@@ -506,6 +509,111 @@ function excerptSnapshot(text: string, start: number, length: number): string {
   const suffix = to < text.length ? "…" : "";
   return `${prefix}${text.slice(from, to)}${suffix}`;
 }
+
+const SEARCH_DEFAULT_LIMIT = 50;
+const SEARCH_MAX_LIMIT = 200;
+const WORKSPACE_SEARCH_NOTE_LIMIT = 50;
+
+function clampSearchLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return SEARCH_DEFAULT_LIMIT;
+  }
+  return Math.max(1, Math.min(Math.trunc(limit), SEARCH_MAX_LIMIT));
+}
+
+function parseSearchCursor(cursor: string | undefined): number {
+  const offset = Number(cursor);
+  return Number.isInteger(offset) && offset >= 0 ? offset : 0;
+}
+
+type SearchRowsResult = { kind: "ok"; rows: NoteRow[] } | { kind: "not_found" };
+
+/**
+ * Permission-filtered candidate rows for search/grep, optionally restricted to
+ * a folder subtree. The folder check hides folders the user cannot view.
+ */
+async function rowsForSearch(
+  env: Env,
+  user: SessionUser | undefined,
+  folderId: string | undefined,
+): Promise<SearchRowsResult> {
+  const rows = user
+    ? await listAccessibleRows(env, user)
+    : await listGuestRows(env);
+  if (!folderId) {
+    return { kind: "ok", rows };
+  }
+  const rec = await getFolderById(env, folderId);
+  if (!rec) {
+    return { kind: "not_found" };
+  }
+  const flags = await folderViewFlags(env, rec.owner_id, rec.folder, user);
+  if (!flags.canView) {
+    return { kind: "not_found" };
+  }
+  const prefix = `${rec.folder}/`;
+  return {
+    kind: "ok",
+    rows: rows.filter(
+      (row) =>
+        row.owner_id === rec.owner_id &&
+        (rec.folder === "" ||
+          row.folder === rec.folder ||
+          row.folder.startsWith(prefix)),
+    ),
+  };
+}
+
+function filterSearchRows(
+  rows: readonly NoteRow[],
+  query: string,
+  scope: SearchScope,
+): NoteRow[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return [];
+  }
+  return rows.filter((row) => {
+    if (scope !== "body" && row.title.toLowerCase().includes(needle)) {
+      return true;
+    }
+    if (scope === "title") {
+      return false;
+    }
+    return (row.markdown_snapshot ?? "").toLowerCase().includes(needle);
+  });
+}
+
+async function searchHitForRow(
+  env: Env,
+  row: NoteRow,
+  user: SessionUser | undefined,
+  needle: string,
+): Promise<NoteSearchHit> {
+  const summary = await toSummary(env, row, user);
+  const markdown = row.markdown_snapshot ?? "";
+  const markdownIndex = markdown.toLowerCase().indexOf(needle);
+  return {
+    ...summary,
+    snippet:
+      markdownIndex >= 0
+        ? excerptSnapshot(markdown, markdownIndex, needle.length)
+        : undefined,
+  };
+}
+
+export type GrepNotesResult =
+  | ({ kind: "ok" } & GrepResult)
+  | { kind: "not_found" }
+  | { kind: "bad_request"; error: string };
+
+export type GrepNotesOptions = {
+  pattern: string;
+  caseSensitive?: boolean;
+  /** Defaults to a fixed-string scan; false enables a JS regex pattern. */
+  fixedString?: boolean;
+  folderId?: string;
+} & GrepScanOptions;
 
 export type GetNoteResult =
   | { kind: "ok"; note: Note }
@@ -528,6 +636,27 @@ export type RenameFolderResult =
   | { kind: "not_found" }
   | { kind: "denied"; status: 401 | 403 }
   | { kind: "invalid"; error: string; status: number };
+
+async function folderNoteVisibleTo(
+  env: Env,
+  rec: { owner_id: string; folder: string },
+  row: NoteRow,
+  isOwner: boolean,
+  user: SessionUser,
+): Promise<boolean> {
+  if (isOwner) {
+    return true;
+  }
+  const access = await resolveNoteAccess(env, accessFields(row), user);
+  if (!access.flags.canView) {
+    return false;
+  }
+  // 既知のフォルダから継承したノートは列挙できる。それ以外は発見可能性が必要。
+  const inheritsKnownFolder =
+    access.sourceFolder !== null &&
+    folderContains(access.sourceFolder, rec.folder);
+  return inheritsKnownFolder || canDiscoverAccess(access, rec.owner_id, user);
+}
 
 async function resolveCreateFolder(
   env: Env,
@@ -800,6 +929,24 @@ export function createNoteService(env: Env) {
 
       return { kind: "ok", note };
     },
+
+    async grep(
+      user: SessionUser | undefined,
+      options: GrepNotesOptions,
+    ): Promise<GrepNotesResult> {
+      const matcher = createLineMatcher(options.pattern, {
+        caseSensitive: options.caseSensitive,
+        fixedString: options.fixedString,
+      });
+      if (matcher.kind !== "ok") {
+        return matcher;
+      }
+      const scoped = await rowsForSearch(env, user, options.folderId);
+      if (scoped.kind !== "ok") {
+        return scoped;
+      }
+      return { kind: "ok", ...grepRows(scoped.rows, matcher.matcher, options) };
+    },
     async listFolderNotes(
       user: SessionUser,
       folderId: string,
@@ -843,25 +990,9 @@ export function createNoteService(env: Env) {
       const isOwner = user.id === rec.owner_id;
       const summaries: NoteSummary[] = [];
       for (const row of rows.results ?? []) {
-        if (!isOwner) {
-          const access = await resolveNoteAccess(env, accessFields(row), user);
-          if (!access.flags.canView) {
-            continue;
-          }
-          // 既知のフォルダから継承したノートは列挙できる。それ以外は発見可能性が必要。
-          const inheritsKnownFolder =
-            access.sourceFolder !== null &&
-            folderContains(access.sourceFolder, rec.folder);
-          if (
-            !(
-              inheritsKnownFolder ||
-              canDiscoverAccess(access, rec.owner_id, user)
-            )
-          ) {
-            continue;
-          }
+        if (await folderNoteVisibleTo(env, rec, row, isOwner, user)) {
+          summaries.push(await toSummary(env, row, user));
         }
-        summaries.push(await toSummary(env, row, user));
       }
       return { kind: "ok", notes: summaries };
     },
@@ -978,30 +1109,70 @@ export function createNoteService(env: Env) {
       user: SessionUser,
       query: string,
     ): Promise<NoteSearchHit[]> {
-      const needle = query.trim().toLowerCase();
-      if (!needle) {
-        return [];
-      }
-
       const rows = await listAccessibleRows(env, user);
-      const hits: NoteSearchHit[] = [];
-      for (const row of rows) {
-        const titleHit = row.title.toLowerCase().includes(needle);
-        const markdown = row.markdown_snapshot ?? "";
-        const markdownIndex = markdown.toLowerCase().indexOf(needle);
-        if (!titleHit && markdownIndex === -1) {
-          continue;
-        }
-        const summary = await toSummary(env, row, user);
-        hits.push({
-          ...summary,
-          snippet:
-            markdownIndex >= 0
-              ? excerptSnapshot(markdown, markdownIndex, needle.length)
-              : undefined,
-        });
+      const needle = query.trim().toLowerCase();
+      return Promise.all(
+        filterSearchRows(rows, query, "all").map((row) =>
+          searchHitForRow(env, row, user, needle),
+        ),
+      );
+    },
+
+    async searchNotes(
+      user: SessionUser | undefined,
+      options: {
+        query: string;
+        scope?: SearchScope;
+        folderId?: string;
+        limit?: number;
+        cursor?: string;
+      },
+    ): Promise<({ kind: "ok" } & NoteSearchPage) | { kind: "not_found" }> {
+      const scoped = await rowsForSearch(env, user, options.folderId);
+      if (scoped.kind !== "ok") {
+        return scoped;
       }
-      return hits;
+      const needle = options.query.trim().toLowerCase();
+      const matched = filterSearchRows(
+        scoped.rows,
+        options.query,
+        options.scope ?? "all",
+      );
+      const limit = clampSearchLimit(options.limit);
+      const offset = parseSearchCursor(options.cursor);
+      const pageRows = matched.slice(offset, offset + limit);
+      const notes = await Promise.all(
+        pageRows.map((row) => searchHitForRow(env, row, user, needle)),
+      );
+      const nextCursor =
+        offset + pageRows.length < matched.length
+          ? String(offset + pageRows.length)
+          : null;
+      return { kind: "ok", nextCursor, notes };
+    },
+
+    async searchWorkspace(
+      user: SessionUser | undefined,
+      query: string,
+      options: { contextAfter?: number; contextBefore?: number } = {},
+    ): Promise<WorkspaceSearchResult> {
+      const trimmed = query.trim();
+      const scoped = await rowsForSearch(env, user, undefined);
+      const rows = scoped.kind === "ok" ? scoped.rows : [];
+      const needle = trimmed.toLowerCase();
+      const matched = filterSearchRows(rows, trimmed, "all").slice(
+        0,
+        WORKSPACE_SEARCH_NOTE_LIMIT,
+      );
+      const notes = await Promise.all(
+        matched.map((row) => searchHitForRow(env, row, user, needle)),
+      );
+      const matcher = createLineMatcher(trimmed, {});
+      const grep =
+        matcher.kind === "ok"
+          ? grepRows(rows, matcher.matcher, options)
+          : { matches: [], scannedNotes: 0, truncated: false };
+      return { grep, notes, query: trimmed };
     },
 
     async updateMarkdown(

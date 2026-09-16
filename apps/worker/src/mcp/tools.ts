@@ -43,6 +43,42 @@ function textError(message: string) {
   };
 }
 
+async function listNotesForTool(
+  notes: ReturnType<typeof createNoteService>,
+  user: SessionUser,
+  options: {
+    folderId?: string;
+    query?: string;
+    recursive: boolean;
+  },
+): Promise<
+  { notes: Awaited<ReturnType<typeof notes.listForUser>> } | { error: string }
+> {
+  let list: Awaited<ReturnType<typeof notes.listForUser>>;
+  if (options.folderId) {
+    const result = await notes.listFolderNotes(
+      user,
+      options.folderId,
+      options.recursive,
+    );
+    if (result.kind === "not_found") {
+      return { error: "Not found" };
+    }
+    if (result.kind === "denied") {
+      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+    }
+    list = result.notes;
+  } else {
+    list = await notes.listForUser(user);
+  }
+  const trimmedQuery = options.query?.trim();
+  if (trimmedQuery) {
+    const needle = trimmedQuery.toLowerCase();
+    list = list.filter((note) => note.title.toLowerCase().includes(needle));
+  }
+  return { notes: list };
+}
+
 function requireUser(): SessionUser | null {
   const raw = getMcpAuthContext()?.props.user;
   if (!raw || typeof raw !== "object") {
@@ -362,33 +398,15 @@ export function createMcpServerFactory() {
       if (!user) {
         return textError("Unauthorized");
       }
-
-      let list: Awaited<ReturnType<typeof notes.listForUser>>;
-      if (folder_id) {
-        const result = await notes.listFolderNotes(
-          user,
-          folder_id,
-          recursive ?? false,
-        );
-        if (result.kind === "not_found") {
-          return textError("Not found");
-        }
-        if (result.kind === "denied") {
-          return textError(
-            result.status === 401 ? "Unauthorized" : "Forbidden",
-          );
-        }
-        list = result.notes;
-      } else {
-        list = await notes.listForUser(user);
+      const result = await listNotesForTool(notes, user, {
+        folderId: folder_id,
+        query,
+        recursive: recursive ?? false,
+      });
+      if ("error" in result) {
+        return textError(result.error);
       }
-      const trimmedQuery = query?.trim();
-      if (trimmedQuery) {
-        const needle = trimmedQuery.toLowerCase();
-        list = list.filter((note) => note.title.toLowerCase().includes(needle));
-      }
-
-      return textResult({ notes: list });
+      return textResult({ notes: result.notes });
     },
   );
 
@@ -737,12 +755,31 @@ export function createMcpServerFactory() {
     "search_notes",
     {
       description:
-        "Search accessible notes by title or markdown snapshot substring.",
+        "Search accessible notes by title or markdown snapshot substring. Use scope=title for fast title-only lookup; use grep_notes for line-level body hits.",
       inputSchema: {
+        cursor: z
+          .string()
+          .optional()
+          .describe("Pagination cursor from a previous next_cursor"),
+        folder_id: z
+          .string()
+          .optional()
+          .describe("Restrict to notes inside this folder UUID (recursive)"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Max notes to return (default 50, max 200)"),
         query: z.string().describe("Search query"),
+        scope: z
+          .enum(["title", "body", "all"])
+          .optional()
+          .describe("Where to match (default: all)"),
       },
     },
-    async ({ query }) => {
+    async ({ query, scope, folder_id, limit, cursor }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -753,8 +790,129 @@ export function createMcpServerFactory() {
         return textError("query is required");
       }
 
-      const notesFound = await notes.searchForUser(user, trimmedQuery);
-      return textResult({ notes: notesFound, query: trimmedQuery });
+      const result = await notes.searchNotes(user, {
+        cursor,
+        folderId: folder_id,
+        limit,
+        query: trimmedQuery,
+        scope,
+      });
+      if (result.kind === "not_found") {
+        return textError("Not found");
+      }
+      return textResult({
+        next_cursor: result.nextCursor,
+        notes: result.notes,
+        query: trimmedQuery,
+      });
+    },
+  );
+
+  server.registerTool(
+    "grep_notes",
+    {
+      description: `Line-level search over the markdown body of accessible notes — like grep. Returns 1-based line/column plus context lines so results can feed replace_in_note. Reads the D1 markdown snapshot which lags live edits by a few seconds; check snapshot_updated_at per match. pattern is a fixed string by default; set fixed_string=false for a JS regular expression. ${MCP_NOTE_URL_HINT}`,
+      inputSchema: {
+        case_sensitive: z
+          .boolean()
+          .optional()
+          .describe("Match case (default: false)"),
+        context_after: z
+          .number()
+          .int()
+          .min(0)
+          .max(5)
+          .optional()
+          .describe("Lines of context after each hit (default 1, max 5)"),
+        context_before: z
+          .number()
+          .int()
+          .min(0)
+          .max(5)
+          .optional()
+          .describe("Lines of context before each hit (default 1, max 5)"),
+        fixed_string: z
+          .boolean()
+          .optional()
+          .describe(
+            "Treat pattern as a literal string (default: true). Set false for a JS regex.",
+          ),
+        folder_id: z
+          .string()
+          .optional()
+          .describe("Restrict to notes inside this folder UUID (recursive)"),
+        glob_title: z
+          .string()
+          .optional()
+          .describe("Only scan notes whose title matches this glob (* ?)"),
+        max_matches_per_note: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .optional()
+          .describe("Cap hits per note (default 10, max 50)"),
+        max_notes: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Cap notes with hits (default 50, max 200)"),
+        pattern: z
+          .string()
+          .min(1)
+          .max(500)
+          .describe("Text or regex to find in note bodies"),
+      },
+    },
+    async ({
+      pattern,
+      case_sensitive,
+      context_after,
+      context_before,
+      fixed_string,
+      folder_id,
+      glob_title,
+      max_matches_per_note,
+      max_notes,
+    }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+
+      const result = await notes.grep(user, {
+        caseSensitive: case_sensitive,
+        contextAfter: context_after,
+        contextBefore: context_before,
+        fixedString: fixed_string,
+        folderId: folder_id,
+        globTitle: glob_title,
+        maxMatchesPerNote: max_matches_per_note,
+        maxNotes: max_notes,
+        pattern,
+      });
+      if (result.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (result.kind === "bad_request") {
+        return textError(result.error);
+      }
+      return textResult({
+        matches: result.matches.map((match) => ({
+          after: match.after,
+          before: match.before,
+          column: match.column,
+          line: match.line,
+          note_id: match.noteId,
+          snapshot_updated_at: match.snapshotUpdatedAt,
+          text: match.text,
+          title: match.title,
+        })),
+        scanned_notes: result.scannedNotes,
+        truncated: result.truncated,
+      });
     },
   );
 

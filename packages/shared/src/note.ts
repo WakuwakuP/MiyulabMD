@@ -140,6 +140,51 @@ export type Note = {
 
 export type NoteSummary = Omit<Note, "markdown">;
 
+export const SEARCH_SCOPES = ["title", "body", "all"] as const;
+export type SearchScope = (typeof SEARCH_SCOPES)[number];
+
+export function isSearchScope(value: string): value is SearchScope {
+  return (SEARCH_SCOPES as readonly string[]).includes(value);
+}
+
+export type NoteSearchHit = NoteSummary & {
+  snippet?: string;
+};
+
+export type NoteSearchPage = {
+  notes: NoteSearchHit[];
+  nextCursor: string | null;
+};
+
+export type GrepMatch = {
+  noteId: NoteId;
+  title: string;
+  /** 1-based line number inside markdown_snapshot. */
+  line: number;
+  /** 1-based column where the match starts. */
+  column: number;
+  /** Full text of the matching line. */
+  text: string;
+  before: string[];
+  after: string[];
+  /** Snapshot freshness — the live document may be newer. */
+  snapshotUpdatedAt: number | null;
+};
+
+export type GrepResult = {
+  matches: GrepMatch[];
+  /** True when a scan/match/time limit cut the result short. */
+  truncated: boolean;
+  scannedNotes: number;
+};
+
+/** Combined title hits + line-level body hits for the search palette. */
+export type WorkspaceSearchResult = {
+  query: string;
+  notes: NoteSearchHit[];
+  grep: GrepResult;
+};
+
 export type NoteCollaborator = {
   noteId: NoteId;
   userId: string;

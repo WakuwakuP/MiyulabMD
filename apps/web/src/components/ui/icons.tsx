@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Share2,
   Sun,
   X,
@@ -82,6 +83,10 @@ export function HistoryIcon({ className }: IconProps) {
 
 export function RefreshIcon({ className }: IconProps) {
   return <RefreshCw aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function SearchIcon({ className }: IconProps) {
+  return <Search aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function ArticleIcon({ className }: IconProps) {
