@@ -2261,12 +2261,17 @@ function applyFolderOperation(
 ): void {
   const { userId, action, orderingToken, save } = operation;
   const store = transaction.objectStore(METADATA_STORE);
-  const current = ids.map((id) => ({
-    generation:
-      parseFolderDenialMarker(records.get(deniedFolderKey(userId, id)), id)
-        ?.generation ?? 1,
-    id,
-  }));
+  const current = ids.map((id) => {
+    const marker = parseFolderDenialMarker(
+      records.get(deniedFolderKey(userId, id)),
+      id,
+    );
+    return {
+      denied: marker?.denied === true,
+      generation: marker?.generation ?? 1,
+      id,
+    };
+  });
   const currentGeneration = Math.max(
     ...current.map((marker) => marker.generation),
   );
@@ -2284,6 +2289,14 @@ function applyFolderOperation(
     return;
   }
   if (action === "check") {
+    if (
+      orderingToken === undefined ||
+      current.some(
+        (marker) => marker.denied && marker.generation > orderingToken,
+      )
+    ) {
+      throw invalidatedError();
+    }
     return;
   }
   if (
@@ -2790,7 +2803,7 @@ async function readVisibleNoteList(
   const notes: NoteSummary[] = [];
   for (const note of record.notes) {
     const denied =
-      deniedFolderIds.has(note.folderId) ||
+      (deniedFolderIds.has(note.folderId) && note.access?.inherit !== false) ||
       (await readDeniedNote(database, userId, note.id));
     if (denied) {
       continue;
