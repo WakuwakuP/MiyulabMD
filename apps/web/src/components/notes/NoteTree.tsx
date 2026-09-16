@@ -79,6 +79,12 @@ export function NoteTree({
   const folders = [...childrenFolders].sort((a, b) =>
     a.name.localeCompare(b.name, "ja"),
   );
+  const noteCounts = new Map<string, number>();
+  for (const note of notes) {
+    if (note.folderId) {
+      noteCounts.set(note.folderId, (noteCounts.get(note.folderId) ?? 0) + 1);
+    }
+  }
 
   function handleRowMenu(event: MouseEvent, target: MenuTarget) {
     event.preventDefault();
@@ -169,6 +175,7 @@ export function NoteTree({
           )}
         >
           {folders.map((folder) => {
+            const noteCount = noteCounts.get(folder.id) ?? 0;
             const target = {
               id: folder.id,
               kind: "folder" as const,
@@ -181,11 +188,20 @@ export function NoteTree({
                 key={folder.id}
                 menuOpen={openMenuId === folder.id}
                 meta={
-                  folder.readScope && folder.writeScope ? (
-                    <AccessScopeMeta
-                      readScope={folder.readScope}
-                      writeScope={folder.writeScope}
-                    />
+                  noteCount > 0 || (folder.readScope && folder.writeScope) ? (
+                    <>
+                      {noteCount > 0 && (
+                        <span className="mr-2 text-xs text-muted">
+                          {noteCount}
+                        </span>
+                      )}
+                      {folder.readScope && folder.writeScope ? (
+                        <AccessScopeMeta
+                          readScope={folder.readScope}
+                          writeScope={folder.writeScope}
+                        />
+                      ) : null}
+                    </>
                   ) : undefined
                 }
                 name={folder.name}

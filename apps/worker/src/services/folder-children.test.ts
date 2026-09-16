@@ -1,0 +1,356 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
+import { upsertUserByEmail } from "../db/users.ts";
+import {
+  ensureFolderRow,
+  getFolderByPath,
+  listFolderChildren,
+  replaceGrants,
+  upsertFolderPolicy,
+} from "./access.ts";
+import { createNoteService } from "./notes.ts";
+
+const MIGRATIONS = [
+  "0001_init.sql",
+  "0002_folders.sql",
+  "0003_access_scopes.sql",
+  "0004_folders_registry.sql",
+  "0005_folder_ids.sql",
+  "0006_article_sources.sql",
+  "0007_user_root_folders.sql",
+  "0008_split_link_and_public_scopes.sql",
+  "0009_note_history.sql",
+];
+
+function applyMigrations(db: DatabaseSync): void {
+  for (const migration of MIGRATIONS) {
+    const sql = readFileSync(
+      new URL(`../db/migrations/${migration}`, import.meta.url),
+      "utf8",
+    );
+    db.exec(sql);
+  }
+}
+
+type BoundStatement = {
+  bind: (...values: unknown[]) => BoundStatement;
+  all: <T = Record<string, unknown>>() => Promise<{ results: T[] }>;
+  first: <T = Record<string, unknown>>() => Promise<T | null>;
+  run: () => Promise<{ success: true }>;
+};
+
+class StatementAdapter implements BoundStatement {
+  private readonly db: DatabaseSync;
+  private readonly query: string;
+  private readonly binds: unknown[];
+
+  constructor(db: DatabaseSync, query: string, binds: unknown[] = []) {
+    this.db = db;
+    this.query = query;
+    this.binds = binds;
+  }
+
+  bind(...values: unknown[]): BoundStatement {
+    return new StatementAdapter(this.db, this.query, values);
+  }
+
+  all<T = Record<string, unknown>>(): Promise<{ results: T[] }> {
+    const rows = this.db.prepare(this.query).all(...this.binds);
+    return Promise.resolve({ results: rows as T[] });
+  }
+
+  first<T = Record<string, unknown>>(): Promise<T | null> {
+    const row = this.db.prepare(this.query).get(...this.binds);
+    return Promise.resolve((row as T | null) ?? null);
+  }
+
+  run(): Promise<{ success: true }> {
+    this.db.prepare(this.query).run(...this.binds);
+    return Promise.resolve({ success: true });
+  }
+}
+
+class D1DatabaseAdapter {
+  private readonly db: DatabaseSync;
+
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
+
+  prepare(query: string): BoundStatement {
+    return new StatementAdapter(this.db, query);
+  }
+}
+
+async function createEnv() {
+  const sqlite = new DatabaseSync(":memory:");
+  applyMigrations(sqlite);
+
+  const env = {
+    ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com",
+    ALLOW_ANONYMOUS: "false",
+    ALLOW_ANONYMOUS_EDITS: "true",
+    ALLOW_ANONYMOUS_VIEWS: "true",
+    DB: new D1DatabaseAdapter(sqlite),
+    DEFAULT_PERMISSION: "editable",
+    DEV_AUTH: "false",
+  } as unknown as Env;
+
+  const owner = await upsertUserByEmail(env, "owner@example.com", "Owner");
+  const viewer = await upsertUserByEmail(env, "viewer@example.com", "Viewer");
+
+  return { env, owner, sqlite, viewer };
+}
+
+test("owner sees direct children folders and notes in one response", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, {
+    folder: "work",
+    markdown: "# Alpha",
+    title: "Alpha",
+  });
+  await notes.create(owner, {
+    folder: "work",
+    markdown: "# Beta",
+    title: "Beta",
+  });
+  await notes.create(owner, {
+    folder: "work/sub",
+    markdown: "# Nested",
+    title: "Nested",
+  });
+  await notes.create(owner, {
+    folder: "other",
+    markdown: "# Other",
+    title: "Other",
+  });
+
+  const work = await getFolderByPath(env, owner.id, "work");
+  assert.ok(work);
+  const result = await listFolderChildren(
+    env,
+    owner.id,
+    "work",
+    work.id,
+    owner,
+  );
+
+  assert.deepEqual(
+    result.entries.map((entry) => [
+      entry.type,
+      entry.type === "folder" ? entry.name : entry.title,
+    ]),
+    [
+      ["folder", "sub"],
+      ["note", "Alpha"],
+      ["note", "Beta"],
+    ],
+  );
+  const sub = result.entries[0];
+  assert.equal(sub.type, "folder");
+  if (sub.type === "folder") {
+    assert.equal(sub.noteCount, 1);
+    assert.equal(sub.parentId, work.id);
+  }
+  assert.equal(result.nextCursor, null);
+  assert.equal(result.folder.name, "work");
+  assert.deepEqual(result.folder.path, ["work"]);
+});
+
+test("entries paginate with a stable offset cursor", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  for (const name of ["n1", "n2", "n3"]) {
+    await notes.create(owner, {
+      folder: "paged",
+      markdown: `# ${name}`,
+      title: name,
+    });
+  }
+  await ensureFolderRow(env, owner.id, "paged/sub");
+
+  const paged = await getFolderByPath(env, owner.id, "paged");
+  assert.ok(paged);
+  const first = await listFolderChildren(
+    env,
+    owner.id,
+    "paged",
+    paged.id,
+    owner,
+    {
+      limit: 2,
+    },
+  );
+  assert.equal(first.entries.length, 2);
+  assert.ok(first.nextCursor);
+  const second = await listFolderChildren(
+    env,
+    owner.id,
+    "paged",
+    paged.id,
+    owner,
+    {
+      cursor: first.nextCursor ?? undefined,
+      limit: 2,
+    },
+  );
+  assert.equal(second.nextCursor, null);
+  const ids = [...first.entries, ...second.entries].map((entry) => entry.id);
+  assert.equal(new Set(ids).size, 4);
+  // フォルダが先、ノートが後の順序がページをまたいで維持される
+  assert.equal(first.entries[0]?.type, "folder");
+  if (first.entries[0]?.type === "folder") {
+    assert.equal(first.entries[0].name, "sub");
+  }
+});
+
+test("non-owner sees only discoverable notes inside a granted folder", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await upsertFolderPolicy(env, owner.id, "team", "signed_in", "signed_in");
+  await replaceGrants(env, owner.id, "folder", "team", [
+    { email: viewer.email },
+  ]);
+
+  const inherited = await notes.create(owner, {
+    folder: "team",
+    inheritAccess: true,
+    markdown: "# Inherited",
+    title: "Inherited",
+  });
+  assert.ok(!("error" in inherited));
+  const privateNote = await notes.create(owner, {
+    folder: "team",
+    markdown: "# Hidden",
+    permission: "private",
+    title: "Hidden",
+  });
+  assert.ok(!("error" in privateNote));
+
+  const team = await getFolderByPath(env, owner.id, "team");
+  assert.ok(team);
+  const result = await listFolderChildren(
+    env,
+    owner.id,
+    "team",
+    team.id,
+    viewer,
+  );
+
+  assert.deepEqual(
+    result.entries.map((entry) =>
+      entry.type === "folder" ? entry.name : entry.title,
+    ),
+    ["Inherited"],
+  );
+  // 非オーナーには noteCount を出さない
+  assert.equal(
+    result.entries.every(
+      (entry) => entry.type !== "folder" || entry.noteCount === undefined,
+    ),
+    true,
+  );
+});
+
+test("link-only child folders are not enumerated for non-owners", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+
+  await upsertFolderPolicy(env, owner.id, "known", "link", "self");
+  await ensureFolderRow(env, owner.id, "known/inherited");
+  await upsertFolderPolicy(env, owner.id, "known/other-link", "link", "self");
+  await ensureFolderRow(env, owner.id, "known/other-link");
+
+  const known = await getFolderByPath(env, owner.id, "known");
+  assert.ok(known);
+  const result = await listFolderChildren(
+    env,
+    owner.id,
+    "known",
+    known.id,
+    viewer,
+  );
+
+  assert.deepEqual(
+    result.entries.map((entry) =>
+      entry.type === "folder" ? entry.name : entry.title,
+    ),
+    ["inherited"],
+  );
+});
+
+test("listFolderNotes returns direct or recursive folder notes", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, { folder: "docs", markdown: "# A", title: "A" });
+  await notes.create(owner, {
+    folder: "docs/deep",
+    markdown: "# B",
+    title: "B",
+  });
+
+  const docs = await getFolderByPath(env, owner.id, "docs");
+  assert.ok(docs);
+  const direct = await notes.listFolderNotes(owner, docs.id);
+  assert.equal(direct.kind, "ok");
+  if (direct.kind === "ok") {
+    assert.deepEqual(
+      direct.notes.map((note) => note.title),
+      ["A"],
+    );
+  }
+
+  const recursive = await notes.listFolderNotes(owner, docs.id, true);
+  assert.equal(recursive.kind, "ok");
+  if (recursive.kind === "ok") {
+    assert.deepEqual(recursive.notes.map((note) => note.title).sort(), [
+      "A",
+      "B",
+    ]);
+  }
+});
+
+test("listFolderNotes hides granted folder notes that lack discovery", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await upsertFolderPolicy(env, owner.id, "team", "signed_in", "signed_in");
+  await replaceGrants(env, owner.id, "folder", "team", [
+    { email: viewer.email },
+  ]);
+  await notes.create(owner, {
+    folder: "team",
+    inheritAccess: true,
+    markdown: "# Inherited",
+    title: "Inherited",
+  });
+  await notes.create(owner, {
+    folder: "team",
+    markdown: "# Hidden",
+    permission: "private",
+    title: "Hidden",
+  });
+
+  const team = await getFolderByPath(env, owner.id, "team");
+  assert.ok(team);
+  const result = await notes.listFolderNotes(viewer, team.id);
+  assert.equal(result.kind, "ok");
+  if (result.kind === "ok") {
+    assert.deepEqual(
+      result.notes.map((note) => note.title),
+      ["Inherited"],
+    );
+  }
+});

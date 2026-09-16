@@ -97,6 +97,31 @@ export type FolderCrumb = {
   name: string;
 };
 
+export type FolderEntryFolder = {
+  type: "folder";
+  id: string;
+  name: string;
+  parentId: string | null;
+  updatedAt: number;
+  /** Owner views only: recursive count of notes inside this folder. */
+  noteCount?: number;
+};
+
+export type FolderEntryNote = {
+  type: "note";
+  id: string;
+  title: string;
+  updatedAt: number;
+};
+
+export type FolderEntry = FolderEntryFolder | FolderEntryNote;
+
+export type FolderChildrenResult = {
+  folder: { id: string | null; name: string; path: string[] };
+  entries: FolderEntry[];
+  nextCursor: string | null;
+};
+
 export type Note = {
   id: NoteId;
   shortId: string;

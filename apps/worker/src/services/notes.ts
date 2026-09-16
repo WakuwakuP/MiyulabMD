@@ -32,6 +32,7 @@ import {
   derivedPermission,
   ensureFolderRow,
   folderDiscoveryAllowed,
+  folderViewFlags,
   getFolderById,
   getFolderByPath,
   listPublicFolderCandidates,
@@ -798,6 +799,71 @@ export function createNoteService(env: Env) {
       }
 
       return { kind: "ok", note };
+    },
+    async listFolderNotes(
+      user: SessionUser,
+      folderId: string,
+      recursive = false,
+    ): Promise<
+      | { kind: "ok"; notes: NoteSummary[] }
+      | { kind: "not_found" }
+      | { kind: "denied"; status: 401 | 403 }
+    > {
+      const rec = await getFolderById(env, folderId);
+      if (!rec) {
+        return { kind: "not_found" };
+      }
+      const flags = await folderViewFlags(env, rec.owner_id, rec.folder, user);
+      if (!flags.canView) {
+        return { kind: "not_found" };
+      }
+
+      const rows = recursive
+        ? await db(env)
+            .prepare(
+              `SELECT ${NOTE_COLUMNS} FROM notes
+                 WHERE owner_id = ? AND (folder = ? OR folder LIKE ? ESCAPE '\\')
+                 ORDER BY updated_at DESC`,
+            )
+            .bind(
+              rec.owner_id,
+              rec.folder,
+              `${escapeLikePattern(rec.folder)}/%`,
+            )
+            .all<NoteRow>()
+        : await db(env)
+            .prepare(
+              `SELECT ${NOTE_COLUMNS} FROM notes
+                 WHERE owner_id = ? AND folder = ?
+                 ORDER BY updated_at DESC`,
+            )
+            .bind(rec.owner_id, rec.folder)
+            .all<NoteRow>();
+
+      const isOwner = user.id === rec.owner_id;
+      const summaries: NoteSummary[] = [];
+      for (const row of rows.results ?? []) {
+        if (!isOwner) {
+          const access = await resolveNoteAccess(env, accessFields(row), user);
+          if (!access.flags.canView) {
+            continue;
+          }
+          // 既知のフォルダから継承したノートは列挙できる。それ以外は発見可能性が必要。
+          const inheritsKnownFolder =
+            access.sourceFolder !== null &&
+            folderContains(access.sourceFolder, rec.folder);
+          if (
+            !(
+              inheritsKnownFolder ||
+              canDiscoverAccess(access, rec.owner_id, user)
+            )
+          ) {
+            continue;
+          }
+        }
+        summaries.push(await toSummary(env, row, user));
+      }
+      return { kind: "ok", notes: summaries };
     },
 
     async listForGuest(): Promise<NoteSummary[]> {

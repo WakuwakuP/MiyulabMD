@@ -11,6 +11,7 @@ export const MCP_TOOLS = [
   "search_notes",
   "agent_join",
   "agent_leave",
+  "list_folder_entries",
   "list_note_history",
   "get_revision",
   "restore_revision",

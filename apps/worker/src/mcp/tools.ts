@@ -17,6 +17,12 @@ import {
   markdownOutline,
   numberMarkdownLines,
 } from "../durable-objects/markdown-edit.ts";
+import {
+  ensureFolderRow,
+  folderViewFlags,
+  getFolderById,
+  listFolderChildren,
+} from "../services/access.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import {
   createNoteService,
@@ -333,21 +339,49 @@ export function createMcpServerFactory() {
   server.registerTool(
     "list_notes",
     {
-      description: `List notes owned by or shared with the authenticated user. ${MCP_NOTE_URL_HINT}`,
+      description: `List notes owned by or shared with the authenticated user. Do not enumerate everything — browse folders with list_folder_entries first. ${MCP_NOTE_URL_HINT}`,
       inputSchema: {
+        folder_id: z
+          .string()
+          .optional()
+          .describe("Restrict to notes inside this folder UUID"),
         query: z
           .string()
           .optional()
           .describe("Optional title filter (case-insensitive substring)"),
+        recursive: z
+          .boolean()
+          .optional()
+          .describe(
+            "With folder_id, include notes in descendant folders (default: direct children only)",
+          ),
       },
     },
-    async ({ query }) => {
+    async ({ folder_id, query, recursive }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
       }
 
-      let list = await notes.listForUser(user);
+      let list: Awaited<ReturnType<typeof notes.listForUser>>;
+      if (folder_id) {
+        const result = await notes.listFolderNotes(
+          user,
+          folder_id,
+          recursive ?? false,
+        );
+        if (result.kind === "not_found") {
+          return textError("Not found");
+        }
+        if (result.kind === "denied") {
+          return textError(
+            result.status === 401 ? "Unauthorized" : "Forbidden",
+          );
+        }
+        list = result.notes;
+      } else {
+        list = await notes.listForUser(user);
+      }
       const trimmedQuery = query?.trim();
       if (trimmedQuery) {
         const needle = trimmedQuery.toLowerCase();
@@ -355,6 +389,62 @@ export function createMcpServerFactory() {
       }
 
       return textResult({ notes: list });
+    },
+  );
+
+  server.registerTool(
+    "list_folder_entries",
+    {
+      description: `List direct children (subfolders and notes) of a folder — one level only. Browse folders with this instead of enumerating all notes. ${MCP_NOTE_URL_HINT}`,
+      inputSchema: {
+        cursor: z
+          .string()
+          .optional()
+          .describe("Pagination cursor from a previous nextCursor"),
+        folder_id: z
+          .string()
+          .optional()
+          .describe("Folder UUID; omit for the drive root"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Max entries to return (default 50, max 200)"),
+      },
+    },
+    async ({ cursor, folder_id, limit }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+
+      let ownerId = user.id;
+      let folderPath = "";
+      let currentId: string | null;
+      if (folder_id) {
+        const rec = await getFolderById(env, folder_id);
+        if (!rec) {
+          return textError("Not found");
+        }
+        ownerId = rec.owner_id;
+        folderPath = rec.folder;
+        currentId = rec.id;
+      } else {
+        currentId = await ensureFolderRow(env, user.id, "");
+      }
+
+      const flags = await folderViewFlags(env, ownerId, folderPath, user);
+      if (!flags.canView) {
+        return textError("Not found");
+      }
+      return textResult(
+        await listFolderChildren(env, ownerId, folderPath, currentId, user, {
+          cursor,
+          limit,
+        }),
+      );
     },
   );
 

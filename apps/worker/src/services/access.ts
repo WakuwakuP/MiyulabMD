@@ -9,7 +9,9 @@ import {
   type EffectiveAccess,
   evaluateAccess,
   type FolderAccess,
+  type FolderChildrenResult,
   type FolderCrumb,
+  type FolderEntry,
   type FolderRecord,
   folderAncestors,
   folderContains,
@@ -447,6 +449,56 @@ async function visibleCrumbs(
   return crumbs;
 }
 
+async function projectVisibleChildFolder(
+  env: Env,
+  ownerId: string,
+  row: FolderRow,
+  parentFolder: string,
+  currentId: string | null,
+  user: SessionUser | null | undefined,
+  isOwner: boolean,
+): Promise<FolderRecord | null> {
+  if (!row.folder || parentFolderPath(row.folder) !== parentFolder) {
+    return null;
+  }
+  const effective = await loadFolderEffective(env, ownerId, row.folder);
+  const actor = actorFromUser(user, ownerId);
+  const grant = grantForActor(effective.grants, actor);
+  const flags = applyInstanceFlags(
+    evaluateAccess(
+      effective.effectiveReadScope,
+      effective.effectiveWriteScope,
+      actor,
+      grant,
+    ),
+    actor,
+    env,
+  );
+  if (!flags.canView) {
+    return null;
+  }
+  // 既知のフォルダから継承した子は辿れるが、別のリンク限定設定は列挙しない。
+  const inheritsKnownFolder =
+    effective.sourceFolder !== null &&
+    folderContains(effective.sourceFolder, parentFolder);
+  if (
+    !(
+      inheritsKnownFolder ||
+      canDiscoverAccess({ ...effective, flags }, ownerId, user)
+    )
+  ) {
+    return null;
+  }
+  return {
+    id: row.id,
+    name: folderName(row.folder),
+    parentId: currentId,
+    readScope: effective.effectiveReadScope,
+    writeScope: effective.effectiveWriteScope,
+    ...(isOwner ? { folder: row.folder } : {}),
+  };
+}
+
 async function listVisibleChildren(
   env: Env,
   ownerId: string,
@@ -464,45 +516,18 @@ async function listVisibleChildren(
 
   const children: FolderRecord[] = [];
   for (const row of rows.results ?? []) {
-    if (!row.folder || parentFolderPath(row.folder) !== folder) {
-      continue;
-    }
-    const effective = await loadFolderEffective(env, ownerId, row.folder);
-    const actor = actorFromUser(user, ownerId);
-    const grant = grantForActor(effective.grants, actor);
-    const flags = applyInstanceFlags(
-      evaluateAccess(
-        effective.effectiveReadScope,
-        effective.effectiveWriteScope,
-        actor,
-        grant,
-      ),
-      actor,
+    const child = await projectVisibleChildFolder(
       env,
+      ownerId,
+      row,
+      folder,
+      currentId,
+      user,
+      isOwner,
     );
-    if (!flags.canView) {
-      continue;
+    if (child) {
+      children.push(child);
     }
-    // 既知のフォルダから継承した子は辿れるが、別のリンク限定設定は列挙しない。
-    const inheritsKnownFolder =
-      effective.sourceFolder !== null &&
-      folderContains(effective.sourceFolder, folder);
-    if (
-      !(
-        inheritsKnownFolder ||
-        canDiscoverAccess({ ...effective, flags }, ownerId, user)
-      )
-    ) {
-      continue;
-    }
-    children.push({
-      id: row.id,
-      name: folderName(row.folder),
-      parentId: currentId,
-      readScope: effective.effectiveReadScope,
-      writeScope: effective.effectiveWriteScope,
-      ...(isOwner ? { folder: row.folder } : {}),
-    });
   }
   return children.sort((a, b) => a.name.localeCompare(b.name, "ja"));
 }
@@ -565,6 +590,159 @@ export async function resolveFolderAccess(
     },
     isOwner,
   );
+}
+
+const FOLDER_ENTRIES_DEFAULT_LIMIT = 50;
+const FOLDER_ENTRIES_MAX_LIMIT = 200;
+
+type FolderEntryNoteRow = {
+  id: string;
+  owner_id: string;
+  title: string;
+  folder: string;
+  read_scope: string | null;
+  write_scope: string | null;
+  updated_at: number;
+};
+
+function decodeFolderEntriesCursor(cursor: string | undefined): number {
+  if (!cursor) {
+    return 0;
+  }
+  const offset = Number(cursor);
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+}
+
+/** 直下の子フォルダとノートを1レスポンスで返す。発見可能性は resolveFolderAccess と同じ規則。 */
+export async function listFolderChildren(
+  env: Env,
+  ownerId: string,
+  folder: string,
+  currentId: string | null,
+  user?: SessionUser | null,
+  options: { cursor?: string; limit?: number } = {},
+): Promise<FolderChildrenResult> {
+  const requested = options.limit ?? FOLDER_ENTRIES_DEFAULT_LIMIT;
+  const limit = Number.isFinite(requested)
+    ? Math.min(Math.max(Math.trunc(requested), 1), FOLDER_ENTRIES_MAX_LIMIT)
+    : FOLDER_ENTRIES_DEFAULT_LIMIT;
+  const offset = decodeFolderEntriesCursor(options.cursor);
+  const isOwner = user?.id === ownerId;
+
+  const [folderRows, noteRows, noteFolderRows] = await Promise.all([
+    db(env)
+      .prepare(
+        "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+      )
+      .bind(ownerId)
+      .all<FolderRow>(),
+    db(env)
+      .prepare(
+        `SELECT id, owner_id, title, folder, read_scope, write_scope, updated_at
+           FROM notes WHERE owner_id = ? AND folder = ?`,
+      )
+      .bind(ownerId, folder)
+      .all<FolderEntryNoteRow>(),
+    isOwner
+      ? db(env)
+          .prepare(
+            "SELECT folder FROM notes WHERE owner_id = ? AND folder != ''",
+          )
+          .bind(ownerId)
+          .all<{ folder: string }>()
+      : Promise.resolve(null),
+  ]);
+
+  const children: { row: FolderRow; record: FolderRecord }[] = [];
+  for (const row of folderRows.results ?? []) {
+    const record = await projectVisibleChildFolder(
+      env,
+      ownerId,
+      row,
+      folder,
+      currentId,
+      user,
+      isOwner,
+    );
+    if (record) {
+      children.push({ record, row });
+    }
+  }
+
+  const noteCounts = new Map<string, number>();
+  if (isOwner) {
+    for (const { folder: noteFolder } of noteFolderRows?.results ?? []) {
+      for (const child of children) {
+        if (folderContains(child.row.folder, noteFolder)) {
+          noteCounts.set(child.row.id, (noteCounts.get(child.row.id) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
+  const entries: FolderEntry[] = [];
+  for (const { record, row } of children) {
+    entries.push({
+      id: record.id,
+      name: record.name,
+      parentId: record.parentId,
+      type: "folder",
+      updatedAt: row.created_at,
+      ...(isOwner ? { noteCount: noteCounts.get(row.id) ?? 0 } : {}),
+    });
+  }
+  for (const row of noteRows.results ?? []) {
+    if (!isOwner) {
+      const access = await resolveNoteAccess(
+        env,
+        {
+          folder: row.folder ?? "",
+          id: row.id,
+          ownerId: row.owner_id,
+          readScope: parseScope(row.read_scope),
+          writeScope: parseScope(row.write_scope),
+        },
+        user,
+      );
+      if (!access.flags.canView) {
+        continue;
+      }
+      const inheritsKnownFolder =
+        access.sourceFolder !== null &&
+        folderContains(access.sourceFolder, folder);
+      if (!(inheritsKnownFolder || canDiscoverAccess(access, ownerId, user))) {
+        continue;
+      }
+    }
+    entries.push({
+      id: row.id,
+      title: row.title,
+      type: "note",
+      updatedAt: row.updated_at,
+    });
+  }
+
+  entries.sort((a, b) => {
+    if (a.type !== b.type) {
+      return a.type === "folder" ? -1 : 1;
+    }
+    const byName = (a.type === "folder" ? a.name : a.title).localeCompare(
+      b.type === "folder" ? b.name : b.title,
+      "ja",
+    );
+    return byName === 0 ? a.id.localeCompare(b.id) : byName;
+  });
+
+  const page = entries.slice(offset, offset + limit);
+  return {
+    entries: page,
+    folder: {
+      id: currentId,
+      name: folder ? folderName(folder) : MY_DRIVE_NAME,
+      path: folder.split("/").filter(Boolean),
+    },
+    nextCursor: offset + limit < entries.length ? String(offset + limit) : null,
+  };
 }
 
 export async function ensureFolderRow(

@@ -14,7 +14,9 @@ import {
   createOwnedFolder,
   deleteFolderPolicy,
   ensureFolderRow,
+  folderViewFlags,
   getFolderById,
+  listFolderChildren,
   listOwnedFolders,
   listPublicSharedFolders,
   listSharedFolders,
@@ -196,6 +198,24 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
   .get("/public", async () => {
     const folders = await listPublicSharedFolders(env);
     return { folders };
+  })
+  .get("/:id/children", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const rec = await getFolderById(env, params.id);
+    if (!rec) {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    const flags = await folderViewFlags(env, rec.owner_id, rec.folder, user);
+    if (!flags.canView) {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    const url = new URL(request.url);
+    return listFolderChildren(env, rec.owner_id, rec.folder, rec.id, user, {
+      cursor: url.searchParams.get("cursor") ?? undefined,
+      limit: Number(url.searchParams.get("limit") ?? "") || undefined,
+    });
   })
   .get("/:id", async ({ params, request, set }) => {
     const user = await readSession(request, env);
