@@ -243,7 +243,7 @@ test("waits for an actual OPFS write in a second page", async ({
           const state = await navigator.locks.query();
           return state.pending.some(
             (lock) =>
-              lock.name === "miyulabmd-offline-cache:YWxpY2U" &&
+              lock.name === "miyulabmd-offline-cache:user:YWxpY2U" &&
               lock.mode === "exclusive",
           );
         }),

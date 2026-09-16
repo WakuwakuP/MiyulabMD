@@ -210,7 +210,7 @@ test("purge waits for another tab's actual OPFS operation, then removes its subt
           return (
             state.pending?.some(
               (lock) =>
-                lock.name === "miyulabmd-offline-cache:YWxpY2U" &&
+                lock.name === "miyulabmd-offline-cache:user:YWxpY2U" &&
                 lock.mode === "exclusive",
             ) ?? false
           );
