@@ -26,6 +26,7 @@ import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
 import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx";
+import { TabIndentHint } from "../components/editor/TabIndentHint.tsx";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterAlert.tsx";
@@ -294,6 +295,7 @@ function EditorWorkspace({
     >
       {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
       {articleSource && <ArticleFrontmatterAlert issues={articleIssues} />}
+      {(showSource || showRich) && <TabIndentHint />}
       <div className={editorGridClass(viewMode, usesInternalScroll, cn)}>
         {showSource && (
           <EditorSourcePane

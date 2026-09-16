@@ -1,8 +1,11 @@
+import { indentWithTab, toggleTabFocusMode } from "@codemirror/commands";
+import { indentUnit } from "@codemirror/language";
 import { Compartment, EditorState } from "@codemirror/state";
 import {
   EditorView,
   highlightActiveLine,
   highlightActiveLineGutter,
+  keymap,
   lineNumbers,
   scrollPastEnd,
 } from "@codemirror/view";
@@ -12,6 +15,12 @@ import * as Y from "yjs";
 import { uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
+import {
+  indentTabSize,
+  indentUnitText,
+  readIndentUnit,
+  readTabKeyMode,
+} from "../../lib/editor-tab.ts";
 import { readEditorScrollPadPx } from "../../lib/visual-viewport.ts";
 import "../../styles/cm-highlight.css";
 import { ContextMenu } from "../notes/ContextMenu.tsx";
@@ -177,6 +186,20 @@ function editingExtensions(readOnly: boolean) {
   return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
 }
 
+// Tab = indent while focused. CodeMirror's built-in hatch applies: Escape
+// grants Tab back to the browser for ~2s, and Ctrl-M toggles focus mode.
+function tabKeyExtensions() {
+  if (readTabKeyMode() === "focus") {
+    return [];
+  }
+  const unit = readIndentUnit();
+  return [
+    EditorState.tabSize.of(indentTabSize(unit)),
+    indentUnit.of(indentUnitText(unit)),
+    keymap.of([indentWithTab, { key: "Ctrl-m", run: toggleTabFocusMode }]),
+  ];
+}
+
 export function MarkdownEditor({
   noteId,
   yText,
@@ -222,6 +245,7 @@ export function MarkdownEditor({
     const state = EditorState.create({
       doc: yText.toString(),
       extensions: [
+        ...tabKeyExtensions(),
         markdownEditorLanguage,
         ...markdownEditorHighlight,
         ...(showLineNumbers

@@ -23,6 +23,11 @@ import { fetchOgPreview, uploadImage } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
 import {
+  indentUnitText,
+  readIndentUnit,
+  readTabKeyMode,
+} from "../../lib/editor-tab.ts";
+import {
   canonicalizeEditorMarkdown,
   normalizeEmbedMarkdown,
   youtubeId,
@@ -120,6 +125,113 @@ function editorMarkdown(editor: Editor): string {
   return canonicalizeEditorMarkdown(editor.getMarkdown());
 }
 
+function dedentRichTextblock(editor: Editor, unit: string) {
+  const { state } = editor;
+  const { $from } = state.selection;
+  if (!$from.parent.isTextblock) {
+    return;
+  }
+  const text = $from.parent.textContent;
+  let width = 0;
+  if (text.startsWith("\t")) {
+    width = 1;
+  } else {
+    while (width < text.length && width < unit.length && text[width] === " ") {
+      width += 1;
+    }
+  }
+  if (width > 0) {
+    const start = $from.start();
+    editor.view.dispatch(state.tr.delete(start, start + width));
+  }
+}
+
+function applyRichTab(editor: Editor | null, unit: string, dedent: boolean) {
+  if (!editor || editor.isDestroyed) {
+    return;
+  }
+  if (editor.isActive("listItem")) {
+    const chain = editor.chain().focus();
+    if (dedent) {
+      chain.liftListItem("listItem").run();
+    } else {
+      chain.sinkListItem("listItem").run();
+    }
+    return;
+  }
+  if (dedent) {
+    dedentRichTextblock(editor, unit);
+    return;
+  }
+  editor.chain().focus().insertContent(unit).run();
+}
+
+type RichKeydownState = {
+  indentText: { current: string };
+  readOnly: { current: boolean };
+  tabFocusMode: { current: number };
+  tabKeyMode: { current: string };
+};
+
+function isTabFocusToggle(event: KeyboardEvent): boolean {
+  return (
+    event.key.toLowerCase() === "m" &&
+    (event.ctrlKey || event.metaKey) &&
+    !(event.altKey || event.shiftKey)
+  );
+}
+
+function handleTabPress(
+  event: KeyboardEvent,
+  editor: Editor | null,
+  state: RichKeydownState,
+): boolean {
+  if (state.readOnly.current || state.tabKeyMode.current === "focus") {
+    return false;
+  }
+  const focusMode = state.tabFocusMode.current;
+  if (focusMode === 0 || (focusMode > 0 && Date.now() <= focusMode)) {
+    return false;
+  }
+  state.tabFocusMode.current = -1;
+  event.preventDefault();
+  applyRichTab(editor, state.indentText.current, event.shiftKey);
+  return true;
+}
+
+// Tab = indent while focused. Escape grants Tab back to the browser for ~2s
+// and Ctrl-M toggles focus pass-through, matching the CodeMirror hatch.
+function handleRichTabKey(
+  event: KeyboardEvent,
+  editor: Editor | null,
+  state: RichKeydownState,
+): boolean {
+  if (event.key === "Escape") {
+    if (state.tabFocusMode.current !== 0) {
+      state.tabFocusMode.current = Date.now() + 2000;
+    }
+    return false;
+  }
+  if (isTabFocusToggle(event)) {
+    if (state.tabKeyMode.current !== "indent") {
+      return false;
+    }
+    state.tabFocusMode.current = state.tabFocusMode.current === 0 ? -1 : 0;
+    event.preventDefault();
+    return true;
+  }
+  if (event.key === "Tab") {
+    return handleTabPress(event, editor, state);
+  }
+  if (
+    state.tabFocusMode.current > 0 &&
+    !["Alt", "Control", "Meta", "Shift"].includes(event.key)
+  ) {
+    state.tabFocusMode.current = -1;
+  }
+  return false;
+}
+
 function trySurgicalApply(
   editor: Editor,
   map: OffsetMap,
@@ -187,7 +299,18 @@ export function RichMarkdownEditor({
   const mapRef = useRef<OffsetMap | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const readOnlyRef = useRef(readOnly);
+  const tabKeyModeRef = useRef(readTabKeyMode());
+  const indentTextRef = useRef(indentUnitText(readIndentUnit()));
+  // Mirrors CodeMirror's tabFocusMode: -1 = Tab indents, 0 = Tab always moves
+  // focus (Ctrl-M), >0 = deadline of the Escape-granted focus window.
+  const tabFocusModeRef = useRef(-1);
   readOnlyRef.current = readOnly;
+  const richKeyState = {
+    indentText: indentTextRef,
+    readOnly: readOnlyRef,
+    tabFocusMode: tabFocusModeRef,
+    tabKeyMode: tabKeyModeRef,
+  };
 
   const refreshMap = useCallback(
     (editor: Editor, markdown = markdownBody(yText.toString())) => {
@@ -327,7 +450,10 @@ export function RichMarkdownEditor({
             event.preventDefault();
             return true;
           }
-          return false;
+          if (composing.current) {
+            return false;
+          }
+          return handleRichTabKey(event, editorRef.current, richKeyState);
         },
       },
       handleDrop(_view, event) {
