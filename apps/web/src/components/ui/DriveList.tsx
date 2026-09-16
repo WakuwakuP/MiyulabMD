@@ -2,7 +2,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { Link } from "react-router";
 import { cn } from "../../lib/cn.ts";
 import { IconButton } from "./IconButton.tsx";
-import { MoreIcon } from "./icons.tsx";
+import { ChevronDownIcon, MoreIcon } from "./icons.tsx";
 
 export function DriveList({
   children,
@@ -23,6 +23,11 @@ export function DriveList({
   );
 }
 
+export type DriveRowToggle = {
+  expanded: boolean;
+  onToggle: () => void;
+};
+
 export function DriveRow({
   href,
   name,
@@ -32,6 +37,8 @@ export function DriveRow({
   onMenu,
   onPointerEnter,
   readonly = false,
+  depth = 0,
+  toggle,
 }: {
   href: string;
   name: string;
@@ -41,6 +48,9 @@ export function DriveRow({
   onMenu?: (event: MouseEvent) => void;
   onPointerEnter?: () => void;
   readonly?: boolean;
+  depth?: number;
+  /** Tree slot: a chevron toggle, or "leaf" to keep leaf rows aligned. */
+  toggle?: DriveRowToggle | "leaf";
 }) {
   return (
     <li
@@ -49,9 +59,34 @@ export function DriveRow({
         menuOpen && "bg-surface",
       )}
       onContextMenu={readonly ? undefined : onMenu}
+      style={depth > 0 ? { paddingLeft: `${depth * 1.5}rem` } : undefined}
     >
+      {toggle !== undefined &&
+        (toggle === "leaf" ? (
+          <span aria-hidden={true} className="ml-[0.45rem] w-6 shrink-0" />
+        ) : (
+          <IconButton
+            aria-expanded={toggle.expanded}
+            aria-label={
+              toggle.expanded ? `${name} を折りたたむ` : `${name} を展開`
+            }
+            className="ml-[0.45rem] shrink-0 text-muted"
+            onClick={toggle.onToggle}
+            size="sm"
+          >
+            <ChevronDownIcon
+              className={cn(
+                "size-3.5 transition-transform",
+                !toggle.expanded && "-rotate-90",
+              )}
+            />
+          </IconButton>
+        ))}
       <Link
-        className="flex min-h-12 min-w-0 flex-1 items-center gap-[0.7rem] px-[0.9rem] py-[0.55rem] text-inherit no-underline"
+        className={cn(
+          "flex min-h-12 min-w-0 flex-1 items-center gap-[0.7rem] py-[0.55rem] text-inherit no-underline",
+          toggle === undefined ? "px-[0.9rem]" : "pl-[0.45rem] pr-[0.9rem]",
+        )}
         onPointerEnter={onPointerEnter}
         to={href}
       >

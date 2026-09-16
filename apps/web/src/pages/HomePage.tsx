@@ -8,6 +8,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -23,6 +24,7 @@ import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
+import { fetchFolderChildren } from "../lib/api.ts";
 import {
   HomeMetadataError,
   readHomeMetadata,
@@ -242,6 +244,8 @@ function HomePageDialogs({
   );
 }
 
+const EMPTY_CHILDREN: FolderRecord[] = [];
+
 function HomePageView({
   user,
   folderId,
@@ -270,6 +274,22 @@ function HomePageView({
   dialogs: ReactNode;
 }) {
   const showGuestTitle = !(user || folderId || userLoading);
+  const childrenFolders = useMemo(
+    () =>
+      user || folderId
+        ? (visibleFolder?.children ?? EMPTY_CHILDREN)
+        : publicFolders,
+    [user, folderId, visibleFolder, publicFolders],
+  );
+  const loadChildren = useCallback(
+    (id: string, options: { cursor: string | null; limit?: number }) =>
+      fetchFolderChildren(id, {
+        cursor: options.cursor ?? undefined,
+        limit: options.limit,
+        viewerId: user?.id ?? null,
+      }),
+    [user?.id],
+  );
   return (
     <section>
       {showGuestTitle && (
@@ -279,12 +299,11 @@ function HomePageView({
       {cacheWarning && <p role="status">{cacheWarning}</p>}
       {flags.showTree ? (
         <NoteTree
-          childrenFolders={
-            user || folderId ? (visibleFolder?.children ?? []) : publicFolders
-          }
+          childrenFolders={childrenFolders}
           crumbs={visibleFolder?.crumbs ?? []}
           currentFolderId={visibleFolder?.id ?? null}
           isDriveRoot={flags.isDriveRoot}
+          loadChildren={loadChildren}
           notes={notes}
           onItemMenu={onItemMenu}
           openMenuId={menu?.id}

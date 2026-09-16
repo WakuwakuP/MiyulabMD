@@ -6,6 +6,7 @@ import type {
   ArticleSourceStatus,
   CreateNoteInput,
   FolderAccess,
+  FolderChildrenResult,
   FolderRecord,
   Note,
   NoteHistoryPage,
@@ -309,6 +310,34 @@ export async function fetchFolder(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as FolderAccess, ok: true };
+}
+
+export async function fetchFolderChildren(
+  id: string,
+  options: {
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
+): Promise<ApiResult<FolderChildrenResult>> {
+  const params = new URLSearchParams();
+  if (options.cursor) {
+    params.set("cursor", options.cursor);
+  }
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const res = await fetch(
+    `/api/folders/${id}/children${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as FolderChildrenResult, ok: true };
 }
 
 export async function renameFolder(
