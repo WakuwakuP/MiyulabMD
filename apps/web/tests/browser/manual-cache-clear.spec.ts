@@ -7,7 +7,13 @@ test("clears every user's private device cache while retaining viewer and shell"
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
-  const result = await page.evaluate(async ({ source, appRoot }) => {
+  const callback = async ({
+    source,
+    appRoot,
+  }: {
+    source: typeof note;
+    appRoot: string;
+  }) => {
     const {
       clearOfflineCacheDevice,
       captureOfflineCacheScope,
@@ -116,7 +122,8 @@ test("clears every user's private device cache while retaining viewer and shell"
       alice.close();
       bob.close();
     }
-  }, { appRoot, source: note });
+  };
+  const result = await page.evaluate(callback, { appRoot, source: note });
   expect(result).toEqual({
     afterClear: { bobNote: null, folder: null, list: null, note: null },
     alice: true,
@@ -134,7 +141,13 @@ test("waits for an unknown-user note write before completing device clear", asyn
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
-  const result = await page.evaluate(async ({ source, appRoot }) => {
+  const callback = async ({
+    source,
+    appRoot,
+  }: {
+    source: typeof note;
+    appRoot: string;
+  }) => {
     const { clearOfflineCacheDevice, openOfflineCache } = await import(
       "/src/lib/offline-cache.ts"
     );
@@ -189,7 +202,8 @@ test("waits for an unknown-user note write before completing device clear", asyn
       FileSystemFileHandle.prototype.createWritable = original;
       cache.close();
     }
-  }, { appRoot, source: note });
+  };
+  const result = await page.evaluate(callback, { appRoot, source: note });
   expect(result).toEqual({
     blockedBeforeRelease: true,
     cleared: true,
@@ -202,7 +216,7 @@ test("waits for an unknown-user image write before completing device clear", asy
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
-  const result = await page.evaluate(async () => {
+  const callback = async () => {
     const { clearOfflineCacheDevice, openOfflineCache } = await import(
       "/src/lib/offline-cache.ts"
     );
@@ -249,7 +263,8 @@ test("waits for an unknown-user image write before completing device clear", asy
       FileSystemFileHandle.prototype.createWritable = original;
       cache.close();
     }
-  });
+  };
+  const result = await page.evaluate(callback);
   expect(result).toEqual({
     blockedBeforeRelease: true,
     cleared: true,
@@ -261,7 +276,13 @@ test("keeps device cache purging and suspended after OPFS failure until retry", 
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
-  const result = await page.evaluate(async ({ source, appRoot }) => {
+  const callback = async ({
+    source,
+    appRoot,
+  }: {
+    source: typeof note;
+    appRoot: string;
+  }) => {
     const { clearOfflineCacheDevice, openOfflineCache } = await import(
       "/src/lib/offline-cache.ts"
     );
@@ -319,7 +340,8 @@ test("keeps device cache purging and suspended after OPFS failure until retry", 
       FileSystemDirectoryHandle.prototype.removeEntry = original;
       cache.close();
     }
-  }, { appRoot, source: note });
+  };
+  const result = await page.evaluate(callback, { appRoot, source: note });
   expect(result.failed).toBe(true);
   expect(result.purging).toBe("purging");
   expect(result.suspended).toBe(true);
@@ -330,7 +352,7 @@ test("records durable purging before an IDB failure and retries device clear", a
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
-  const result = await page.evaluate(async ({ appRoot }) => {
+  const callback = async ({ appRoot }: { appRoot: string }) => {
     const { clearOfflineCacheDevice, openOfflineCache } = await import(
       "/src/lib/offline-cache.ts"
     );
@@ -391,7 +413,8 @@ test("records durable purging before an IDB failure and retries device clear", a
       FileSystemDirectoryHandle.prototype.removeEntry = remove;
       cache.close();
     }
-  }, { appRoot });
+  };
+  const result = await page.evaluate(callback, { appRoot });
   expect(result).toEqual({
     active: "active",
     failed: true,
@@ -405,7 +428,7 @@ test("abort after the purging marker completes terminally without implicit retry
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
-  const result = await page.evaluate(async () => {
+  const callback = async () => {
     const { clearOfflineCacheDevice } = await import(
       "/src/lib/offline-cache.ts"
     );
@@ -436,6 +459,7 @@ test("abort after the purging marker completes terminally without implicit retry
     } finally {
       IDBObjectStore.prototype.clear = original;
     }
-  });
+  };
+  const result = await page.evaluate(callback);
   expect(result).toEqual({ clearCalls: 3, terminal: "completed" });
 });
