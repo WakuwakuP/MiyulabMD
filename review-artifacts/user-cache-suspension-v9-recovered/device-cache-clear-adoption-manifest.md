@@ -69,3 +69,20 @@ pending exclusive lock, whose name is now
 Known pre-existing failures (red before adoption, unrelated):
 `offline-epoch-terminal.spec.ts` home-folder-denial and
 `offline-folder-denial.spec.ts` stale-navigation cases.
+
+## Live UI entry point
+
+`ProfileSettingsPage` mounts a `この端末のキャッシュを削除` danger button that
+opens `ConfirmDialog` and calls `clearOfflineCacheDevice`. The copy states the
+scope: every account's offline notes, folders, lists, and images on this
+device are removed, while server data and the app shell survive, and
+in-flight cache work in other tabs is invalidated. Failure is retryable —
+the dialog reports `削除を完了できませんでした。もう一度実行してください。`
+and keeps the purging marker semantics from the core. The gate is
+`settings-device-cache.spec.ts`, which seeds a cached note, confirms the
+dialog, and observes the note is gone.
+
+Placement choice: the control lives under アカウント → ユーザー設定 rather
+than a new settings group, because it is a per-device privacy operation that
+must work even when the account form cannot (the section renders outside the
+login gate).

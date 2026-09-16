@@ -27,7 +27,7 @@
 
 | ID | 作業 | 完了条件 | 状態 |
 |---|---|---|---|
-| C1 | user切替・明示logout・端末cache削除 | 旧userの表示・メモリ・IDB・OPFSを規則どおり除去し、全タブの進行中処理が復元しない。app起動資産とserverデータは残す | logout/switch・user purge本体反映済み、実Workerでpeer本文・IDB・OPFS削除確認。端末全体削除UIは未実装 |
+| C1 | user切替・明示logout・端末cache削除 | 旧userの表示・メモリ・IDB・OPFSを規則どおり除去し、全タブの進行中処理が復元しない。app起動資産とserverデータは残す | logout/switch・user purge本体反映済み、実Workerでpeer本文・IDB・OPFS削除確認。端末全体削除のcore・UI本体反映済み、browser gate 8件成功。実Worker・複数タブの最終統合はC11/C12 |
 | C2 | 認証と拒否のタブ間整合性 | 別タブの認証変更を検出し、誤ったuser領域への保存・表示を防ぐ。確定拒否後の古い保存／公開が他タブでも復活しない | 応答identity・永続世代・表示中note/親画像の拒否通知を本体反映。folder/list投影・guest/cache-disabled画像のchecked fetchが残る |
 | C3 | folder HTTP拒否・解除 | canonical ID/root alias、独立した子孫、パンくず・参照、失敗時のfail-closed、古い応答、新しい成功による解除を検証 | 本体反映・対象検証済み：非衝突root、永続世代、atomic保存／解除、Home警告、独立prefetch。表示中通知はC2で継続 |
 | C4 | 短縮ID・alias・`/s` | serverの実際の識別子契約に合わせ、対応URLのoffline直接アクセス／reloadと拒否・別名変更を検証 | 本体反映・対象検証済み：canonical/short IDと`/s`。記事aliasはgeneric note APIの契約外。C2との最終統合検証待ち |
@@ -68,3 +68,30 @@
   **実Worker1件成功**。詳細は `docs/api-response-identity.md`。
 - 未採用のlive編集は`review/unadopted-reader-folder-work`の`12ac659`へ保全した。
   mainの`apps/web/src`に未検証の部分API変更を残さず、候補から再構成する。
+
+### `fdaf910`–`8801027` 端末cache削除の本体反映
+
+- `071be6b` で採用判断を manifest に記録（候補 `offline-cache.ts` を
+  banner 除去のうえバイトコピー。候補が最新 live を内包することを
+  mounted-folder manifest の hash で確認）。
+- `fdaf910` で `apps/web/src/lib/offline-cache.ts` に本体反映。
+  反映直後の browser suite で14件の回帰を検出し、以下の採用後差分で解消した。
+  いずれも判断内容は `device-cache-clear-adoption-manifest.md` に記録。
+  - OPFS app root を削除後に空で再作成（clear 後の `getDirectoryHandle` 契約）。
+  - suspended user の `openOfflineCache` を拒否しない（open 成功・各操作が
+    fail-closed の従来契約を復元）。
+  - `navigator.locks` 非対応時、shared lock は無ロック実行に縮退、
+    exclusive（GC/user clear/device clear）は従来どおり reject。
+  - `readScopeEpochs` を request の `onsuccess` 解決に変更
+    （epoch-terminal の最終検証ゲートがハンドラ遅延で実際に読み取りを
+    保留できるようにする）。
+- `0c281df` で `manual-cache-clear.spec.ts` の callback 抽出と
+  `manual-cache-clear-tabs.spec.ts`（BroadcastChannel 欠如時の durable
+  device epoch 拒否）を追加。`e1e58ef` で gc/tabs ゲートの lock 名を
+  `miyulabmd-offline-cache:user:<id>` に追従。
+- `8801027` で `/settings/profile` に端末削除 UI（ConfirmDialog 経由）を追加。
+  ゲートは `settings-device-cache.spec.ts`。
+- 実行: `pnpm --filter @miyulabmd/web typecheck` 成功、`pnpm test` 117件成功、
+  `node scripts/playwright.mjs test` 254件成功・2件失敗
+  （`offline-epoch-terminal` home-folder-denial、`offline-folder-denial`
+  stale-navigation は採用前からの RED。C2/C3 側の残件として継続）。
