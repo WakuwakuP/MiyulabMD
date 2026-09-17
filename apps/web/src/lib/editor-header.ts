@@ -1,4 +1,4 @@
-import { NOTE_LAYER_LABELS, type Note } from "@miyulabmd/shared";
+import type { MedallionResolution, Note } from "@miyulabmd/shared";
 
 /**
  * エディタヘッダーの 3 層分類（specs/knowledge-management.html §3）。
@@ -117,15 +117,16 @@ export function folderMenuContext(folder: string): string {
   return folder.trim() || "なし";
 }
 
-/** 「編集ロック」項目に添える現在値。層名は短形に落とす。 */
+/**
+ * 「編集ロック」項目に添える現在値（§2.6）。
+ * 層はフォルダのメダリオン表示のみで、ロックとは独立している。
+ */
 export function lockMenuContext(
-  note: Pick<Note, "goldLocked" | "goldUnlockedUntil" | "layer">,
+  note: Pick<Note, "editLocked">,
+  medallion?: MedallionResolution | null,
 ): string {
-  if (note.goldLocked) {
+  if (note.editLocked) {
     return "ロック中";
   }
-  if (note.layer === "gold" && note.goldUnlockedUntil != null) {
-    return "解除中";
-  }
-  return NOTE_LAYER_LABELS[note.layer].replace(/（.*）/, "");
+  return medallion?.layerLabel ?? "未ロック";
 }

@@ -9,7 +9,10 @@ import {
   replaceGrants,
   upsertFolderPolicy,
 } from "./access.ts";
-import { setNoteLayer } from "./layers.ts";
+import {
+  assignFolderMedallion,
+  ensureDefaultMedallionSet,
+} from "./medallion.ts";
 import { createNoteService } from "./notes.ts";
 import { enablePara, ensureParaBuckets } from "./para.ts";
 import { createSchemeChild, setFolderScheme } from "./schemes.ts";
@@ -30,6 +33,7 @@ const MIGRATIONS = [
   "0013_medallion_layers.sql",
   "0014_notes_fts.sql",
   "0016_para_spaces.sql",
+  "0017_medallion_sets_edit_lock.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -592,41 +596,76 @@ test("searchNotes DSL: path/tag/layer filters", async (t) => {
     ["Outside"],
   );
 
-  const gold = await notes.create(owner, {
-    markdown: "# Golden\nneedle\n",
-    title: "Golden",
-  });
-  assert.ok(!("error" in gold));
-  const promoted = await setNoteLayer(env, gold.id, "gold", null, owner);
-  assert.equal(promoted.kind, "ok");
+  // §2.6: layer: resolves through folder medallion assignments, with
+  // nearest-ancestor inheritance.
+  const set = await ensureDefaultMedallionSet(env, owner);
+  const knowledgeId = await ensureFolderRow(env, owner.id, "Knowledge");
+  const subId = await ensureFolderRow(env, owner.id, "Knowledge/Sub");
+  assert.ok(knowledgeId && subId);
+  assert.equal(
+    (await assignFolderMedallion(env, owner, knowledgeId, set.id, "knowledge"))
+      .kind,
+    "ok",
+  );
+  // A nearer assignment overrides the inherited one.
+  assert.equal(
+    (await assignFolderMedallion(env, owner, subId, set.id, "output")).kind,
+    "ok",
+  );
 
   const byLayer = await notes.searchNotes(owner, {
-    query: "needle layer:gold",
+    query: "needle layer:knowledge",
   });
   assert.equal(byLayer.kind, "ok");
   if (byLayer.kind !== "ok") {
     return;
   }
+  // InSub's folder carries its own output assignment — only InKnowledge
+  // resolves to knowledge.
   assert.deepEqual(
     byLayer.notes.map((note) => note.title),
-    ["Golden"],
+    ["InKnowledge"],
   );
 
   const byLayerOption = await notes.searchNotes(owner, {
-    layer: "gold",
+    layer: "output",
     query: "needle",
   });
   assert.equal(byLayerOption.kind, "ok");
   if (byLayerOption.kind === "ok") {
     assert.deepEqual(
       byLayerOption.notes.map((note) => note.title),
-      ["Golden"],
+      ["InSub"],
     );
+  }
+
+  // Set-qualified form pins one set by name.
+  const qualified = await notes.searchNotes(owner, {
+    query: "needle layer:精緻度.output",
+  });
+  assert.equal(qualified.kind, "ok");
+  if (qualified.kind === "ok") {
+    assert.deepEqual(
+      qualified.notes.map((note) => note.title),
+      ["InSub"],
+    );
+  }
+
+  // Negated layer filter excludes assigned notes.
+  const negatedLayer = await notes.searchNotes(owner, {
+    query: "needle -layer:output",
+  });
+  assert.equal(negatedLayer.kind, "ok");
+  if (negatedLayer.kind === "ok") {
+    assert.deepEqual(negatedLayer.notes.map((note) => note.title).sort(), [
+      "InKnowledge",
+      "Outside",
+    ]);
   }
 
   // invalid layer value resolves to an empty result, not an error
   const badLayer = await notes.searchNotes(owner, {
-    query: "needle layer:platinum",
+    query: "needle layer:.x",
   });
   assert.equal(badLayer.kind, "ok");
   if (badLayer.kind === "ok") {
@@ -740,10 +779,10 @@ test("searchNotes DSL: para:<space>.<bucket> scopes to one space", async (t) => 
   const all = await notes.searchNotes(owner, { query: "needle para:projects" });
   assert.equal(all.kind, "ok");
   if (all.kind === "ok") {
-    assert.deepEqual(
-      all.notes.map((note) => note.title).sort(),
-      ["DefaultProj", "WorkProj"],
-    );
+    assert.deepEqual(all.notes.map((note) => note.title).sort(), [
+      "DefaultProj",
+      "WorkProj",
+    ]);
   }
 
   // Space-qualified: only the work space's bucket.

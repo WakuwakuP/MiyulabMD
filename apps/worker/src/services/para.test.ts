@@ -31,6 +31,7 @@ const MIGRATIONS = [
   "0014_notes_fts.sql",
   "0015_user_settings.sql",
   "0016_para_spaces.sql",
+  "0017_medallion_sets_edit_lock.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -598,10 +599,12 @@ test("enablePara requires a signed-in user", async (t) => {
 // --- §2.5 spaces --------------------------------------------------------------
 
 test("0016 backfill: existing buckets keep NULL space + default row appears", async (t) => {
-  // Simulate a pre-0016 database: all migrations except the last one.
+  // Simulate a pre-0016 database: every migration except 0016/0017.
   const sqlite = new DatabaseSync(":memory:");
   t.after(() => sqlite.close());
-  for (const migration of MIGRATIONS.slice(0, -1)) {
+  for (const migration of MIGRATIONS.filter(
+    (name) => !(name.startsWith("0016") || name.startsWith("0017")),
+  )) {
     sqlite.exec(
       readFileSync(
         new URL(`../db/migrations/${migration}`, import.meta.url),
@@ -651,9 +654,7 @@ test("0016 backfill: existing buckets keep NULL space + default row appears", as
   assert.ok(dupId);
   assert.throws(() =>
     sqlite
-      .prepare(
-        "UPDATE folders SET para_bucket = 'projects' WHERE id = ?",
-      )
+      .prepare("UPDATE folders SET para_bucket = 'projects' WHERE id = ?")
       .run(dupId),
   );
 });
@@ -669,9 +670,7 @@ test("paraPlan for a new named space reports space + buckets vacant", async (t) 
   }
   assert.equal(result.plan.space.status, "vacant");
   assert.equal(result.plan.space.name, "個人");
-  assert.ok(
-    result.plan.buckets.every((bucket) => bucket.status === "vacant"),
-  );
+  assert.ok(result.plan.buckets.every((bucket) => bucket.status === "vacant"));
   // Side-effect-free: no folders, no space rows.
   assert.equal(folderCount(sqlite, owner.id), 0);
   assert.equal(spaceRows(sqlite, owner.id).length, 0);
@@ -898,7 +897,11 @@ test("enablePara allows a nested space inside another space's bucket", async (t)
   await enablePara(env, { space: { name: "個人" } }, owner);
   // Create a project folder inside the outer space's Projects bucket, then
   // make it the root of an inner space (ADR 0005: nesting is allowed).
-  const innerRoot = await ensureFolderRow(env, owner.id, "個人/Projects/myproj");
+  const innerRoot = await ensureFolderRow(
+    env,
+    owner.id,
+    "個人/Projects/myproj",
+  );
   assert.ok(innerRoot);
 
   const result = await enablePara(
@@ -1042,17 +1045,19 @@ test("paraArchiveProject moves into the same space's Archives", async (t) => {
   const appId = folderRow(sqlite, owner.id, "仕事/Projects/App")?.id;
   assert.ok(appId);
 
-  const archived = await paraArchiveProject(env, appId, { name: "AppDone" }, owner);
+  const archived = await paraArchiveProject(
+    env,
+    appId,
+    { name: "AppDone" },
+    owner,
+  );
   assert.equal(archived.kind, "ok");
   if (archived.kind !== "ok") {
     return;
   }
   assert.equal(archived.result.to, "仕事/Archives/AppDone");
   // The default space's Archives stays untouched.
-  assert.equal(
-    folderRow(sqlite, owner.id, "Archives/AppDone"),
-    undefined,
-  );
+  assert.equal(folderRow(sqlite, owner.id, "Archives/AppDone"), undefined);
 });
 
 test("paraDeleteSpace unassigns the space but keeps the folders", async (t) => {

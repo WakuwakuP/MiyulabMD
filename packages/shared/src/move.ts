@@ -158,7 +158,8 @@ export type MoveItemReason =
   | "owner_mismatch"
   | "same_folder"
   | "conflict"
-  | "cycle";
+  | "cycle"
+  | "locked";
 
 export type MoveNoteItem = {
   noteId: string;

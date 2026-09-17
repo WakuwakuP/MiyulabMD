@@ -24,6 +24,7 @@ import { escapeLikePattern } from "./articles.ts";
 import {
   accessFields,
   findNoteRow,
+  lockedNotesInFolder,
   NOTE_COLUMNS,
   type NoteRow,
   relocateFolderTree,
@@ -218,6 +219,11 @@ export async function moveFolder(
   if (exceedsLimit(plan)) {
     return limitError();
   }
+  // §2.6: a folder move relocates every note inside — refuse while any of
+  // them is edit-locked.
+  if ((await lockedNotesInFolder(env, src.owner_id, src.folder)) > 0) {
+    return invalid("編集ロック中のノートを含むため移動できません", 409);
+  }
   if (!dryRun) {
     await relocateFolderTree(env, src.owner_id, src.folder, to);
   }
@@ -240,6 +246,15 @@ async function moveOneNote(
   destPath: string,
   dryRun: boolean,
 ): Promise<MoveNoteItem> {
+  // §2.6: folder move is a mutation — locked notes refuse to move.
+  if (row.edit_locked === 1) {
+    return {
+      from: row.folder,
+      noteId: row.id,
+      reason: "locked",
+      status: "failed",
+    };
+  }
   if (row.folder === destPath) {
     return {
       from: row.folder,
@@ -385,6 +400,15 @@ async function moveChildFolder(
       status: "skipped",
     };
   }
+  // §2.6: locked notes inside the subtree block the move.
+  if ((await lockedNotesInFolder(env, ownerId, child.folder)) > 0) {
+    return {
+      folderId: child.id,
+      from: child.folder,
+      reason: "locked",
+      status: "skipped",
+    };
+  }
   if (!dryRun) {
     await relocateFolderTree(env, ownerId, child.folder, to);
   }
@@ -424,6 +448,12 @@ async function classifyNoteForMove(
   }
   if (!access.flags.canAdmin) {
     return { item: { noteId, reason: "denied", status: "failed" } };
+  }
+  // §2.6: edit-locked notes refuse folder moves.
+  if (row.edit_locked === 1) {
+    return {
+      item: { from: row.folder, noteId, reason: "locked", status: "failed" },
+    };
   }
   return { row };
 }

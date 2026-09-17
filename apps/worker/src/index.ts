@@ -17,6 +17,7 @@ import {
 } from "./routes/auth.ts";
 import { folderRoutes } from "./routes/folders.ts";
 import { imageRoutes } from "./routes/images.ts";
+import { medallionRoutes } from "./routes/medallion.ts";
 import { noteRoutes } from "./routes/notes.ts";
 import { ogRoutes } from "./routes/og.ts";
 import { paraRoutes } from "./routes/para.ts";
@@ -56,6 +57,7 @@ const api = new Elysia({ adapter: CloudflareAdapter })
   .use(articleRoutes)
   .use(articleSourceRoutes)
   .use(folderRoutes)
+  .use(medallionRoutes)
   .use(ogRoutes)
   .use(paraRoutes)
   .use(schemeRoutes)
@@ -184,7 +186,7 @@ async function handleNoteWebSocket(
   headers.set("X-Note-Id", note.id);
   headers.set(
     "X-Can-Edit",
-    note.access.flags.canEdit && !note.goldLocked ? "true" : "false",
+    note.access.flags.canEdit && !note.editLocked ? "true" : "false",
   );
   if (user) {
     applyWsUserHeaders(headers, user);

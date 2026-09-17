@@ -59,27 +59,23 @@ export {
   parseUserSettingsObject,
   userSettingsFromObject,
 } from "./knowledge.ts";
-export type {
-  NoteLayer,
-  NoteLayerEvent,
-  PromoteGateCode,
-  PromoteGateFailure,
-} from "./layers.ts";
-export {
-  GOLD_LOCK_WS_CLOSE_CODE,
-  GOLD_LOCK_WS_CLOSE_REASON,
-  GOLD_UNLOCK_DEFAULT_MINUTES,
-  GOLD_UNLOCK_MAX_MINUTES,
-  isGoldLockedAt,
-  isNoteLayer,
-  LAYER_RANK,
-  NOTE_LAYER_LABELS,
-  NOTE_LAYERS,
-  nextLayer,
-  PROMOTE_GATE_CODES,
-} from "./layers.ts";
 export type { McpToolName } from "./mcp.ts";
 export { MCP_NOTE_URL_HINT, MCP_TOOLS } from "./mcp.ts";
+export type {
+  MedallionAssignment,
+  MedallionLayer,
+  MedallionResolution,
+  MedallionSet,
+} from "./medallion.ts";
+export {
+  DEFAULT_MEDALLION_LAYERS,
+  DEFAULT_MEDALLION_SET_NAME,
+  isMedallionLayerKey,
+  medalForLayerIndex,
+  medalForLayerKey,
+  parseMedallionLayers,
+  resolveMedallionAssignment,
+} from "./medallion.ts";
 export type {
   MoveFolderContentsResult,
   MoveFolderItem,
@@ -144,6 +140,9 @@ export type {
   WorkspaceSearchResult,
 } from "./note.ts";
 export {
+  EDIT_LOCK_WS_CLOSE_CODE,
+  EDIT_LOCK_WS_CLOSE_REASON,
+  EDIT_LOCKED_CODE,
   isNoteEditOp,
   isNoteHistoryActorKind,
   isSearchScope,
@@ -210,6 +209,7 @@ export {
   zettelStamp,
 } from "./schemes.ts";
 export type {
+  LayerFilterValue,
   ParaFilterValue,
   SearchDslFilter,
   SearchDslOperator,

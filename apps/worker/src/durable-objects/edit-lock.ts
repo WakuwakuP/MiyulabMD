@@ -1,32 +1,28 @@
-import { isGoldLockedAt } from "@miyulabmd/shared";
-
 /**
- * Minimum interval between D1 reads for the live gold-lock re-check.
- * Small enough that a promote/expire takes effect mid-session quickly,
+ * Minimum interval between D1 reads for the live edit-lock re-check.
+ * Small enough that a mid-session lock takes effect quickly,
  * large enough that a typing session does not hit D1 per keystroke.
  */
-export const GOLD_LOCK_RECHECK_MS = 5_000;
+export const EDIT_LOCK_RECHECK_MS = 5_000;
 
-export type GoldLockRow = {
-  layer: string | null;
-  gold_unlocked_until: number | null;
+export type EditLockRow = {
+  edit_locked: number | null;
 };
 
 /**
- * Throttled re-check of the gold edit lock for a DocumentRoom.
+ * Throttled re-check of the §2.6 edit lock for a DocumentRoom.
  *
- * `X-Can-Edit` is frozen at WebSocket connect time, so a note promoted to
- * gold (or whose `gold_unlocked_until` expired) would otherwise stay
- * writable for the life of the connection. The room re-reads
- * `layer`/`gold_unlocked_until` at most once per `intervalMs` and only on
+ * `X-Can-Edit` is frozen at WebSocket connect time, so a note locked
+ * mid-session would otherwise stay writable for the life of the connection.
+ * The room re-reads `edit_locked` at most once per `intervalMs` and only on
  * write paths.
  *
  * Read failures fail open: the durable boundary in
- * `persistMarkdownSnapshot` still refuses writes to a locked gold note,
+ * `persistMarkdownSnapshot` still refuses writes to a locked note,
  * so a transient D1 error must not drop live edits.
  */
-export class GoldLockRecheck {
-  private readonly readRow: () => Promise<GoldLockRow | null>;
+export class EditLockRecheck {
+  private readonly readRow: () => Promise<EditLockRow | null>;
   private readonly intervalMs: number;
   private readonly now: () => number;
   private cached: { locked: boolean; checkedAt: number } | null = null;
@@ -34,8 +30,8 @@ export class GoldLockRecheck {
   private refreshSeq = 0;
 
   constructor(
-    readRow: () => Promise<GoldLockRow | null>,
-    intervalMs: number = GOLD_LOCK_RECHECK_MS,
+    readRow: () => Promise<EditLockRow | null>,
+    intervalMs: number = EDIT_LOCK_RECHECK_MS,
     now: () => number = Date.now,
   ) {
     this.readRow = readRow;
@@ -79,11 +75,7 @@ export class GoldLockRecheck {
     const seq = ++this.refreshSeq;
     try {
       const row = await this.readRow();
-      const locked = isGoldLockedAt(
-        row?.layer,
-        row?.gold_unlocked_until,
-        this.now(),
-      );
+      const locked = row?.edit_locked === 1;
       // Only the newest refresh may publish: a slower in-flight read must
       // not overwrite a fresher lockedNow() verdict with its stale row.
       if (seq === this.refreshSeq) {

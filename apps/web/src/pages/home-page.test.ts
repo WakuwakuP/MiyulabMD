@@ -31,6 +31,7 @@ function note(id: string, folderId: string | null = "folder-1"): NoteSummary {
     alias: null,
     articleMeta: {},
     createdAt: 1,
+    editLocked: false,
     folder: "docs",
     folderId,
     id,

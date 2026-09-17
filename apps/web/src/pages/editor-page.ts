@@ -1,5 +1,5 @@
 import {
-  GOLD_LOCK_WS_CLOSE_CODE,
+  EDIT_LOCK_WS_CLOSE_CODE,
   type Note,
   type SessionUser,
 } from "@miyulabmd/shared";
@@ -187,8 +187,8 @@ export function bindEditorCollab(input: {
   setCollabReady: (ready: boolean) => void;
   setMarkdown: (markdown: string) => void;
   setCollabWritable: (writable: boolean) => void;
-  /** Server revoked edit access mid-session (gold lock engaged). */
-  onGoldLocked?: () => void;
+  /** Server revoked edit access mid-session (edit lock engaged). */
+  onEditLocked?: () => void;
 }) {
   if (!(input.noteId && input.hydrated) || input.userLoading) {
     return;
@@ -223,8 +223,8 @@ export function bindEditorCollab(input: {
   const onClosed = (event: { code: number; reason: string }) => {
     // A 4400-4499 close is terminal: the server will not accept writes on a
     // reconnection either, so flip the note into its locked read-only state.
-    if (event.code === GOLD_LOCK_WS_CLOSE_CODE) {
-      input.onGoldLocked?.();
+    if (event.code === EDIT_LOCK_WS_CLOSE_CODE) {
+      input.onEditLocked?.();
     }
   };
 

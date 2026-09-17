@@ -86,9 +86,7 @@ export function setParaConflictNewName(
   key: ParaResolutionKey,
   newName: string,
 ): ParaConflictItem[] {
-  return items.map((item) =>
-    item.key === key ? { ...item, newName } : item,
-  );
+  return items.map((item) => (item.key === key ? { ...item, newName } : item));
 }
 
 /** Every row has a usable resolution (rename requires a non-empty new name). */
