@@ -57,6 +57,7 @@ import {
 import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
+import { schemeNoteTitlePrefix } from "./schemes.ts";
 import { createLineMatcher, type GrepScanOptions, grepRows } from "./search.ts";
 
 export type NoteRow = {
@@ -716,16 +717,13 @@ async function markdownForCreate(
   folder: string,
   input: CreateNoteInput,
 ): Promise<string> {
-  let markdown =
-    input.markdown ?? defaultNoteMarkdown(input.title?.trim() || "無題");
+  const prefix = await schemeNoteTitlePrefix(env, ownerId, folder, Date.now());
+  const baseTitle = `${prefix ?? ""}${input.title?.trim() || "無題"}`;
+  let markdown = input.markdown ?? defaultNoteMarkdown(baseTitle);
   const sources = await createArticleService(env).listSources(ownerId);
   const source = matchArticleSource(folder, sources);
   if (source) {
-    markdown = ensureArticleMarkdown(
-      markdown,
-      source.schema,
-      input.title?.trim() || "無題",
-    );
+    markdown = ensureArticleMarkdown(markdown, source.schema, baseTitle);
   }
   return markdown;
 }

@@ -1,8 +1,9 @@
 import type { GrepMatch, NoteSearchHit } from "@miyulabmd/shared";
+import { folderUrl, looksLikeSchemeId } from "@miyulabmd/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { searchWorkspace } from "../../lib/api.ts";
+import { resolveSchemeId, searchWorkspace } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 import { debounce } from "../../lib/debounce.ts";
 import { Input } from "../ui/Input.tsx";
@@ -10,7 +11,12 @@ import { MutedText } from "../ui/Text.tsx";
 
 type PaletteItem =
   | { key: string; kind: "note"; note: NoteSearchHit }
-  | { key: string; kind: "match"; match: GrepMatch };
+  | { key: string; kind: "match"; match: GrepMatch }
+  | {
+      folder: { id: string; name: string; schemeId: string };
+      key: string;
+      kind: "folder";
+    };
 
 type PaletteState =
   | { kind: "idle" }
@@ -22,11 +28,20 @@ function itemToLocation(item: PaletteItem): string {
   if (item.kind === "note") {
     return `/n/${item.note.id}`;
   }
+  if (item.kind === "folder") {
+    return folderUrl(item.folder.id);
+  }
   return `/n/${item.match.noteId}?line=${item.match.line}`;
 }
 
 function itemTitle(item: PaletteItem): string {
-  return item.kind === "note" ? item.note.title : item.match.title;
+  if (item.kind === "note") {
+    return item.note.title;
+  }
+  if (item.kind === "folder") {
+    return item.folder.name;
+  }
+  return item.match.title;
 }
 
 export function SearchPalette({
@@ -58,11 +73,21 @@ export function SearchPalette({
         const controller = new AbortController();
         abortRef.current = controller;
         setState({ kind: "loading" });
-        void searchWorkspace(trimmed, {
-          signal: controller.signal,
-          viewerId,
-        }).then(
-          (result) => {
+        // `15.22` や `202609171230` のような ID は scheme 解決も並走させる。
+        const schemeRequest = looksLikeSchemeId(trimmed)
+          ? resolveSchemeId(trimmed, {
+              signal: controller.signal,
+              viewerId,
+            })
+          : Promise.resolve(null);
+        void Promise.all([
+          searchWorkspace(trimmed, {
+            signal: controller.signal,
+            viewerId,
+          }),
+          schemeRequest,
+        ]).then(
+          ([result, schemeResult]) => {
             if (
               generationRef.current !== generation ||
               controller.signal.aborted
@@ -74,6 +99,15 @@ export function SearchPalette({
               return;
             }
             const items: PaletteItem[] = [
+              ...(schemeResult?.ok
+                ? [
+                    {
+                      folder: schemeResult.data.folder,
+                      key: `scheme:${schemeResult.data.folder.id}`,
+                      kind: "folder" as const,
+                    },
+                  ]
+                : []),
               ...result.data.notes.map((note) => ({
                 key: `note:${note.id}`,
                 kind: "note" as const,
@@ -221,6 +255,11 @@ export function SearchPalette({
             >
               <span className="min-w-0 flex-1 truncate">
                 {itemTitle(item)}
+                {item.kind === "folder" && (
+                  <span className="ml-2 font-mono text-muted text-xs">
+                    フォルダを開く
+                  </span>
+                )}
                 {item.kind === "match" && (
                   <span className="ml-2 text-muted text-xs">
                     {item.match.text.trim()}

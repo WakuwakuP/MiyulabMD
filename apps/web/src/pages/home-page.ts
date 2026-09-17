@@ -27,6 +27,7 @@ import {
   fetchPublicFolders,
   renameFolder,
   updateFolderAccess,
+  updateFolderScheme,
   updateNote,
 } from "../lib/api.ts";
 import {
@@ -254,11 +255,16 @@ export async function persistNewFolder(
     setShare: (share: ShareState) => void;
     setShareError: (error: string | null) => void;
   },
+  options: { useScheme?: boolean } = {},
 ) {
   setters.setFolderCreating(true);
   setters.setFolderCreateError(null);
 
-  const result = await createFolder({ name, parentId: visibleFolder?.id });
+  const result = await createFolder({
+    name,
+    parentId: visibleFolder?.id,
+    useScheme: options.useScheme,
+  });
   if (!result.ok) {
     setters.setFolderCreateError(result.error);
     setters.setFolderCreating(false);
@@ -411,8 +417,9 @@ function folderMenuItems(
   onShare: (id: string, name: string) => void,
   onRename: (id: string, name: string) => void,
   onDelete: (id: string, name: string) => void,
-  para: {
+  options: {
     onArchive: (id: string, name: string) => void;
+    onScheme: (id: string, name: string, scheme: string | null) => void;
     projectsPath: string | null;
   },
 ): ContextMenuItem[] {
@@ -427,13 +434,18 @@ function folderMenuItems(
     label: "名前を変更",
     onSelect: () => onRename(target.id, target.name),
   });
+  items.push({
+    label: "命名規則…",
+    onSelect: () =>
+      options.onScheme(target.id, target.name, target.scheme ?? null),
+  });
   const inProjects =
-    para.projectsPath !== null &&
-    target.path?.startsWith(`${para.projectsPath}/`) === true;
+    options.projectsPath !== null &&
+    target.path?.startsWith(`${options.projectsPath}/`) === true;
   if (inProjects) {
     items.push({
       label: "完了してアーカイブ（PARA）",
-      onSelect: () => para.onArchive(target.id, target.name),
+      onSelect: () => options.onArchive(target.id, target.name),
     });
   }
   items.push({
@@ -475,8 +487,9 @@ export function handleItemMenu(
   onNoteShare: (note: NoteSummary) => void,
   onRename: (id: string, name: string) => void,
   onDelete: (kind: ConfirmState["kind"], id: string, name: string) => void,
-  para: {
+  options: {
     onArchive: (id: string, name: string) => void;
+    onScheme: (id: string, name: string, scheme: string | null) => void;
     projectsPath: string | null;
   },
 ) {
@@ -492,7 +505,7 @@ export function handleItemMenu(
         onFolderShare,
         onRename,
         (id, name) => onDelete("folder", id, name),
-        para,
+        options,
       ),
     });
     return;
@@ -535,6 +548,45 @@ export async function refreshHomeList(
     return;
   }
   setVisibleFolder(result.data);
+}
+
+export async function persistFolderScheme(
+  target: { id: string; name: string; scheme: string | null } | null,
+  scheme: string | null,
+  folderId: string | undefined,
+  user: SessionUser | null,
+  navigate: NavigateFunction,
+  setters: {
+    setSchemeBusy: (busy: boolean) => void;
+    setSchemeDialog: (
+      value: { id: string; name: string; scheme: string | null } | null,
+    ) => void;
+    setSchemeError: (error: string | null) => void;
+    setNotes: (notes: NoteSummary[]) => void;
+    setVisibleFolder: (folder: FolderAccess | null) => void;
+  },
+) {
+  if (!target) {
+    return;
+  }
+  setters.setSchemeBusy(true);
+  setters.setSchemeError(null);
+  const result = await updateFolderScheme(target.id, scheme);
+  if (!result.ok) {
+    setters.setSchemeError(result.error);
+    setters.setSchemeBusy(false);
+    return;
+  }
+  setters.setSchemeBusy(false);
+  setters.setSchemeDialog(null);
+  invalidateFolderCache();
+  await refreshHomeList(
+    folderId,
+    user,
+    navigate,
+    setters.setNotes,
+    setters.setVisibleFolder,
+  );
 }
 
 export async function persistRenameFolder(

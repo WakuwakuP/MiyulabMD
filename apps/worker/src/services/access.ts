@@ -75,6 +75,9 @@ export type FolderRow = {
   owner_id: string;
   folder: string;
   created_at: number;
+  scheme?: string | null;
+  scheme_id?: string | null;
+  scheme_title?: string | null;
 };
 
 function parseScope(value: string | null | undefined): AccessScope | null {
@@ -284,7 +287,7 @@ export async function getFolderById(
   return (
     (await db(env)
       .prepare(
-        "SELECT id, owner_id, folder, created_at FROM folders WHERE id = ?",
+        "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE id = ?",
       )
       .bind(id)
       .first<FolderRow>()) ?? null
@@ -299,7 +302,7 @@ export async function getFolderByPath(
   return (
     (await db(env)
       .prepare(
-        "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? AND folder = ?",
+        "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? AND folder = ?",
       )
       .bind(ownerId, folder)
       .first<FolderRow>()) ?? null
@@ -494,7 +497,14 @@ async function projectVisibleChildFolder(
     parentId: currentId,
     readScope: effective.effectiveReadScope,
     writeScope: effective.effectiveWriteScope,
-    ...(isOwner ? { folder: row.folder } : {}),
+    ...(isOwner
+      ? {
+          folder: row.folder,
+          scheme: row.scheme ?? null,
+          schemeId: row.scheme_id ?? null,
+          schemeTitle: row.scheme_title ?? null,
+        }
+      : {}),
   };
 }
 
@@ -508,7 +518,7 @@ async function listVisibleChildren(
   const isOwner = user?.id === ownerId;
   const rows = await db(env)
     .prepare(
-      "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+      "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
     )
     .bind(ownerId)
     .all<FolderRow>();
@@ -575,6 +585,7 @@ export async function resolveFolderAccess(
     parentId = await ensureFolderRow(env, ownerId, "");
   }
   const children = await listVisibleChildren(env, ownerId, folder, id, user);
+  const row = await getFolderByPath(env, ownerId, folder);
 
   return presentFolderAccess(
     {
@@ -585,6 +596,9 @@ export async function resolveFolderAccess(
       id,
       name: folder ? folderName(folder) : MY_DRIVE_NAME,
       parentId,
+      scheme: row?.scheme ?? null,
+      schemeId: row?.scheme_id ?? null,
+      schemeTitle: row?.scheme_title ?? null,
       ...(isOwner ? { folder } : { folder: undefined, sourceFolder: null }),
     },
     isOwner,
@@ -612,6 +626,97 @@ function decodeFolderEntriesCursor(cursor: string | undefined): number {
   return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
 }
 
+function folderEntryOf(
+  record: FolderRecord,
+  row: FolderRow,
+  noteCounts: Map<string, number>,
+  isOwner: boolean,
+): FolderEntry {
+  return {
+    id: record.id,
+    name: record.name,
+    parentId: record.parentId,
+    type: "folder",
+    updatedAt: row.created_at,
+    ...(isOwner
+      ? {
+          noteCount: noteCounts.get(row.id) ?? 0,
+          scheme: row.scheme ?? null,
+          schemeId: row.scheme_id ?? null,
+          schemeTitle: row.scheme_title ?? null,
+        }
+      : {}),
+  };
+}
+
+async function visibleChildFolders(
+  env: Env,
+  ownerId: string,
+  rows: FolderRow[],
+  folder: string,
+  currentId: string | null,
+  user: SessionUser | null | undefined,
+  isOwner: boolean,
+): Promise<{ row: FolderRow; record: FolderRecord }[]> {
+  const children: { row: FolderRow; record: FolderRecord }[] = [];
+  for (const row of rows) {
+    const record = await projectVisibleChildFolder(
+      env,
+      ownerId,
+      row,
+      folder,
+      currentId,
+      user,
+      isOwner,
+    );
+    if (record) {
+      children.push({ record, row });
+    }
+  }
+  return children;
+}
+
+function childNoteCounts(
+  noteFolders: { folder: string }[],
+  children: { row: FolderRow }[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const { folder: noteFolder } of noteFolders) {
+    for (const child of children) {
+      if (folderContains(child.row.folder, noteFolder)) {
+        counts.set(child.row.id, (counts.get(child.row.id) ?? 0) + 1);
+      }
+    }
+  }
+  return counts;
+}
+
+async function noteEntryVisible(
+  env: Env,
+  folder: string,
+  row: FolderEntryNoteRow,
+  ownerId: string,
+  user?: SessionUser | null,
+): Promise<boolean> {
+  const access = await resolveNoteAccess(
+    env,
+    {
+      folder: row.folder ?? "",
+      id: row.id,
+      ownerId: row.owner_id,
+      readScope: parseScope(row.read_scope),
+      writeScope: parseScope(row.write_scope),
+    },
+    user,
+  );
+  if (!access.flags.canView) {
+    return false;
+  }
+  const inheritsKnownFolder =
+    access.sourceFolder !== null && folderContains(access.sourceFolder, folder);
+  return inheritsKnownFolder || canDiscoverAccess(access, ownerId, user);
+}
+
 /** 直下の子フォルダとノートを1レスポンスで返す。発見可能性は resolveFolderAccess と同じ規則。 */
 export async function listFolderChildren(
   env: Env,
@@ -631,7 +736,7 @@ export async function listFolderChildren(
   const [folderRows, noteRows, noteFolderRows] = await Promise.all([
     db(env)
       .prepare(
-        "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+        "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
       )
       .bind(ownerId)
       .all<FolderRow>(),
@@ -652,73 +757,33 @@ export async function listFolderChildren(
       : Promise.resolve(null),
   ]);
 
-  const children: { row: FolderRow; record: FolderRecord }[] = [];
-  for (const row of folderRows.results ?? []) {
-    const record = await projectVisibleChildFolder(
-      env,
-      ownerId,
-      row,
-      folder,
-      currentId,
-      user,
-      isOwner,
-    );
-    if (record) {
-      children.push({ record, row });
-    }
-  }
+  const children = await visibleChildFolders(
+    env,
+    ownerId,
+    folderRows.results ?? [],
+    folder,
+    currentId,
+    user,
+    isOwner,
+  );
 
-  const noteCounts = new Map<string, number>();
-  if (isOwner) {
-    for (const { folder: noteFolder } of noteFolderRows?.results ?? []) {
-      for (const child of children) {
-        if (folderContains(child.row.folder, noteFolder)) {
-          noteCounts.set(child.row.id, (noteCounts.get(child.row.id) ?? 0) + 1);
-        }
-      }
-    }
-  }
+  const noteCounts = isOwner
+    ? childNoteCounts(noteFolderRows?.results ?? [], children)
+    : new Map<string, number>();
 
   const entries: FolderEntry[] = [];
   for (const { record, row } of children) {
-    entries.push({
-      id: record.id,
-      name: record.name,
-      parentId: record.parentId,
-      type: "folder",
-      updatedAt: row.created_at,
-      ...(isOwner ? { noteCount: noteCounts.get(row.id) ?? 0 } : {}),
-    });
+    entries.push(folderEntryOf(record, row, noteCounts, isOwner));
   }
   for (const row of noteRows.results ?? []) {
-    if (!isOwner) {
-      const access = await resolveNoteAccess(
-        env,
-        {
-          folder: row.folder ?? "",
-          id: row.id,
-          ownerId: row.owner_id,
-          readScope: parseScope(row.read_scope),
-          writeScope: parseScope(row.write_scope),
-        },
-        user,
-      );
-      if (!access.flags.canView) {
-        continue;
-      }
-      const inheritsKnownFolder =
-        access.sourceFolder !== null &&
-        folderContains(access.sourceFolder, folder);
-      if (!(inheritsKnownFolder || canDiscoverAccess(access, ownerId, user))) {
-        continue;
-      }
+    if (isOwner || (await noteEntryVisible(env, folder, row, ownerId, user))) {
+      entries.push({
+        id: row.id,
+        title: row.title,
+        type: "note",
+        updatedAt: row.updated_at,
+      });
     }
-    entries.push({
-      id: row.id,
-      title: row.title,
-      type: "note",
-      updatedAt: row.updated_at,
-    });
   }
 
   entries.sort((a, b) => {
@@ -780,7 +845,7 @@ export async function listOwnedFolders(
 ): Promise<FolderRecord[]> {
   const rows = await db(env)
     .prepare(
-      "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+      "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
     )
     .bind(ownerId)
     .all<FolderRow>();
@@ -792,6 +857,9 @@ export async function listOwnedFolders(
     parentId: isDriveRootPath(row.folder)
       ? null
       : (byPath.get(parentFolderPath(row.folder))?.id ?? null),
+    scheme: row.scheme ?? null,
+    schemeId: row.scheme_id ?? null,
+    schemeTitle: row.scheme_title ?? null,
   }));
 }
 

@@ -133,6 +133,32 @@ export {
   rewriteFolderPrefix,
   scopesFromPreset,
 } from "./permission.ts";
+export type {
+  JdLevel,
+  NamingScheme,
+  SchemeSuggestion,
+  SchemeValidateResult,
+  SchemeValidationIssue,
+} from "./schemes.ts";
+export {
+  formatJdArea,
+  formatJdId,
+  formatSchemeFolderName,
+  isNamingScheme,
+  isZettelId,
+  JD_GROUP_MAX,
+  JD_ID_MAX,
+  JD_RESERVED_MAX,
+  jdChildLevel,
+  jdLevelOf,
+  looksLikeSchemeId,
+  NAMING_SCHEME_LABELS,
+  NAMING_SCHEMES,
+  parseJdArea,
+  parseJdCategory,
+  parseJdId,
+  zettelStamp,
+} from "./schemes.ts";
 export {
   encodeSnapshotSaved,
   isSnapshotSavedForRoom,

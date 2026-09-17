@@ -90,6 +90,11 @@ export type FolderRecord = {
   /** Effective scopes for list display (not a path leak). */
   readScope?: AccessScope;
   writeScope?: AccessScope;
+  /** Owner views only: naming rule declared for this folder's children. */
+  scheme?: string | null;
+  /** Owner views only: ID minted by a parent's scheme. */
+  schemeId?: string | null;
+  schemeTitle?: string | null;
 };
 
 export type FolderCrumb = {
@@ -105,6 +110,11 @@ export type FolderEntryFolder = {
   updatedAt: number;
   /** Owner views only: recursive count of notes inside this folder. */
   noteCount?: number;
+  /** Owner views only: naming rule declared for this folder's children. */
+  scheme?: string | null;
+  /** Owner views only: ID minted by a parent's scheme. */
+  schemeId?: string | null;
+  schemeTitle?: string | null;
 };
 
 export type FolderEntryNote = {
@@ -229,6 +239,11 @@ export type FolderAccess = EffectiveAccess & {
   children: FolderRecord[];
   flags: PermissionFlags;
   locked?: boolean;
+  /** Naming rule this folder declares for its children. */
+  scheme?: string | null;
+  /** ID this folder carries from a parent's scheme. */
+  schemeId?: string | null;
+  schemeTitle?: string | null;
 };
 
 export type UpdateFolderAccessInput = {

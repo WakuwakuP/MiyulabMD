@@ -23,6 +23,7 @@ const MIGRATIONS = [
   "0009_note_history.sql",
   "0010_note_links.sql",
   "0011_para_buckets.sql",
+  "0012_naming_schemes.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {

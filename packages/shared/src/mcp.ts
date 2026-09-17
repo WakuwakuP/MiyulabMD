@@ -25,6 +25,13 @@ export const MCP_TOOLS = [
   "move_notes",
   "para_list",
   "para_archive_project",
+  "set_folder_scheme",
+  "scheme_get",
+  "jd_allocate_id",
+  "jd_create_id_folder",
+  "jd_get",
+  "jd_list_category",
+  "jd_validate_tree",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOLS)[number];

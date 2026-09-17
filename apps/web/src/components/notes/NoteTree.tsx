@@ -28,6 +28,7 @@ import {
 } from "../../lib/folder-entries.ts";
 import { prefetchFolder } from "../../lib/list-cache.ts";
 import { prefetchNote } from "../../lib/note-cache.ts";
+import { compareSchemeFolders } from "../../lib/scheme-sort.ts";
 import { DriveList, DriveRow } from "../ui/DriveList.tsx";
 import { FolderIcon, MarkdownIcon } from "../ui/icons.tsx";
 import { AccessScopeMeta } from "./AccessScopeMeta.tsx";
@@ -61,7 +62,13 @@ type Props = {
 };
 
 export type MenuTarget =
-  | { kind: "folder"; id: string; name: string; path?: string }
+  | {
+      id: string;
+      kind: "folder";
+      name: string;
+      path?: string;
+      scheme?: string | null;
+    }
   | { kind: "note"; note: NoteSummary };
 
 function notesInFolder(
@@ -406,6 +413,8 @@ function folderRow(
     noteCount?: number;
     path?: string;
     readScope?: FolderRecord["readScope"];
+    scheme?: string | null;
+    schemeId?: string | null;
     writeScope?: FolderRecord["writeScope"];
   },
 ) {
@@ -430,6 +439,7 @@ function folderRow(
                   kind: "folder",
                   name: row.name,
                   path: row.path,
+                  scheme: row.scheme,
                 });
               }
         }
@@ -452,7 +462,7 @@ function folderRow(
       />
       {expansion && (
         <>
-          {expansion.entries.map((entry) =>
+          {sortedEntries(expansion.entries).map((entry) =>
             entryRow(ctx, entry, row.depth + 1, expansion.path ?? row.path),
           )}
           {expansionStatus(ctx, row.id, expansion, row.depth + 1)}
@@ -475,6 +485,8 @@ function entryRow(
         name: entry.name,
         noteCount: entry.noteCount,
         path: parentPath ? `${parentPath}/${entry.name}` : entry.name,
+        scheme: entry.scheme,
+        schemeId: entry.schemeId,
       })
     : entryNoteRow(ctx, entry, depth);
 }
@@ -631,7 +643,14 @@ function sortedFolders(
   const bucketIds = new Set((buckets ?? []).map((bucket) => bucket.folderId));
   return [...childrenFolders]
     .filter((folder) => !bucketIds.has(folder.id))
-    .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+    .sort(compareSchemeFolders);
+}
+
+/** 遅延読み込み行のフォルダ部分だけ ID 数値順に並べ替える（ノート順は維持）。 */
+function sortedEntries(entries: FolderEntry[]): FolderEntry[] {
+  return [...entries].sort((a, b) =>
+    a.type === "folder" && b.type === "folder" ? compareSchemeFolders(a, b) : 0,
+  );
 }
 
 function TreeBody({
@@ -672,6 +691,8 @@ function TreeBody({
           noteCount: noteCounts.get(folder.id) ?? 0,
           path: folder.folder,
           readScope: folder.readScope,
+          scheme: folder.scheme,
+          schemeId: folder.schemeId,
           writeScope: folder.writeScope,
         }),
       )}

@@ -20,6 +20,7 @@ import type {
   ParaBucketKey,
   ParaListResult,
   PermissionPreset,
+  SchemeSuggestion,
   SessionUser,
   WorkspaceSearchResult,
 } from "@miyulabmd/shared";
@@ -329,6 +330,9 @@ export async function searchWorkspace(
 export async function createFolder(input: {
   name: string;
   parentId?: string | null;
+  /** Mint the name from the parent's naming scheme (JD/Zettelkasten). */
+  useScheme?: boolean;
+  schemeId?: string;
 }): Promise<ApiResult<FolderAccess>> {
   const res = await fetch("/api/folders", {
     ...fetchOpts,
@@ -588,6 +592,74 @@ export async function archiveParaProject(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as MoveFolderResult, ok: true };
+}
+
+export type SchemeSuggestResponse = {
+  suggestion: SchemeSuggestion | null;
+};
+
+export async function fetchSchemeSuggestion(
+  folderId: string,
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<SchemeSuggestResponse>> {
+  const res = await fetch(
+    `/api/schemes/suggest?folderId=${encodeURIComponent(folderId)}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SchemeSuggestResponse, ok: true };
+}
+
+export async function updateFolderScheme(
+  folderId: string,
+  scheme: string | null,
+): Promise<ApiResult<{ folder: string; id: string; scheme: string | null }>> {
+  const res = await fetch(`/api/folders/${folderId}/scheme`, {
+    ...fetchOpts,
+    body: JSON.stringify({ scheme }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return {
+    data: (await res.json()) as {
+      folder: string;
+      id: string;
+      scheme: string | null;
+    },
+    ok: true,
+  };
+}
+
+export type SchemeResolveResponse = {
+  folder: {
+    folder: string;
+    id: string;
+    name: string;
+    scheme: string | null;
+    schemeId: string;
+    schemeTitle: string | null;
+  };
+};
+
+export async function resolveSchemeId(
+  id: string,
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<SchemeResolveResponse>> {
+  const res = await fetch(
+    `/api/schemes/resolve?id=${encodeURIComponent(id)}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SchemeResolveResponse, ok: true };
 }
 
 export async function deleteFolder(id: string): Promise<ApiResult<void>> {

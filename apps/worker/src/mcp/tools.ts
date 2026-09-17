@@ -42,6 +42,15 @@ import {
   type MutateNoteResult,
 } from "../services/notes.ts";
 import { paraArchiveProject, paraList } from "../services/para.ts";
+import {
+  createSchemeChild,
+  jdAllocateId,
+  jdListCategory,
+  type SchemeError,
+  schemeGet,
+  setFolderScheme,
+  validateSchemeTree,
+} from "../services/schemes.ts";
 
 function textResult(data: unknown) {
   return {
@@ -92,7 +101,7 @@ async function listNotesForTool(
   return { notes: list };
 }
 
-function moveToolError(result: MoveError) {
+function moveToolError(result: MoveError | SchemeError) {
   if (result.kind === "not_found") {
     return textError("Not found");
   }
@@ -1319,6 +1328,185 @@ export function createMcpServerFactory() {
         { dated, dryRun: dry_run, name },
         user,
       );
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "set_folder_scheme",
+    {
+      description:
+        "Opt-in naming rule for a folder's future children. 'jd' = Johnny.Decimal (10 areas / 10 categories / 100 IDs), 'zettel' = Zettelkasten UTC timestamp IDs (YYYYMMDDHHmm). Existing children keep their names — the scheme only affects new creates. Pass null to clear. Owner only.",
+      inputSchema: {
+        folder_id: z
+          .string()
+          .describe("Folder UUID that declares the naming rule"),
+        scheme: z
+          .enum(["jd", "zettel"])
+          .nullable()
+          .describe("Naming rule to apply, or null to clear"),
+      },
+    },
+    async ({ folder_id, scheme }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await setFolderScheme(env, folder_id, scheme, user);
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "scheme_get",
+    {
+      description:
+        "Resolve a naming-scheme ID (e.g. '15.22' or '202609171230') to the folder that carries it in the caller's own drive, and list its direct children.",
+      inputSchema: {
+        id: z.string().describe("Scheme ID such as '15.22' or '202609171230'"),
+      },
+    },
+    async ({ id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await schemeGet(env, id, user);
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "jd_allocate_id",
+    {
+      description:
+        "Allocate the next Johnny.Decimal ID under a JD folder without creating anything. Under a JD root returns an area ('10-19'), under an area a category ('15'), under a category an ID ('15.22'). Category-local max+1 — gaps are never reused and .00–.10 stay reserved. Errors once a category reaches 100 IDs.",
+      inputSchema: {
+        folder_id: z
+          .string()
+          .describe("JD root, area, or category folder UUID"),
+      },
+    },
+    async ({ folder_id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await jdAllocateId(env, folder_id, user);
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "jd_create_id_folder",
+    {
+      description:
+        "Allocate a Johnny.Decimal ID and create the child folder ('15.22 Title') under a JD root/area/category. title defaults to 無題 — rename later. Pass scheme_id to claim a specific number instead of the next one.",
+      inputSchema: {
+        folder_id: z
+          .string()
+          .describe("JD root, area, or category folder UUID"),
+        scheme_id: z
+          .string()
+          .optional()
+          .describe(
+            "Explicit ID ('10-19' / '15' / '15.22') instead of auto-allocation",
+          ),
+        title: z
+          .string()
+          .optional()
+          .describe("Title after the ID (default 無題)"),
+      },
+    },
+    async ({ folder_id, scheme_id, title }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await createSchemeChild(
+        env,
+        folder_id,
+        { schemeId: scheme_id, title },
+        user,
+      );
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "jd_get",
+    {
+      description:
+        "Resolve a Johnny.Decimal ID such as '15.22' to its folder and list the direct children. Same resolution as scheme_get but JD-only.",
+      inputSchema: {
+        id: z.string().describe("JD ID such as '10-19', '15', or '15.22'"),
+      },
+    },
+    async ({ id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await schemeGet(env, id, user);
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "jd_list_category",
+    {
+      description:
+        "List a JD container's numbered children in numeric order — areas under a JD root, categories under an area, IDs under a category.",
+      inputSchema: {
+        folder_id: z
+          .string()
+          .describe("JD root, area, or category folder UUID"),
+      },
+    },
+    async ({ folder_id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await jdListCategory(env, folder_id, user);
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "jd_validate_tree",
+    {
+      description:
+        "Validate the caller's naming-scheme tree: JD area/category/ID counts, naming-pattern deviations ('15.22 Title'), duplicate IDs, reserved .00–.10 usage, and IDs moved outside their expected parent. Returns a structured issue list.",
+      inputSchema: {},
+    },
+    async () => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await validateSchemeTree(env, user);
       if (result.kind !== "ok") {
         return moveToolError(result);
       }

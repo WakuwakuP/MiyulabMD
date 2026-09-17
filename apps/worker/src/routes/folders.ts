@@ -31,6 +31,11 @@ import {
   moveFolderContents,
 } from "../services/move.ts";
 import { createNoteService } from "../services/notes.ts";
+import {
+  createSchemeChild,
+  type SchemeError,
+  setFolderScheme,
+} from "../services/schemes.ts";
 
 const notes = createNoteService(env);
 
@@ -44,7 +49,7 @@ async function parseJsonBody<T>(request: Request): Promise<T | null> {
 
 function moveErrorResponse(
   set: { status?: number | string },
-  result: MoveError,
+  result: MoveError | SchemeError,
 ): { error: string } {
   if (result.kind === "not_found") {
     set.status = 404;
@@ -282,7 +287,27 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       folder?: string;
       name?: string;
       parentId?: string;
+      schemeId?: string;
+      useScheme?: boolean;
     }>(request);
+    if (body?.useScheme) {
+      // 親フォルダの命名規則で採番して作成する。
+      if (!body.parentId) {
+        set.status = 400;
+        return { error: "parentId を指定してください" };
+      }
+      const created = await createSchemeChild(
+        env,
+        body.parentId,
+        { schemeId: body.schemeId, title: body.name },
+        user,
+      );
+      if (created.kind !== "ok") {
+        return moveErrorResponse(set, created);
+      }
+      set.status = 201;
+      return created.result.folder;
+    }
     const resolved = await resolveCreateFolderPath(user.id, body);
     if ("error" in resolved) {
       set.status = resolved.status;
@@ -337,6 +362,20 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
     }
 
     return resolveFolderAccess(env, user.id, folder, user);
+  })
+  .post("/:id/scheme", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const body = await parseJsonBody<{ scheme?: string | null }>(request);
+    const result = await setFolderScheme(
+      env,
+      params.id,
+      body && "scheme" in body ? (body.scheme ?? null) : null,
+      user ?? undefined,
+    );
+    if (result.kind !== "ok") {
+      return moveErrorResponse(set, result);
+    }
+    return result.result;
   })
   .post("/:id/move", async ({ params, request, set }) => {
     const user = await readSession(request, env);

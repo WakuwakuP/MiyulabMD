@@ -3,6 +3,7 @@ import type {
   FolderRecord,
   NoteSummary,
   ParaBucket,
+  SchemeSuggestion,
 } from "@miyulabmd/shared";
 import {
   type MouseEvent,
@@ -21,6 +22,7 @@ import { ContextMenu } from "../components/notes/ContextMenu.tsx";
 import { DrivePlaceNav } from "../components/notes/DrivePlaceNav.tsx";
 import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
 import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
+import { SchemeDialog } from "../components/notes/SchemeDialog.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
@@ -29,6 +31,7 @@ import {
   archiveParaProject,
   fetchFolderChildren,
   fetchPara,
+  fetchSchemeSuggestion,
   moveFolder,
   moveNotes,
 } from "../lib/api.ts";
@@ -58,6 +61,7 @@ import {
   type MenuState,
   openFolderShare,
   openNoteShare,
+  persistFolderScheme,
   persistHomeDelete,
   persistHomeShare,
   persistNewFolder,
@@ -161,6 +165,10 @@ function HomePageDialogs({
   confirm,
   confirmBusy,
   confirmError,
+  schemeDialog,
+  schemeBusy,
+  schemeError,
+  schemeSuggestion,
   share,
   shareError,
   shareLink,
@@ -171,6 +179,8 @@ function HomePageDialogs({
   onCloseRename,
   onConfirmDelete,
   onCloseConfirm,
+  onPersistScheme,
+  onCloseScheme,
   onPersistShare,
   onCloseShare,
 }: {
@@ -185,6 +195,10 @@ function HomePageDialogs({
   confirm: ConfirmState | null;
   confirmBusy: boolean;
   confirmError: string | null;
+  schemeDialog: { id: string; name: string; scheme: string | null } | null;
+  schemeBusy: boolean;
+  schemeError: string | null;
+  schemeSuggestion: SchemeSuggestion | null;
   share: ShareState | null;
   shareError: string | null;
   shareLink: string;
@@ -195,6 +209,8 @@ function HomePageDialogs({
   onCloseRename: () => void;
   onConfirmDelete: () => void;
   onCloseConfirm: () => void;
+  onPersistScheme: (scheme: string | null) => void;
+  onCloseScheme: () => void;
   onPersistShare: (next: AccessDraft) => void;
   onCloseShare: () => void;
 }) {
@@ -215,6 +231,17 @@ function HomePageDialogs({
           error={folderCreateError}
           onClose={onCloseCreateFolder}
           onSubmit={onCreateFolder}
+          suggestion={schemeSuggestion}
+        />
+      )}
+      {schemeDialog && (
+        <SchemeDialog
+          busy={schemeBusy}
+          current={schemeDialog.scheme}
+          error={schemeError}
+          folderName={schemeDialog.name}
+          onClose={onCloseScheme}
+          onSubmit={onPersistScheme}
         />
       )}
       {folderRename && (
@@ -381,6 +408,15 @@ function NetworkHomePage() {
     null,
   );
   const [paraBuckets, setParaBuckets] = useState<ParaBucket[]>([]);
+  const [schemeDialog, setSchemeDialog] = useState<{
+    id: string;
+    name: string;
+    scheme: string | null;
+  } | null>(null);
+  const [schemeBusy, setSchemeBusy] = useState(false);
+  const [schemeError, setSchemeError] = useState<string | null>(null);
+  const [schemeSuggestion, setSchemeSuggestion] =
+    useState<SchemeSuggestion | null>(null);
 
   const flags = homeListFlags({
     error,
@@ -417,6 +453,24 @@ function NetworkHomePage() {
     }
     setParaBuckets([]);
   }, [user, reloadPara]);
+
+  // 作成ダイアログを開いたら親フォルダの命名規則から「次の番号」ヒントを引く。
+  useEffect(() => {
+    if (!(folderCreateOpen && visibleFolder?.id)) {
+      setSchemeSuggestion(null);
+      return;
+    }
+    const controller = new AbortController();
+    void fetchSchemeSuggestion(visibleFolder.id, {
+      signal: controller.signal,
+      viewerId: user?.id,
+    }).then((result) => {
+      if (result.ok && !controller.signal.aborted) {
+        setSchemeSuggestion(result.data.suggestion);
+      }
+    });
+    return () => controller.abort();
+  }, [folderCreateOpen, visibleFolder?.id, user?.id]);
 
   const refreshAfterMove = useCallback(() => {
     invalidateNotesCache();
@@ -662,6 +716,11 @@ function NetworkHomePage() {
               setFolderRename(null);
             }
           }}
+          onCloseScheme={() => {
+            if (!schemeBusy) {
+              setSchemeDialog(null);
+            }
+          }}
           onCloseShare={() => setShare(null)}
           onConfirmDelete={() => {
             void persistHomeDelete(
@@ -680,13 +739,35 @@ function NetworkHomePage() {
             );
           }}
           onCreateFolder={(name) => {
-            void persistNewFolder(name, visibleFolder, navigate, {
-              setFolderCreateError,
-              setFolderCreateOpen,
-              setFolderCreating,
-              setShare,
-              setShareError,
-            });
+            void persistNewFolder(
+              name,
+              visibleFolder,
+              navigate,
+              {
+                setFolderCreateError,
+                setFolderCreateOpen,
+                setFolderCreating,
+                setShare,
+                setShareError,
+              },
+              { useScheme: schemeSuggestion !== null },
+            );
+          }}
+          onPersistScheme={(scheme) => {
+            void persistFolderScheme(
+              schemeDialog,
+              scheme,
+              folderId,
+              user,
+              navigate,
+              {
+                setNotes,
+                setSchemeBusy,
+                setSchemeDialog,
+                setSchemeError,
+                setVisibleFolder,
+              },
+            );
           }}
           onPersistShare={(next) => {
             void persistHomeShare(share, next, visibleFolder?.id, {
@@ -713,6 +794,10 @@ function NetworkHomePage() {
               },
             );
           }}
+          schemeBusy={schemeBusy}
+          schemeDialog={schemeDialog}
+          schemeError={schemeError}
+          schemeSuggestion={schemeSuggestion}
           share={share}
           shareError={shareError}
           shareLink={shareLink}
@@ -745,7 +830,14 @@ function NetworkHomePage() {
             setConfirm({ id, kind, name });
             setConfirmError(null);
           },
-          { onArchive: onArchiveProject, projectsPath: paraProjectsPath },
+          {
+            onArchive: onArchiveProject,
+            onScheme: (id, name, scheme) => {
+              setSchemeDialog({ id, name, scheme });
+              setSchemeError(null);
+            },
+            projectsPath: paraProjectsPath,
+          },
         );
       }}
       onMove={flags.canAdmin ? onTreeMove : undefined}
