@@ -798,12 +798,19 @@ export async function listFolderChildren(
   });
 
   const page = entries.slice(offset, offset + limit);
+  // 非オーナーには resolveFolderAccess の crumbs と同じ規則で、
+  // 発見可能な祖先の suffix だけを返す。
+  const path = isOwner
+    ? folder.split("/").filter(Boolean)
+    : (await visibleCrumbs(env, ownerId, folder, user)).map(
+        (crumb) => crumb.name,
+      );
   return {
     entries: page,
     folder: {
       id: currentId,
       name: folder ? folderName(folder) : MY_DRIVE_NAME,
-      path: folder.split("/").filter(Boolean),
+      path,
     },
     nextCursor: offset + limit < entries.length ? String(offset + limit) : null,
   };

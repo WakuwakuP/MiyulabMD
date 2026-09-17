@@ -283,6 +283,35 @@ test("grep honors case sensitivity and fixed vs regex patterns", async (t) => {
   assert.equal(invalid.kind, "bad_request");
 });
 
+test("guest grep rejects regex patterns but allows fixed strings", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, {
+    markdown: "# Public\npublic needle body",
+    readScope: "public",
+    title: "Public",
+  });
+
+  // JS regex cannot be timed out, so unauthenticated callers are limited to
+  // fixed-string scans to keep catastrophic backtracking off the isolate.
+  const regex = await notes.grep(undefined, {
+    fixedString: false,
+    pattern: "n..dle",
+  });
+  assert.equal(regex.kind, "bad_request");
+
+  const fixed = await notes.grep(undefined, { pattern: "needle" });
+  assert.equal(fixed.kind, "ok");
+  if (fixed.kind === "ok") {
+    assert.deepEqual(
+      fixed.matches.map((match) => match.title),
+      ["Public"],
+    );
+  }
+});
+
 test("grep glob_title filters which notes are scanned", async (t) => {
   const { env, owner, sqlite } = await createEnv();
   t.after(() => sqlite.close());

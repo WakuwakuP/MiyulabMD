@@ -1194,6 +1194,15 @@ export function createNoteService(env: Env) {
       user: SessionUser | undefined,
       options: GrepNotesOptions,
     ): Promise<GrepNotesResult> {
+      // JS regex execution cannot be timed out, so catastrophic backtracking
+      // would burn isolate CPU past the scan deadline. Guests may only run
+      // fixed-string scans; regex mode requires a signed-in user.
+      if (user === undefined && options.fixedString === false) {
+        return {
+          error: "regular expression search requires sign-in",
+          kind: "bad_request",
+        };
+      }
       const matcher = createLineMatcher(options.pattern, {
         caseSensitive: options.caseSensitive,
         fixedString: options.fixedString,

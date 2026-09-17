@@ -311,6 +311,96 @@ test("link-only child folders are not enumerated for non-owners", async (t) => {
   );
 });
 
+test("non-owner folder.path hides undiscoverable ancestor names", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+
+  // 深いフォルダだけに共有を付け、祖先は非公開のままにする。
+  await upsertFolderPolicy(
+    env,
+    owner.id,
+    "hidden/inner/leaf",
+    "signed_in",
+    "signed_in",
+  );
+  await replaceGrants(env, owner.id, "folder", "hidden/inner/leaf", [
+    { email: viewer.email },
+  ]);
+
+  const leaf = await getFolderByPath(env, owner.id, "hidden/inner/leaf");
+  assert.ok(leaf);
+  const result = await listFolderChildren(
+    env,
+    owner.id,
+    "hidden/inner/leaf",
+    leaf.id,
+    viewer,
+  );
+
+  assert.equal(result.folder.name, "leaf");
+  // 祖先 hidden / inner は発見不可なので見せない
+  assert.deepEqual(result.folder.path, ["leaf"]);
+
+  // 途中の祖先にも発見可能な共有があれば、その suffix が見える
+  await upsertFolderPolicy(
+    env,
+    owner.id,
+    "hidden/inner",
+    "signed_in",
+    "signed_in",
+  );
+  await replaceGrants(env, owner.id, "folder", "hidden/inner", [
+    { email: viewer.email },
+  ]);
+  const widened = await listFolderChildren(
+    env,
+    owner.id,
+    "hidden/inner/leaf",
+    leaf.id,
+    viewer,
+  );
+  assert.deepEqual(widened.folder.path, ["inner", "leaf"]);
+
+  // オーナーは引き続き完全なパスを見る
+  const owned = await listFolderChildren(
+    env,
+    owner.id,
+    "hidden/inner/leaf",
+    leaf.id,
+    owner,
+  );
+  assert.deepEqual(owned.folder.path, ["hidden", "inner", "leaf"]);
+});
+
+test("folder.path hides undiscoverable ancestors for link viewers", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+
+  // 祖先は非公開、末端だけリンク共有。
+  await upsertFolderPolicy(
+    env,
+    owner.id,
+    "hidden-link/published",
+    "link",
+    "self",
+  );
+  const leaf = await getFolderByPath(env, owner.id, "hidden-link/published");
+  assert.ok(leaf);
+
+  // ゲストとログイン済みユーザーのどちらにも祖先名を出さない
+  for (const user of [undefined, viewer]) {
+    const result = await listFolderChildren(
+      env,
+      owner.id,
+      "hidden-link/published",
+      leaf.id,
+      user,
+    );
+    assert.equal(result.folder.name, "published");
+    assert.deepEqual(result.folder.path, ["published"]);
+  }
+});
+
 test("listFolderNotes returns direct or recursive folder notes", async (t) => {
   const { env, owner, sqlite } = await createEnv();
   t.after(() => sqlite.close());
