@@ -5,7 +5,6 @@ import { test } from "node:test";
 import type { SessionUser } from "@miyulabmd/shared";
 import { upsertUserByEmail } from "../db/users.ts";
 import { ensureFolderRow } from "./access.ts";
-import { setNoteLayer, unlockGoldForEdit } from "./layers.ts";
 import { createNoteService, persistMarkdownSnapshot } from "./notes.ts";
 
 const MIGRATIONS = [
@@ -23,6 +22,10 @@ const MIGRATIONS = [
   "0012_naming_schemes.sql",
   "0013_medallion_layers.sql",
   "0014_notes_fts.sql",
+
+  "0015_user_settings.sql",
+  "0016_para_spaces.sql",
+  "0017_medallion_sets_edit_lock.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -143,7 +146,7 @@ function snapshotRow(sqlite: DatabaseSync, id: string) {
     .get(id) as { markdown_snapshot: string; title: string };
 }
 
-test("persistMarkdownSnapshot writes for a non-gold note", async () => {
+test("persistMarkdownSnapshot writes for an unlocked note", async () => {
   const { env, owner, sqlite } = await createEnv();
   const created = await createNote(env, owner);
 
@@ -159,20 +162,21 @@ test("persistMarkdownSnapshot writes for a non-gold note", async () => {
   assert.equal(row.title, "新タイトル");
 });
 
-test("persistMarkdownSnapshot skips the write while the note is gold-locked", async () => {
+test("persistMarkdownSnapshot skips the write while the note is edit-locked", async () => {
   const { env, owner, sqlite } = await createEnv();
   const created = await createNote(env, owner);
-  const gold = await setNoteLayer(env, created.id, "gold", null, owner);
-  assert.equal(gold.kind, "ok");
+  const notes = createNoteService(env);
+  const locked = await notes.setEditLock(created.id, owner, true);
+  assert.equal(locked.kind, "ok");
 
-  // Live session was connected before the promote: the durable boundary
+  // Live session was connected before the lock: the durable boundary
   // must refuse the snapshot write even though the DO accepted the edit,
   // and the skip must be visible so the outbox drops the pending snapshot
   // instead of reporting a saved snapshot.
   const result = await persistMarkdownSnapshot(
     env,
     created.id,
-    "# 書き換え\n\ngold 越し。",
+    "# 書き換え\n\nロック越し。",
   );
 
   assert.equal(result, "rejected");
@@ -181,25 +185,22 @@ test("persistMarkdownSnapshot skips the write while the note is gold-locked", as
   assert.equal(row.title, "元タイトル");
 });
 
-test("persistMarkdownSnapshot writes while gold_unlocked_until is in the future", async () => {
+test("persistMarkdownSnapshot writes again after an explicit unlock", async () => {
   const { env, owner, sqlite } = await createEnv();
   const created = await createNote(env, owner);
-  const gold = await setNoteLayer(env, created.id, "gold", null, owner);
-  assert.equal(gold.kind, "ok");
-  const unlocked = await unlockGoldForEdit(env, created.id, 30, owner);
-  assert.equal(unlocked.kind, "ok");
+  const notes = createNoteService(env);
+  await notes.setEditLock(created.id, owner, true);
+  await notes.setEditLock(created.id, owner, false);
 
-  await persistMarkdownSnapshot(env, created.id, "# 解除中\n\n変更。");
+  await persistMarkdownSnapshot(env, created.id, "# 解除後\n\n変更。");
 
   const row = snapshotRow(sqlite, created.id);
-  assert.equal(row.markdown_snapshot, "# 解除中\n\n変更。");
-  assert.equal(row.title, "解除中");
+  assert.equal(row.markdown_snapshot, "# 解除後\n\n変更。");
+  assert.equal(row.title, "解除後");
 
-  // 期限切れで再ロック → 再び書き込み拒否。
-  sqlite
-    .prepare("UPDATE notes SET gold_unlocked_until = ? WHERE id = ?")
-    .run(Date.now() - 1000, created.id);
+  // Re-lock → writes refused again.
+  await notes.setEditLock(created.id, owner, true);
   await persistMarkdownSnapshot(env, created.id, "# 再ロック後\n\n変更。");
   const relocked = snapshotRow(sqlite, created.id);
-  assert.equal(relocked.markdown_snapshot, "# 解除中\n\n変更。");
+  assert.equal(relocked.markdown_snapshot, "# 解除後\n\n変更。");
 });

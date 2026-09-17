@@ -1,8 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
   ACCESS_SCOPES,
-  GOLD_UNLOCK_DEFAULT_MINUTES,
-  GOLD_UNLOCK_MAX_MINUTES,
+  EDIT_LOCKED_CODE,
   MCP_NOTE_URL_HINT,
   NOTE_RESTORE_MESSAGE,
   type Note,
@@ -11,7 +10,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
-
+import { db } from "../db/client.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import {
@@ -27,19 +26,18 @@ import {
 } from "../services/access.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import {
-  demoteNote,
-  type LayerError,
-  listNotesByLayer,
-  promoteNote,
-  setNoteLayer,
-  unlockGoldForEdit,
-} from "../services/layers.ts";
-import {
   listBacklinks,
   listBrokenLinks,
   listNoteLinks,
   resolveWikilink,
 } from "../services/links.ts";
+import {
+  assignFolderMedallion,
+  clearFolderMedallion,
+  listMedallionAssignments,
+  listMedallionSets,
+  type MedallionResult,
+} from "../services/medallion.ts";
 import {
   type MoveError,
   moveFolder,
@@ -112,19 +110,31 @@ async function listNotesForTool(
   return { notes: list };
 }
 
-function layerToolError(
-  result: LayerError | { kind: "gates"; failures: unknown; to: string },
+function medallionToolError(
+  result: Exclude<MedallionResult<unknown>, { kind: "ok" }>,
 ) {
   if (result.kind === "not_found") {
     return textError("Not found");
   }
   if (result.kind === "denied") {
-    return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+    return textError("Forbidden");
   }
-  if (result.kind === "gates") {
-    return textResult(result);
+  if (result.kind === "confirm_required") {
+    return textError(
+      `confirm_required: ${result.assignedFolders} folder(s) still reference this set`,
+    );
   }
-  return textError(result.error);
+  return textError(result.message ?? "Invalid request");
+}
+
+/** Denied-result text that surfaces the §2.6 edit-lock code when present. */
+function deniedToolError(result: { status: number; code?: string }) {
+  if (result.code === EDIT_LOCKED_CODE) {
+    return textError(
+      `${EDIT_LOCKED_CODE}: this note is edit-locked. Call set_edit_lock with locked=false first.`,
+    );
+  }
+  return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
 }
 
 /** folder_id か scheme_id（`15.22` 等）から対象フォルダ UUID を決める。 */
@@ -213,7 +223,7 @@ function mutateNoteToolResponse(result: MutateNoteResult) {
     return textError("Not found");
   }
   if (result.kind === "denied") {
-    return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+    return deniedToolError(result);
   }
   if (result.kind === "bad_request") {
     return textError(result.error);
@@ -276,10 +286,10 @@ async function requireEditableNote(
   if (!loaded.note.access.flags.canEdit) {
     return { error: textError("Forbidden"), ok: false };
   }
-  if (loaded.note.goldLocked) {
+  if (loaded.note.editLocked) {
     return {
       error: textError(
-        "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.",
+        `${EDIT_LOCKED_CODE}: this note is edit-locked. Call set_edit_lock with locked=false first.`,
       ),
       ok: false,
     };
@@ -446,13 +456,53 @@ async function inviteCollaboratorTool(
   return mutateNoteToolResponse(result);
 }
 
-/** createMcpHandler に渡す MCP サーバーファクトリ。 */
-export function createMcpServerFactory() {
+/**
+ * §2.6/KM-E: tool exposure follows *configured* state, not the UI feature
+ * flags. A feature's tools register only when the user already has the
+ * backing configuration rows — an unconfigured feature offers no tools
+ * instead of failing at call time.
+ */
+async function featureConfig(env_: Env, user: SessionUser | null) {
+  if (!user) {
+    return { hasMedallion: false, hasPara: false, hasSchemes: false };
+  }
+  const [para, medallion, scheme] = await Promise.all([
+    db(env_)
+      .prepare("SELECT 1 AS x FROM para_spaces WHERE owner_id = ? LIMIT 1")
+      .bind(user.id)
+      .first<{ x: number }>(),
+    db(env_)
+      .prepare(
+        "SELECT 1 AS x FROM medallion_sets WHERE owner_user_id = ? LIMIT 1",
+      )
+      .bind(user.id)
+      .first<{ x: number }>(),
+    db(env_)
+      .prepare(
+        "SELECT 1 AS x FROM folders WHERE owner_id = ? AND scheme IS NOT NULL LIMIT 1",
+      )
+      .bind(user.id)
+      .first<{ x: number }>(),
+  ]);
+  return {
+    hasMedallion: medallion !== null,
+    hasPara: para !== null,
+    hasSchemes: scheme !== null,
+  };
+}
+
+/**
+ * createMcpHandler に渡す MCP サーバーファクトリ。
+ * Async so it can read the caller's feature configuration inside the auth
+ * context (createMcpHandler awaits the factory per request).
+ */
+export async function createMcpServerFactory() {
   const server = new McpServer({
     name: "miyulabmd",
     version: "0.1.0",
   });
   const notes = createNoteService(env);
+  const features = await featureConfig(env, requireUser());
 
   server.registerTool(
     "list_notes",
@@ -676,9 +726,9 @@ export function createMcpServerFactory() {
       if (!loaded.note.access.flags.canEdit) {
         return textError("Forbidden");
       }
-      if (loaded.note.goldLocked) {
+      if (loaded.note.editLocked) {
         return textError(
-          "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.",
+          `${EDIT_LOCKED_CODE}: this note is edit-locked. Call set_edit_lock with locked=false first.`,
         );
       }
 
@@ -745,9 +795,9 @@ export function createMcpServerFactory() {
       if (!note.access.flags.canEdit) {
         return textError("Forbidden");
       }
-      if (note.goldLocked) {
+      if (note.editLocked) {
         return textError(
-          "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.",
+          `${EDIT_LOCKED_CODE}: this note is edit-locked. Call set_edit_lock with locked=false first.`,
         );
       }
 
@@ -792,7 +842,7 @@ export function createMcpServerFactory() {
         return textError("Not found");
       }
       if (result.kind === "denied") {
-        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+        return deniedToolError(result);
       }
       if (result.kind !== "ok") {
         return textError("Failed to delete note");
@@ -825,17 +875,7 @@ export function createMcpServerFactory() {
         readScope,
         writeScope,
       });
-      if (result.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (result.kind === "denied") {
-        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
-      }
-      if (result.kind === "bad_request") {
-        return textError(result.error);
-      }
-
-      return textResult({ note: result.note });
+      return mutateNoteToolResponse(result);
     },
   );
 
@@ -857,7 +897,7 @@ export function createMcpServerFactory() {
     "search_notes",
     {
       description:
-        'Search accessible notes by title or markdown snapshot. Query supports a small DSL: `word`, `"exact phrase"`, `-excluded`, and filters `path:folder`, `tag:name`, `layer:bronze|silver|gold`, `scheme:`/`jd:15.22`, `para:projects`. Use scope=title for fast title-only lookup; use grep_notes for line-level body hits.',
+        'Search accessible notes by title or markdown snapshot. Query supports a small DSL: `word`, `"exact phrase"`, `-excluded`, and filters `path:folder`, `tag:name`, `layer:key` or `layer:set.key` (folder medallion assignment, inherited by descendants), `scheme:`/`jd:15.22`, `para:projects`. Use scope=title for fast title-only lookup; use grep_notes for line-level body hits.',
       inputSchema: {
         cursor: z
           .string()
@@ -868,9 +908,11 @@ export function createMcpServerFactory() {
           .optional()
           .describe("Restrict to notes inside this folder UUID (recursive)"),
         layer: z
-          .enum(["bronze", "silver", "gold"])
+          .string()
           .optional()
-          .describe("Restrict to a medallion layer"),
+          .describe(
+            "Restrict to a medallion layer — a layer key (`output`) or set-qualified (`set.key`)",
+          ),
         limit: z
           .number()
           .int()
@@ -1362,394 +1404,379 @@ export function createMcpServerFactory() {
     },
   );
 
-  server.registerTool(
-    "para_list",
-    {
-      description:
-        "List the caller's PARA spaces with their buckets (Projects/Areas/Resources/Archives). Buckets keep stable keys across renames. With bucket, also returns the direct children (e.g. active projects).",
-      inputSchema: {
-        bucket: z
-          .enum(["projects", "areas", "resources", "archives"])
-          .optional()
-          .describe("Return direct children of this bucket too"),
-        space: z
-          .string()
-          .optional()
-          .describe(
-            "PARA space name or id; 'default' = the rootless space. Omit = all spaces; bucket children resolve in the default space unless space is given.",
-          ),
+  // para_* tools exist only once a PARA space is configured.
+  if (features.hasPara) {
+    server.registerTool(
+      "para_list",
+      {
+        description:
+          "List the caller's PARA spaces with their buckets (Projects/Areas/Resources/Archives). Buckets keep stable keys across renames. With bucket, also returns the direct children (e.g. active projects).",
+        inputSchema: {
+          bucket: z
+            .enum(["projects", "areas", "resources", "archives"])
+            .optional()
+            .describe("Return direct children of this bucket too"),
+          space: z
+            .string()
+            .optional()
+            .describe(
+              "PARA space name or id; 'default' = the rootless space. Omit = all spaces; bucket children resolve in the default space unless space is given.",
+            ),
+        },
       },
-    },
-    async ({ bucket, space }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await paraList(env, user, bucket, space);
-      if (result.kind === "denied") {
-        return textError("Unauthorized");
-      }
-      if (result.kind === "invalid") {
-        return textError(result.error);
-      }
-      return textResult(result.result);
-    },
-  );
+      async ({ bucket, space }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await paraList(env, user, bucket, space);
+        if (result.kind === "denied") {
+          return textError("Unauthorized");
+        }
+        if (result.kind === "invalid") {
+          return textError(result.error);
+        }
+        return textResult(result.result);
+      },
+    );
 
+    server.registerTool(
+      "para_archive_project",
+      {
+        description:
+          "Move a folder inside the Projects bucket into Archives. dated adds a YYYY-MM- prefix to the name. Set dry_run first to preview counts.",
+        inputSchema: {
+          dated: z
+            .boolean()
+            .optional()
+            .describe("Prefix the archived name with YYYY-MM-"),
+          dry_run: z
+            .boolean()
+            .optional()
+            .describe("Report planned counts without writing"),
+          folder_id: z
+            .string()
+            .describe("Folder UUID inside the Projects bucket"),
+          name: z
+            .string()
+            .optional()
+            .describe("Override the archived folder name"),
+        },
+      },
+      async ({ folder_id, dated, name, dry_run }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await paraArchiveProject(
+          env,
+          folder_id,
+          { dated, dryRun: dry_run, name },
+          user,
+        );
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+  }
+
+  // scheme_*/jd_* tools exist only once a naming-scheme folder is configured.
+  if (features.hasSchemes) {
+    server.registerTool(
+      "set_folder_scheme",
+      {
+        description:
+          "Opt-in naming rule for a folder's future children. 'jd' = Johnny.Decimal (10 areas / 10 categories / 100 IDs), 'zettel' = Zettelkasten UTC timestamp IDs (YYYYMMDDHHmm). Existing children keep their names — the scheme only affects new creates. Pass null to clear. Owner only.",
+        inputSchema: {
+          folder_id: z
+            .string()
+            .describe("Folder UUID that declares the naming rule"),
+          scheme: z
+            .enum(["jd", "zettel"])
+            .nullable()
+            .describe("Naming rule to apply, or null to clear"),
+        },
+      },
+      async ({ folder_id, scheme }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await setFolderScheme(env, folder_id, scheme, user);
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+
+    server.registerTool(
+      "scheme_get",
+      {
+        description:
+          "Resolve a naming-scheme ID (e.g. '15.22' or '202609171230') to the folder that carries it in the caller's own drive, and list its direct children.",
+        inputSchema: {
+          id: z
+            .string()
+            .describe("Scheme ID such as '15.22' or '202609171230'"),
+        },
+      },
+      async ({ id }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await schemeGet(env, id, user);
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+
+    server.registerTool(
+      "jd_allocate_id",
+      {
+        description:
+          "Allocate the next Johnny.Decimal ID under a JD folder without creating anything. Under a JD root returns an area ('10-19'), under an area a category ('15'), under a category an ID ('15.22'). Category-local max+1 — gaps are never reused and .00–.10 stay reserved. Errors once a category reaches 100 IDs.",
+        inputSchema: {
+          folder_id: z
+            .string()
+            .describe("JD root, area, or category folder UUID"),
+        },
+      },
+      async ({ folder_id }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await jdAllocateId(env, folder_id, user);
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+
+    server.registerTool(
+      "jd_create_id_folder",
+      {
+        description:
+          "Allocate a Johnny.Decimal ID and create the child folder ('15.22 Title') under a JD root/area/category. title defaults to 無題 — rename later. Pass scheme_id to claim a specific number instead of the next one.",
+        inputSchema: {
+          folder_id: z
+            .string()
+            .describe("JD root, area, or category folder UUID"),
+          scheme_id: z
+            .string()
+            .optional()
+            .describe(
+              "Explicit ID ('10-19' / '15' / '15.22') instead of auto-allocation",
+            ),
+          title: z
+            .string()
+            .optional()
+            .describe("Title after the ID (default 無題)"),
+        },
+      },
+      async ({ folder_id, scheme_id, title }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await createSchemeChild(
+          env,
+          folder_id,
+          { schemeId: scheme_id, title },
+          user,
+        );
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+
+    server.registerTool(
+      "jd_get",
+      {
+        description:
+          "Resolve a Johnny.Decimal ID such as '15.22' to its folder and list the direct children. Same resolution as scheme_get but JD-only.",
+        inputSchema: {
+          id: z.string().describe("JD ID such as '10-19', '15', or '15.22'"),
+        },
+      },
+      async ({ id }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await schemeGet(env, id, user);
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+
+    server.registerTool(
+      "jd_list_category",
+      {
+        description:
+          "List a JD container's numbered children in numeric order — areas under a JD root, categories under an area, IDs under a category.",
+        inputSchema: {
+          folder_id: z
+            .string()
+            .describe("JD root, area, or category folder UUID"),
+        },
+      },
+      async ({ folder_id }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await jdListCategory(env, folder_id, user);
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+
+    server.registerTool(
+      "jd_validate_tree",
+      {
+        description:
+          "Validate the caller's naming-scheme tree: JD area/category/ID counts, naming-pattern deviations ('15.22 Title'), duplicate IDs, reserved .00–.10 usage, and IDs moved outside their expected parent. Returns a structured issue list.",
+        inputSchema: {},
+      },
+      async () => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await validateSchemeTree(env, user);
+        if (result.kind !== "ok") {
+          return moveToolError(result);
+        }
+        return textResult(result.result);
+      },
+    );
+  }
+
+  // §2.6 permanent edit lock — always available (not feature-gated).
   server.registerTool(
-    "para_archive_project",
+    "set_edit_lock",
     {
       description:
-        "Move a folder inside the Projects bucket into Archives. dated adds a YYYY-MM- prefix to the name. Set dry_run first to preview counts.",
+        "Lock or unlock a note for editing. While locked every mutation — body edits, metadata, folder move, delete, sharing — is rejected until explicit unlock (locked=false). There is no timed unlock. Requires canAdmin. Unlocking (locked=false) additionally requires confirm=true.",
       inputSchema: {
-        dated: z
+        confirm: z
           .boolean()
           .optional()
-          .describe("Prefix the archived name with YYYY-MM-"),
-        dry_run: z
-          .boolean()
-          .optional()
-          .describe("Report planned counts without writing"),
-        folder_id: z
-          .string()
-          .describe("Folder UUID inside the Projects bucket"),
-        name: z
-          .string()
-          .optional()
-          .describe("Override the archived folder name"),
-      },
-    },
-    async ({ folder_id, dated, name, dry_run }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await paraArchiveProject(
-        env,
-        folder_id,
-        { dated, dryRun: dry_run, name },
-        user,
-      );
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "set_folder_scheme",
-    {
-      description:
-        "Opt-in naming rule for a folder's future children. 'jd' = Johnny.Decimal (10 areas / 10 categories / 100 IDs), 'zettel' = Zettelkasten UTC timestamp IDs (YYYYMMDDHHmm). Existing children keep their names — the scheme only affects new creates. Pass null to clear. Owner only.",
-      inputSchema: {
-        folder_id: z
-          .string()
-          .describe("Folder UUID that declares the naming rule"),
-        scheme: z
-          .enum(["jd", "zettel"])
-          .nullable()
-          .describe("Naming rule to apply, or null to clear"),
-      },
-    },
-    async ({ folder_id, scheme }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await setFolderScheme(env, folder_id, scheme, user);
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "scheme_get",
-    {
-      description:
-        "Resolve a naming-scheme ID (e.g. '15.22' or '202609171230') to the folder that carries it in the caller's own drive, and list its direct children.",
-      inputSchema: {
-        id: z.string().describe("Scheme ID such as '15.22' or '202609171230'"),
-      },
-    },
-    async ({ id }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await schemeGet(env, id, user);
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "jd_allocate_id",
-    {
-      description:
-        "Allocate the next Johnny.Decimal ID under a JD folder without creating anything. Under a JD root returns an area ('10-19'), under an area a category ('15'), under a category an ID ('15.22'). Category-local max+1 — gaps are never reused and .00–.10 stay reserved. Errors once a category reaches 100 IDs.",
-      inputSchema: {
-        folder_id: z
-          .string()
-          .describe("JD root, area, or category folder UUID"),
-      },
-    },
-    async ({ folder_id }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await jdAllocateId(env, folder_id, user);
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "jd_create_id_folder",
-    {
-      description:
-        "Allocate a Johnny.Decimal ID and create the child folder ('15.22 Title') under a JD root/area/category. title defaults to 無題 — rename later. Pass scheme_id to claim a specific number instead of the next one.",
-      inputSchema: {
-        folder_id: z
-          .string()
-          .describe("JD root, area, or category folder UUID"),
-        scheme_id: z
-          .string()
-          .optional()
           .describe(
-            "Explicit ID ('10-19' / '15' / '15.22') instead of auto-allocation",
+            "Must be true when locked=false (unlock is gated like promote_note's confirm)",
           ),
-        title: z
-          .string()
-          .optional()
-          .describe("Title after the ID (default 無題)"),
-      },
-    },
-    async ({ folder_id, scheme_id, title }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await createSchemeChild(
-        env,
-        folder_id,
-        { schemeId: scheme_id, title },
-        user,
-      );
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "jd_get",
-    {
-      description:
-        "Resolve a Johnny.Decimal ID such as '15.22' to its folder and list the direct children. Same resolution as scheme_get but JD-only.",
-      inputSchema: {
-        id: z.string().describe("JD ID such as '10-19', '15', or '15.22'"),
-      },
-    },
-    async ({ id }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await schemeGet(env, id, user);
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "jd_list_category",
-    {
-      description:
-        "List a JD container's numbered children in numeric order — areas under a JD root, categories under an area, IDs under a category.",
-      inputSchema: {
-        folder_id: z
-          .string()
-          .describe("JD root, area, or category folder UUID"),
-      },
-    },
-    async ({ folder_id }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await jdListCategory(env, folder_id, user);
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "jd_validate_tree",
-    {
-      description:
-        "Validate the caller's naming-scheme tree: JD area/category/ID counts, naming-pattern deviations ('15.22 Title'), duplicate IDs, reserved .00–.10 usage, and IDs moved outside their expected parent. Returns a structured issue list.",
-      inputSchema: {},
-    },
-    async () => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await validateSchemeTree(env, user);
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
-
-  server.registerTool(
-    "set_note_layer",
-    {
-      description:
-        "Set a note's medallion layer directly (bronze|silver|gold). Bypasses promote gates — prefer promote_note for gated promotion. Owner only; audited in layer events.",
-      inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
-        layer: z.enum(["bronze", "silver", "gold"]).describe("Target layer"),
-        reason: z.string().optional().describe("Optional audit reason"),
+        locked: z
+          .boolean()
+          .describe("true to lock (read-only), false to unlock"),
       },
     },
-    async ({ id, layer, reason }) => {
+    async ({ id, locked, confirm }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
       }
-      const result = await setNoteLayer(env, id, layer, reason ?? null, user);
-      if (result.kind !== "ok") {
-        return layerToolError(result);
+      // §2.6: unlocking via MCP requires an explicit confirm so a tool call
+      // cannot silently reopen a preserved note.
+      if (!locked && confirm !== true) {
+        return textError(
+          "confirm=true is required to unlock a note (set_edit_lock with locked=false)",
+        );
       }
-      return textResult(result.result);
+      const result = await notes.setEditLock(id, user, locked);
+      return mutateNoteToolResponse(result);
     },
   );
 
-  server.registerTool(
-    "promote_note",
-    {
-      description:
-        "Promote a note one medallion layer (bronze→silver→gold) through machine-readable gates. Returns {failures:[{code,message}]} when gates fail. Gold additionally requires confirm=true and zero broken links. Owner only.",
-      inputSchema: {
-        confirm: z.boolean().optional().describe("Required for gold promotion"),
-        id: z.string().describe("Note UUID or short ID"),
+  // medallion_* tools exist only once a medallion set is configured.
+  if (features.hasMedallion) {
+    server.registerTool(
+      "medallion_list_sets",
+      {
+        description:
+          "List the caller's medallion layer sets (name + ordered key/label layers) and the folders assigned to them. Medallion layers are folder-level display labels — they do not affect editability (see set_edit_lock).",
+        inputSchema: {},
       },
-    },
-    async ({ id, confirm }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await promoteNote(env, id, confirm, user);
-      if (result.kind === "gates") {
+      async () => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
         return textResult({
-          failures: result.failures,
-          promoted: false,
-          to: result.to,
+          assignments: await listMedallionAssignments(env, user),
+          sets: await listMedallionSets(env, user),
         });
-      }
-      if (result.kind !== "ok") {
-        return layerToolError(result);
-      }
-      return textResult({
-        note: result.result.note,
-        promoted: true,
-        to: result.result.note.layer,
-      });
-    },
-  );
-
-  server.registerTool(
-    "demote_note",
-    {
-      description:
-        "Demote a note to a lower medallion layer. A reason is required and recorded in the audit log. Owner only.",
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        reason: z.string().describe("Why the note is being demoted"),
-        to: z
-          .enum(["bronze", "silver"])
-          .optional()
-          .describe("Target layer (default: one step down)"),
       },
-    },
-    async ({ id, reason, to }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await demoteNote(env, id, reason, to, user);
-      if (result.kind !== "ok") {
-        return layerToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
+    );
 
-  server.registerTool(
-    "unlock_gold_for_edit",
-    {
-      description: `Temporarily unlock a gold-layer note for editing (default ${GOLD_UNLOCK_DEFAULT_MINUTES} min, max ${GOLD_UNLOCK_MAX_MINUTES} min). Edit tools reject gold notes while locked.`,
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        minutes: z
-          .number()
-          .int()
-          .min(1)
-          .max(GOLD_UNLOCK_MAX_MINUTES)
-          .optional()
-          .describe("Unlock window in minutes"),
+    server.registerTool(
+      "medallion_assign_folder",
+      {
+        description:
+          "Assign a medallion set layer to a folder. Descendant folders and their notes inherit the nearest assigned ancestor's layer. One assignment per folder; reassigning overwrites it.",
+        inputSchema: {
+          folder_id: z.string().describe("Folder UUID"),
+          layer: z
+            .string()
+            .describe("Layer key inside the set (e.g. 'output')"),
+          set_id: z.string().describe("Medallion set UUID"),
+        },
       },
-    },
-    async ({ id, minutes }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await unlockGoldForEdit(env, id, minutes, user);
-      if (result.kind !== "ok") {
-        return layerToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
+      async ({ folder_id, set_id, layer }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await assignFolderMedallion(
+          env,
+          user,
+          folder_id,
+          set_id,
+          layer,
+        );
+        if (result.kind !== "ok") {
+          return medallionToolError(result);
+        }
+        return textResult({ assignment: result.result });
+      },
+    );
 
-  server.registerTool(
-    "list_notes_by_layer",
-    {
-      description:
-        "List accessible notes filtered by medallion layer (bronze|silver|gold).",
-      inputSchema: {
-        layer: z.enum(["bronze", "silver", "gold"]),
+    server.registerTool(
+      "medallion_unassign_folder",
+      {
+        description:
+          "Clear a folder's medallion assignment. Descendants then inherit from the next assigned ancestor (or none).",
+        inputSchema: {
+          folder_id: z.string().describe("Folder UUID"),
+        },
       },
-    },
-    async ({ layer }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const result = await listNotesByLayer(env, user, layer);
-      if (result.kind !== "ok") {
-        return layerToolError(result);
-      }
-      return textResult(result.result);
-    },
-  );
+      async ({ folder_id }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        const result = await clearFolderMedallion(env, user, folder_id);
+        if (result.kind !== "ok") {
+          return medallionToolError(result);
+        }
+        return textResult({ cleared: true, folder_id });
+      },
+    );
+  }
 
   return server;
 }

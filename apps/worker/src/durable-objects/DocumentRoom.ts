@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { TaskCheckboxUpdate } from "@miyulabmd/markdown";
 import {
-  GOLD_LOCK_WS_CLOSE_CODE,
-  GOLD_LOCK_WS_CLOSE_REASON,
+  EDIT_LOCK_WS_CLOSE_CODE,
+  EDIT_LOCK_WS_CLOSE_REASON,
   type NoteHistoryActor,
 } from "@miyulabmd/shared";
 import * as decoding from "lib0/decoding";
@@ -27,7 +27,7 @@ import {
   encodeAwarenessNullUpdate,
   nextAwarenessClocks,
 } from "./awareness-sync.ts";
-import { GoldLockRecheck, type GoldLockRow } from "./gold-lock.ts";
+import { EditLockRecheck, type EditLockRow } from "./edit-lock.ts";
 import {
   APPLY_EDIT_ORIGIN,
   APPLY_MARKDOWN_ORIGIN,
@@ -113,8 +113,8 @@ export type ApplyEditResult =
       matches?: number;
     };
 
-const GOLD_LOCKED_MESSAGE =
-  "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.";
+const EDIT_LOCKED_MESSAGE =
+  "edit_locked: this note is edit-locked. Call set_edit_lock first.";
 
 export type TaskCheckboxResult =
   | { checked: boolean; ok: true }
@@ -146,9 +146,9 @@ export class DocumentRoom extends DurableObject<Env> {
       }
     },
   );
-  // X-Can-Edit is fixed at connect time; this re-checks the gold edit
-  // lock against D1 so promote/unlock-expiry take effect mid-session.
-  private readonly goldLock = new GoldLockRecheck(() => this.readGoldLockRow());
+  // X-Can-Edit is fixed at connect time; this re-checks the §2.6 edit
+  // lock against D1 so a mid-session lock/unlock takes effect.
+  private readonly editLock = new EditLockRecheck(() => this.readEditLockRow());
   private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private historyPending = new Map<string, PendingHistorySession>();
   private historyMarkdown = new Map<string, string>();
@@ -237,7 +237,7 @@ export class DocumentRoom extends DurableObject<Env> {
           if (!canEdit) {
             break;
           }
-          if (await this.goldLock.locked()) {
+          if (await this.editLock.locked()) {
             // X-Can-Edit is frozen at connect time, so the client still
             // believes it can edit. Close writable sockets with a permanent
             // app-level code instead of silently dropping the update.
@@ -329,7 +329,7 @@ export class DocumentRoom extends DurableObject<Env> {
   }
 
   /**
-   * The gold lock engaged mid-session. Every socket accepted with
+   * The edit lock engaged mid-session. Every socket accepted with
    * X-Can-Edit=true is revoked and closed with a permanent code so clients
    * flip to read-only; read-only sockets keep syncing/awareness.
    */
@@ -343,7 +343,7 @@ export class DocumentRoom extends DurableObject<Env> {
         }
         attachment.canEdit = false;
         socket.serializeAttachment(attachment);
-        socket.close(GOLD_LOCK_WS_CLOSE_CODE, GOLD_LOCK_WS_CLOSE_REASON);
+        socket.close(EDIT_LOCK_WS_CLOSE_CODE, EDIT_LOCK_WS_CLOSE_REASON);
       } catch {
         // A socket already tearing down needs no revocation.
       }
@@ -368,8 +368,8 @@ export class DocumentRoom extends DurableObject<Env> {
     actor: NoteHistoryActor,
   ): Promise<TaskCheckboxResult> {
     await this.ensureInitialized(noteId);
-    if (await this.goldLock.lockedNow()) {
-      return { error: "locked", message: GOLD_LOCKED_MESSAGE, ok: false };
+    if (await this.editLock.lockedNow()) {
+      return { error: "locked", message: EDIT_LOCKED_MESSAGE, ok: false };
     }
     const doc = this.requireDoc();
     const result = await applyTaskCheckbox(doc.getText("markdown"), input);
@@ -422,8 +422,8 @@ export class DocumentRoom extends DurableObject<Env> {
 
   async applyEdit(input: ApplyEditInput): Promise<ApplyEditResult> {
     await this.ensureInitialized(input.noteId);
-    if (await this.goldLock.lockedNow()) {
-      return { error: "locked", message: GOLD_LOCKED_MESSAGE, ok: false };
+    if (await this.editLock.lockedNow()) {
+      return { error: "locked", message: EDIT_LOCKED_MESSAGE, ok: false };
     }
     const ytext = this.requireDoc().getText("markdown");
     const current = ytext.toString();
@@ -470,8 +470,8 @@ export class DocumentRoom extends DurableObject<Env> {
     actor: NoteHistoryActor,
   ): Promise<ApplyEditResult> {
     await this.ensureInitialized(noteId);
-    if (await this.goldLock.lockedNow()) {
-      return { error: "locked", message: GOLD_LOCKED_MESSAGE, ok: false };
+    if (await this.editLock.lockedNow()) {
+      return { error: "locked", message: EDIT_LOCKED_MESSAGE, ok: false };
     }
     const ytext = this.requireDoc().getText("markdown");
     const current = ytext.toString();
@@ -488,15 +488,15 @@ export class DocumentRoom extends DurableObject<Env> {
     };
   }
 
-  private async readGoldLockRow(): Promise<GoldLockRow | null> {
+  private async readEditLockRow(): Promise<EditLockRow | null> {
     const noteId = await this.ctx.storage.get<string>(STORAGE_NOTE_ID_KEY);
     if (!noteId) {
       return null;
     }
     return db(this.env)
-      .prepare("SELECT layer, gold_unlocked_until FROM notes WHERE id = ?")
+      .prepare("SELECT edit_locked FROM notes WHERE id = ?")
       .bind(noteId)
-      .first<GoldLockRow>();
+      .first<EditLockRow>();
   }
 
   private async ensureInitialized(noteId?: string): Promise<void> {

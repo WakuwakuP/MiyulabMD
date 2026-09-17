@@ -9,7 +9,11 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useOutletContext } from "react-router";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
-import { fetchMe, updateKnowledgeSettings } from "./api.ts";
+import {
+  ensureDefaultMedallionSet,
+  fetchMe,
+  updateKnowledgeSettings,
+} from "./api.ts";
 
 // --- feature registry (specs/knowledge-management.html §2.7) ----------------
 
@@ -51,6 +55,11 @@ export const KNOWLEDGE_FEATURES: Record<KnowledgeFeatureKey, KnowledgeFeature> =
         "フォルダに割り当てる「情報の種類」の表示ラベル（raw / knowledge / output など）。無効化するとメダル表示と割当メニューを隠します。割当データやノートの編集ロックは残ります。",
       key: "layers",
       label: "メダリオン層",
+      // §2.6: enabling the feature seeds the built-in 精緻度 set (idempotent).
+      setup: async () => {
+        const result = await ensureDefaultMedallionSet();
+        return result.ok ? { ok: true } : { error: result.error, ok: false };
+      },
       surfaces: { contextMenu: true, editorHeader: true },
     },
     para: {
@@ -253,6 +262,20 @@ export function useKnowledgeFeatureToggle(
     };
   }, [setUser]);
 
+  // Features with a setup step (e.g. layers seeds 精緻度) run it after the
+  // flag lands. A failed setup surfaces an error but keeps the flag on — the
+  // step is idempotent and retried on the next enable/page visit.
+  const runFeatureSetup = useCallback(
+    async (featureKey: KnowledgeFeatureKey, userId: string) => {
+      const setup = KNOWLEDGE_FEATURES[featureKey].setup;
+      const outcome = await setup?.({ userId });
+      if (outcome && !outcome.ok) {
+        setError(outcome.error ?? "初期データの作成に失敗しました。");
+      }
+    },
+    [],
+  );
+
   const setEnabled = useCallback(
     async (next: boolean) => {
       if (saving) {
@@ -276,9 +299,12 @@ export function useKnowledgeFeatureToggle(
       if (result.data.settings?.knowledge) {
         writeKnowledgeMirror(result.data.id, result.data.settings.knowledge);
       }
+      if (next) {
+        await runFeatureSetup(key, result.data.id);
+      }
       setSaving(false);
     },
-    [key, saving, setUser],
+    [key, saving, setUser, runFeatureSetup],
   );
 
   return { enabled, error, saving, setEnabled };

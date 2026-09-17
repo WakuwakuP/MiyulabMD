@@ -130,37 +130,21 @@ test("folderMenuContext shows the current folder or なし", () => {
   assert.equal(folderMenuContext("  "), "なし");
 });
 
-test("lockMenuContext reports lock state before the layer name", () => {
+test("lockMenuContext reports the edit-lock state and medallion label", () => {
+  assert.equal(lockMenuContext({ editLocked: true }), "ロック中");
+  assert.equal(lockMenuContext({ editLocked: false }), "未ロック");
   assert.equal(
-    lockMenuContext({
-      goldLocked: true,
-      goldUnlockedUntil: null,
-      layer: "gold",
-    }),
-    "ロック中",
-  );
-  assert.equal(
-    lockMenuContext({
-      goldLocked: false,
-      goldUnlockedUntil: Date.now() + 60_000,
-      layer: "gold",
-    }),
-    "解除中",
-  );
-  assert.equal(
-    lockMenuContext({
-      goldLocked: false,
-      goldUnlockedUntil: null,
-      layer: "silver",
-    }),
-    "Silver",
-  );
-  assert.equal(
-    lockMenuContext({
-      goldLocked: false,
-      goldUnlockedUntil: null,
-      layer: "bronze",
-    }),
-    "Bronze",
+    lockMenuContext(
+      { editLocked: false },
+      {
+        assignedPath: "knowledge",
+        layerIndex: 1,
+        layerKey: "knowledge",
+        layerLabel: "知識",
+        setId: "set-1",
+        setName: "精緻度",
+      },
+    ),
+    "知識",
   );
 });

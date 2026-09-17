@@ -80,11 +80,7 @@ class FakeObjectStore {
   readonly name: string;
   private readonly data: StoreData;
 
-  constructor(
-    transaction: FakeTransaction,
-    name: string,
-    data: StoreData,
-  ) {
+  constructor(transaction: FakeTransaction, name: string, data: StoreData) {
     this.transaction = transaction;
     this.name = name;
     this.data = data;
@@ -165,11 +161,7 @@ class FakeTransaction {
   oncomplete: (() => void) | null = null;
   onerror: (() => void) | null = null;
 
-  constructor(
-    backend: FakeBackend,
-    storeNames: string[],
-    mode: string,
-  ) {
+  constructor(backend: FakeBackend, storeNames: string[], mode: string) {
     this.backend = backend;
     this.mode = mode;
     for (const name of storeNames) {
@@ -198,7 +190,7 @@ class FakeTransaction {
     this.pending += 1;
     queueMicrotask(() => {
       try {
-        if (!this.aborted && !this.settled) {
+        if (!(this.aborted || this.settled)) {
           run();
         }
       } catch (error) {
@@ -264,7 +256,10 @@ class FakeDatabase {
     }
   }
 
-  transaction(storeNames: string[] | string, mode = "readonly"): FakeTransaction {
+  transaction(
+    storeNames: string[] | string,
+    mode = "readonly",
+  ): FakeTransaction {
     const names = Array.isArray(storeNames) ? storeNames : [storeNames];
     const transaction = new FakeTransaction(this.backend, names, mode);
     if (idbHarness.abortNextTransaction) {
@@ -287,13 +282,13 @@ const idbHarness = {
     queueMicrotask(() => {
       try {
         let backend = this.databases.get(name);
-        if (!backend) {
+        if (backend) {
+          request.result = new FakeDatabase(backend);
+        } else {
           backend = new FakeBackend();
           this.databases.set(name, backend);
           request.result = new FakeDatabase(backend);
           request.onupgradeneeded?.();
-        } else {
-          request.result = new FakeDatabase(backend);
         }
         request.onsuccess?.();
       } catch (error) {
@@ -396,6 +391,7 @@ class FakeDirectoryHandle {
     return Promise.resolve();
   }
 
+  // biome-ignore lint/suspicious/useAwait: mocks FileSystemDirectoryHandle.entries, which is an async iterator
   async *entries(): AsyncIterableIterator<
     [string, FakeDirectoryHandle | FakeFileHandle]
   > {
@@ -485,12 +481,10 @@ function note(id: string, ownerId: string): Note {
     alias: null,
     articleMeta: {},
     createdAt: 1,
+    editLocked: false,
     folder: "",
     folderId: null,
-    goldLocked: false,
-    goldUnlockedUntil: null,
     id,
-    layer: "bronze",
     markdown: `# ${id}`,
     ownerId,
     permission: "private",
@@ -500,7 +494,7 @@ function note(id: string, ownerId: string): Note {
   };
 }
 
-function folder(id: string | null, ownerId: string): FolderAccess {
+function folder(id: string | null): FolderAccess {
   return {
     children: [],
     crumbs: [],
@@ -554,7 +548,7 @@ test("openOfflineCache completes an interrupted user purge instead of failing", 
   const seeded = await openOfflineCache({ userId });
   await seeded.putNote(note("note-a", userId));
   await seeded.putNoteList([summary("note-a", userId)]);
-  await seeded.putFolder(folder(null, userId), { asDriveRoot: true });
+  await seeded.putFolder(folder(null), { asDriveRoot: true });
   seeded.close();
   assert.ok(opfsUserDirectory(userId), "seeded OPFS data must exist");
 
@@ -681,7 +675,7 @@ test("readCachedDrive treats an interrupted purge as an empty cache", async () =
   const userId = "user-failsoft-1";
   const seeded = await openOfflineCache({ userId });
   await seeded.putNoteList([summary("note-d", userId)]);
-  await seeded.putFolder(folder(null, userId), { asDriveRoot: true });
+  await seeded.putFolder(folder(null), { asDriveRoot: true });
   seeded.close();
   writeMetadata(userEpochKey(userId), `${crypto.randomUUID()}:purging`);
 
@@ -694,7 +688,7 @@ test("readCachedDrive treats an interrupted purge as an empty cache", async () =
 test("readCachedDrive returns cached data on a healthy cache", async () => {
   const userId = "user-failsoft-2";
   const seeded = await openOfflineCache({ userId });
-  await seeded.putFolder(folder("folder-1", userId));
+  await seeded.putFolder(folder("folder-1"));
   await seeded.putNoteList([summary("note-e", userId)]);
   seeded.close();
 

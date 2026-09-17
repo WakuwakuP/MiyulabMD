@@ -59,6 +59,13 @@ type Props = {
   onMove?: (source: TreeDragItem, destFolderId: string | null) => void;
   /** Pinned PARA spaces (with their bucket folders) rendered above the regular tree. */
   paraSpaces?: ParaSpaceSummary[];
+  /**
+   * §2.6 medallion badge lookup by folder path (nearest-ancestor resolution
+   * happens in the caller). Absent = no badges rendered.
+   */
+  medallionForPath?: (
+    path: string | undefined,
+  ) => { medal: string; label: string } | null;
 };
 
 export type MenuTarget =
@@ -253,6 +260,7 @@ type TreeContext = {
   expandable: boolean;
   expansions: ReadonlyMap<string, FolderExpansion>;
   loadMore: (id: string) => void;
+  medallionForPath?: Props["medallionForPath"];
   notes: NoteSummary[];
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
   onMove?: (source: TreeDragItem, destFolderId: string | null) => void;
@@ -419,6 +427,8 @@ function folderRow(
   },
 ) {
   const expansion = ctx.expansions.get(row.id);
+  const medallion = ctx.medallionForPath?.(row.path) ?? null;
+  const meta = folderMeta(row);
   return (
     <Fragment key={`folder:${row.id}`}>
       <DriveRow
@@ -426,7 +436,21 @@ function folderRow(
         href={folderUrl(row.id)}
         icon={<FolderIcon />}
         menuOpen={ctx.openMenuId === row.id}
-        meta={folderMeta(row)}
+        meta={
+          medallion || meta ? (
+            <>
+              {medallion && (
+                <span
+                  className="mr-2 text-xs"
+                  title={`${medallion.label}（メダリオン層）`}
+                >
+                  {medallion.medal}
+                </span>
+              )}
+              {meta}
+            </>
+          ) : undefined
+        }
         name={row.name}
         onMenu={
           ctx.readonly
@@ -727,6 +751,7 @@ export function NoteTree({
   onItemMenu,
   onMove,
   paraSpaces,
+  medallionForPath,
 }: Props) {
   const expandable = Boolean(loadChildren) && !readonly;
   const { expansions, loadMore, retry, toggle } = useFolderExpansions(
@@ -745,6 +770,7 @@ export function NoteTree({
     expandable,
     expansions,
     loadMore,
+    medallionForPath,
     notes,
     onItemMenu,
     onMove,

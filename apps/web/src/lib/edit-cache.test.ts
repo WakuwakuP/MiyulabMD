@@ -68,7 +68,7 @@ type EligibleNote = Parameters<typeof isEditCacheEligible>[0];
 function eligibleNote(overrides: Partial<EligibleNote> = {}): EligibleNote {
   return {
     access: { effectiveWriteScope: "self" },
-    goldLocked: false,
+    editLocked: false,
     ownerId: "user-1",
     ...overrides,
   } as EligibleNote;
@@ -105,17 +105,10 @@ test("ineligible for every write scope except self", () =>
     assert.equal(isEditCacheEligible(eligibleNote(), "user-1"), true);
   }));
 
-test("edit-locked notes are ineligible (gold lock and generic lock)", () =>
+test("edit-locked notes are ineligible (§2.6 permanent lock)", () =>
   withStorage(() => {
     assert.equal(
-      isEditCacheEligible(eligibleNote({ goldLocked: true }), "user-1"),
-      false,
-    );
-    assert.equal(
-      isEditCacheEligible(
-        eligibleNote({ locked: true } as Partial<EligibleNote>),
-        "user-1",
-      ),
+      isEditCacheEligible(eligibleNote({ editLocked: true }), "user-1"),
       false,
     );
   }));

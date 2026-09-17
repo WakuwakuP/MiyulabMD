@@ -1,4 +1,9 @@
-import type { Note, NoteSummary, SessionUser } from "@miyulabmd/shared";
+import type {
+  MedallionResolution,
+  Note,
+  NoteSummary,
+  SessionUser,
+} from "@miyulabmd/shared";
 import { type ReactNode, useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import type { CollabAwareness } from "../../lib/collaboration.ts";
@@ -20,8 +25,8 @@ import {
 } from "../ui/icons.tsx";
 import { MenuItem, MenuPanel, MenuRow, MenuSeparator } from "../ui/Menu.tsx";
 import { MutedText } from "../ui/Text.tsx";
+import { EditLockPanel } from "./EditLockPanel.tsx";
 import { FolderPanelFields } from "./FolderPopover.tsx";
-import { LayerMenuPanel } from "./LayerMenu.tsx";
 import { useAwarenessPeers } from "./PresenceBar.tsx";
 
 type MenuView = "menu" | "folder" | "lock";
@@ -31,8 +36,8 @@ type Props = {
   folder: string;
   folderId: string | null;
   isOwner: boolean;
-  /** §3.3: layers OFF でも編集ロックの解除導線は残すため層操作だけ隠す。 */
-  layersEnabled: boolean;
+  /** Effective (nearest-ancestor) medallion for the note's folder, if any. */
+  medallion?: MedallionResolution | null;
   note: Note;
   user: SessionUser | null;
   onFolderBlur: () => void;
@@ -79,7 +84,7 @@ export function EditorOverflowMenu({
   folder,
   folderId,
   isOwner,
-  layersEnabled,
+  medallion,
   note,
   user,
   onFolderBlur,
@@ -160,7 +165,7 @@ export function EditorOverflowMenu({
               </MenuItem>
               <MenuItem onClick={() => setView("lock")}>
                 <MenuItemLabel
-                  context={lockMenuContext(note)}
+                  context={lockMenuContext(note, medallion)}
                   hasSubview={true}
                   icon={<LockIcon />}
                   label="編集ロック"
@@ -191,7 +196,7 @@ export function EditorOverflowMenu({
               <FolderPanelFields
                 folder={folder}
                 folderId={folderId}
-                isOwner={isOwner}
+                isOwner={isOwner && !note.editLocked}
                 onFolderBlur={onFolderBlur}
                 onFolderChange={onFolderChange}
               />
@@ -206,11 +211,10 @@ export function EditorOverflowMenu({
                 />
               </MenuItem>
               <MenuSeparator />
-              <LayerMenuPanel
+              <EditLockPanel
                 isOwner={isOwner}
                 note={note}
                 onChanged={onNoteChange}
-                showLayerControls={layersEnabled}
               />
             </>
           )}

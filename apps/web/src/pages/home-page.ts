@@ -19,6 +19,8 @@ import type { ContextMenuItem } from "../components/notes/ContextMenu.tsx";
 import type { MenuTarget } from "../components/notes/NoteTree.tsx";
 import type { ApiResult } from "../lib/api.ts";
 import {
+  assignFolderMedallion,
+  clearFolderMedallion,
   createFolder,
   createNote,
   deleteFolder,
@@ -438,6 +440,8 @@ function folderMenuItems(
   options: {
     onArchive: (id: string, name: string) => void;
     onScheme: (id: string, name: string, scheme: string | null) => void;
+    /** §2.6: medallion assignment dialog (layers feature only). */
+    onMedallion?: (id: string, name: string, path?: string) => void;
     projectsPaths: string[];
   },
 ): ContextMenuItem[] {
@@ -457,6 +461,13 @@ function folderMenuItems(
     onSelect: () =>
       options.onScheme(target.id, target.name, target.scheme ?? null),
   });
+  if (options.onMedallion) {
+    items.push({
+      label: "メダリオン層…",
+      onSelect: () =>
+        options.onMedallion?.(target.id, target.name, target.path),
+    });
+  }
   const inProjects = options.projectsPaths.some(
     (path) => target.path?.startsWith(`${path}/`) === true,
   );
@@ -508,6 +519,7 @@ export function handleItemMenu(
   options: {
     onArchive: (id: string, name: string) => void;
     onScheme: (id: string, name: string, scheme: string | null) => void;
+    onMedallion?: (id: string, name: string, path?: string) => void;
     projectsPaths: string[];
   },
 ) {
@@ -597,6 +609,62 @@ export async function persistFolderScheme(
   }
   setters.setSchemeBusy(false);
   setters.setSchemeDialog(null);
+  invalidateFolderCache();
+  await refreshHomeList(
+    folderId,
+    user,
+    navigate,
+    setters.setNotes,
+    setters.setVisibleFolder,
+  );
+}
+
+export type MedallionDialogTarget = {
+  id: string;
+  name: string;
+  path?: string;
+};
+
+/**
+ * §2.6: assign a medallion layer to a folder (`next` = {setId, layer}) or
+ * clear the folder's own assignment (`next` = null). Inherited badges are
+ * recomputed by reloading the assignment list afterwards.
+ */
+export async function persistFolderMedallion(
+  target: MedallionDialogTarget | null,
+  next: { setId: string; layer: string } | null,
+  folderId: string | undefined,
+  user: SessionUser | null,
+  navigate: NavigateFunction,
+  setters: {
+    setMedallionBusy: (busy: boolean) => void;
+    setMedallionDialog: (value: MedallionDialogTarget | null) => void;
+    setMedallionError: (error: string | null) => void;
+    setNotes: (notes: NoteSummary[]) => void;
+    setVisibleFolder: (folder: FolderAccess | null) => void;
+    /** Reloads the medallion set/assignment lists for badges. */
+    onMedallionsChanged: () => void;
+  },
+) {
+  if (!target) {
+    return;
+  }
+  setters.setMedallionBusy(true);
+  setters.setMedallionError(null);
+  const result = next
+    ? await assignFolderMedallion(target.id, {
+        layer: next.layer,
+        setId: next.setId,
+      })
+    : await clearFolderMedallion(target.id);
+  if (!result.ok) {
+    setters.setMedallionError(result.error);
+    setters.setMedallionBusy(false);
+    return;
+  }
+  setters.setMedallionBusy(false);
+  setters.setMedallionDialog(null);
+  setters.onMedallionsChanged();
   invalidateFolderCache();
   await refreshHomeList(
     folderId,

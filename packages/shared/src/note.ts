@@ -1,5 +1,4 @@
 import type { ArticleMeta } from "./article.ts";
-import type { NoteLayer } from "./layers.ts";
 import type {
   AccessScope,
   CollaboratorRole,
@@ -68,6 +67,23 @@ export type NoteRevisionRestore = {
 
 export const NOTE_RESTORE_MESSAGE =
   "今の本文を、選んだ時点の全文で置き換えました。同時に編集していた内容は上書きされます。";
+
+// --- edit lock (§2.6) -------------------------------------------------------
+
+/**
+ * Error code returned by mutation APIs while a note's `edit_locked` flag is
+ * set. Locked notes allow reads and explicit unlock only — body edits,
+ * delete, folder move, rename, and access changes are all rejected.
+ */
+export const EDIT_LOCKED_CODE = "edit_locked";
+
+/**
+ * WebSocket close code DocumentRoom uses when the edit lock engages
+ * mid-session. The 4400-4499 range is the app-level "permanent" convention:
+ * clients must treat the note as read-only instead of retrying the write.
+ */
+export const EDIT_LOCK_WS_CLOSE_CODE = 4403;
+export const EDIT_LOCK_WS_CLOSE_REASON = "edit_locked";
 
 export function isNoteHistoryActorKind(
   value: string,
@@ -145,11 +161,12 @@ export type Note = {
   folderSchemeId?: string | null;
   /** Title part of the containing folder's scheme name. */
   folderSchemeTitle?: string | null;
-  /** Medallion layer. Gold notes reject body edits while locked. */
-  layer: NoteLayer;
-  /** True when layer === 'gold' and the unlock window has expired/absent. */
-  goldLocked: boolean;
-  goldUnlockedUntil: number | null;
+  /**
+   * §2.6 permanent per-note edit lock. While true every mutation (body,
+   * metadata, move, delete, sharing) is rejected; only reads and explicit
+   * unlock are allowed. Independent of medallion folder layers.
+   */
+  editLocked: boolean;
   permission: PermissionPreset;
   access: NoteAccess;
   markdown: string;

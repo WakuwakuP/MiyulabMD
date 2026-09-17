@@ -49,17 +49,14 @@ export function editCacheDocName(userId: string, noteId: string): string {
  * 資格判定に必要なノート情報だけを持つ構造型。
  * `Note` はこの型を満たす。
  */
-export type EditCacheNote = Pick<Note, "ownerId" | "access" | "goldLocked"> & {
-  /** 汎用編集ロック（導入予定）。サーバーが返し始めたらロック中として扱う。 */
-  locked?: boolean;
-};
+export type EditCacheNote = Pick<Note, "ownerId" | "access" | "editLocked">;
 
 /**
- * 現在のロック意味論: gold 層ロック（`goldLocked` = layer === 'gold' かつ
- * 解除ウィンドウなし/期限切れ）。汎用の「編集ロック」に分離されたらここを更新する。
+ * §2.6 編集ロック: `editLocked` = サーバーの永続的なロックフラグ。
+ * ロック中は本文・メタ・移動・削除すべてが拒否される（解除のみ可）。
  */
 export function isNoteEditLocked(note: EditCacheNote): boolean {
-  return note.goldLocked === true || note.locked === true;
+  return note.editLocked === true;
 }
 
 /**

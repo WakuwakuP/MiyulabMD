@@ -4,17 +4,15 @@ import {
   type CreateNoteInput,
   clampWriteScope,
   defaultNoteMarkdown,
+  EDIT_LOCKED_CODE,
   ensureArticleMarkdown,
   type FolderAccess,
   folderContains,
   type GrepResult,
   isAccessScope,
-  isGoldLockedAt,
-  isNoteLayer,
   isPermissionPreset,
   matchArticleSource,
   type Note,
-  type NoteLayer,
   type NoteSearchHit,
   type NoteSearchPage,
   type NoteSummary,
@@ -65,7 +63,11 @@ import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
 import { schemeNoteTitlePrefix } from "./schemes.ts";
 import { createLineMatcher, type GrepScanOptions, grepRows } from "./search.ts";
-import { resolveSearchDsl, rowMatchesSearchDsl } from "./search-dsl.ts";
+import {
+  applyLayerOption,
+  resolveSearchDsl,
+  rowMatchesSearchDsl,
+} from "./search-dsl.ts";
 
 export type NoteRow = {
   id: string;
@@ -82,8 +84,7 @@ export type NoteRow = {
   created_at: number;
   updated_at: number;
   article_meta: string | null;
-  layer: string | null;
-  gold_unlocked_until: number | null;
+  edit_locked: number;
 };
 
 const SHORT_ID_CHARS =
@@ -91,10 +92,10 @@ const SHORT_ID_CHARS =
 const ANONYMOUS_OWNER_EMAIL = "anonymous@miyulabmd.local";
 export const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
                   markdown_snapshot, snapshot_updated_at, created_at, updated_at, article_meta,
-                  layer, gold_unlocked_until`;
+                  edit_locked`;
 const NOTE_COLUMNS_N = `n.id, n.short_id, n.alias, n.owner_id, n.title, n.folder, n.permission, n.read_scope, n.write_scope,
                   n.markdown_snapshot, n.snapshot_updated_at, n.created_at, n.updated_at, n.article_meta,
-                  n.layer, n.gold_unlocked_until`;
+                  n.edit_locked`;
 
 function parseStoredScope(value: string | null): AccessScope | null {
   return value && isAccessScope(value) ? value : null;
@@ -140,14 +141,12 @@ async function toNote(
     alias: row.alias,
     articleMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
     createdAt: row.created_at,
+    editLocked: row.edit_locked === 1,
     folder: isOwner ? folder : "",
     folderId: visibleFolderId,
     folderSchemeId,
     folderSchemeTitle,
-    goldLocked: isGoldLockedAt(row.layer, row.gold_unlocked_until),
-    goldUnlockedUntil: row.gold_unlocked_until ?? null,
     id: row.id,
-    layer: isNoteLayer(row.layer ?? "") ? (row.layer as NoteLayer) : "bronze",
     markdown: row.markdown_snapshot,
     ownerId: row.owner_id,
     permission: derivedPermission(access),
@@ -192,7 +191,7 @@ async function generateUniqueShortId(env: Env): Promise<string> {
 
 /**
  * DocumentRoom から D1 へ markdown_snapshot をデバウンス書き込みする。
- * "rejected" は確定的な拒否（gold ロック・ノート削除済み）を意味し、
+ * "rejected" は確定的な拒否（編集ロック・ノート削除済み）を意味し、
  * outbox は pending を捨ててリトライも保存通知もしない。
  */
 export async function persistMarkdownSnapshot(
@@ -204,10 +203,10 @@ export async function persistMarkdownSnapshot(
   if (!before) {
     return "rejected";
   }
-  // Durable boundary for the gold edit lock: X-Can-Edit is frozen at WS
-  // connect time, so a note promoted to gold (or whose unlock expired)
-  // must not accept snapshot writes from an already-connected session.
-  if (isGoldLockedAt(before.layer, before.gold_unlocked_until)) {
+  // Durable boundary for the §2.6 edit lock: X-Can-Edit is frozen at WS
+  // connect time, so a note locked mid-session must not accept snapshot
+  // writes from an already-connected session.
+  if (before.edit_locked === 1) {
     return "rejected";
   }
   const now = Date.now();
@@ -744,12 +743,12 @@ export type MutateNoteResult =
 export type RemoveFolderResult =
   | { kind: "ok" }
   | { kind: "not_found" }
-  | { kind: "denied"; status: 401 | 403 };
+  | { kind: "denied"; status: 401 | 403; code?: string };
 
 export type RenameFolderResult =
   | { kind: "ok"; access: FolderAccess }
   | { kind: "not_found" }
-  | { kind: "denied"; status: 401 | 403 }
+  | { kind: "denied"; status: 401 | 403; code?: string }
   | { kind: "invalid"; error: string; status: number };
 
 async function folderNoteVisibleTo(
@@ -833,6 +832,29 @@ function hasAdminMetaFields(input: UpdateNoteMetaInput): boolean {
   );
 }
 
+/**
+ * §2.6 permission gate for updateMeta: title edits need canEdit, admin fields
+ * need canAdmin, and every metadata mutation is blocked while edit-locked.
+ */
+function metaWriteDenied(
+  env: Env,
+  row: NoteRow,
+  flags: Note["access"]["flags"],
+  input: UpdateNoteMetaInput,
+  user: SessionUser | undefined,
+): MutateNoteResult | null {
+  if (input.title !== undefined && !flags.canEdit) {
+    return mutateDenied(env, row.owner_id, flags, user);
+  }
+  if (hasAdminMetaFields(input) && !flags.canAdmin) {
+    return mutateDenied(env, row.owner_id, flags, user);
+  }
+  if (row.edit_locked === 1) {
+    return { code: EDIT_LOCKED_CODE, kind: "denied", status: 403 };
+  }
+  return null;
+}
+
 function nextMetaValues(row: NoteRow, input: UpdateNoteMetaInput) {
   return {
     alias: input.alias === undefined ? row.alias : input.alias,
@@ -873,6 +895,23 @@ function folderOwnerDenied(
     return { kind: "denied", status: user === undefined ? 401 : 403 };
   }
   return null;
+}
+
+/** §2.6: count edit-locked notes inside a folder subtree ("" = drive root). */
+export async function lockedNotesInFolder(
+  env: Env,
+  ownerId: string,
+  folder: string,
+): Promise<number> {
+  const row = await db(env)
+    .prepare(
+      `SELECT COUNT(*) AS c FROM notes
+        WHERE owner_id = ? AND edit_locked = 1
+          AND (folder = ? OR folder LIKE ? ESCAPE '\\')`,
+    )
+    .bind(ownerId, folder, `${escapeLikePattern(folder)}/%`)
+    .first<{ c: number }>();
+  return row?.c ?? 0;
 }
 
 async function deleteOwnedNotesInFolder(
@@ -1313,6 +1352,10 @@ export function createNoteService(env: Env) {
               : 403,
         };
       }
+      // §2.6: delete is a mutation — blocked while edit_locked.
+      if (row.edit_locked === 1) {
+        return { code: EDIT_LOCKED_CODE, kind: "denied", status: 403 };
+      }
 
       await createImageService(env).deleteAllForNote(row.id);
       await deleteRevisionsForNote(env, row.id);
@@ -1358,6 +1401,11 @@ export function createNoteService(env: Env) {
       if (!rec.folder) {
         return { kind: "denied", status: 403 };
       }
+      // §2.6: deleting a folder deletes its notes — refuse while any of them
+      // is edit-locked.
+      if ((await lockedNotesInFolder(env, rec.owner_id, rec.folder)) > 0) {
+        return { code: EDIT_LOCKED_CODE, kind: "denied", status: 403 };
+      }
 
       await deleteOwnedNotesInFolder(env, rec.owner_id, rec.folder);
       await deleteArticleSourcesInFolder(env, rec.owner_id, rec.folder);
@@ -1377,6 +1425,11 @@ export function createNoteService(env: Env) {
       const validated = await validateRenameFolder(env, rec, name, user);
       if (!("nextPath" in validated)) {
         return validated;
+      }
+      // §2.6: a rename moves every note under the folder — refuse while any
+      // of them is edit-locked.
+      if ((await lockedNotesInFolder(env, rec.owner_id, rec.folder)) > 0) {
+        return { code: EDIT_LOCKED_CODE, kind: "denied", status: 403 };
       }
 
       await relocateFolderTree(
@@ -1415,7 +1468,8 @@ export function createNoteService(env: Env) {
         query: string;
         scope?: SearchScope;
         folderId?: string;
-        layer?: NoteLayer;
+        /** §2.6 medallion layer filter: `key` or `set.key` (same as layer:). */
+        layer?: string;
         limit?: number;
         cursor?: string;
       },
@@ -1423,9 +1477,7 @@ export function createNoteService(env: Env) {
       const scope = options.scope ?? "all";
       const parsed = parseSearchQuery(options.query);
       const resolved = await resolveSearchDsl(env, user, parsed);
-      if (options.layer) {
-        resolved.layers.push({ negated: false, value: options.layer });
-      }
+      await applyLayerOption(env, user, resolved, options.layer);
       if (resolved.empty) {
         return { kind: "ok", nextCursor: null, notes: [] };
       }
@@ -1498,6 +1550,36 @@ export function createNoteService(env: Env) {
       return { grep, notes, query: trimmed };
     },
 
+    /**
+     * §2.6 permanent edit lock. The only mutation allowed on a locked note:
+     * setting `locked` to false. Locking/unlocking requires admin rights.
+     */
+    async setEditLock(
+      idOrShortId: string,
+      user: SessionUser | undefined,
+      locked: boolean,
+    ): Promise<MutateNoteResult> {
+      const row = await findNoteRow(env, idOrShortId);
+      if (!row) {
+        return { kind: "not_found" };
+      }
+
+      const current = await toNote(env, row, user);
+      if (!current.access.flags.canAdmin) {
+        return mutateDenied(env, row.owner_id, current.access.flags, user);
+      }
+
+      await db(env)
+        .prepare("UPDATE notes SET edit_locked = ? WHERE id = ?")
+        .bind(locked ? 1 : 0, row.id)
+        .run();
+      const updated = await findNoteRow(env, row.id);
+      if (!updated) {
+        throw new Error("note update failed");
+      }
+      return { kind: "ok", note: await toNote(env, updated, user) };
+    },
+
     async updateMarkdown(
       idOrShortId: string,
       user: SessionUser | undefined,
@@ -1522,9 +1604,9 @@ export function createNoteService(env: Env) {
               : 403,
         };
       }
-      // gold 層はポリシーロック: unlock_gold_for_edit の期限中のみ編集可。
-      if (isGoldLockedAt(row.layer, row.gold_unlocked_until)) {
-        return { code: "gold_locked", kind: "denied", status: 403 };
+      // §2.6 permanent edit lock: body edits are rejected until unlock.
+      if (row.edit_locked === 1) {
+        return { code: EDIT_LOCKED_CODE, kind: "denied", status: 403 };
       }
 
       const now = Date.now();
@@ -1557,12 +1639,9 @@ export function createNoteService(env: Env) {
       const current = await toNote(env, row, user);
       const flags = current.access.flags;
 
-      if (input.title !== undefined && !flags.canEdit) {
-        return mutateDenied(env, row.owner_id, flags, user);
-      }
-
-      if (hasAdminMetaFields(input) && !flags.canAdmin) {
-        return mutateDenied(env, row.owner_id, flags, user);
+      const denied = metaWriteDenied(env, row, flags, input, user);
+      if (denied) {
+        return denied;
       }
 
       const scopes = scopesFromInput(env, input, {

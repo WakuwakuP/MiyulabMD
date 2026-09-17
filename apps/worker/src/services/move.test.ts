@@ -23,6 +23,7 @@ const MIGRATIONS = [
   "0013_medallion_layers.sql",
   "0014_notes_fts.sql",
   "0016_para_spaces.sql",
+  "0017_medallion_sets_edit_lock.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {

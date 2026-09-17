@@ -1,9 +1,15 @@
 import type {
   FolderAccess,
   FolderRecord,
+  MedallionAssignment,
+  MedallionSet,
   NoteSummary,
   ParaSpaceSummary,
   SchemeSuggestion,
+} from "@miyulabmd/shared";
+import {
+  medalForLayerKey,
+  resolveMedallionAssignment,
 } from "@miyulabmd/shared";
 import {
   type MouseEvent,
@@ -21,6 +27,7 @@ import { ConfirmDialog } from "../components/notes/ConfirmDialog.tsx";
 import { ContextMenu } from "../components/notes/ContextMenu.tsx";
 import { DrivePlaceNav } from "../components/notes/DrivePlaceNav.tsx";
 import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
+import { MedallionDialog } from "../components/notes/MedallionDialog.tsx";
 import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
 import { SchemeDialog } from "../components/notes/SchemeDialog.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
@@ -30,6 +37,8 @@ import { ErrorText } from "../components/ui/Text.tsx";
 import {
   archiveParaProject,
   fetchFolderChildren,
+  fetchMedallionAssignments,
+  fetchMedallionSets,
   fetchSchemeSuggestion,
   moveFolder,
   moveNotes,
@@ -59,9 +68,11 @@ import {
   homeListFlags,
   inheritLabelFor,
   loadParaSpaces,
+  type MedallionDialogTarget,
   type MenuState,
   openFolderShare,
   openNoteShare,
+  persistFolderMedallion,
   persistFolderScheme,
   persistHomeDelete,
   persistHomeShare,
@@ -170,10 +181,17 @@ function HomePageDialogs({
   schemeBusy,
   schemeError,
   schemeSuggestion,
+  medallionAssignments,
+  medallionDialog,
+  medallionBusy,
+  medallionError,
+  medallionSets,
   share,
   shareError,
   shareLink,
+  onCloseMedallion,
   onCloseMenu,
+  onPersistMedallion,
   onCreateFolder,
   onCloseCreateFolder,
   onRenameFolder,
@@ -212,10 +230,31 @@ function HomePageDialogs({
   onCloseConfirm: () => void;
   onPersistScheme: (scheme: string | null) => void;
   onCloseScheme: () => void;
+  medallionAssignments: MedallionAssignment[];
+  medallionDialog: MedallionDialogTarget | null;
+  medallionBusy: boolean;
+  medallionError: string | null;
+  medallionSets: MedallionSet[];
+  onCloseMedallion: () => void;
+  onPersistMedallion: (next: { setId: string; layer: string } | null) => void;
   onPersistShare: (next: AccessDraft) => void;
   onCloseShare: () => void;
 }) {
   const copy = confirm ? confirmCopy(confirm) : null;
+  const medallionCurrent = medallionDialog
+    ? (medallionAssignments.find(
+        (assignment) => assignment.folderId === medallionDialog.id,
+      ) ?? null)
+    : null;
+  // Inherited = nearest assignment above this folder's own path.
+  const medallionParentPath = medallionDialog?.path
+    ?.split("/")
+    .slice(0, -1)
+    .join("/");
+  const medallionInherited =
+    medallionDialog && !medallionCurrent && medallionParentPath !== undefined
+      ? resolveMedallionAssignment(medallionAssignments, medallionParentPath)
+      : null;
   return (
     <>
       {menu && (
@@ -233,6 +272,33 @@ function HomePageDialogs({
           onClose={onCloseCreateFolder}
           onSubmit={onCreateFolder}
           suggestion={schemeSuggestion}
+        />
+      )}
+      {medallionDialog && (
+        <MedallionDialog
+          busy={medallionBusy}
+          current={
+            medallionCurrent
+              ? {
+                  layerKey: medallionCurrent.layerKey,
+                  setId: medallionCurrent.setId,
+                }
+              : null
+          }
+          error={medallionError}
+          folderName={medallionDialog.name}
+          inherited={
+            medallionInherited
+              ? {
+                  assignedPath: medallionInherited.path,
+                  layerLabel: medallionInherited.layerLabel,
+                }
+              : null
+          }
+          onClear={() => onPersistMedallion(null)}
+          onClose={onCloseMedallion}
+          onSubmit={(setId, layer) => onPersistMedallion({ layer, setId })}
+          sets={medallionSets}
         />
       )}
       {schemeDialog && (
@@ -298,6 +364,7 @@ function HomePageView({
   cacheWarning,
   flags,
   menu,
+  medallionForPath,
   onItemMenu,
   onMove,
   paraSpaces,
@@ -313,6 +380,9 @@ function HomePageView({
   cacheWarning: string | null;
   flags: ReturnType<typeof homeListFlags>;
   menu: MenuState | null;
+  medallionForPath?: (
+    path: string | undefined,
+  ) => { medal: string; label: string } | null;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
   onMove:
     | ((source: TreeDragItem, destFolderId: string | null) => void)
@@ -351,6 +421,7 @@ function HomePageView({
           currentFolderId={visibleFolder?.id ?? null}
           isDriveRoot={flags.isDriveRoot}
           loadChildren={loadChildren}
+          medallionForPath={medallionForPath}
           notes={notes}
           onItemMenu={onItemMenu}
           onMove={onMove}
@@ -376,6 +447,8 @@ function NetworkHomePage() {
     useOutletContext<AppShellContext>();
   // §2.4 opt-in: PARA UI and /api/para calls only exist while the flag is on.
   const paraEnabled = useKnowledgeFeature("para");
+  // §2.6: medallion UI (folder menu item, tree badges) is feature-gated too.
+  const layersEnabled = useKnowledgeFeature("layers");
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(null);
   const [folderPending, setFolderPending] = useState(true);
@@ -421,6 +494,14 @@ function NetworkHomePage() {
   const [schemeError, setSchemeError] = useState<string | null>(null);
   const [schemeSuggestion, setSchemeSuggestion] =
     useState<SchemeSuggestion | null>(null);
+  const [medallionSets, setMedallionSets] = useState<MedallionSet[]>([]);
+  const [medallionAssignments, setMedallionAssignments] = useState<
+    MedallionAssignment[]
+  >([]);
+  const [medallionDialog, setMedallionDialog] =
+    useState<MedallionDialogTarget | null>(null);
+  const [medallionBusy, setMedallionBusy] = useState(false);
+  const [medallionError, setMedallionError] = useState<string | null>(null);
 
   const flags = homeListFlags({
     error,
@@ -458,6 +539,47 @@ function NetworkHomePage() {
     }
     setParaSpaces([]);
   }, [user, paraEnabled, reloadPara]);
+
+  const reloadMedallions = useCallback(() => {
+    if (!(user && layersEnabled)) {
+      setMedallionSets([]);
+      setMedallionAssignments([]);
+      return;
+    }
+    void fetchMedallionSets({ viewerId: user.id }).then((result) => {
+      if (result.ok) {
+        setMedallionSets(result.data.sets);
+      }
+    });
+    void fetchMedallionAssignments({ viewerId: user.id }).then((result) => {
+      if (result.ok) {
+        setMedallionAssignments(result.data.assignments);
+      }
+    });
+  }, [user, layersEnabled]);
+
+  useEffect(() => {
+    reloadMedallions();
+  }, [reloadMedallions]);
+
+  // Nearest-ancestor badge lookup for tree rows (§2.6).
+  const medallionForPath = useCallback(
+    (path: string | undefined) => {
+      if (!(layersEnabled && path)) {
+        return null;
+      }
+      const assignment = resolveMedallionAssignment(medallionAssignments, path);
+      if (!assignment) {
+        return null;
+      }
+      const set = medallionSets.find((entry) => entry.id === assignment.setId);
+      return {
+        label: assignment.layerLabel,
+        medal: medalForLayerKey(set?.layers ?? [], assignment.layerKey),
+      };
+    },
+    [layersEnabled, medallionAssignments, medallionSets],
+  );
 
   // 作成ダイアログを開いたら親フォルダの命名規則から「次の番号」ヒントを引く。
   useEffect(() => {
@@ -721,6 +843,11 @@ function NetworkHomePage() {
           folderRename={folderRename}
           folderRenameError={folderRenameError}
           folderRenaming={folderRenaming}
+          medallionAssignments={medallionAssignments}
+          medallionBusy={medallionBusy}
+          medallionDialog={medallionDialog}
+          medallionError={medallionError}
+          medallionSets={medallionSets}
           menu={menu}
           onCloseConfirm={() => {
             if (!confirmBusy) {
@@ -730,6 +857,11 @@ function NetworkHomePage() {
           onCloseCreateFolder={() => {
             if (!folderCreating) {
               setFolderCreateOpen(false);
+            }
+          }}
+          onCloseMedallion={() => {
+            if (!medallionBusy) {
+              setMedallionDialog(null);
             }
           }}
           onCloseMenu={() => setMenu(null)}
@@ -773,6 +905,23 @@ function NetworkHomePage() {
                 setShareError,
               },
               { useScheme: schemeSuggestion !== null },
+            );
+          }}
+          onPersistMedallion={(next) => {
+            void persistFolderMedallion(
+              medallionDialog,
+              next,
+              folderId,
+              user,
+              navigate,
+              {
+                onMedallionsChanged: reloadMedallions,
+                setMedallionBusy,
+                setMedallionDialog,
+                setMedallionError,
+                setNotes,
+                setVisibleFolder,
+              },
             );
           }}
           onPersistScheme={(scheme) => {
@@ -829,6 +978,7 @@ function NetworkHomePage() {
       error={error}
       flags={flags}
       folderId={folderId}
+      medallionForPath={medallionForPath}
       menu={menu}
       notes={notes}
       onItemMenu={(event, target) => {
@@ -854,6 +1004,12 @@ function NetworkHomePage() {
           },
           {
             onArchive: onArchiveProject,
+            onMedallion: layersEnabled
+              ? (id, name, path) => {
+                  setMedallionDialog({ id, name, path });
+                  setMedallionError(null);
+                }
+              : undefined,
             onScheme: (id, name, scheme) => {
               setSchemeDialog({ id, name, scheme });
               setSchemeError(null);

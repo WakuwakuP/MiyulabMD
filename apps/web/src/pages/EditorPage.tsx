@@ -1,7 +1,13 @@
 import type { WikiLinkMap } from "@miyulabmd/markdown";
-import type { ArticleSource, Note, NoteSummary } from "@miyulabmd/shared";
+import type {
+  ArticleSource,
+  MedallionResolution,
+  Note,
+  NoteSummary,
+} from "@miyulabmd/shared";
 import {
   matchArticleSource,
+  medalForLayerIndex,
   normalizeFolder,
   titleFromMarkdown,
   validateArticleDocument,
@@ -41,6 +47,7 @@ import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
+import { resolveMedallion } from "../lib/api.ts";
 import { cn } from "../lib/cn.ts";
 import type { YjsSession } from "../lib/collaboration.ts";
 import type { EditorMode } from "../lib/editor-mode.ts";
@@ -289,7 +296,7 @@ function EditorWorkspace({
   yMarkdown: YjsSession["yMarkdown"] | undefined;
   awareness: YjsSession["awareness"] | undefined;
   canEdit: boolean;
-  /** Share/history stay usable while a gold lock freezes the body. */
+  /** False while paused or edit-locked — §2.6 blocks share/folder mutations too. */
   canManage: boolean;
   splitScroll: number;
   shareOpen: boolean;
@@ -429,10 +436,10 @@ function EditorPageView({
           未送信の編集あり（オフライン）
         </p>
       )}
-      {note.goldLocked && (
+      {note.editLocked && (
         <p className="px-5 py-2" role="status">
-          このノートは Gold（Canonical）としてロックされています。
-          ヘッダーの「⋯」メニューの「編集ロック」から一時解除できます。
+          このノートは編集ロックされています。ヘッダーの「⋯」メニューの
+          「編集ロック」から解除できます。
         </p>
       )}
       {workspace}
@@ -450,7 +457,7 @@ function EditorHeaderEnd({
   folder,
   folderId,
   isOwner,
-  layersEnabled,
+  medallion,
   note,
   user,
   onFolderChange,
@@ -465,7 +472,7 @@ function EditorHeaderEnd({
   folder: string;
   folderId: string | null;
   isOwner: boolean;
-  layersEnabled: boolean;
+  medallion: MedallionResolution | null;
   note: Note;
   user: AppShellContext["user"];
   onFolderChange: (folder: string) => void;
@@ -484,7 +491,7 @@ function EditorHeaderEnd({
         <FolderPopover
           folder={folder}
           folderId={folderId}
-          isOwner={isOwner}
+          isOwner={isOwner && !note.editLocked}
           onFolderBlur={onFolderBlur}
           onFolderChange={onFolderChange}
         />
@@ -494,7 +501,7 @@ function EditorHeaderEnd({
         folder={folder}
         folderId={folderId}
         isOwner={isOwner}
-        layersEnabled={layersEnabled}
+        medallion={medallion}
         note={note}
         onFolderBlur={onFolderBlur}
         onFolderChange={onFolderChange}
@@ -565,6 +572,7 @@ export function EditorPage() {
   const { user, userLoading, viewer, viewing, setHeader, openSearch } =
     useOutletContext<AppShellContext>();
   const layersEnabled = useKnowledgeFeature("layers");
+  const [medallion, setMedallion] = useState<MedallionResolution | null>(null);
   const [note, setNote] = useState<Note | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [folder, setFolder] = useState("");
@@ -611,9 +619,11 @@ export function EditorPage() {
       : null;
   const flags = ownerFlags(user, note);
   const readReady = currentReadState?.phase === "success" && !loading;
-  const goldLocked = Boolean(note?.goldLocked);
+  // §2.6: edit_locked freezes every mutation (body, folder, share, delete)
+  // until explicitly unlocked — including for the owner.
+  const editLocked = Boolean(note?.editLocked);
   const canEdit = flags.canEdit && readSource === "network" && readReady;
-  const viewMode: EditorMode = canEdit && !goldLocked ? mode : "preview";
+  const viewMode: EditorMode = canEdit && !editLocked ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
   const noteLinks = useNoteLinks(
@@ -633,9 +643,9 @@ export function EditorPage() {
   // Read readiness is sticky for this session: a disconnect must not unmount
   // the editor or replace its local document with the network/cache snapshot.
   const paused = ready && !collabWritable;
-  const canMutate = canEdit && !paused;
-  // Gold lock freezes the body only — folder/share metadata stays editable.
-  const bodyEditable = canMutate && !goldLocked;
+  // §2.6: edit lock freezes all mutations, not just the body.
+  const canMutate = canEdit && !paused && !editLocked;
+  const bodyEditable = canMutate;
 
   useLayoutEffect(() => {
     hydratedRef.current = false;
@@ -763,6 +773,32 @@ export function EditorPage() {
 
   useEffect(() => subscribeArticleSources(user, setArticleSources), [user]);
 
+  // §2.6: resolve the note's effective medallion from its folder ancestry.
+  // Layers OFF or a network-miss both render no badge (display-only data).
+  const noteFolder = note?.folder;
+  useEffect(() => {
+    if (!(layersEnabled && noteFolder) || readSource !== "network") {
+      setMedallion(null);
+      return;
+    }
+    let cancelled = false;
+    void resolveMedallion(noteFolder).then(
+      (result) => {
+        if (!cancelled) {
+          setMedallion(result.ok ? result.data.medallion : null);
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setMedallion(null);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [layersEnabled, noteFolder, readSource]);
+
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);
     if (!loading) {
@@ -795,11 +831,11 @@ export function EditorPage() {
       hydrated: hydratedRef.current,
       note: canEdit ? note : null,
       noteId: canEdit ? noteId : undefined,
-      onGoldLocked: () => {
+      onEditLocked: () => {
         // The server closed the writable session: reflect the lock so the
-        // body flips to read-only and the gold-lock banner appears.
+        // body flips to read-only and the lock banner appears.
         setNote((current) =>
-          current ? { ...current, goldLocked: true } : current,
+          current ? { ...current, editLocked: true } : current,
         );
       },
       sessionRef,
@@ -846,7 +882,7 @@ export function EditorPage() {
       folder,
       isCurrent: () => viewScope?.isCurrent() === true,
       isOwner: flags.isOwner,
-      layersEnabled,
+      medallion,
       note,
       onOpenSearch: openSearch,
       paused,
@@ -871,7 +907,7 @@ export function EditorPage() {
     awareness,
     folder,
     flags.isOwner,
-    layersEnabled,
+    medallion,
     openSearch,
     paused,
     readSource,
@@ -955,7 +991,7 @@ function bindEditorHeader(input: {
   readSource: "pending" | "network" | "cache";
   awareness: YjsSession["awareness"] | undefined;
   isOwner: boolean;
-  layersEnabled: boolean;
+  medallion: MedallionResolution | null;
   user: AppShellContext["user"];
   onOpenSearch: () => void;
   setHeader: AppShellContext["setHeader"];
@@ -978,8 +1014,17 @@ function bindEditorHeader(input: {
   input.setHeader({
     actions: (
       <span className="flex items-center gap-2">
-        {/* KM-E2: フォルダのメダリオン割当を解決して medal を渡す（§3.1 中央スロット） */}
-        <MedalBadge medal={null} />
+        {/* §3.1 中央スロット: フォルダのメダリオン割当（最寄祖先）を表示する */}
+        <MedalBadge
+          medal={
+            input.medallion
+              ? {
+                  medal: medalForLayerIndex(input.medallion.layerIndex),
+                  path: input.folder || input.medallion.assignedPath,
+                }
+              : null
+          }
+        />
         <EditorModeSwitch
           canEdit={input.canEdit}
           onChange={(next) =>
@@ -996,7 +1041,7 @@ function bindEditorHeader(input: {
           folder={input.folder}
           folderId={input.note.folderId}
           isOwner={input.isOwner}
-          layersEnabled={input.layersEnabled}
+          medallion={input.medallion}
           note={input.note}
           onFolderBlur={() => {
             void persistEditorFolder(
