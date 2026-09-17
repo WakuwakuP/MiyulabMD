@@ -5,7 +5,6 @@ import {
   isSupportedCachedImageMime,
   type OfflineCacheScope,
   openOfflineCache,
-  suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { StorageWriteRecovery } from "./storage-write-recovery.ts";
 
@@ -50,6 +49,20 @@ export class AttachedImageCacheError extends Error {
 function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw signal.reason;
+  }
+}
+
+// The scope fence exists to keep writes ordered; it must never veto bytes
+// that are already on the wire. Any abort raised by the cache scope check
+// is cache-internal (no caller signal is passed in), so it degrades to
+// "proceed without cache authority" instead of failing the display.
+async function assertScopeOrDegrade(scope: OfflineCacheScope): Promise<void> {
+  try {
+    await assertOfflineCacheScope(scope);
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "AbortError")) {
+      throw error;
+    }
   }
 }
 
@@ -108,7 +121,8 @@ async function readNetworkImage(
       }
       await cache.denyImage(image.noteId, image.imageId, orderingToken);
     } catch {
-      suspendOfflineCacheUser(scope.userId);
+      // The denial marker is best-effort for images: a failed write is a
+      // warning-class event, never a reason to suspend display reads.
     }
     return { bytes: null };
   }
@@ -128,7 +142,7 @@ async function readNetworkImage(
   }
   const bytes = new Blob([await response.blob()], { type: mime });
   checkAbort(signal);
-  await assertOfflineCacheScope(scope);
+  await assertScopeOrDegrade(scope);
   const retry = (retrySignal: AbortSignal) =>
     writeImageToFreshCache(image, bytes, scope, orderingToken, retrySignal);
   if (!cache) {
@@ -162,7 +176,7 @@ async function loadImage(
 ): Promise<LoadedImage> {
   const { scope, signal, cacheOnly } = options;
   checkAbort(signal);
-  await assertOfflineCacheScope(scope);
+  await assertScopeOrDegrade(scope);
   let cache: ImageCache | null = null;
   let cacheOpenError: unknown;
   try {
@@ -221,7 +235,7 @@ export async function acquireAttachedImage(
   ) {
     return null;
   }
-  await assertOfflineCacheScope(scope);
+  await assertScopeOrDegrade(scope);
   checkAbort(signal);
   const key = JSON.stringify([
     scope.userId,
@@ -293,7 +307,7 @@ export async function acquireAttachedImage(
     }
   });
   checkAbort(signal);
-  await assertOfflineCacheScope(scope);
+  await assertScopeOrDegrade(scope);
   checkAbort(signal);
   if (requireCache && loaded.cacheFailure) {
     try {

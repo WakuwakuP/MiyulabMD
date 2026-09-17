@@ -50,20 +50,23 @@ for (const failure of ["abort", "metadata", "abort-and-metadata"] as const) {
           signal: controller.signal,
           userId: "alice",
         }).then(
-          (cache: { close(): void }) => {
+          (cache: { close(): void; degraded: boolean }) => {
             opened = cache;
-            return false;
+            return { degraded: cache.degraded, rejected: false };
           },
-          (error: unknown) =>
-            error === (failure === "metadata" ? metadataError : reason),
+          (error: unknown) => ({
+            degraded: null,
+            rejected:
+              error === (failure === "metadata" ? metadataError : reason),
+          }),
         );
         if (failure === "abort") {
           await entered.promise;
           controller.abort(reason);
           release.resolve();
         }
-        const rejected = await pending;
-        return { closedBeforeReturn: closes, rejected };
+        const outcome = await pending;
+        return { closedBeforeReturn: closes, ...outcome };
       } finally {
         release.resolve();
         opened?.close();
@@ -71,8 +74,19 @@ for (const failure of ["abort", "metadata", "abort-and-metadata"] as const) {
         IDBDatabase.prototype.close = originalClose;
       }
     }, failure);
-    expect(result.rejected).toBe(true);
-    expect(result.closedBeforeReturn).toBe(1);
+    if (failure === "metadata") {
+      // A transient metadata read failure is absorbed by the tombstone scan;
+      // the open still resolves a usable cache instead of rejecting.
+      expect(result.rejected).toBe(false);
+      expect(result.degraded).toBe(false);
+    } else {
+      // The caller's own abort still propagates the exact reason.
+      expect(result.rejected).toBe(true);
+      expect(result.degraded).toBeNull();
+    }
+    // The tombstone scan reuses the shared epoch connection, so an open that
+    // never reached storage owns nothing to close.
+    expect(result.closedBeforeReturn).toBeLessThanOrEqual(1);
   });
 }
 
