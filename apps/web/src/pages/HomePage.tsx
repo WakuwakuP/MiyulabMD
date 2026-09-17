@@ -30,7 +30,6 @@ import { ErrorText } from "../components/ui/Text.tsx";
 import {
   archiveParaProject,
   fetchFolderChildren,
-  fetchPara,
   fetchSchemeSuggestion,
   moveFolder,
   moveNotes,
@@ -40,6 +39,7 @@ import {
   HomeMetadataError,
   readHomeMetadata,
 } from "../lib/home-metadata-reader.ts";
+import { useKnowledgeFeature } from "../lib/knowledge-features.ts";
 import {
   invalidateFolderCache,
   invalidateNotesCache,
@@ -58,6 +58,7 @@ import {
   headerFolderFor,
   homeListFlags,
   inheritLabelFor,
+  loadParaBuckets,
   type MenuState,
   openFolderShare,
   openNoteShare,
@@ -373,6 +374,8 @@ function NetworkHomePage() {
   const { folderId } = useParams();
   const { user, userLoading, viewer, setHeader } =
     useOutletContext<AppShellContext>();
+  // §2.4 opt-in: PARA UI and /api/para calls only exist while the flag is on.
+  const paraEnabled = useKnowledgeFeature("para");
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(null);
   const [folderPending, setFolderPending] = useState(true);
@@ -433,27 +436,20 @@ function NetworkHomePage() {
     paraBuckets.find((bucket) => bucket.key === "projects")?.path ?? null;
 
   const reloadPara = useCallback(() => {
-    if (!user) {
-      return;
-    }
-    void fetchPara({ viewerId: user.id })
-      .then((result) => {
-        if (result.ok) {
-          setParaBuckets(result.data.buckets);
-        }
-      })
+    void loadParaBuckets(user, paraEnabled)
+      .then(setParaBuckets)
       .catch(() => {
         // PARA section is optional chrome; ignore transient failures.
       });
-  }, [user]);
+  }, [user, paraEnabled]);
 
   useEffect(() => {
-    if (user) {
+    if (user && paraEnabled) {
       reloadPara();
       return;
     }
     setParaBuckets([]);
-  }, [user, reloadPara]);
+  }, [user, paraEnabled, reloadPara]);
 
   // 作成ダイアログを開いたら親フォルダの命名規則から「次の番号」ヒントを引く。
   useEffect(() => {
@@ -854,12 +850,14 @@ function NetworkHomePage() {
               setSchemeDialog({ id, name, scheme });
               setSchemeError(null);
             },
-            projectsPath: paraProjectsPath,
+            // The archive menu item only exists while PARA is enabled —
+            // a null projectsPath keeps it out of folderMenuItems.
+            projectsPath: paraEnabled ? paraProjectsPath : null,
           },
         );
       }}
       onMove={flags.canAdmin ? onTreeMove : undefined}
-      paraBuckets={flags.isDriveRoot ? paraBuckets : EMPTY_PARA}
+      paraBuckets={paraEnabled && flags.isDriveRoot ? paraBuckets : EMPTY_PARA}
       publicFolders={publicFolders}
       user={user}
       userLoading={userLoading}

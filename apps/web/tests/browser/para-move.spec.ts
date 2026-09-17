@@ -86,6 +86,10 @@ async function mockHome(page: Page) {
               displayName: "Alice",
               email: "alice@example.test",
               id: "alice",
+              // PARA is opt-in (§2.1): the fixture user has it enabled.
+              settings: {
+                knowledge: { layers: true, para: true, schemes: true },
+              },
             },
           },
         });

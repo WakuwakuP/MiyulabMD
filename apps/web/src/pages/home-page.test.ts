@@ -10,6 +10,7 @@ import {
 } from "../lib/list-cache.ts";
 import {
   homeListFlags,
+  loadParaBuckets,
   subscribeHomeFolder,
   subscribeHomeNotes,
 } from "./home-page.ts";
@@ -167,4 +168,54 @@ test("subscribeHomeFolder shows the cached folder immediately and refreshes it",
     () => setVisibleFolder.mock.calls.at(-1)?.arguments[0]?.name === "updated",
   );
   unsubscribe?.();
+});
+
+test("loadParaBuckets never calls /api/para while the para flag is off", async () => {
+  const spy = mock.method(globalThis, "fetch", () =>
+    Promise.resolve(new Response("{}", { status: 200 })),
+  );
+  assert.deepEqual(await loadParaBuckets(user, false), []);
+  assert.equal(spy.mock.callCount(), 0);
+  // Guests never fetch either, even with the flag on.
+  assert.deepEqual(await loadParaBuckets(null, true), []);
+  assert.equal(spy.mock.callCount(), 0);
+});
+
+test("loadParaBuckets fetches buckets when para is enabled", async () => {
+  const spy = mock.method(globalThis, "fetch", () =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          buckets: [
+            {
+              folderId: "f-projects",
+              key: "projects",
+              name: "Projects",
+              noteCount: 0,
+              path: "Projects",
+            },
+          ],
+        }),
+        {
+          headers: { "X-MiyulabMD-Session-User": "user:me" },
+          status: 200,
+        },
+      ),
+    ),
+  );
+  const buckets = await loadParaBuckets(user, true);
+  assert.equal(spy.mock.callCount(), 1);
+  assert.equal(buckets[0]?.key, "projects");
+});
+
+test("loadParaBuckets swallows API errors into an empty list", async () => {
+  mock.method(globalThis, "fetch", () =>
+    Promise.resolve(
+      new Response(JSON.stringify({ error: "Unauthorized" }), {
+        headers: { "X-MiyulabMD-Session-User": "user:me" },
+        status: 401,
+      }),
+    ),
+  );
+  assert.deepEqual(await loadParaBuckets(user, true), []);
 });

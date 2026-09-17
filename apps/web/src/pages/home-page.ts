@@ -2,6 +2,7 @@ import type {
   FolderAccess,
   FolderRecord,
   NoteSummary,
+  ParaBucket,
   SessionUser,
 } from "@miyulabmd/shared";
 import { folderUrl } from "@miyulabmd/shared";
@@ -24,6 +25,7 @@ import {
   deleteNote,
   fetchFolder,
   fetchNote,
+  fetchPara,
   fetchPublicFolders,
   renameFolder,
   updateFolderAccess,
@@ -393,6 +395,21 @@ export async function persistHomeShare(
     return;
   }
   await persistHomeNoteShare(share, next, setters);
+}
+
+/**
+ * §2.4: fetch the caller's PARA buckets, but only when the para feature flag
+ * is on — flag OFF means /api/para is never called and the section stays hidden.
+ */
+export async function loadParaBuckets(
+  user: SessionUser | null | undefined,
+  paraEnabled: boolean,
+): Promise<ParaBucket[]> {
+  if (!(user && paraEnabled)) {
+    return [];
+  }
+  const result = await fetchPara({ viewerId: user.id });
+  return result.ok ? result.data.buckets : [];
 }
 
 export function menuPosition(event: MouseEvent) {
