@@ -25,6 +25,12 @@ import {
 } from "../services/access.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import {
+  listBacklinks,
+  listBrokenLinks,
+  listNoteLinks,
+  resolveWikilink,
+} from "../services/links.ts";
+import {
   createNoteService,
   type GetNoteResult,
   type MutateNoteResult,
@@ -913,6 +919,103 @@ export function createMcpServerFactory() {
         scanned_notes: result.scannedNotes,
         truncated: result.truncated,
       });
+    },
+  );
+
+  server.registerTool(
+    "list_note_links",
+    {
+      description: `List outgoing links from a note ([[wiki links]] and /n/{id} markdown links). Unresolved links have note=null. Only notes the caller can see are resolved; hidden targets look missing. ${MCP_NOTE_URL_HINT}`,
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+      },
+    },
+    async ({ id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await listNoteLinks(env, id, user);
+      if (result.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (result.kind === "denied") {
+        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "list_backlinks",
+    {
+      description: `List notes linking to the given note (incoming links). Only sources the caller can see are listed. ${MCP_NOTE_URL_HINT}`,
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+      },
+    },
+    async ({ id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await listBacklinks(env, id, user);
+      if (result.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (result.kind === "denied") {
+        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+      }
+      return textResult({ backlinks: result.backlinks });
+    },
+  );
+
+  server.registerTool(
+    "list_broken_links",
+    {
+      description:
+        "List unresolved links (missing or ambiguous) across notes the caller can see. Use before renaming or promoting notes.",
+      inputSchema: {},
+    },
+    async () => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      return textResult({ broken: await listBrokenLinks(env, user) });
+    },
+  );
+
+  server.registerTool(
+    "resolve_wikilink",
+    {
+      description: `Resolve a [[wiki link]] target to a note the caller can see. Order: UUID → short_id → alias → folder/Title → same-folder title → global title. Pass context_id to scope folder-relative resolution to that note's folder. ${MCP_NOTE_URL_HINT}`,
+      inputSchema: {
+        context_id: z
+          .string()
+          .optional()
+          .describe(
+            "Source note UUID or short ID; scopes folder/title resolution",
+          ),
+        target: z
+          .string()
+          .min(1)
+          .describe("The link target text inside [[...]]"),
+      },
+    },
+    async ({ target, context_id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await resolveWikilink(env, user, target, context_id);
+      if (result.kind === "not_found") {
+        return textError("Not found");
+      }
+      if (result.kind === "denied") {
+        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+      }
+      return textResult(result.resolution);
     },
   );
 

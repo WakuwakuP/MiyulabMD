@@ -22,6 +22,7 @@ import {
   readTabKeyMode,
 } from "../../lib/editor-tab.ts";
 import { readEditorScrollPadPx } from "../../lib/visual-viewport.ts";
+import { wikilinkCompletion } from "../../lib/wikilink-complete.ts";
 import "../../styles/cm-highlight.css";
 import { ContextMenu } from "../notes/ContextMenu.tsx";
 import { FileInput } from "../ui/FileInput.tsx";
@@ -247,6 +248,7 @@ export function MarkdownEditor({
       extensions: [
         ...tabKeyExtensions(),
         markdownEditorLanguage,
+        wikilinkCompletion(),
         ...markdownEditorHighlight,
         ...(showLineNumbers
           ? [lineNumbers(), highlightActiveLineGutter()]

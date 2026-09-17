@@ -12,6 +12,7 @@ import { Elysia } from "elysia";
 import { readSession } from "../auth/session.ts";
 import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
+import { listNoteLinks } from "../services/links.ts";
 import { createNoteService, type MutateNoteResult } from "../services/notes.ts";
 
 function documentRoom(noteId: string) {
@@ -204,6 +205,19 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
       };
     },
   )
+  .get("/:id/links", async ({ request, params, set }) => {
+    const user = await readSession(request, env);
+    const result = await listNoteLinks(env, params.id, user ?? undefined);
+    if (result.kind === "not_found") {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    if (result.kind === "denied") {
+      set.status = result.status;
+      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+    }
+    return result.result;
+  })
   .get("/:id", async ({ request, params, set }) => {
     const user = await readSession(request, env);
     const result = await notes.get(params.id, user ?? undefined);

@@ -10,6 +10,7 @@ import type {
   FolderRecord,
   Note,
   NoteHistoryPage,
+  NoteLinksResult,
   NoteRevisionBody,
   NoteRevisionRestore,
   NoteSummary,
@@ -124,6 +125,21 @@ export async function updateTaskCheckbox(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: await res.json(), ok: true };
+}
+
+export async function fetchNoteLinks(
+  id: string,
+  options: ReadOptions = {},
+): Promise<ApiResult<NoteLinksResult>> {
+  const res = await fetch(
+    `/api/notes/${id}/links`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as NoteLinksResult, ok: true };
 }
 
 export async function fetchNoteHistory(

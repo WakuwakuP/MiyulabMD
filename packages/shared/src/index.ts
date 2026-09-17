@@ -135,3 +135,19 @@ export {
   titleFromMarkdown,
 } from "./title.ts";
 export type { SessionUser, User } from "./user.ts";
+export type {
+  BrokenLinkItem,
+  NoteBacklinkItem,
+  NoteLinkItem,
+  NoteLinksResult,
+  NoteLinkType,
+  ParsedNoteLink,
+  WikiLinkResolution,
+} from "./wikilinks.ts";
+export {
+  lineForOffset,
+  maskCodeRegions,
+  NOTE_UUID_RE,
+  parseNoteLinks,
+  parseWikiLinkInner,
+} from "./wikilinks.ts";

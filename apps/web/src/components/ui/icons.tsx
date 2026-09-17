@@ -6,6 +6,7 @@ import {
   FileText,
   Folder,
   History,
+  Link2,
   Monitor,
   Moon,
   Pencil,
@@ -83,6 +84,10 @@ export function HistoryIcon({ className }: IconProps) {
 
 export function RefreshIcon({ className }: IconProps) {
   return <RefreshCw aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function LinkIcon({ className }: IconProps) {
+  return <Link2 aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function SearchIcon({ className }: IconProps) {

@@ -1,3 +1,4 @@
+import type { WikiLinkMap } from "@miyulabmd/markdown";
 import type { ArticleSource, Note } from "@miyulabmd/shared";
 import {
   matchArticleSource,
@@ -9,6 +10,7 @@ import {
   type ReactNode,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -21,6 +23,7 @@ import {
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
+import { LinksPanel } from "../components/editor/LinksPanel.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
@@ -33,7 +36,7 @@ import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterA
 import { draftFromNote } from "../components/notes/access-draft.ts";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
-import { HistoryIcon, ShareIcon } from "../components/ui/icons.tsx";
+import { HistoryIcon, LinkIcon, ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { cn } from "../lib/cn.ts";
@@ -43,6 +46,7 @@ import {
   dismissStaleSsrPreview,
   removeSsrPreview,
 } from "../lib/note-bootstrap.ts";
+import { useNoteLinks, wikiLinkMapFor } from "../lib/note-links.ts";
 import {
   createNoteReadSession,
   type NoteReadResult,
@@ -50,6 +54,7 @@ import {
   OfflineNoteUnavailableError,
 } from "../lib/note-read-session.ts";
 import type { ImageViewContext } from "../lib/preview-images.ts";
+
 import {
   applySplitScroll,
   bindEditorCollab,
@@ -132,6 +137,7 @@ function EditorPreviewPane({
   taskNoteId,
   imageContext,
   focusLine,
+  wikiLinks,
 }: {
   viewMode: EditorMode;
   markdown: string;
@@ -140,6 +146,7 @@ function EditorPreviewPane({
   taskNoteId?: string;
   imageContext?: ImageViewContext;
   focusLine?: number;
+  wikiLinks?: WikiLinkMap;
 }) {
   if (viewMode === "preview") {
     return (
@@ -149,6 +156,7 @@ function EditorPreviewPane({
         imageContext={imageContext}
         markdown={markdown}
         taskNoteId={taskNoteId}
+        wikiLinks={wikiLinks}
       />
     );
   }
@@ -158,6 +166,7 @@ function EditorPreviewPane({
       markdown={markdown}
       onScrollRatio={onSplitScroll}
       scrollRatio={splitScroll}
+      wikiLinks={wikiLinks}
     />
   );
 }
@@ -260,6 +269,8 @@ function EditorWorkspace({
   onCloseShare,
   onCloseHistory,
   focusLine,
+  wikiLinks,
+  linksPanel,
 }: {
   note: Note;
   markdown: string;
@@ -285,6 +296,8 @@ function EditorWorkspace({
   onCloseShare: () => void;
   onCloseHistory: () => void;
   focusLine?: number;
+  wikiLinks?: WikiLinkMap;
+  linksPanel?: ReactNode;
 }) {
   const showSource = viewMode === "split" || viewMode === "source";
   const showPreview = viewMode === "split" || viewMode === "preview";
@@ -319,6 +332,7 @@ function EditorWorkspace({
             splitScroll={splitScroll}
             taskNoteId={canEdit ? note.id : undefined}
             viewMode={viewMode}
+            wikiLinks={wikiLinks}
           />
         )}
         {showRich && (
@@ -343,6 +357,7 @@ function EditorWorkspace({
         shareOpen={shareOpen}
         user={user}
       />
+      {linksPanel}
       {historyOpen && (
         <HistoryPanel
           canEdit={canEdit}
@@ -414,6 +429,7 @@ function EditorHeaderEnd({
   onFolderChange,
   onFolderBlur,
   onHistory,
+  onLinks,
   onShare,
 }: {
   awareness: YjsSession["awareness"] | undefined;
@@ -423,6 +439,7 @@ function EditorHeaderEnd({
   onFolderChange: (folder: string) => void;
   onFolderBlur: () => void;
   onHistory: () => void;
+  onLinks: () => void;
   onShare: () => void;
 }) {
   return (
@@ -435,6 +452,7 @@ function EditorHeaderEnd({
         onFolderBlur={onFolderBlur}
         onFolderChange={onFolderChange}
       />
+      <HeaderButton icon={<LinkIcon />} label="リンク" onClick={onLinks} />
       <HeaderButton icon={<HistoryIcon />} label="履歴" onClick={onHistory} />
       <HeaderButton
         icon={<ShareIcon />}
@@ -489,6 +507,7 @@ function parseFocusLine(raw: string | null): number | undefined {
   return Number.isInteger(line) && line > 0 ? line : undefined;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: read-session, collab, and panel wiring are intentionally kept in one component.
 export function EditorPage() {
   const { id = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -512,6 +531,7 @@ export function EditorPage() {
   const [collabWritable, setCollabWritable] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [linksOpen, setLinksOpen] = useState(false);
   const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
   const [mode, setMode] = useState<EditorMode>("preview");
   const [splitScroll, setSplitScroll] = useState(0);
@@ -543,6 +563,15 @@ export function EditorPage() {
   const viewMode: EditorMode = canEdit ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
+  const noteLinks = useNoteLinks(
+    readSource === "network" ? note?.id : undefined,
+    user?.id ?? null,
+    markdown,
+  );
+  const wikiLinks = useMemo(
+    () => wikiLinkMapFor(noteLinks.data),
+    [noteLinks.data],
+  );
   const articleSource = matchArticleSource(folder, articleSources);
   const articleIssues = articleIssuesFor(articleSource, markdown);
   const awareness = collab?.awareness;
@@ -562,6 +591,7 @@ export function EditorPage() {
     setAccessDraft(null);
     setMarkdown("");
     setFolder("");
+    setLinksOpen(false);
     setMode("preview");
     setViewScope(null);
     setShareOpen(false);
@@ -602,11 +632,13 @@ export function EditorPage() {
         teardownCollab(unbindCollabRef, sessionRef, setCollab, setCollabReady);
         hydratedRef.current = false;
         setReadState({ id, ownerViewer: viewer, phase: "error" });
+        setLinksOpen(false);
         setNote(null);
         setAccessDraft(null);
         setMarkdown("");
         setShareOpen(false);
         setHistoryOpen(false);
+        setLinksOpen(false);
         setLoading(false);
         setLoadError(noteDenialMessage(event));
       },
@@ -746,6 +778,7 @@ export function EditorPage() {
       setFolder,
       setHeader,
       setHistoryOpen,
+      setLinksOpen,
       setMode,
       setNote,
       setSaveError,
@@ -788,6 +821,16 @@ export function EditorPage() {
             historyOpen={historyOpen}
             imageContext={currentReadState.result}
             isOwner={flags.isOwner}
+            linksPanel={
+              linksOpen ? (
+                <LinksPanel
+                  error={noteLinks.error}
+                  links={noteLinks.data}
+                  loading={noteLinks.loading}
+                  onClose={() => setLinksOpen(false)}
+                />
+              ) : null
+            }
             markdown={markdown}
             note={note}
             onCloseHistory={() => setHistoryOpen(false)}
@@ -811,6 +854,7 @@ export function EditorPage() {
             user={user}
             usesInternalScroll={usesInternalScroll}
             viewMode={viewMode}
+            wikiLinks={wikiLinks}
             yMarkdown={yMarkdown}
           />
         ) : null
@@ -838,6 +882,7 @@ function bindEditorHeader(input: {
   setAccessDraft: (draft: AccessDraft) => void;
   setShareOpen: (open: boolean) => void;
   setHistoryOpen: (open: boolean) => void;
+  setLinksOpen: (open: boolean) => void;
 }) {
   if (!input.note) {
     input.setHeader({ folder: null, layout: "editor" });
@@ -877,6 +922,7 @@ function bindEditorHeader(input: {
           }}
           onFolderChange={input.setFolder}
           onHistory={() => input.setHistoryOpen(true)}
+          onLinks={() => input.setLinksOpen(true)}
           onShare={() => input.setShareOpen(true)}
         />
       ),

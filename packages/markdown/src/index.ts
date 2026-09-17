@@ -33,3 +33,4 @@ export {
   type TaskCheckboxUpdate,
   taskContextHash,
 } from "./task-list.ts";
+export { remarkWikiLinks, type WikiLinkMap } from "./wikilinks.ts";

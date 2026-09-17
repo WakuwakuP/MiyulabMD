@@ -90,7 +90,7 @@ function parseStoredScope(value: string | null): AccessScope | null {
   return value && isAccessScope(value) ? value : null;
 }
 
-function accessFields(row: NoteRow): NoteAccessFields {
+export function accessFields(row: NoteRow): NoteAccessFields {
   return {
     folder: row.folder ?? "",
     id: row.id,
@@ -134,7 +134,7 @@ async function toNote(
   };
 }
 
-async function toSummary(
+export async function toSummary(
   env: Env,
   row: NoteRow,
   user?: SessionUser | null,
@@ -173,6 +173,7 @@ export async function persistMarkdownSnapshot(
   noteId: string,
   markdown: string,
 ): Promise<void> {
+  const before = await findNoteRow(env, noteId);
   const now = Date.now();
   const title = titleFromMarkdown(markdown);
   await db(env)
@@ -181,9 +182,46 @@ export async function persistMarkdownSnapshot(
     )
     .bind(markdown, title, now, now, noteId)
     .run();
+  const after = await findNoteRow(env, noteId);
+  if (after) {
+    await syncNoteLinks(env, after, before ?? undefined);
+  }
 }
 
-function findNoteRow(env: Env, idOrShortId: string): Promise<NoteRow | null> {
+/**
+ * リンク索引を差し替える。作成・本文更新・メタ更新・snapshot 書き戻し時に呼ぶ。
+ * `before` を渡すと、タイトル/フォルダ/別名が変わった場合に他ノートからの
+ * リンクも再解決する。索引は再構築可能なので失敗しても本体処理は継続する。
+ */
+export async function syncNoteLinks(
+  env: Env,
+  after: NoteRow,
+  before?: NoteRow,
+): Promise<void> {
+  try {
+    const { reindexLinksToNote, reindexNoteLinks } = await import("./links.ts");
+    await reindexNoteLinks(env, after);
+    const identityChanged =
+      !before ||
+      before.title !== after.title ||
+      before.folder !== after.folder ||
+      before.alias !== after.alias;
+    if (identityChanged) {
+      await reindexLinksToNote(
+        env,
+        after,
+        before ?? { alias: null, folder: "", title: "" },
+      );
+    }
+  } catch (error) {
+    console.error("note_links reindex failed", error);
+  }
+}
+
+export function findNoteRow(
+  env: Env,
+  idOrShortId: string,
+): Promise<NoteRow | null> {
   return db(env)
     .prepare(
       `SELECT ${NOTE_COLUMNS}
@@ -427,7 +465,7 @@ async function listGuestInheritedRowsFromPublicFolders(
   return candidates;
 }
 
-async function listAccessibleRows(
+export async function listAccessibleRows(
   env: Env,
   user: SessionUser,
 ): Promise<NoteRow[]> {
@@ -786,6 +824,16 @@ async function deleteOwnedNotesInFolder(
       .bind(row.id)
       .run();
     await db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id).run();
+    await db(env)
+      .prepare("DELETE FROM note_links WHERE src_note_id = ?")
+      .bind(row.id)
+      .run();
+    await db(env)
+      .prepare(
+        "UPDATE note_links SET dest_note_id = NULL, dest_status = 'missing', updated_at = ? WHERE dest_note_id = ?",
+      )
+      .bind(Date.now(), row.id)
+      .run();
   }
 }
 
@@ -906,6 +954,7 @@ export function createNoteService(env: Env) {
       if (!row) {
         throw new Error("note insert failed");
       }
+      await syncNoteLinks(env, row);
       return toNote(env, row, user ?? owner);
     },
 
@@ -1042,6 +1091,16 @@ export function createNoteService(env: Env) {
         .prepare("DELETE FROM notes WHERE id = ?")
         .bind(row.id)
         .run();
+      await db(env)
+        .prepare("DELETE FROM note_links WHERE src_note_id = ?")
+        .bind(row.id)
+        .run();
+      await db(env)
+        .prepare(
+          "UPDATE note_links SET dest_note_id = NULL, dest_status = 'missing', updated_at = ? WHERE dest_note_id = ?",
+        )
+        .bind(Date.now(), row.id)
+        .run();
       return { kind: "ok", note: current };
     },
 
@@ -1094,6 +1153,29 @@ export function createNoteService(env: Env) {
         rec.folder,
         validated.nextPath,
       );
+      const moved = await db(env)
+        .prepare(
+          `SELECT ${NOTE_COLUMNS} FROM notes
+           WHERE owner_id = ? AND (folder = ? OR folder LIKE ? ESCAPE '\\')`,
+        )
+        .bind(
+          rec.owner_id,
+          validated.nextPath,
+          `${escapeLikePattern(validated.nextPath)}/%`,
+        )
+        .all<NoteRow>();
+      for (const movedRow of moved.results ?? []) {
+        const prevFolder =
+          rewriteFolderPrefix(
+            movedRow.folder ?? "",
+            validated.nextPath,
+            rec.folder,
+          ) ?? rec.folder;
+        await syncNoteLinks(env, movedRow, {
+          ...movedRow,
+          folder: prevFolder,
+        });
+      }
       return {
         access: await resolveFolderAccess(
           env,
@@ -1213,6 +1295,7 @@ export function createNoteService(env: Env) {
       if (!updated) {
         throw new Error("note update failed");
       }
+      await syncNoteLinks(env, updated, row);
       return { kind: "ok", note: await toNote(env, updated, user) };
     },
 
@@ -1281,6 +1364,7 @@ export function createNoteService(env: Env) {
       if (!updated) {
         throw new Error("note update failed");
       }
+      await syncNoteLinks(env, updated, row);
       return { kind: "ok", note: await toNote(env, updated, user) };
     },
   };

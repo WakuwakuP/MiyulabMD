@@ -21,6 +21,7 @@ import {
   rehypeTaskCheckboxes,
   remarkTaskCheckboxes,
 } from "./task-list-render.ts";
+import { remarkWikiLinks, type WikiLinkMap } from "./wikilinks.ts";
 
 const TABLE_TAGS = [
   "table",
@@ -69,6 +70,7 @@ function createProcessor(render: boolean) {
     .use(remarkGfm)
     .use(remarkFenceInfo)
     .use(remarkTaskCheckboxes)
+    .use(remarkWikiLinks)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw);
 
@@ -124,12 +126,16 @@ export function collectImageUrls(markdown: string): string[] {
 export function renderMarkdownHtml(
   markdown: string,
   cards: Map<string, OgPreview> = new Map(),
+  wikiLinks?: WikiLinkMap,
 ): string {
   const expanded = expandEmbedsForPreview(
     normalizeEmbedMarkdown(markdownBody(markdown)),
     cards,
   );
   return String(
-    processor.processSync({ data: { taskSource: markdown }, value: expanded }),
+    processor.processSync({
+      data: { taskSource: markdown, wikiLinks },
+      value: expanded,
+    }),
   );
 }

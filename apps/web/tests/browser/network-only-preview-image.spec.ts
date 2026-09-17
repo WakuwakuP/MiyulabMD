@@ -204,7 +204,10 @@ test("guest MarkdownPreview displays checked attachments through a blob URL", as
     if (pathname === "/api/me") {
       return route.fulfill({ body: "guest", status: 401 });
     }
-    return route.fulfill({ json: {} });
+    return route.fulfill({
+      headers: { "X-MiyulabMD-Session-User": "guest" },
+      json: { backlinks: [], outgoing: [] },
+    });
   });
   await page.goto(`/n/${note.id}`);
   const previewImage = page.getByRole("img", { name: "Network attachment" });

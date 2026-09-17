@@ -1,3 +1,4 @@
+import type { WikiLinkMap } from "@miyulabmd/markdown";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import {
@@ -24,6 +25,7 @@ type Props = {
   imageContext?: ImageViewContext;
   /** 1-based source line to scroll toward (jumps to the heading above it). */
   focusLine?: number;
+  wikiLinks?: WikiLinkMap;
 };
 
 function TocNav({ entries }: { entries: TocEntry[] }) {
@@ -74,6 +76,7 @@ export function PreviewWithToc({
   taskNoteId,
   imageContext,
   focusLine,
+  wikiLinks,
 }: Props) {
   const layoutRef = useRef<HTMLDivElement>(null);
   const [showToc, setShowToc] = useState(false);
@@ -139,6 +142,7 @@ export function PreviewWithToc({
           onScrollRatio={onScrollRatio}
           scrollRatio={scrollRatio}
           taskNoteId={taskNoteId}
+          wikiLinks={wikiLinks}
         />
       </div>
       {showToc && entries.length > 0 && (

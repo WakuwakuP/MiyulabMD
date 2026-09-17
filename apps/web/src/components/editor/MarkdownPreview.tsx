@@ -1,3 +1,4 @@
+import type { WikiLinkMap } from "@miyulabmd/markdown";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import { loadOgCards, renderMarkdownHtml } from "../../lib/markdown.ts";
@@ -21,6 +22,8 @@ type Props = {
   documentScroll?: boolean;
   taskNoteId?: string;
   imageContext?: ImageViewContext;
+  /** Resolved [[wiki link]] targets → note id; undefined keeps them literal. */
+  wikiLinks?: WikiLinkMap;
 };
 
 function scrollRatioFrom(el: HTMLElement): number {
@@ -36,6 +39,7 @@ export function MarkdownPreview({
   documentScroll = false,
   taskNoteId,
   imageContext,
+  wikiLinks,
 }: Props) {
   const articleRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -48,11 +52,14 @@ export function MarkdownPreview({
 
   const rendered = useMemo(() => {
     try {
-      return { error: null, html: renderMarkdownHtml(deferredMarkdown) };
+      return {
+        error: null,
+        html: renderMarkdownHtml(deferredMarkdown, undefined, wikiLinks),
+      };
     } catch {
       return { error: "プレビューの生成に失敗しました。", html: "" };
     }
-  }, [deferredMarkdown]);
+  }, [deferredMarkdown, wikiLinks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,14 +68,14 @@ export function MarkdownPreview({
         return;
       }
       setEnhanced({
-        html: renderMarkdownHtml(markdown, cards),
+        html: renderMarkdownHtml(markdown, cards, wikiLinks),
         md: markdown,
       });
     });
     return () => {
       cancelled = true;
     };
-  }, [markdown]);
+  }, [markdown, wikiLinks]);
 
   const sourceHtml = enhanced?.md === markdown ? enhanced.html : rendered.html;
   const html = useMemo(
