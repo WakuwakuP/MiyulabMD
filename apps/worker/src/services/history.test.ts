@@ -28,6 +28,7 @@ const MIGRATIONS = [
   "0010_note_links.sql",
   "0011_para_buckets.sql",
   "0012_naming_schemes.sql",
+  "0013_medallion_layers.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {

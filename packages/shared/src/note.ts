@@ -1,4 +1,5 @@
 import type { ArticleMeta } from "./article.ts";
+import type { NoteLayer } from "./layers.ts";
 import type {
   AccessScope,
   CollaboratorRole,
@@ -144,6 +145,11 @@ export type Note = {
   folderSchemeId?: string | null;
   /** Title part of the containing folder's scheme name. */
   folderSchemeTitle?: string | null;
+  /** Medallion layer. Gold notes reject body edits while locked. */
+  layer: NoteLayer;
+  /** True when layer === 'gold' and the unlock window has expired/absent. */
+  goldLocked: boolean;
+  goldUnlockedUntil: number | null;
   permission: PermissionPreset;
   access: NoteAccess;
   markdown: string;

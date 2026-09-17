@@ -45,6 +45,23 @@ export {
   validateArticleDocument,
   withClosedFrontmatter,
 } from "./frontmatter.ts";
+export type {
+  NoteLayer,
+  NoteLayerEvent,
+  PromoteGateCode,
+  PromoteGateFailure,
+} from "./layers.ts";
+export {
+  GOLD_UNLOCK_DEFAULT_MINUTES,
+  GOLD_UNLOCK_MAX_MINUTES,
+  isGoldLockedAt,
+  isNoteLayer,
+  LAYER_RANK,
+  NOTE_LAYER_LABELS,
+  NOTE_LAYERS,
+  nextLayer,
+  PROMOTE_GATE_CODES,
+} from "./layers.ts";
 export type { McpToolName } from "./mcp.ts";
 export { MCP_NOTE_URL_HINT, MCP_TOOLS } from "./mcp.ts";
 export type {

@@ -177,7 +177,10 @@ async function handleNoteWebSocket(
   const id = env.DOCUMENT_ROOM.idFromName(note.id);
   const headers = new Headers(request.headers);
   headers.set("X-Note-Id", note.id);
-  headers.set("X-Can-Edit", note.access.flags.canEdit ? "true" : "false");
+  headers.set(
+    "X-Can-Edit",
+    note.access.flags.canEdit && !note.goldLocked ? "true" : "false",
+  );
   if (user) {
     applyWsUserHeaders(headers, user);
   }

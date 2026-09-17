@@ -1,6 +1,6 @@
 # 作業引き継ぎメモ
 
-最終更新: 2026-09-17。#112 まで実装済み。**実装作業は親リポジトリで直接行う**（worktree は参照のみ。ユーザー指示）。
+最終更新: 2026-09-17。#114 まで実装済み。**実装作業は親リポジトリで直接行う**（worktree は参照のみ。ユーザー指示）。
 
 ## リポジトリ構成
 
@@ -30,7 +30,7 @@
 | #111 | wiki-link / backlinks | P1 | **実装完了**（パーサ/DB/再索引/REST/MCP/プレビュー/LinksPanel/オートコンプリート/テスト済。close 判断は要ユーザー確認） |
 | #112 | フォルダ一括移動（PARA 土台） | P1 | **実装完了**（move 系 + PARA + REST/MCP/UI + テスト済。close 判断は要ユーザー確認） |
 | #113 | Johnny.Decimal 採番 | P2 | **実装完了**（汎用命名規則基盤 + JD/Zettel + REST/MCP/UI + テスト済。close 判断は要ユーザー確認） |
-| #114 | メダリオン層 + gold ロック | P2 | 未着手 |
+| #114 | メダリオン層 + gold ロック | P2 | **実装完了**（層サービス/ゲート/ロック強制/監査/pin/REST/MCP/UI/テスト済。close 判断は要ユーザー確認） |
 | #115 | 検索 DSL / FTS・日本語 | P2-3 | 未着手（#109 の後） |
 
 ### 依存グラフ
@@ -204,17 +204,48 @@
 - REST `GET /api/search/notes`・`/api/search/grep` に `schemeId` パラメータ（フォルダサブツリー絞り込み、未解決は 404）
 - MCP `list_notes`/`search_notes`/`grep_notes` に `scheme_id` パラメータ（`folder_id` と排他）— エージェントが `scheme_get` で UUID を引かずに `15.22` 直接指定で絞り込める
 
+## #114 の実装内容
+
+**設計:** メダリオン品質層 `bronze → silver → gold`（`NOTE_LAYERS`/`LAYER_RANK`、PARA のフォルダ分類とは直交）。gold は「ポリシーロック」— `gold_unlocked_until` が未来の間だけ本文編集を許可し、権限モデルとは別系統で API/MCP/WS の全変異経路を塞ぐ。
+
+**Shared:** `layers.ts`（新規）— `NOTE_LAYERS`/`NOTE_LAYER_LABELS`/`LAYER_RANK`/`isNoteLayer`/`nextLayer`/`isGoldLockedAt`、`GOLD_UNLOCK_DEFAULT_MINUTES=30`/`MAX=24h`、`PROMOTE_GATE_CODES`（`missing_title`/`empty_body`/`no_links`/`no_headings`/`broken_links`/`needs_confirm`）、`PromoteGateFailure`/`NoteLayerEvent` 型。`note.ts` — `Note`/`NoteSummary` に `layer`/`goldLocked`/`goldUnlockedUntil`。`mcp.ts` — MCP_TOOLS に 5 ツール。
+
+**Worker:**
+
+- `db/migrations/0013_medallion_layers.sql` + `schema.sql` — `notes.layer`（default bronze）/`notes.gold_unlocked_until`、`note_revisions.pinned`、`note_layer_events`（遷移監査）+ 索引
+- `services/layers.ts`（新規）— `setNoteLayer`（任意遷移・owner のみ・監査）、`promoteNote`（1段階昇格 + `evaluatePromoteGates`：title/本文/リンク数、gold 昇格は H2 構造 + broken link 0 + `confirm=true` 必須、失敗は機械可読 `{failures,to}` 422）、`demoteNote`（reason 必須・降格で unlock リセット）、`unlockGoldForEdit`（canEdit 権限・1〜1440分）、`listNotesByLayer`/`listLayerEvents`、昇格時に最新リビジョンを `pinned=1` にピン
+- ロック強制 — `updateMarkdown`（サービス層、`denied code:"gold_locked"`）、REST `PATCH /:id`・`/restore`・`/task-checkbox`（403 `gold_locked`）、MCP `replace_in_note`/`insert_in_note`/`update_note`（`unlock_gold_for_edit` を先に呼ぶよう明示したエラー文）、WS 接続時 `X-Can-Edit` に `!goldLocked` を畳み込み（index.ts）— ライブ経路も接続時点で封じる
+- `services/history.ts` — compaction 候補に `pinned` を通し、ピン済みリビジョンを削除対象から除外
+- REST — `POST /api/notes/:id/layer`（rank で promote/demote/set を振り分け、2段飛ばしは 400、gates 失敗は 422 `{failures,to}`）、`POST /:id/unlock`、`GET /:id/layer-events`、`GET /api/notes?layer=` フィルタ
+- MCP 5 ツール — `set_note_layer`/`promote_note`/`demote_note`/`unlock_gold_for_edit`/`list_notes_by_layer`（`layerToolError` で gates を構造化返却）
+- テスト `services/layers.test.ts` 8 件（既定 bronze/ゲート失敗/bronze→gold/ロック+期限切れ/demote 理由/任意遷移・他人拒否/超過分数・不正層/broken link で gold 不可）
+
+**Web:**
+
+- `lib/api.ts` — `changeNoteLayer`（422 の failures を素通しする `LayerChangeResult`）/`unlockNoteForEdit`/`fetchLayerEvents`
+- `components/editor/LayerMenu.tsx`（新規）— ヘッダーの層バッジ（gold ロック中は鍵アイコン）。owner はパネルから昇格（needs_confirm 時は「確認して昇格」に変化）/降格（理由入力必須）/一時解除（30分）。非 owner はバッジのみ
+- `EditorPage` — `goldLocked` で `viewMode` を preview 強制＋`bodyEditable`（モード切替・source/rich ペイン・タスクチェックボックス・履歴 restore を遮断）。フォルダ移動・共有設定は `canMutate` 側で引き続き可（ロックは本文のみ）。ロックバナー表示
+- `ui/icons.tsx` — `MedalIcon`/`LockIcon`/`LockOpenIcon`
+- Playwright `note-layers.spec.ts` 4 件（gold ロック表示→解除→編集可/昇格/ゲート失敗表示/降格理由必須）
+
+**留意点:**
+
+- gold ロックは本文のみ。title/フォルダ/共有メタは従来どおり変更可（`updateMeta` 系は非ロック）
+- WS の `X-Can-Edit` は接続時評価 — 接続中に unlock 期限切れになっても既存接続は切れない（次回接続でロック）。unlock 中の昇格/降格でリセットされるのは次の層遷移時
+- `POST /:id/layer` で rank>1（bronze→gold 直跳び）は 400。`promote_note` は常に1段階
+- layer events は REST のみ（MCP の履歴系は `list_note_history` が編集履歴を担う）
+
 ## 検証コマンドと最新結果
 
 ```sh
 pnpm --filter @miyulabmd/web typecheck      # web（tsc × 2）
 pnpm --filter @miyulabmd/worker typecheck   # worker
 pnpm -r typecheck                           # 全ワークスペース
-pnpm --filter @miyulabmd/worker test        # node:test。122/122 ✓（+15 schemes）
+pnpm --filter @miyulabmd/worker test        # node:test。130/130 ✓（+8 layers）
 pnpm --filter @miyulabmd/web test           # node:test。129/129 ✓
 pnpm --filter @miyulabmd/markdown test      # node:test。26/26 ✓
 pnpm --filter @miyulabmd/shared test        # wikilinks パーサテスト等
-cd apps/web && node scripts/playwright.mjs test  # ブラウザ全量 280/280 ✓（+4 naming-schemes）
+cd apps/web && node scripts/playwright.mjs test  # ブラウザ全量（+4 note-layers）
 ```
 
 注意: `vitest` は存在しない。テストは Node 組み込みランナー。Playwright は `apps/web/scripts/playwright.mjs` 経由。

@@ -9,9 +9,12 @@ import {
   folderContains,
   type GrepResult,
   isAccessScope,
+  isGoldLockedAt,
+  isNoteLayer,
   isPermissionPreset,
   matchArticleSource,
   type Note,
+  type NoteLayer,
   type NoteSearchHit,
   type NoteSearchPage,
   type NoteSummary,
@@ -75,15 +78,19 @@ export type NoteRow = {
   created_at: number;
   updated_at: number;
   article_meta: string | null;
+  layer: string | null;
+  gold_unlocked_until: number | null;
 };
 
 const SHORT_ID_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const ANONYMOUS_OWNER_EMAIL = "anonymous@miyulabmd.local";
 export const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
-                  markdown_snapshot, snapshot_updated_at, created_at, updated_at, article_meta`;
+                  markdown_snapshot, snapshot_updated_at, created_at, updated_at, article_meta,
+                  layer, gold_unlocked_until`;
 const NOTE_COLUMNS_N = `n.id, n.short_id, n.alias, n.owner_id, n.title, n.folder, n.permission, n.read_scope, n.write_scope,
-                  n.markdown_snapshot, n.snapshot_updated_at, n.created_at, n.updated_at, n.article_meta`;
+                  n.markdown_snapshot, n.snapshot_updated_at, n.created_at, n.updated_at, n.article_meta,
+                  n.layer, n.gold_unlocked_until`;
 
 function parseStoredScope(value: string | null): AccessScope | null {
   return value && isAccessScope(value) ? value : null;
@@ -133,7 +140,10 @@ async function toNote(
     folderId: visibleFolderId,
     folderSchemeId,
     folderSchemeTitle,
+    goldLocked: isGoldLockedAt(row.layer, row.gold_unlocked_until),
+    goldUnlockedUntil: row.gold_unlocked_until ?? null,
     id: row.id,
+    layer: isNoteLayer(row.layer ?? "") ? (row.layer as NoteLayer) : "bronze",
     markdown: row.markdown_snapshot,
     ownerId: row.owner_id,
     permission: derivedPermission(access),
@@ -670,7 +680,7 @@ export type GetNoteResult =
 export type MutateNoteResult =
   | { kind: "ok"; note: Note }
   | { kind: "not_found" }
-  | { kind: "denied"; status: 401 | 403 }
+  | { kind: "denied"; status: 401 | 403; code?: string }
   | { kind: "bad_request"; error: string };
 
 export type RemoveFolderResult =
@@ -1404,6 +1414,10 @@ export function createNoteService(env: Env) {
                 )
               : 403,
         };
+      }
+      // gold 層はポリシーロック: unlock_gold_for_edit の期限中のみ編集可。
+      if (isGoldLockedAt(row.layer, row.gold_unlocked_until)) {
+        return { code: "gold_locked", kind: "denied", status: 403 };
       }
 
       const now = Date.now();

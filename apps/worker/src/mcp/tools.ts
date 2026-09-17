@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import {
   ACCESS_SCOPES,
+  GOLD_UNLOCK_DEFAULT_MINUTES,
+  GOLD_UNLOCK_MAX_MINUTES,
   MCP_NOTE_URL_HINT,
   NOTE_RESTORE_MESSAGE,
   type Note,
@@ -24,6 +26,14 @@ import {
   listFolderChildren,
 } from "../services/access.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
+import {
+  demoteNote,
+  type LayerError,
+  listNotesByLayer,
+  promoteNote,
+  setNoteLayer,
+  unlockGoldForEdit,
+} from "../services/layers.ts";
 import {
   listBacklinks,
   listBrokenLinks,
@@ -100,6 +110,21 @@ async function listNotesForTool(
     list = list.filter((note) => note.title.toLowerCase().includes(needle));
   }
   return { notes: list };
+}
+
+function layerToolError(
+  result: LayerError | { kind: "gates"; failures: unknown; to: string },
+) {
+  if (result.kind === "not_found") {
+    return textError("Not found");
+  }
+  if (result.kind === "denied") {
+    return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+  }
+  if (result.kind === "gates") {
+    return textResult(result);
+  }
+  return textError(result.error);
 }
 
 /** folder_id か scheme_id（`15.22` 等）から対象フォルダ UUID を決める。 */
@@ -250,6 +275,14 @@ async function requireEditableNote(
   }
   if (!loaded.note.access.flags.canEdit) {
     return { error: textError("Forbidden"), ok: false };
+  }
+  if (loaded.note.goldLocked) {
+    return {
+      error: textError(
+        "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.",
+      ),
+      ok: false,
+    };
   }
   return loaded;
 }
@@ -643,6 +676,11 @@ export function createMcpServerFactory() {
       if (!loaded.note.access.flags.canEdit) {
         return textError("Forbidden");
       }
+      if (loaded.note.goldLocked) {
+        return textError(
+          "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.",
+        );
+      }
 
       const result = await documentRoom(loaded.note.id).applyEdit({
         agent: agentOf(user),
@@ -706,6 +744,11 @@ export function createMcpServerFactory() {
       const note = result.note;
       if (!note.access.flags.canEdit) {
         return textError("Forbidden");
+      }
+      if (note.goldLocked) {
+        return textError(
+          "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.",
+        );
       }
 
       const applied = await documentRoom(note.id).applyEdit({
@@ -1557,6 +1600,141 @@ export function createMcpServerFactory() {
       const result = await validateSchemeTree(env, user);
       if (result.kind !== "ok") {
         return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "set_note_layer",
+    {
+      description:
+        "Set a note's medallion layer directly (bronze|silver|gold). Bypasses promote gates — prefer promote_note for gated promotion. Owner only; audited in layer events.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+        layer: z.enum(["bronze", "silver", "gold"]).describe("Target layer"),
+        reason: z.string().optional().describe("Optional audit reason"),
+      },
+    },
+    async ({ id, layer, reason }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await setNoteLayer(env, id, layer, reason ?? null, user);
+      if (result.kind !== "ok") {
+        return layerToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "promote_note",
+    {
+      description:
+        "Promote a note one medallion layer (bronze→silver→gold) through machine-readable gates. Returns {failures:[{code,message}]} when gates fail. Gold additionally requires confirm=true and zero broken links. Owner only.",
+      inputSchema: {
+        confirm: z.boolean().optional().describe("Required for gold promotion"),
+        id: z.string().describe("Note UUID or short ID"),
+      },
+    },
+    async ({ id, confirm }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await promoteNote(env, id, confirm, user);
+      if (result.kind === "gates") {
+        return textResult({
+          failures: result.failures,
+          promoted: false,
+          to: result.to,
+        });
+      }
+      if (result.kind !== "ok") {
+        return layerToolError(result);
+      }
+      return textResult({
+        note: result.result.note,
+        promoted: true,
+        to: result.result.note.layer,
+      });
+    },
+  );
+
+  server.registerTool(
+    "demote_note",
+    {
+      description:
+        "Demote a note to a lower medallion layer. A reason is required and recorded in the audit log. Owner only.",
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+        reason: z.string().describe("Why the note is being demoted"),
+        to: z
+          .enum(["bronze", "silver"])
+          .optional()
+          .describe("Target layer (default: one step down)"),
+      },
+    },
+    async ({ id, reason, to }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await demoteNote(env, id, reason, to, user);
+      if (result.kind !== "ok") {
+        return layerToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "unlock_gold_for_edit",
+    {
+      description: `Temporarily unlock a gold-layer note for editing (default ${GOLD_UNLOCK_DEFAULT_MINUTES} min, max ${GOLD_UNLOCK_MAX_MINUTES} min). Edit tools reject gold notes while locked.`,
+      inputSchema: {
+        id: z.string().describe("Note UUID or short ID"),
+        minutes: z
+          .number()
+          .int()
+          .min(1)
+          .max(GOLD_UNLOCK_MAX_MINUTES)
+          .optional()
+          .describe("Unlock window in minutes"),
+      },
+    },
+    async ({ id, minutes }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await unlockGoldForEdit(env, id, minutes, user);
+      if (result.kind !== "ok") {
+        return layerToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "list_notes_by_layer",
+    {
+      description:
+        "List accessible notes filtered by medallion layer (bronze|silver|gold).",
+      inputSchema: {
+        layer: z.enum(["bronze", "silver", "gold"]),
+      },
+    },
+    async ({ layer }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await listNotesByLayer(env, user, layer);
+      if (result.kind !== "ok") {
+        return layerToolError(result);
       }
       return textResult(result.result);
     },

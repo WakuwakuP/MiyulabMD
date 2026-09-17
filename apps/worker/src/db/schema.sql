@@ -23,7 +23,9 @@ CREATE TABLE notes (
   snapshot_updated_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  article_meta TEXT
+  article_meta TEXT,
+  layer TEXT NOT NULL DEFAULT 'bronze',
+  gold_unlocked_until INTEGER
 );
 
 CREATE TABLE note_collaborators (
@@ -139,6 +141,18 @@ CREATE TABLE note_revisions (
   actor_kind TEXT NOT NULL,
   actor_user_id TEXT,
   actor_name TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE note_layer_events (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL REFERENCES notes (id) ON DELETE CASCADE,
+  from_layer TEXT,
+  to_layer TEXT NOT NULL,
+  actor_user_id TEXT,
+  actor_name TEXT NOT NULL,
+  reason TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -169,3 +183,5 @@ CREATE INDEX images_note_id_idx ON images (note_id);
 CREATE INDEX api_tokens_user_id_idx ON api_tokens (user_id);
 CREATE INDEX note_links_dest_idx ON note_links (dest_note_id);
 CREATE INDEX note_links_src_status_idx ON note_links (src_note_id, dest_status);
+CREATE INDEX notes_owner_layer_idx ON notes (owner_id, layer);
+CREATE INDEX note_layer_events_note_idx ON note_layer_events (note_id, created_at);

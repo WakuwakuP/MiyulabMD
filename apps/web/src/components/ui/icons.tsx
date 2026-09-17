@@ -7,6 +7,9 @@ import {
   Folder,
   History,
   Link2,
+  Lock,
+  LockOpen,
+  Medal,
   Monitor,
   Moon,
   Pencil,
@@ -88,6 +91,18 @@ export function RefreshIcon({ className }: IconProps) {
 
 export function LinkIcon({ className }: IconProps) {
   return <Link2 aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function MedalIcon({ className }: IconProps) {
+  return <Medal aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function LockIcon({ className }: IconProps) {
+  return <Lock aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function LockOpenIcon({ className }: IconProps) {
+  return <LockOpen aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function SearchIcon({ className }: IconProps) {

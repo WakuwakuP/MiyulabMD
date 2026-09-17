@@ -13,6 +13,8 @@ import type {
   MoveNotesResult,
   Note,
   NoteHistoryPage,
+  NoteLayer,
+  NoteLayerEvent,
   NoteLinksResult,
   NoteRevisionBody,
   NoteRevisionRestore,
@@ -20,6 +22,7 @@ import type {
   ParaBucketKey,
   ParaListResult,
   PermissionPreset,
+  PromoteGateFailure,
   SchemeSuggestion,
   SessionUser,
   WorkspaceSearchResult,
@@ -660,6 +663,96 @@ export async function resolveSchemeId(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as SchemeResolveResponse, ok: true };
+}
+
+// --- medallion layers -------------------------------------------------------
+
+export type LayerChangeResult =
+  | {
+      ok: true;
+      note: NoteSummary;
+      unlockedUntil?: number;
+    }
+  | {
+      ok: false;
+      status: number;
+      error?: string;
+      /** 422 promote gate failures (machine-readable). */
+      failures?: PromoteGateFailure[];
+      to?: NoteLayer;
+    };
+
+/** 層を1段階 promote（ゲート評価）または demote（reason 必須）する。 */
+export async function changeNoteLayer(
+  noteId: string,
+  input: { confirm?: boolean; reason?: string; to: NoteLayer },
+): Promise<LayerChangeResult> {
+  const res = await fetch(`/api/notes/${noteId}/layer`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    failures?: PromoteGateFailure[];
+    note?: NoteSummary;
+    to?: NoteLayer;
+    unlockedUntil?: number;
+  };
+  if (!res.ok) {
+    return {
+      error: body.error,
+      failures: body.failures,
+      ok: false,
+      status: res.status,
+      to: body.to,
+    };
+  }
+  return { note: body.note as NoteSummary, ok: true };
+}
+
+export async function unlockNoteForEdit(
+  noteId: string,
+  minutes?: number,
+): Promise<LayerChangeResult> {
+  const res = await fetch(`/api/notes/${noteId}/unlock`, {
+    ...fetchOpts,
+    body: JSON.stringify({ minutes }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    note?: NoteSummary;
+    unlockedUntil?: number;
+  };
+  if (!res.ok) {
+    return { error: body.error, ok: false, status: res.status };
+  }
+  return {
+    note: body.note as NoteSummary,
+    ok: true,
+    unlockedUntil: body.unlockedUntil,
+  };
+}
+
+export async function fetchLayerEvents(
+  noteId: string,
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<{ events: NoteLayerEvent[] }>> {
+  const res = await fetch(
+    `/api/notes/${noteId}/layer-events`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return {
+    data: (await res.json()) as { events: NoteLayerEvent[] },
+    ok: true,
+  };
 }
 
 export async function deleteFolder(id: string): Promise<ApiResult<void>> {

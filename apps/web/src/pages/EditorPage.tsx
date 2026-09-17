@@ -1,5 +1,5 @@
 import type { WikiLinkMap } from "@miyulabmd/markdown";
-import type { ArticleSource, Note } from "@miyulabmd/shared";
+import type { ArticleSource, Note, NoteSummary } from "@miyulabmd/shared";
 import {
   matchArticleSource,
   normalizeFolder,
@@ -23,6 +23,7 @@ import {
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
+import { LayerMenu } from "../components/editor/LayerMenu.tsx";
 import { LinksPanel } from "../components/editor/LinksPanel.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
@@ -258,6 +259,7 @@ function EditorWorkspace({
   yMarkdown,
   awareness,
   canEdit,
+  canManage,
   splitScroll,
   shareOpen,
   historyOpen,
@@ -285,6 +287,8 @@ function EditorWorkspace({
   yMarkdown: YjsSession["yMarkdown"] | undefined;
   awareness: YjsSession["awareness"] | undefined;
   canEdit: boolean;
+  /** Share/history stay usable while a gold lock freezes the body. */
+  canManage: boolean;
   splitScroll: number;
   shareOpen: boolean;
   historyOpen: boolean;
@@ -347,7 +351,7 @@ function EditorWorkspace({
       </div>
       <EditorShareDialog
         accessDraft={accessDraft}
-        canEdit={canEdit}
+        canEdit={canManage}
         headingTitle={headingTitle}
         isOwner={isOwner}
         noteId={note.id}
@@ -416,6 +420,12 @@ function EditorPageView({
           再接続・再同期が完了するまで編集できません。
         </p>
       )}
+      {note.goldLocked && (
+        <p className="px-5 py-2" role="status">
+          このノートは Gold（Canonical）としてロックされています。
+          ヘッダーの層メニューから一時解除できます。
+        </p>
+      )}
       {workspace}
     </>
   );
@@ -426,25 +436,30 @@ function EditorHeaderEnd({
   folder,
   folderId,
   isOwner,
+  note,
   onFolderChange,
   onFolderBlur,
   onHistory,
   onLinks,
+  onNoteChange,
   onShare,
 }: {
   awareness: YjsSession["awareness"] | undefined;
   folder: string;
   folderId: string | null;
   isOwner: boolean;
+  note: Note;
   onFolderChange: (folder: string) => void;
   onFolderBlur: () => void;
   onHistory: () => void;
   onLinks: () => void;
+  onNoteChange: (note: NoteSummary) => void;
   onShare: () => void;
 }) {
   return (
     <>
       {awareness && <PresenceBar awareness={awareness} />}
+      <LayerMenu isOwner={isOwner} note={note} onChanged={onNoteChange} />
       <FolderPopover
         folder={folder}
         folderId={folderId}
@@ -559,8 +574,9 @@ export function EditorPage() {
       : null;
   const flags = ownerFlags(user, note);
   const readReady = currentReadState?.phase === "success" && !loading;
+  const goldLocked = Boolean(note?.goldLocked);
   const canEdit = flags.canEdit && readSource === "network" && readReady;
-  const viewMode: EditorMode = canEdit ? mode : "preview";
+  const viewMode: EditorMode = canEdit && !goldLocked ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
   const noteLinks = useNoteLinks(
@@ -581,6 +597,8 @@ export function EditorPage() {
   // the editor or replace its local document with the network/cache snapshot.
   const paused = ready && !collabWritable;
   const canMutate = canEdit && !paused;
+  // Gold lock freezes the body only — folder/share metadata stays editable.
+  const bodyEditable = canMutate && !goldLocked;
 
   useLayoutEffect(() => {
     hydratedRef.current = false;
@@ -766,7 +784,7 @@ export function EditorPage() {
   useEffect(() => {
     bindEditorHeader({
       awareness,
-      canEdit: canMutate,
+      canEdit: bodyEditable,
       canStart: () => editorSessionWritable(sessionRef.current),
       folder,
       isCurrent: () => viewScope?.isCurrent() === true,
@@ -789,7 +807,7 @@ export function EditorPage() {
   }, [
     note,
     viewMode,
-    canMutate,
+    bodyEditable,
     awareness,
     folder,
     flags.isOwner,
@@ -815,7 +833,8 @@ export function EditorPage() {
             articleIssues={articleIssues}
             articleSource={articleSource}
             awareness={awareness}
-            canEdit={canMutate}
+            canEdit={bodyEditable}
+            canManage={canMutate}
             focusLine={focusLine}
             headingTitle={headingTitle}
             historyOpen={historyOpen}
@@ -888,6 +907,7 @@ function bindEditorHeader(input: {
     input.setHeader({ folder: null, layout: "editor" });
     return;
   }
+  const note = input.note;
   input.setHeader({
     actions: (
       <EditorModeSwitch
@@ -905,6 +925,7 @@ function bindEditorHeader(input: {
           folder={input.folder}
           folderId={input.note.folderId}
           isOwner={input.isOwner}
+          note={input.note}
           onFolderBlur={() => {
             void persistEditorFolder(
               input.note,
@@ -923,6 +944,9 @@ function bindEditorHeader(input: {
           onFolderChange={input.setFolder}
           onHistory={() => input.setHistoryOpen(true)}
           onLinks={() => input.setLinksOpen(true)}
+          onNoteChange={(summary) =>
+            input.setNote({ ...note, ...summary, markdown: note.markdown })
+          }
           onShare={() => input.setShareOpen(true)}
         />
       ),
