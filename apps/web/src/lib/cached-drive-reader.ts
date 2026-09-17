@@ -1,8 +1,5 @@
 import type { FolderAccess, NoteSummary } from "@miyulabmd/shared";
-import {
-  isOfflineCacheUserSuspended,
-  openOfflineCache,
-} from "./offline-cache.ts";
+import { openOfflineCache } from "./offline-cache.ts";
 
 export type CachedDriveView = {
   folder: FolderAccess | null;
@@ -29,9 +26,9 @@ export async function readCachedDrive(
         "AbortError",
       );
     }
-    if (isOfflineCacheUserSuspended(userId)) {
-      throw new DOMException("Offline cache is suspended");
-    }
+    // Cache state never gates this read: openOfflineCache degrades to an
+    // empty handle during purges or storage failures, and every read then
+    // resolves as a cache miss.
   };
   const cache = await openOfflineCache({ signal, userId });
   let result: CachedDriveView;

@@ -15,7 +15,6 @@ import {
   type OfflineCacheScope,
   openOfflineCache,
   subscribeOfflineCacheInvalidation,
-  suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
@@ -200,10 +199,8 @@ async function persistDeniedFolder(
     ) {
       throw cause;
     }
-    if (!isOfflineCacheScopeInvalidated(cause)) {
-      // An invalidated scope means a purge is already deleting the denial.
-      suspendOfflineCacheUser(viewer.user.id);
-    }
+    // A failed denial write is a warning, never a suspension: the denial
+    // ledger is best-effort and display reads must keep working.
     error.cacheWarning =
       "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
   } finally {
@@ -360,7 +357,7 @@ async function readHomeMetadataSnapshot({
   const clearLifetime = viewer.user
     ? captureOfflineCacheUserClearLifetime(viewer.user.id)
     : 0;
-  const scope = viewer.user
+  let scope = viewer.user
     ? await captureOfflineCacheScope(viewer.user.id)
     : null;
   throwIfCancelled(signal, isCurrentOwner);
@@ -395,7 +392,18 @@ async function readHomeMetadataSnapshot({
   ]);
   throwIfCancelled(signal, isCurrentOwner);
   if (scope) {
-    await assertOfflineCacheScope(scope);
+    try {
+      await assertOfflineCacheScope(scope);
+    } catch (error) {
+      if (!isOfflineCacheScopeInvalidated(error)) {
+        throw error;
+      }
+      // A purge landing mid-read invalidated the captured epoch. The
+      // network snapshot stands on its own; downstream cache work
+      // re-opens against the post-purge realm and warns instead of
+      // failing the display.
+      scope = null;
+    }
   }
 
   const snapshot = buildHomeSnapshot(viewer, folderId, notes, folderResult);

@@ -18,7 +18,6 @@ import {
   reportOfflineNoteDenial,
   subscribeOfflineCacheInvalidation,
   subscribeOfflineCacheNoteDenial,
-  suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
@@ -457,17 +456,27 @@ export function createNoteReadSession(
         noteAuthority &&
         scope.epoch !== noteAuthority.epoch
       ) {
-        throw new DOMException(
-          "Note scope changed before acquisition",
-          "AbortError",
-        );
+        // A purge landed between the two captures; the old epoch's authority
+        // is meaningless. Drop it and fetch unpreconditioned rather than
+        // failing the read on cache-internal state.
+        noteAuthority = null;
+        owner.authority = null;
       }
       const result =
         capturedViewer.mode === "cached"
           ? await readCachedOnly(id)
           : await fetchWithFallback(id, orderingToken, noteAuthority);
       if (scope) {
-        await assertOfflineCacheScope(scope);
+        try {
+          await assertOfflineCacheScope(scope);
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            throw error;
+          }
+          // Cache-side epoch churn (a purge landing mid-read) must not take
+          // down a healthy network result. Fresh writes are still fenced by
+          // the rotated epoch.
+        }
       }
       let published: NoteReadResult;
       if (isPublishedReadResult(result)) {
@@ -501,7 +510,8 @@ export function createNoteReadSession(
             if (openedCache) {
               await openedCache.denyNote(id, denialToken);
             } else if (cacheOpenFailed) {
-              suspendOfflineCacheUser(capturedViewer.cacheViewerId);
+              // The denial ledger could not record this denial. Warn — do
+              // not suspend the realm's display reads.
               reportOfflineNoteDenial(
                 capturedViewer.cacheViewerId,
                 id,
@@ -512,7 +522,6 @@ export function createNoteReadSession(
                 "キャッシュを無効化できませんでした。安全のためキャッシュをクリアしてください。";
             }
           } catch {
-            suspendOfflineCacheUser(capturedViewer.cacheViewerId);
             reportOfflineNoteDenial(
               capturedViewer.cacheViewerId,
               id,
@@ -528,7 +537,17 @@ export function createNoteReadSession(
       ensurePublishable(published, id, orderingToken);
       try {
         if (scope) {
-          await assertOfflineCacheScope(scope);
+          try {
+            await assertOfflineCacheScope(scope);
+          } catch (error) {
+            if (
+              !(error instanceof DOMException && error.name === "AbortError")
+            ) {
+              throw error;
+            }
+            // As above: cache-internal churn degrades, it never vetoes the
+            // already-fetched network result.
+          }
           if (published.ok && noteAuthority) {
             await assertOfflineNoteAuthority(
               noteAuthority,

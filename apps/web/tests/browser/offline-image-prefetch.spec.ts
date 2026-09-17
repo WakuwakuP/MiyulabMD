@@ -99,7 +99,7 @@ test("prefetch acquires images only after all bodies and uses the referenced par
   );
 });
 
-test("an image response arriving after purge cannot repopulate or publish bytes", async ({
+test("an image response arriving after purge resolves empty instead of failing", async ({
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
@@ -134,16 +134,19 @@ test("an image response arriving after purge cannot repopulate or publish bytes"
         attachedImage("/api/notes/parent/images/image"),
         { cacheOnly: false, scope },
       ).then(
-        () => false,
-        () => true,
+        async (blob: Blob | null) => ({
+          rejected: false,
+          text: blob ? await blob.text() : null,
+        }),
+        () => ({ rejected: true, text: null }),
       );
       await requested;
       await clearOfflineCacheUser("alice");
       release();
-      const rejected = await pending;
+      const { rejected, text } = await pending;
       const fresh = await openOfflineCache({ userId: "alice" });
       try {
-        return { image: await fresh.getImage("parent", "image"), rejected };
+        return { image: await fresh.getImage("parent", "image"), rejected, text };
       } finally {
         fresh.close();
       }
@@ -151,7 +154,10 @@ test("an image response arriving after purge cannot repopulate or publish bytes"
       globalThis.fetch = originalFetch;
     }
   });
-  expect(result).toEqual({ image: null, rejected: true });
+  // The fenced write drops the late bytes (the purged epoch cannot be
+  // repopulated), and the acquisition resolves empty instead of rejecting
+  // with a cache-internal error.
+  expect(result).toEqual({ image: null, rejected: false, text: null });
 });
 
 test("unsupported image MIME cannot replace a supported cached image", async ({

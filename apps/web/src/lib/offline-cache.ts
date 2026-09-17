@@ -134,6 +134,12 @@ type OfflineCache = {
   getFolderState(
     id: string | null,
   ): Promise<"available" | "denied" | "missing">;
+  /**
+   * `true` when this handle is a stand-in for unavailable storage (for
+   * example while a purge is running). Reads resolve as misses and writes
+   * reject, but the display layer must keep working without the cache.
+   */
+  readonly degraded: boolean;
   close(): void;
 };
 
@@ -425,9 +431,9 @@ function invalidateDeviceRealm(): void {
 function handleDenialLifecycleMessage(
   event: NoteDenialEvent | FolderDenialEvent,
 ): void {
-  if (event.resource.generation === null) {
-    suspendOfflineCacheUser(event.userId);
-  }
+  // A `generation === null` event means a remote context could not persist
+  // the denial. That is a warning, not a reason to suspend this realm's
+  // display reads.
   notifyLifecycle(event);
 }
 
@@ -570,6 +576,232 @@ function isInvalidActiveEpochFence(
   );
 }
 
+// Phase 1 — purge tombstone self-healing.
+// A `<uuid>:purging` epoch or `device-clear-state: "purging"` marker means a
+// purge died mid-flight (or is running in another context). Whoever observes
+// the marker tries the same exclusive lock the purge itself would hold: a
+// granted lock proves the previous purge died, so the observer finishes the
+// deletion and removes the marker. If the lock is unavailable a purge is
+// actively running, and callers proceed against an empty cache instead of
+// blocking or failing.
+
+type PurgeTombstoneScan = {
+  device: boolean;
+  user: boolean;
+};
+
+function userLockName(userId: string): string {
+  return `miyulabmd-offline-cache:user:${encodePathPart(userId)}`;
+}
+
+function readScopeEpochsRaw(
+  database: IDBDatabase,
+  userId: string,
+): Promise<{ global: string; user: string; state: string }> {
+  return new Promise((resolve, reject) => {
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(METADATA_STORE, "readonly");
+      const store = transaction.objectStore(METADATA_STORE);
+      const global = store.get(DEVICE_EPOCH_METADATA_KEY);
+      const user = store.get(epochKey(userId));
+      const state = store.get(DEVICE_CLEAR_STATE_METADATA_KEY);
+      let remaining = 3;
+      const finish = () => {
+        if (--remaining !== 0) {
+          return;
+        }
+        resolve({
+          global:
+            (global.result as MetadataRecord | undefined)?.value ?? "0",
+          state:
+            (state.result as MetadataRecord | undefined)?.value ??
+            DEVICE_CLEAR_ACTIVE,
+          user: (user.result as MetadataRecord | undefined)?.value ?? "0",
+        });
+      };
+      global.onsuccess = finish;
+      user.onsuccess = finish;
+      state.onsuccess = finish;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () =>
+        reject(transaction.error ?? invalidatedError());
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function scanPurgeTombstones(
+  userId: string,
+): Promise<PurgeTombstoneScan | null> {
+  try {
+    const database = await getEpochDatabase();
+    if (!database) {
+      return null;
+    }
+    const epochs = await readScopeEpochsRaw(database, userId);
+    return {
+      device:
+        epochs.state !== DEVICE_CLEAR_ACTIVE ||
+        !isValidEpoch(epochs.global) ||
+        isPurgingEpoch(epochs.global),
+      user: !isValidEpoch(epochs.user) || isPurgingEpoch(epochs.user),
+    };
+  } catch {
+    // Storage that cannot be read at all is handled by the caller's
+    // ordinary degradation path, not by tombstone recovery.
+    return null;
+  }
+}
+
+type LockAttempt<T> = { acquired: boolean; value?: T };
+
+async function requestLockIfAvailable<T>(
+  name: string,
+  mode: "exclusive" | "shared",
+  operation: () => Promise<T>,
+): Promise<LockAttempt<T>> {
+  if (!navigator.locks) {
+    // Without Web Locks there is no cross-context survivor check; run the
+    // recovery best effort. Same-tab purges are still serialized by the
+    // in-memory operation trackers.
+    return { acquired: true, value: await operation() };
+  }
+  return navigator.locks.request(
+    name,
+    { ifAvailable: true, mode },
+    async (lock): Promise<LockAttempt<T>> =>
+      lock ? { acquired: true, value: await operation() } : { acquired: false },
+  );
+}
+
+async function finishInterruptedUserPurge(
+  userId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const database = await openDatabase(signal);
+  try {
+    const epoch = crypto.randomUUID();
+    // Re-run the purge's own steps: write the tombstone, delete scoped data,
+    // then clear the marker with a fresh epoch. A crash here simply leaves
+    // another tombstone for the next observer.
+    await clearUserRecords(database, userId, epoch);
+    await clearUserFiles(userId);
+    await commitTransaction(
+      database,
+      METADATA_STORE,
+      { key: epochKey(userId), value: epoch },
+      userId,
+    );
+  } finally {
+    database.close();
+  }
+}
+
+async function finishInterruptedDevicePurge(): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await clearPrivateDeviceRecords(database);
+    await removeDeviceFiles();
+    await updateDeviceState(database, DEVICE_CLEAR_ACTIVE, crypto.randomUUID());
+  } finally {
+    database.close();
+  }
+}
+
+async function healInterruptedPurgeMarkers(
+  userId: string,
+  signal?: AbortSignal,
+): Promise<"clean" | "purging"> {
+  let scan = await scanPurgeTombstones(userId);
+  if (!scan) {
+    return "clean";
+  }
+  if (!scan.device) {
+    // A completed device purge cannot leave the in-memory flag stuck: the
+    // flag only mirrors the durable marker.
+    globalSuspended = false;
+  }
+  if (scan.device) {
+    try {
+      const healed = await requestLockIfAvailable(
+        GLOBAL_LOCK_NAME,
+        "exclusive",
+        async () => {
+          const again = await scanPurgeTombstones(userId);
+          if (again?.device) {
+            await finishInterruptedDevicePurge();
+          }
+          globalSuspended = false;
+        },
+      );
+      if (!healed.acquired) {
+        return "purging";
+      }
+    } catch {
+      return "purging";
+    }
+    scan = await scanPurgeTombstones(userId);
+    if (!scan || scan.device) {
+      return "purging";
+    }
+  }
+  if (scan.user) {
+    try {
+      const healed = await requestLockIfAvailable(
+        GLOBAL_LOCK_NAME,
+        "shared",
+        () =>
+          requestLockIfAvailable(userLockName(userId), "exclusive", async () => {
+            const again = await scanPurgeTombstones(userId);
+            if (again?.user) {
+              await finishInterruptedUserPurge(userId, signal);
+            }
+            suspendedUsers.delete(userId);
+          }),
+      );
+      if (!healed.acquired || healed.value?.acquired !== true) {
+        return "purging";
+      }
+    } catch {
+      return "purging";
+    }
+    const after = await scanPurgeTombstones(userId);
+    if (after?.user) {
+      return "purging";
+    }
+  }
+  return "clean";
+}
+
+function emptyOfflineCache(): OfflineCache {
+  const unavailable = (): Promise<never> =>
+    Promise.reject(new Error("Offline cache is unavailable"));
+  return {
+    degraded: true,
+    beginFolderRead: () => Promise.resolve(1),
+    beginImageRead: () => Promise.resolve(0),
+    beginNoteRead: () => 0,
+    clearFolderDenial: unavailable,
+    clearNoteDenial: unavailable,
+    close: () => undefined,
+    denyFolder: unavailable,
+    denyImage: unavailable,
+    denyNote: unavailable,
+    getFolder: () => Promise.resolve(null),
+    getFolderState: () => Promise.resolve("missing"),
+    getImage: () => Promise.resolve(null),
+    getNote: () => Promise.resolve(null),
+    getNoteList: () => Promise.resolve(null),
+    getNoteListState: () => Promise.resolve("missing"),
+    putFolder: unavailable,
+    putImage: unavailable,
+    putNote: unavailable,
+    putNoteList: unavailable,
+  };
+}
+
 async function captureOfflineCacheScopeUnlocked(
   userId: string,
 ): Promise<OfflineCacheScope> {
@@ -603,9 +835,18 @@ async function captureOfflineCacheScopeUnlocked(
   return { epoch, lifetime, userId };
 }
 
-export function captureOfflineCacheScope(
+export async function captureOfflineCacheScope(
   userId: string,
 ): Promise<OfflineCacheScope> {
+  if ((await healInterruptedPurgeMarkers(userId)) === "purging") {
+    // A live purge owns this realm: report no authority instead of blocking
+    // on its lock.
+    return {
+      epoch: null,
+      lifetime: captureOfflineCacheUserClearLifetime(userId),
+      userId,
+    };
+  }
   return userStorageLock(userId, "shared", () =>
     captureOfflineCacheScopeUnlocked(userId),
   );
@@ -672,11 +913,7 @@ function userStorageLock<T>(
         ? operation()
         : Promise.reject(new Error("Offline cache locking is unavailable"));
     }
-    return navigator.locks.request(
-      `miyulabmd-offline-cache:user:${encodePathPart(userId)}`,
-      { mode },
-      operation,
-    );
+    return navigator.locks.request(userLockName(userId), { mode }, operation);
   });
 }
 
@@ -2239,13 +2476,14 @@ function reportCommittedFolderDenial(
   }
 }
 
+// A failed folder-denial write surfaces to the caller, which turns it into a
+// warning. It never suspends the realm: the denial ledger is best-effort and
+// display reads stay live regardless.
 function throwFolderDenialFailure(
   error: unknown,
   userId: string,
-  id: string | null,
   lifetime: number,
   signal: AbortSignal | undefined,
-  scope: OfflineCacheScope,
 ): never {
   if (signal?.aborted) {
     throw signal.reason;
@@ -2257,8 +2495,6 @@ function throwFolderDenialFailure(
   ) {
     throw error instanceof DOMException ? error : invalidatedError();
   }
-  suspendOfflineCacheUser(userId);
-  reportOfflineFolderDenial(userId, id, scope.epoch, null, [id]);
   throw error;
 }
 
@@ -2834,16 +3070,23 @@ export function persistCachedViewerId(
   viewerId: string,
   options: CancellationOptions = {},
 ): Promise<void> {
-  return userStorageLock(viewerId, "shared", async () => {
-    const clearLifetime = captureOfflineCacheUserClearLifetime(viewerId);
-    const scope = await captureOfflineCacheScopeUnlocked(viewerId);
-    if (scope.epoch === null) {
-      throw new Error("Viewer identity storage is unavailable");
-    }
-    return { clearLifetime, scope };
-  }).then(({ clearLifetime, scope }) =>
-    persistCachedViewerIdUnlocked(viewerId, scope, clearLifetime, options),
-  );
+  // Tombstone healing runs first; a still-running purge then serializes this
+  // write behind its exclusive lock, and the post-purge scope capture simply
+  // sees the fresh epoch.
+  return healInterruptedPurgeMarkers(viewerId)
+    .then(() =>
+      userStorageLock(viewerId, "shared", async () => {
+        const clearLifetime = captureOfflineCacheUserClearLifetime(viewerId);
+        const scope = await captureOfflineCacheScopeUnlocked(viewerId);
+        if (scope.epoch === null) {
+          throw new Error("Viewer identity storage is unavailable");
+        }
+        return { clearLifetime, scope };
+      }),
+    )
+    .then(({ clearLifetime, scope }) =>
+      persistCachedViewerIdUnlocked(viewerId, scope, clearLifetime, options),
+    );
 }
 
 export function readCachedViewerId(
@@ -3120,12 +3363,12 @@ function updateNoteAuthority(
 
 async function openOfflineCacheUnlocked(
   options: OpenOfflineCacheOptions & CancellationOptions,
-): Promise<OfflineCache> {
+): Promise<OfflineCache | null> {
   if (!options.userId) {
     throw new Error("A user ID is required");
   }
   if (!("indexedDB" in globalThis && navigator.storage?.getDirectory)) {
-    throw new Error("Offline cache storage is unavailable");
+    return null;
   }
 
   const userId = options.userId;
@@ -3133,13 +3376,16 @@ async function openOfflineCacheUnlocked(
   const database = await openDatabase(options.signal);
   let scope: OfflineCacheScope;
   try {
-    const epochs = await readScopeEpochs(database, userId);
+    const epochs = await readScopeEpochsRaw(database, userId);
     const epoch = composeEpoch(epochs.global, epochs.user);
     throwIfAborted(options.signal);
     scope = { epoch, lifetime: clearLifetime, userId };
     if (
-      isPurgingEpoch(epoch) ||
-      epochs.state === DEVICE_CLEAR_PURGING ||
+      !isValidEpoch(epochs.global) ||
+      !isValidEpoch(epochs.user) ||
+      isPurgingEpoch(epochs.global) ||
+      isPurgingEpoch(epochs.user) ||
+      epochs.state !== DEVICE_CLEAR_ACTIVE ||
       globalSuspended ||
       userClearOperations.has(userId) ||
       !isOfflineCacheUserClearLifetimeCurrent(userId, clearLifetime) ||
@@ -3151,17 +3397,25 @@ async function openOfflineCacheUnlocked(
             options.scope.lifetime,
           )))
     ) {
-      throw invalidatedError();
+      // A tombstone, an active purge, or a stale scope means "empty cache",
+      // never a display-blocking error.
+      database.close();
+      return null;
     }
     databaseScopes.set(database, scope);
   } catch (error) {
     database.close();
     throwIfAborted(options.signal);
+    if (error instanceof DOMException && error.name === "AbortError") {
+      // Aborted or invalid storage reads degrade to an empty cache.
+      return null;
+    }
     throw error;
   }
   let closed = false;
 
   const cache: OfflineCache = {
+    degraded: false,
     async beginFolderRead() {
       if (closed) {
         throw new Error("Offline cache is closed");
@@ -3250,7 +3504,7 @@ async function openOfflineCacheUnlocked(
         reportCommittedFolderDenial(userId, id, receipt);
         return receipt.committed;
       } catch (error) {
-        throwFolderDenialFailure(error, userId, id, lifetime, signal, scope);
+        throwFolderDenialFailure(error, userId, lifetime, signal);
       }
     },
 
@@ -3315,8 +3569,8 @@ async function openOfflineCacheUnlocked(
         );
         reportOfflineNoteDenial(userId, id, scope.epoch, generation);
       } catch (error) {
-        suspendOfflineCacheUser(userId);
-        reportOfflineNoteDenial(userId, id, scope.epoch, null);
+        // A failed denial write surfaces to the caller as a warning. It must
+        // not suspend or poison this realm's display reads.
         throw error;
       }
       try {
@@ -3810,16 +4064,48 @@ async function openOfflineCacheUnlocked(
   return cache;
 }
 
-export function openOfflineCache(
+export async function openOfflineCache(
   options: OpenOfflineCacheOptions & CancellationOptions,
 ): Promise<OfflineCache> {
   if (!options.userId) {
-    return Promise.reject(new Error("A user ID is required"));
+    throw new Error("A user ID is required");
   }
-  if (userClearOperations.has(options.userId) || globalSuspended) {
-    return Promise.reject(invalidatedError());
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (
+      (await healInterruptedPurgeMarkers(options.userId, options.signal)) ===
+      "purging"
+    ) {
+      return emptyOfflineCache();
+    }
+    let opened: LockAttempt<LockAttempt<OfflineCache | null>>;
+    try {
+      // An unavailable shared lock means an exclusive operation (a live
+      // purge or orphan sweep) owns the realm — degrade rather than block.
+      opened = await requestLockIfAvailable(
+        GLOBAL_LOCK_NAME,
+        "shared",
+        () =>
+          requestLockIfAvailable(userLockName(options.userId), "shared", () =>
+            openOfflineCacheUnlocked(options),
+          ),
+      );
+    } catch (error) {
+      if (options.signal?.aborted) {
+        throw options.signal.reason;
+      }
+      // Storage that cannot be opened at all is a permanently empty cache.
+      void error;
+      return emptyOfflineCache();
+    }
+    const inner = opened.value;
+    if (!opened.acquired || !inner || inner.acquired !== true) {
+      return emptyOfflineCache();
+    }
+    if (inner.value) {
+      return inner.value;
+    }
+    // A marker or scope change appeared between the scan and the lock —
+    // heal once more, then give up on this open.
   }
-  return userStorageLock(options.userId, "shared", () =>
-    openOfflineCacheUnlocked(options),
-  );
+  return emptyOfflineCache();
 }

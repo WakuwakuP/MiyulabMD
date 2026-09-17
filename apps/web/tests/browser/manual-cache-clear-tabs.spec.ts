@@ -64,15 +64,21 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
           () => true,
         );
       const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
+      // A stale pre-purge scope must not resurrect purged data: the open
+      // resolves to a degraded handle whose reads are all misses.
       const scoped = await openOfflineCache({
         scope: fixture.aliceScope as never,
         userId: "manual-tab-alice-7",
       }).then(
-        (v) => {
+        async (v) => {
+          const observed = {
+            degraded: v.degraded,
+            reopened: await v.getNote("manual-tab-note-a-7"),
+          };
           v.close();
-          return false;
+          return observed;
         },
-        () => true,
+        () => null,
       );
       return { alice, bob, scoped };
     }, note);
@@ -86,7 +92,11 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
         cache.close();
       }
     }, note);
-    expect(stale).toEqual({ alice: true, bob: true, scoped: true });
+    expect(stale).toEqual({
+      alice: true,
+      bob: true,
+      scoped: { degraded: true, reopened: null },
+    });
     expect(fresh).toBe("manual-tab-fresh-7");
   } finally {
     await other.close();

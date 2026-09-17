@@ -218,7 +218,7 @@ test("cache clearing prevents an older Home snapshot from being saved or publish
   expect(result).toEqual({ folder: null, list: null, published: false });
 });
 
-test("failed user purge remains stopped until a successful retry", async ({
+test("failed user purge degrades opens and stays stopped until a successful retry", async ({
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
@@ -253,14 +253,24 @@ test("failed user purge remains stopped until a successful retry", async ({
       const second = clearOfflineCacheUser("alice");
       const settled = Promise.allSettled([first, second]);
       await entered.promise;
+      // A live purge owns the realm: the observer gets a degraded empty
+      // handle instead of blocking on the purge's lock.
       const blockedDuringPurge = await openOfflineCache({
         userId: "alice",
       }).then(
-        (handle: { close(): void }) => {
+        async (handle: {
+          close(): void;
+          degraded: boolean;
+          getNote(id: string): Promise<unknown>;
+        }) => {
+          const observed = {
+            degraded: handle.degraded,
+            note: await handle.getNote(note.id),
+          };
           handle.close();
-          return false;
+          return observed;
         },
-        () => true,
+        () => null,
       );
       release.resolve();
       const outcomes = await settled;
@@ -290,7 +300,7 @@ test("failed user purge remains stopped until a successful retry", async ({
     }
   }, note);
   expect(result).toEqual({
-    blockedDuringPurge: true,
+    blockedDuringPurge: { degraded: true, note: null },
     failures: [true, true],
     recovered: note.markdown,
     removals: 1,
