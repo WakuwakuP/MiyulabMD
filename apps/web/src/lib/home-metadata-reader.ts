@@ -10,6 +10,7 @@ import {
   captureOfflineCacheScope,
   captureOfflineCacheUserClearLifetime,
   captureOfflineFolderRead,
+  isOfflineCacheScopeInvalidated,
   isOfflineCacheUserClearLifetimeCurrent,
   type OfflineCacheScope,
   openOfflineCache,
@@ -140,7 +141,9 @@ async function saveHomeMetadata(
     if (
       signal.aborted ||
       !isCurrentOwner() ||
-      (error instanceof DOMException && error.name === "AbortError")
+      (error instanceof DOMException &&
+        error.name === "AbortError" &&
+        !isOfflineCacheScopeInvalidated(error))
     ) {
       throw error;
     }
@@ -191,11 +194,16 @@ async function persistDeniedFolder(
     if (
       signal.aborted ||
       !isCurrentOwner() ||
-      (cause instanceof DOMException && cause.name === "AbortError")
+      (cause instanceof DOMException &&
+        cause.name === "AbortError" &&
+        !isOfflineCacheScopeInvalidated(cause))
     ) {
       throw cause;
     }
-    suspendOfflineCacheUser(viewer.user.id);
+    if (!isOfflineCacheScopeInvalidated(cause)) {
+      // An invalidated scope means a purge is already deleting the denial.
+      suspendOfflineCacheUser(viewer.user.id);
+    }
     error.cacheWarning =
       "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
   } finally {
@@ -249,6 +257,31 @@ async function validateHomePublication(
   }
 }
 
+function handleProjectionFailure(
+  snapshot: HomeMetadataSnapshot,
+  folderId: string | undefined,
+  scope: OfflineCacheScope | null,
+  error: unknown,
+): void {
+  const scopeInvalidated = isOfflineCacheScopeInvalidated(error);
+  if (
+    error instanceof DOMException &&
+    error.name === "AbortError" &&
+    !scopeInvalidated
+  ) {
+    throw error;
+  }
+  snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
+  // A scope invalidation means a purge is deleting the cached denial state;
+  // only an unverifiable projection with captured authority must hide data.
+  if (scope?.epoch && !scopeInvalidated) {
+    snapshot.notes = [];
+    if (folderId !== undefined) {
+      snapshot.visibleFolder = null;
+    }
+  }
+}
+
 async function projectCachedHomeMetadata(
   snapshot: HomeMetadataSnapshot,
   folderId: string | undefined,
@@ -282,20 +315,10 @@ async function projectCachedHomeMetadata(
       folderState,
     );
   } catch (error) {
-    if (
-      signal.aborted ||
-      !isCurrentOwner() ||
-      (error instanceof DOMException && error.name === "AbortError")
-    ) {
+    if (signal.aborted || !isCurrentOwner()) {
       throw error;
     }
-    snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
-    if (scope) {
-      snapshot.notes = [];
-      if (folderId !== undefined) {
-        snapshot.visibleFolder = null;
-      }
-    }
+    handleProjectionFailure(snapshot, folderId, scope, error);
   } finally {
     projectionCache?.close();
   }

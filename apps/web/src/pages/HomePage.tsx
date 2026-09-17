@@ -388,6 +388,7 @@ function NetworkHomePage() {
   const reloadOwnerRef = useRef(0);
   const homeReadOwnerRef = useRef<object | null>(null);
   const homeReadActiveRef = useRef(false);
+  const invalidationRetryRef = useRef(false);
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -535,6 +536,31 @@ function NetworkHomePage() {
     setCacheWarning(null);
     setFolderPending(true);
     ++reloadOwnerRef.current;
+    // A mid-read invalidation aborts once; the next read captures a fresh
+    // scope. The flag is consumed by whichever run follows, so a failed retry
+    // or a folder/viewer change cannot leave stale state behind.
+    const isInvalidationRetry = invalidationRetryRef.current;
+    invalidationRetryRef.current = false;
+    const shouldRetryInvalidation = (error: unknown): boolean =>
+      error instanceof DOMException &&
+      error.name === "AbortError" &&
+      !isInvalidationRetry;
+    const showReadError = (error: unknown): void => {
+      setFolderPending(false);
+      notesRef.current = [];
+      setVisibleFolder(null);
+      visibleFolderRef.current = null;
+      setPublicFolders([]);
+      setNotes([]);
+      if (error instanceof HomeMetadataError) {
+        setCacheWarning(error.cacheWarning ?? null);
+      }
+      if (error instanceof HomeMetadataError || error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError("データを取得できませんでした。");
+      }
+    };
     void readHomeMetadata({
       folderId,
       isCurrentOwner,
@@ -561,20 +587,12 @@ function NetworkHomePage() {
         if (!ownerCurrent || controller.signal.aborted) {
           return;
         }
-        setFolderPending(false);
-        notesRef.current = [];
-        setVisibleFolder(null);
-        visibleFolderRef.current = null;
-        setPublicFolders([]);
-        setNotes([]);
-        if (error instanceof HomeMetadataError) {
-          setCacheWarning(error.cacheWarning ?? null);
+        if (shouldRetryInvalidation(error)) {
+          invalidationRetryRef.current = true;
+          setReloadRequest((value) => value + 1);
+          return;
         }
-        if (error instanceof HomeMetadataError || error instanceof Error) {
-          setError(error.message);
-        } else {
-          setError("データを取得できませんでした。");
-        }
+        showReadError(error);
       });
     return () => {
       current = false;
