@@ -21,12 +21,13 @@ import {
   useSearchParams,
 } from "react-router";
 import { EditorModeSwitch } from "../components/editor/EditorModeSwitch.tsx";
+import { EditorOverflowMenu } from "../components/editor/EditorOverflowMenu.tsx";
 import { FolderPopover } from "../components/editor/FolderPopover.tsx";
 import { HistoryPanel } from "../components/editor/HistoryPanel.tsx";
-import { LayerMenu } from "../components/editor/LayerMenu.tsx";
 import { LinksPanel } from "../components/editor/LinksPanel.tsx";
 import { MarkdownEditor } from "../components/editor/MarkdownEditor.tsx";
 import { MarkdownPreview } from "../components/editor/MarkdownPreview.tsx";
+import { MedalBadge } from "../components/editor/MedalBadge.tsx";
 import { PresenceBar } from "../components/editor/PresenceBar.tsx";
 import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import { RichMarkdownEditor } from "../components/editor/RichMarkdownEditor.tsx";
@@ -37,12 +38,13 @@ import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterA
 import { draftFromNote } from "../components/notes/access-draft.ts";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
-import { HistoryIcon, LinkIcon, ShareIcon } from "../components/ui/icons.tsx";
+import { ShareIcon } from "../components/ui/icons.tsx";
 import { editorLoadingClass } from "../components/ui/prose.ts";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { cn } from "../lib/cn.ts";
 import type { YjsSession } from "../lib/collaboration.ts";
 import type { EditorMode } from "../lib/editor-mode.ts";
+import { useKnowledgeFeature } from "../lib/knowledge-features.ts";
 import {
   dismissStaleSsrPreview,
   removeSsrPreview,
@@ -430,7 +432,7 @@ function EditorPageView({
       {note.goldLocked && (
         <p className="px-5 py-2" role="status">
           このノートは Gold（Canonical）としてロックされています。
-          ヘッダーの層メニューから一時解除できます。
+          ヘッダーの「⋯」メニューの「編集ロック」から一時解除できます。
         </p>
       )}
       {workspace}
@@ -438,44 +440,70 @@ function EditorPageView({
   );
 }
 
+/**
+ * 右 nav（specs/knowledge-management.html §3.1）。
+ * 常時表示は共有 CTA と ⋯ メニュー、条件付きは presence アバター。
+ * フォルダ・リンク・履歴・編集ロックは「⋯ ノート」に集約する。
+ */
 function EditorHeaderEnd({
   awareness,
   folder,
   folderId,
   isOwner,
+  layersEnabled,
   note,
+  user,
   onFolderChange,
   onFolderBlur,
   onHistory,
   onLinks,
   onNoteChange,
+  onSearch,
   onShare,
 }: {
   awareness: YjsSession["awareness"] | undefined;
   folder: string;
   folderId: string | null;
   isOwner: boolean;
+  layersEnabled: boolean;
   note: Note;
+  user: AppShellContext["user"];
   onFolderChange: (folder: string) => void;
   onFolderBlur: () => void;
   onHistory: () => void;
   onLinks: () => void;
   onNoteChange: (note: NoteSummary) => void;
+  onSearch: () => void;
   onShare: () => void;
 }) {
   return (
     <>
       {awareness && <PresenceBar awareness={awareness} />}
-      <LayerMenu isOwner={isOwner} note={note} onChanged={onNoteChange} />
-      <FolderPopover
+      {/* ≥900px では現在地ボタンとして残す（§3.2）。<900px では ⋯ 内へ。 */}
+      <div className="max-[900px]:hidden">
+        <FolderPopover
+          folder={folder}
+          folderId={folderId}
+          isOwner={isOwner}
+          onFolderBlur={onFolderBlur}
+          onFolderChange={onFolderChange}
+        />
+      </div>
+      <EditorOverflowMenu
+        awareness={awareness}
         folder={folder}
         folderId={folderId}
         isOwner={isOwner}
+        layersEnabled={layersEnabled}
+        note={note}
         onFolderBlur={onFolderBlur}
         onFolderChange={onFolderChange}
+        onHistory={onHistory}
+        onLinks={onLinks}
+        onNoteChange={onNoteChange}
+        onSearch={onSearch}
+        user={user}
       />
-      <HeaderButton icon={<LinkIcon />} label="リンク" onClick={onLinks} />
-      <HeaderButton icon={<HistoryIcon />} label="履歴" onClick={onHistory} />
       <HeaderButton
         icon={<ShareIcon />}
         label="共有"
@@ -534,8 +562,9 @@ export function EditorPage() {
   const { id = "" } = useParams();
   const [searchParams] = useSearchParams();
   const focusLine = parseFocusLine(searchParams.get("line"));
-  const { user, userLoading, viewer, viewing, setHeader } =
+  const { user, userLoading, viewer, viewing, setHeader, openSearch } =
     useOutletContext<AppShellContext>();
+  const layersEnabled = useKnowledgeFeature("layers");
   const [note, setNote] = useState<Note | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [folder, setFolder] = useState("");
@@ -817,7 +846,9 @@ export function EditorPage() {
       folder,
       isCurrent: () => viewScope?.isCurrent() === true,
       isOwner: flags.isOwner,
+      layersEnabled,
       note,
+      onOpenSearch: openSearch,
       paused,
       readSource,
       setAccessDraft,
@@ -829,6 +860,7 @@ export function EditorPage() {
       setNote,
       setSaveError,
       setShareOpen,
+      user,
       viewMode,
     });
     return () => setHeader(null);
@@ -839,9 +871,12 @@ export function EditorPage() {
     awareness,
     folder,
     flags.isOwner,
+    layersEnabled,
+    openSearch,
     paused,
     readSource,
     setHeader,
+    user,
     viewScope,
   ]);
 
@@ -920,6 +955,9 @@ function bindEditorHeader(input: {
   readSource: "pending" | "network" | "cache";
   awareness: YjsSession["awareness"] | undefined;
   isOwner: boolean;
+  layersEnabled: boolean;
+  user: AppShellContext["user"];
+  onOpenSearch: () => void;
   setHeader: AppShellContext["setHeader"];
   setMode: (mode: EditorMode) => void;
   setFolder: (folder: string) => void;
@@ -939,13 +977,17 @@ function bindEditorHeader(input: {
   const note = input.note;
   input.setHeader({
     actions: (
-      <EditorModeSwitch
-        canEdit={input.canEdit}
-        onChange={(next) =>
-          changeEditorMode(input.canEdit, next, input.setMode)
-        }
-        value={input.viewMode}
-      />
+      <span className="flex items-center gap-2">
+        {/* KM-E2: フォルダのメダリオン割当を解決して medal を渡す（§3.1 中央スロット） */}
+        <MedalBadge medal={null} />
+        <EditorModeSwitch
+          canEdit={input.canEdit}
+          onChange={(next) =>
+            changeEditorMode(input.canEdit, next, input.setMode)
+          }
+          value={input.viewMode}
+        />
+      </span>
     ),
     end:
       input.readSource === "cache" || input.paused ? undefined : (
@@ -954,6 +996,7 @@ function bindEditorHeader(input: {
           folder={input.folder}
           folderId={input.note.folderId}
           isOwner={input.isOwner}
+          layersEnabled={input.layersEnabled}
           note={input.note}
           onFolderBlur={() => {
             void persistEditorFolder(
@@ -976,7 +1019,9 @@ function bindEditorHeader(input: {
           onNoteChange={(summary) =>
             input.setNote({ ...note, ...summary, markdown: note.markdown })
           }
+          onSearch={input.onOpenSearch}
           onShare={() => input.setShareOpen(true)}
+          user={input.user}
         />
       ),
     folder: input.folder,

@@ -324,7 +324,10 @@ export function AppShell() {
     [],
   );
 
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+
   const context: AppShellContext = {
+    openSearch,
     setHeader,
     setUser,
     user: viewer.user,

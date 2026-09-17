@@ -85,6 +85,7 @@ export function AppHeader({
         {onOpenSearch && (
           <IconButton
             aria-label="検索 (Ctrl+K)"
+            className="[[data-layout=editor]_&]:max-[640px]:hidden"
             onClick={onOpenSearch}
             title="検索 (Ctrl+K)"
             variant="ghost"

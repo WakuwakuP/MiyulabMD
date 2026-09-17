@@ -10,6 +10,8 @@ export type AppShellContext = {
   userLoading: boolean;
   viewer: ViewerContext;
   viewing: ReturnType<typeof createViewingAccess>;
+  /** 検索パレットを開く。<640px では「⋯」メニュー内の検索項目がこれを呼ぶ。 */
+  openSearch: () => void;
   setUser: (user: SessionUser | null) => void;
   setHeader: (
     header: {
