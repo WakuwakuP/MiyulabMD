@@ -196,6 +196,12 @@ export async function persistMarkdownSnapshot(
   markdown: string,
 ): Promise<void> {
   const before = await findNoteRow(env, noteId);
+  // Durable boundary for the gold edit lock: X-Can-Edit is frozen at WS
+  // connect time, so a note promoted to gold (or whose unlock expired)
+  // must not accept snapshot writes from an already-connected session.
+  if (isGoldLockedAt(before?.layer, before?.gold_unlocked_until)) {
+    return;
+  }
   const now = Date.now();
   const title = titleFromMarkdown(markdown);
   await db(env)

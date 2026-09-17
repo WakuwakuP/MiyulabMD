@@ -23,6 +23,7 @@ import {
   encodeAwarenessNullUpdate,
   nextAwarenessClocks,
 } from "./awareness-sync.ts";
+import { GoldLockRecheck, type GoldLockRow } from "./gold-lock.ts";
 import {
   APPLY_EDIT_ORIGIN,
   APPLY_MARKDOWN_ORIGIN,
@@ -103,10 +104,13 @@ export type ApplyEditResult =
     }
   | {
       ok: false;
-      error: "not_found" | "ambiguous" | "invalid";
+      error: "not_found" | "ambiguous" | "invalid" | "locked";
       message: string;
       matches?: number;
     };
+
+const GOLD_LOCKED_MESSAGE =
+  "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.";
 
 /**
  * ノート 1 件につき 1 Durable Object。
@@ -130,6 +134,9 @@ export class DocumentRoom extends DurableObject<Env> {
       );
     },
   );
+  // X-Can-Edit is fixed at connect time; this re-checks the gold edit
+  // lock against D1 so promote/unlock-expiry take effect mid-session.
+  private readonly goldLock = new GoldLockRecheck(() => this.readGoldLockRow());
   private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private historyPending = new Map<string, PendingHistorySession>();
   private historyMarkdown = new Map<string, string>();
@@ -211,11 +218,10 @@ export class DocumentRoom extends DurableObject<Env> {
         const syncMessageType = decoding.readVarUint(decoder);
         decoder.pos = syncTypePos;
 
-        if (
-          !canEdit &&
-          (syncMessageType === syncProtocol.messageYjsSyncStep2 ||
-            syncMessageType === syncProtocol.messageYjsUpdate)
-        ) {
+        const isWrite =
+          syncMessageType === syncProtocol.messageYjsSyncStep2 ||
+          syncMessageType === syncProtocol.messageYjsUpdate;
+        if (isWrite && (!canEdit || (await this.goldLock.locked()))) {
           break;
         }
 
@@ -319,6 +325,9 @@ export class DocumentRoom extends DurableObject<Env> {
     actor: NoteHistoryActor,
   ) {
     await this.ensureInitialized(noteId);
+    if (await this.goldLock.lockedNow()) {
+      return { ok: false as const };
+    }
     const doc = this.requireDoc();
     const result = await applyTaskCheckbox(doc.getText("markdown"), input);
     if (!result.ok) {
@@ -370,6 +379,9 @@ export class DocumentRoom extends DurableObject<Env> {
 
   async applyEdit(input: ApplyEditInput): Promise<ApplyEditResult> {
     await this.ensureInitialized(input.noteId);
+    if (await this.goldLock.lockedNow()) {
+      return { error: "locked", message: GOLD_LOCKED_MESSAGE, ok: false };
+    }
     const ytext = this.requireDoc().getText("markdown");
     const current = ytext.toString();
 
@@ -415,6 +427,9 @@ export class DocumentRoom extends DurableObject<Env> {
     actor: NoteHistoryActor,
   ): Promise<ApplyEditResult> {
     await this.ensureInitialized(noteId);
+    if (await this.goldLock.lockedNow()) {
+      return { error: "locked", message: GOLD_LOCKED_MESSAGE, ok: false };
+    }
     const ytext = this.requireDoc().getText("markdown");
     const current = ytext.toString();
     const cursor = cursorAfterSet(current, markdown);
@@ -428,6 +443,17 @@ export class DocumentRoom extends DurableObject<Env> {
       markdownLength: markdown.length,
       ok: true,
     };
+  }
+
+  private async readGoldLockRow(): Promise<GoldLockRow | null> {
+    const noteId = await this.ctx.storage.get<string>(STORAGE_NOTE_ID_KEY);
+    if (!noteId) {
+      return null;
+    }
+    return db(this.env)
+      .prepare("SELECT layer, gold_unlocked_until FROM notes WHERE id = ?")
+      .bind(noteId)
+      .first<GoldLockRow>();
   }
 
   private async ensureInitialized(noteId?: string): Promise<void> {
