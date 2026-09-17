@@ -38,10 +38,14 @@ CREATE TABLE folders (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
   folder TEXT NOT NULL,
+  para_bucket TEXT,
   created_at INTEGER NOT NULL
 );
 
 CREATE UNIQUE INDEX folders_owner_folder_idx ON folders (owner_id, folder);
+CREATE UNIQUE INDEX folders_owner_para_bucket_idx
+  ON folders (owner_id, para_bucket)
+  WHERE para_bucket IS NOT NULL;
 
 CREATE TABLE folder_policies (
   owner_id TEXT NOT NULL,

@@ -45,7 +45,6 @@ import {
   type NoteAccessFields,
   noteMatchesFolderGrant,
   parentFolderPath,
-  renameFolderTree,
   replaceGrants,
   resolveFolderAccess,
   resolveNoteAccess,
@@ -54,7 +53,6 @@ import {
   createArticleService,
   deleteArticleSourcesInFolder,
   escapeLikePattern,
-  rewriteArticleSourceFolders,
 } from "./articles.ts";
 import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
@@ -81,7 +79,7 @@ export type NoteRow = {
 const SHORT_ID_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const ANONYMOUS_OWNER_EMAIL = "anonymous@miyulabmd.local";
-const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
+export const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
                   markdown_snapshot, snapshot_updated_at, created_at, updated_at, article_meta`;
 const NOTE_COLUMNS_N = `n.id, n.short_id, n.alias, n.owner_id, n.title, n.folder, n.permission, n.read_scope, n.write_scope,
                   n.markdown_snapshot, n.snapshot_updated_at, n.created_at, n.updated_at, n.article_meta`;
@@ -837,25 +835,173 @@ async function deleteOwnedNotesInFolder(
   }
 }
 
-async function rewriteOwnedNoteFolders(
+/**
+ * フォルダ配下のパスを一括書き換える。notes/folders/folder_policies/
+ * access_grants/article_sources を prefix rewrite し、移動したノートと
+ * それを指すリンクを再索引する。renameFolder と move 系サービスで共有。
+ */
+type RelocateRows = {
+  folderRows: { id: string; folder: string }[];
+  grantRows: { id: string; target_key: string }[];
+  noteRows: { id: string; folder: string }[];
+  policyRows: { folder: string }[];
+  sourceRows: { id: string; folder: string }[];
+};
+
+function prefixUpdateStatements<Row>(
+  rows: Row[],
+  from: string,
+  to: string,
+  pathOf: (row: Row) => string,
+  build: (next: string, row: Row) => D1PreparedStatement,
+): D1PreparedStatement[] {
+  const statements: D1PreparedStatement[] = [];
+  for (const row of rows) {
+    const next = rewriteFolderPrefix(pathOf(row), from, to);
+    if (next !== null) {
+      statements.push(build(next, row));
+    }
+  }
+  return statements;
+}
+
+function relocationStatements(
+  d1: D1Database,
+  ownerId: string,
+  from: string,
+  to: string,
+  rows: RelocateRows,
+): D1PreparedStatement[] {
+  const folderIdByPath = new Map<string, string>();
+  for (const row of rows.folderRows) {
+    folderIdByPath.set(
+      rewriteFolderPrefix(row.folder, from, to) ?? row.folder,
+      row.id,
+    );
+  }
+  return [
+    ...prefixUpdateStatements(
+      rows.folderRows,
+      from,
+      to,
+      (row) => row.folder,
+      (next, row) =>
+        d1
+          .prepare(
+            "UPDATE folders SET folder = ? WHERE owner_id = ? AND folder = ?",
+          )
+          .bind(next, ownerId, row.folder),
+    ),
+    ...prefixUpdateStatements(
+      rows.noteRows,
+      from,
+      to,
+      (row) => row.folder ?? "",
+      (next, row) =>
+        d1
+          .prepare("UPDATE notes SET folder = ? WHERE id = ?")
+          .bind(next, row.id),
+    ),
+    ...prefixUpdateStatements(
+      rows.policyRows,
+      from,
+      to,
+      (row) => row.folder,
+      (next, row) =>
+        d1
+          .prepare(
+            "UPDATE folder_policies SET folder = ? WHERE owner_id = ? AND folder = ?",
+          )
+          .bind(next, ownerId, row.folder),
+    ),
+    ...prefixUpdateStatements(
+      rows.grantRows,
+      from,
+      to,
+      (row) => row.target_key,
+      (next, row) =>
+        d1
+          .prepare("UPDATE access_grants SET target_key = ? WHERE id = ?")
+          .bind(next, row.id),
+    ),
+    ...prefixUpdateStatements(
+      rows.sourceRows,
+      from,
+      to,
+      (row) => row.folder,
+      (next, row) =>
+        d1
+          .prepare(
+            "UPDATE article_sources SET folder = ?, folder_id = ? WHERE id = ?",
+          )
+          .bind(next, folderIdByPath.get(next) ?? null, row.id),
+    ),
+  ];
+}
+
+/**
+ * Rewrites a folder path prefix across every table that stores it. All path
+ * rewrites run as one D1 batch so a mid-way failure cannot leave the tree
+ * half-moved; the derived link index is refreshed afterwards.
+ */
+export async function relocateFolderTree(
   env: Env,
   ownerId: string,
   from: string,
   to: string,
 ): Promise<void> {
-  const owned = await db(env)
-    .prepare("SELECT id, folder FROM notes WHERE owner_id = ?")
-    .bind(ownerId)
-    .all<{ id: string; folder: string }>();
-  for (const row of owned.results ?? []) {
-    const next = rewriteFolderPrefix(row.folder ?? "", from, to);
-    if (next === null) {
-      continue;
-    }
-    await db(env)
-      .prepare("UPDATE notes SET folder = ? WHERE id = ?")
-      .bind(next, row.id)
-      .run();
+  if (!(from && to) || from === to) {
+    return;
+  }
+  const d1 = db(env);
+  const [noteRows, folderRows, policyRows, grantRows, sourceRows] =
+    await Promise.all([
+      d1
+        .prepare("SELECT id, folder FROM notes WHERE owner_id = ?")
+        .bind(ownerId)
+        .all<{ id: string; folder: string }>(),
+      d1
+        .prepare("SELECT id, folder FROM folders WHERE owner_id = ?")
+        .bind(ownerId)
+        .all<{ id: string; folder: string }>(),
+      d1
+        .prepare("SELECT folder FROM folder_policies WHERE owner_id = ?")
+        .bind(ownerId)
+        .all<{ folder: string }>(),
+      d1
+        .prepare(
+          "SELECT id, target_key FROM access_grants WHERE owner_id = ? AND target_kind = 'folder'",
+        )
+        .bind(ownerId)
+        .all<{ id: string; target_key: string }>(),
+      d1
+        .prepare("SELECT id, folder FROM article_sources WHERE owner_id = ?")
+        .bind(ownerId)
+        .all<{ id: string; folder: string }>(),
+    ]);
+
+  const statements = relocationStatements(d1, ownerId, from, to, {
+    folderRows: folderRows.results ?? [],
+    grantRows: grantRows.results ?? [],
+    noteRows: noteRows.results ?? [],
+    policyRows: policyRows.results ?? [],
+    sourceRows: sourceRows.results ?? [],
+  });
+  if (statements.length > 0) {
+    await d1.batch(statements);
+  }
+
+  const moved = await d1
+    .prepare(
+      `SELECT ${NOTE_COLUMNS} FROM notes
+       WHERE owner_id = ? AND (folder = ? OR folder LIKE ? ESCAPE '\\')`,
+    )
+    .bind(ownerId, to, `${escapeLikePattern(to)}/%`)
+    .all<NoteRow>();
+  for (const movedRow of moved.results ?? []) {
+    const prevFolder =
+      rewriteFolderPrefix(movedRow.folder ?? "", to, from) ?? from;
+    await syncNoteLinks(env, movedRow, { ...movedRow, folder: prevFolder });
   }
 }
 
@@ -1140,42 +1286,12 @@ export function createNoteService(env: Env) {
         return validated;
       }
 
-      await rewriteOwnedNoteFolders(
+      await relocateFolderTree(
         env,
         rec.owner_id,
         rec.folder,
         validated.nextPath,
       );
-      await renameFolderTree(env, rec.owner_id, rec.folder, validated.nextPath);
-      await rewriteArticleSourceFolders(
-        env,
-        rec.owner_id,
-        rec.folder,
-        validated.nextPath,
-      );
-      const moved = await db(env)
-        .prepare(
-          `SELECT ${NOTE_COLUMNS} FROM notes
-           WHERE owner_id = ? AND (folder = ? OR folder LIKE ? ESCAPE '\\')`,
-        )
-        .bind(
-          rec.owner_id,
-          validated.nextPath,
-          `${escapeLikePattern(validated.nextPath)}/%`,
-        )
-        .all<NoteRow>();
-      for (const movedRow of moved.results ?? []) {
-        const prevFolder =
-          rewriteFolderPrefix(
-            movedRow.folder ?? "",
-            validated.nextPath,
-            rec.folder,
-          ) ?? rec.folder;
-        await syncNoteLinks(env, movedRow, {
-          ...movedRow,
-          folder: prevFolder,
-        });
-      }
       return {
         access: await resolveFolderAccess(
           env,

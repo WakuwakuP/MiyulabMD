@@ -20,6 +20,11 @@ export const MCP_TOOLS = [
   "list_note_history",
   "get_revision",
   "restore_revision",
+  "move_folder",
+  "move_folder_contents",
+  "move_notes",
+  "para_list",
+  "para_archive_project",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOLS)[number];

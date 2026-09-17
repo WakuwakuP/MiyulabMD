@@ -71,7 +71,13 @@ test("changing the Home viewer hides previous private rows while the new request
           json: folder,
         });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers: {
+            "X-MiyulabMD-Session-User": bob ? "user:bob" : "user:alice",
+          },
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
 
@@ -290,7 +296,11 @@ test("Home reports failed cache saves without making network data readonly", asy
           json: folder,
         });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
 

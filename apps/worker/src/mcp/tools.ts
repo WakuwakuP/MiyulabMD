@@ -31,10 +31,17 @@ import {
   resolveWikilink,
 } from "../services/links.ts";
 import {
+  type MoveError,
+  moveFolder,
+  moveFolderContents,
+  moveNotes,
+} from "../services/move.ts";
+import {
   createNoteService,
   type GetNoteResult,
   type MutateNoteResult,
 } from "../services/notes.ts";
+import { paraArchiveProject, paraList } from "../services/para.ts";
 
 function textResult(data: unknown) {
   return {
@@ -83,6 +90,16 @@ async function listNotesForTool(
     list = list.filter((note) => note.title.toLowerCase().includes(needle));
   }
   return { notes: list };
+}
+
+function moveToolError(result: MoveError) {
+  if (result.kind === "not_found") {
+    return textError("Not found");
+  }
+  if (result.kind === "denied") {
+    return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+  }
+  return textError(result.error);
 }
 
 function requireUser(): SessionUser | null {
@@ -1119,6 +1136,194 @@ export function createMcpServerFactory() {
     },
     async ({ id, revisionId }) =>
       restoreRevisionTool(notes, { id, revisionId }),
+  );
+
+  server.registerTool(
+    "move_folder",
+    {
+      description:
+        "Move a folder (with all contents) under another folder, or to the drive root. Detects cycles, conflicts, and the 500-item cap. Set dry_run first to preview counts.",
+      inputSchema: {
+        dest_folder_id: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Destination folder UUID; null/omitted = drive root"),
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe("Report planned counts without writing"),
+        folder_id: z.string().describe("Folder UUID to move"),
+        name: z.string().optional().describe("Rename the folder while moving"),
+      },
+    },
+    async ({ folder_id, dest_folder_id, name, dry_run }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await moveFolder(
+        env,
+        folder_id,
+        { destFolderId: dest_folder_id, dryRun: dry_run, name },
+        user,
+      );
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "move_folder_contents",
+    {
+      description:
+        "Move the direct notes (and optionally direct subfolders with their subtrees) of a folder into another folder. The source folder itself stays. Set dry_run first to preview counts and skip reasons.",
+      inputSchema: {
+        dest_folder_id: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Destination folder UUID; null/omitted = drive root"),
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe("Report planned moves without writing"),
+        folder_id: z.string().describe("Source folder UUID"),
+        include_subfolders: z
+          .boolean()
+          .optional()
+          .describe("Also move direct child folders (default false)"),
+      },
+    },
+    async ({ folder_id, dest_folder_id, include_subfolders, dry_run }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await moveFolderContents(
+        env,
+        folder_id,
+        {
+          destFolderId: dest_folder_id,
+          dryRun: dry_run,
+          includeSubfolders: include_subfolders,
+        },
+        user,
+      );
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "move_notes",
+    {
+      description:
+        "Move notes (by UUID or short ID) into a folder in the caller's own drive. Returns per-note moved/skipped/failed with reasons. Max 500 IDs per call. Set dry_run first to preview.",
+      inputSchema: {
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe("Report planned moves without writing"),
+        folder_id: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Destination folder UUID; null/omitted = drive root"),
+        note_ids: z
+          .array(z.string())
+          .min(1)
+          .describe("Note UUIDs or short IDs to move"),
+      },
+    },
+    async ({ note_ids, folder_id, dry_run }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await moveNotes(
+        env,
+        { destFolderId: folder_id, dryRun: dry_run, noteIds: note_ids },
+        user,
+      );
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "para_list",
+    {
+      description:
+        "List the caller's PARA buckets (Projects/Areas/Resources/Archives). Buckets keep stable keys across renames. With bucket, also returns the direct children (e.g. active projects).",
+      inputSchema: {
+        bucket: z
+          .enum(["projects", "areas", "resources", "archives"])
+          .optional()
+          .describe("Return direct children of this bucket too"),
+      },
+    },
+    async ({ bucket }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await paraList(env, user, bucket);
+      if (result.kind === "denied") {
+        return textError("Unauthorized");
+      }
+      if (result.kind === "invalid") {
+        return textError(result.error);
+      }
+      return textResult(result.result);
+    },
+  );
+
+  server.registerTool(
+    "para_archive_project",
+    {
+      description:
+        "Move a folder inside the Projects bucket into Archives. dated adds a YYYY-MM- prefix to the name. Set dry_run first to preview counts.",
+      inputSchema: {
+        dated: z
+          .boolean()
+          .optional()
+          .describe("Prefix the archived name with YYYY-MM-"),
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe("Report planned counts without writing"),
+        folder_id: z
+          .string()
+          .describe("Folder UUID inside the Projects bucket"),
+        name: z
+          .string()
+          .optional()
+          .describe("Override the archived folder name"),
+      },
+    },
+    async ({ folder_id, dated, name, dry_run }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const result = await paraArchiveProject(
+        env,
+        folder_id,
+        { dated, dryRun: dry_run, name },
+        user,
+      );
+      if (result.kind !== "ok") {
+        return moveToolError(result);
+      }
+      return textResult(result.result);
+    },
   );
 
   return server;

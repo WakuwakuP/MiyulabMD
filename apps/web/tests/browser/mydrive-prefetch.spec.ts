@@ -108,7 +108,11 @@ test("authenticated startup prepares unvisited MyDrive folders and bodies withou
           json: shared,
         });
       default:
-        return route.fulfill({ json: { error: "No fixture" }, status: 404 });
+        return route.fulfill({
+          headers: { "X-MiyulabMD-Session-User": "user:alice" },
+          json: { error: "No fixture" },
+          status: 404,
+        });
     }
   });
 

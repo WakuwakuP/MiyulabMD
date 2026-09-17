@@ -48,6 +48,20 @@ export {
 export type { McpToolName } from "./mcp.ts";
 export { MCP_NOTE_URL_HINT, MCP_TOOLS } from "./mcp.ts";
 export type {
+  MoveFolderContentsResult,
+  MoveFolderItem,
+  MoveFolderResult,
+  MoveItemReason,
+  MoveItemStatus,
+  MoveNoteItem,
+  MoveNotesResult,
+  MovePlan,
+  ParaBucket,
+  ParaBucketKey,
+  ParaListResult,
+} from "./move.ts";
+export { isParaBucketKey, MOVE_MAX_ITEMS, PARA_BUCKETS } from "./move.ts";
+export type {
   AccessGrantInput,
   CreateNoteInput,
   FolderAccess,

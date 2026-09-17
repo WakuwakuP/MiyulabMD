@@ -5,6 +5,7 @@ import type {
   FolderEntryNote,
   FolderRecord,
   NoteSummary,
+  ParaBucket,
 } from "@miyulabmd/shared";
 import { folderUrl, MY_DRIVE_NAME, SHARED_PATH } from "@miyulabmd/shared";
 import type { MouseEvent, ReactNode } from "react";
@@ -12,6 +13,11 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { ApiResult } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
+import {
+  decodeTreeDragItem,
+  encodeTreeDragItem,
+  type TreeDragItem,
+} from "../../lib/dnd.ts";
 import {
   type ExpansionRequest,
   expansionRefreshLimit,
@@ -48,10 +54,14 @@ type Props = {
   listingIncomplete?: boolean;
   loadChildren?: LoadChildren;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
+  /** Enables drag & drop moves between rows when set. */
+  onMove?: (source: TreeDragItem, destFolderId: string | null) => void;
+  /** Pinned PARA bucket folders rendered above the regular tree. */
+  paraBuckets?: ParaBucket[];
 };
 
 export type MenuTarget =
-  | { kind: "folder"; id: string; name: string }
+  | { kind: "folder"; id: string; name: string; path?: string }
   | { kind: "note"; note: NoteSummary };
 
 function notesInFolder(
@@ -238,11 +248,35 @@ type TreeContext = {
   loadMore: (id: string) => void;
   notes: NoteSummary[];
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
+  onMove?: (source: TreeDragItem, destFolderId: string | null) => void;
   openMenuId: string | null;
   readonly: boolean;
   retry: (id: string) => void;
   toggle: (id: string) => void;
 };
+
+function rowDragProps(ctx: TreeContext, item: TreeDragItem) {
+  if (!ctx.onMove || ctx.readonly) {
+    return {};
+  }
+  return { dragPayload: encodeTreeDragItem(item) };
+}
+
+function rowDropProps(ctx: TreeContext, folderId: string) {
+  if (!ctx.onMove || ctx.readonly) {
+    return {};
+  }
+  const onMove = ctx.onMove;
+  return {
+    onDropPayload: (payload: string) => {
+      const item = decodeTreeDragItem(payload);
+      if (!item || item.id === folderId) {
+        return;
+      }
+      onMove(item, folderId);
+    },
+  };
+}
 
 function expansionStatus(
   ctx: TreeContext,
@@ -358,6 +392,7 @@ function entryNoteRow(ctx: TreeContext, entry: FolderEntryNote, depth: number) {
       }}
       readonly={ctx.readonly || !target}
       toggle={ctx.expandable ? "leaf" : undefined}
+      {...rowDragProps(ctx, { id: entry.id, kind: "note" })}
     />
   );
 }
@@ -369,6 +404,7 @@ function folderRow(
     id: string;
     name: string;
     noteCount?: number;
+    path?: string;
     readScope?: FolderRecord["readScope"];
     writeScope?: FolderRecord["writeScope"];
   },
@@ -393,6 +429,7 @@ function folderRow(
                   id: row.id,
                   kind: "folder",
                   name: row.name,
+                  path: row.path,
                 });
               }
         }
@@ -410,11 +447,13 @@ function folderRow(
               }
             : undefined
         }
+        {...rowDragProps(ctx, { id: row.id, kind: "folder" })}
+        {...rowDropProps(ctx, row.id)}
       />
       {expansion && (
         <>
           {expansion.entries.map((entry) =>
-            entryRow(ctx, entry, row.depth + 1),
+            entryRow(ctx, entry, row.depth + 1, expansion.path ?? row.path),
           )}
           {expansionStatus(ctx, row.id, expansion, row.depth + 1)}
         </>
@@ -423,13 +462,19 @@ function folderRow(
   );
 }
 
-function entryRow(ctx: TreeContext, entry: FolderEntry, depth: number) {
+function entryRow(
+  ctx: TreeContext,
+  entry: FolderEntry,
+  depth: number,
+  parentPath?: string,
+) {
   return entry.type === "folder"
     ? folderRow(ctx, {
         depth,
         id: entry.id,
         name: entry.name,
         noteCount: entry.noteCount,
+        path: parentPath ? `${parentPath}/${entry.name}` : entry.name,
       })
     : entryNoteRow(ctx, entry, depth);
 }
@@ -464,6 +509,7 @@ function noteSummaryRow(ctx: TreeContext, note: NoteSummary) {
       }}
       readonly={ctx.readonly}
       toggle={ctx.expandable ? "leaf" : undefined}
+      {...rowDragProps(ctx, { id: note.id, kind: "note" })}
     />
   );
 }
@@ -543,6 +589,97 @@ function FolderCrumbs({
   );
 }
 
+function ParaSection({
+  ctx,
+  buckets,
+}: {
+  ctx: TreeContext;
+  buckets: ParaBucket[];
+}) {
+  return (
+    <section aria-label="PARA" className="mb-4">
+      <h2 className="mb-1 text-xs font-semibold text-muted">PARA</h2>
+      <DriveList>
+        {buckets.map((bucket) =>
+          folderRow(ctx, {
+            depth: 0,
+            id: bucket.folderId,
+            name: bucket.name,
+            noteCount: bucket.noteCount,
+            path: bucket.path,
+          }),
+        )}
+      </DriveList>
+    </section>
+  );
+}
+
+function noteCountsByFolder(notes: NoteSummary[]) {
+  const counts = new Map<string, number>();
+  for (const note of notes) {
+    if (note.folderId) {
+      counts.set(note.folderId, (counts.get(note.folderId) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function sortedFolders(
+  childrenFolders: FolderRecord[],
+  buckets?: ParaBucket[],
+) {
+  const bucketIds = new Set((buckets ?? []).map((bucket) => bucket.folderId));
+  return [...childrenFolders]
+    .filter((folder) => !bucketIds.has(folder.id))
+    .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+}
+
+function TreeBody({
+  ctx,
+  folders,
+  items,
+  listingIncomplete,
+  noteCounts,
+  pending,
+  placeholder,
+}: {
+  ctx: TreeContext;
+  folders: FolderRecord[];
+  items: NoteSummary[];
+  listingIncomplete: boolean;
+  noteCounts: Map<string, number>;
+  pending: boolean;
+  placeholder: boolean;
+}) {
+  if (placeholder) {
+    return <ListSkeleton />;
+  }
+  if (!listingIncomplete && folders.length === 0 && items.length === 0) {
+    return <p>このフォルダは空です。</p>;
+  }
+  if (folders.length === 0 && items.length === 0) {
+    return null;
+  }
+  return (
+    <DriveList
+      className={cn(pending && "opacity-60 transition-opacity duration-150")}
+    >
+      {folders.map((folder) =>
+        folderRow(ctx, {
+          depth: 0,
+          id: folder.id,
+          name: folder.name,
+          noteCount: noteCounts.get(folder.id) ?? 0,
+          path: folder.folder,
+          readScope: folder.readScope,
+          writeScope: folder.writeScope,
+        }),
+      )}
+      {items.map((note) => noteSummaryRow(ctx, note))}
+    </DriveList>
+  );
+}
+
 export function NoteTree({
   notes,
   currentFolderId,
@@ -560,6 +697,8 @@ export function NoteTree({
   listingIncomplete = false,
   loadChildren,
   onItemMenu,
+  onMove,
+  paraBuckets,
 }: Props) {
   const expandable = Boolean(loadChildren) && !readonly;
   const { expansions, loadMore, retry, toggle } = useFolderExpansions(
@@ -571,15 +710,8 @@ export function NoteTree({
   const items = showAllNotes
     ? [...notes].sort((a, b) => b.updatedAt - a.updatedAt)
     : notesInFolder(notes, currentFolderId);
-  const folders = [...childrenFolders].sort((a, b) =>
-    a.name.localeCompare(b.name, "ja"),
-  );
-  const noteCounts = new Map<string, number>();
-  for (const note of notes) {
-    if (note.folderId) {
-      noteCounts.set(note.folderId, (noteCounts.get(note.folderId) ?? 0) + 1);
-    }
-  }
+  const folders = sortedFolders(childrenFolders, paraBuckets);
+  const noteCounts = noteCountsByFolder(notes);
 
   const ctx: TreeContext = {
     expandable,
@@ -587,6 +719,7 @@ export function NoteTree({
     loadMore,
     notes,
     onItemMenu,
+    onMove,
     openMenuId,
     readonly,
     retry,
@@ -617,29 +750,19 @@ export function NoteTree({
         </Link>
       )}
 
-      {placeholder && <ListSkeleton />}
-      {!(placeholder || listingIncomplete) &&
-        folders.length === 0 &&
-        items.length === 0 && <p>このフォルダは空です。</p>}
-      {!placeholder && (folders.length > 0 || items.length > 0) && (
-        <DriveList
-          className={cn(
-            pending && "opacity-60 transition-opacity duration-150",
-          )}
-        >
-          {folders.map((folder) =>
-            folderRow(ctx, {
-              depth: 0,
-              id: folder.id,
-              name: folder.name,
-              noteCount: noteCounts.get(folder.id) ?? 0,
-              readScope: folder.readScope,
-              writeScope: folder.writeScope,
-            }),
-          )}
-          {items.map((note) => noteSummaryRow(ctx, note))}
-        </DriveList>
+      {paraBuckets && paraBuckets.length > 0 && (
+        <ParaSection buckets={paraBuckets} ctx={ctx} />
       )}
+
+      <TreeBody
+        ctx={ctx}
+        folders={folders}
+        items={items}
+        listingIncomplete={listingIncomplete}
+        noteCounts={noteCounts}
+        pending={pending}
+        placeholder={placeholder}
+      />
     </div>
   );
 }

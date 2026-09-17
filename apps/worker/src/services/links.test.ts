@@ -22,6 +22,7 @@ const MIGRATIONS = [
   "0008_split_link_and_public_scopes.sql",
   "0009_note_history.sql",
   "0010_note_links.sql",
+  "0011_para_buckets.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -66,9 +67,13 @@ class StatementAdapter implements BoundStatement {
     return Promise.resolve((row as T | null) ?? null);
   }
 
-  run(): Promise<{ success: true }> {
+  runSync(): { success: true } {
     this.db.prepare(this.query).run(...this.binds);
-    return Promise.resolve({ success: true });
+    return { success: true };
+  }
+
+  run(): Promise<{ success: true }> {
+    return Promise.resolve(this.runSync());
   }
 }
 
@@ -81,6 +86,20 @@ class D1DatabaseAdapter {
 
   prepare(query: string): BoundStatement {
     return new StatementAdapter(this.db, query);
+  }
+
+  batch(statements: BoundStatement[]) {
+    this.db.exec("BEGIN");
+    try {
+      const results = statements.map((statement) =>
+        (statement as StatementAdapter).runSync(),
+      );
+      this.db.exec("COMMIT");
+      return Promise.resolve(results);
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 }
 

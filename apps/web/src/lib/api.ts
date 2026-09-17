@@ -8,12 +8,17 @@ import type {
   FolderAccess,
   FolderChildrenResult,
   FolderRecord,
+  MoveFolderContentsResult,
+  MoveFolderResult,
+  MoveNotesResult,
   Note,
   NoteHistoryPage,
   NoteLinksResult,
   NoteRevisionBody,
   NoteRevisionRestore,
   NoteSummary,
+  ParaBucketKey,
+  ParaListResult,
   PermissionPreset,
   SessionUser,
   WorkspaceSearchResult,
@@ -492,6 +497,97 @@ export async function uploadImage(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as { id: string; url: string }, ok: true };
+}
+
+export async function moveFolder(
+  id: string,
+  input: { destFolderId?: string | null; name?: string; dryRun?: boolean },
+): Promise<ApiResult<MoveFolderResult>> {
+  const res = await fetch(`/api/folders/${id}/move`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveFolderResult, ok: true };
+}
+
+export async function moveFolderContents(
+  id: string,
+  input: {
+    destFolderId?: string | null;
+    includeSubfolders?: boolean;
+    dryRun?: boolean;
+  },
+): Promise<ApiResult<MoveFolderContentsResult>> {
+  const res = await fetch(`/api/folders/${id}/move-contents`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveFolderContentsResult, ok: true };
+}
+
+export async function moveNotes(
+  noteIds: string[],
+  destFolderId: string | null,
+): Promise<ApiResult<MoveNotesResult>> {
+  const res = await fetch("/api/notes/move", {
+    ...fetchOpts,
+    body: JSON.stringify({ destFolderId, noteIds }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveNotesResult, ok: true };
+}
+
+export async function fetchPara(
+  options: {
+    bucket?: ParaBucketKey;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
+): Promise<ApiResult<ParaListResult>> {
+  const params = new URLSearchParams();
+  if (options.bucket) {
+    params.set("bucket", options.bucket);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const res = await fetch(
+    `/api/para${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as ParaListResult, ok: true };
+}
+
+export async function archiveParaProject(
+  folderId: string,
+  input: { dated?: boolean; name?: string; dryRun?: boolean } = {},
+): Promise<ApiResult<MoveFolderResult>> {
+  const res = await fetch("/api/para/archive", {
+    ...fetchOpts,
+    body: JSON.stringify({ folderId, ...input }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveFolderResult, ok: true };
 }
 
 export async function deleteFolder(id: string): Promise<ApiResult<void>> {

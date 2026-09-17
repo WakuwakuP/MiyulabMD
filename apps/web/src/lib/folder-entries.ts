@@ -7,6 +7,8 @@ export type FolderExpansion = {
   error: string | null;
   nextCursor: string | null;
   pending: ExpansionRequest | null;
+  /** Path of the expanded folder (from the children response). */
+  path?: string;
 };
 
 export const FOLDER_ENTRIES_PAGE_SIZE = 50;
@@ -41,7 +43,13 @@ export function resolveFolderExpansion(
       ...page.entries.filter((entry) => !seen.has(entryKey(entry))),
     ];
   }
-  return { entries, error: null, nextCursor: page.nextCursor, pending: null };
+  return {
+    entries,
+    error: null,
+    nextCursor: page.nextCursor,
+    path: page.folder.path.join("/"),
+    pending: null,
+  };
 }
 
 export function failFolderExpansion(

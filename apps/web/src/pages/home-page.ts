@@ -411,6 +411,10 @@ function folderMenuItems(
   onShare: (id: string, name: string) => void,
   onRename: (id: string, name: string) => void,
   onDelete: (id: string, name: string) => void,
+  para: {
+    onArchive: (id: string, name: string) => void;
+    projectsPath: string | null;
+  },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
     { label: "開く", onSelect: () => navigate(folderUrl(target.id)) },
@@ -423,6 +427,15 @@ function folderMenuItems(
     label: "名前を変更",
     onSelect: () => onRename(target.id, target.name),
   });
+  const inProjects =
+    para.projectsPath !== null &&
+    target.path?.startsWith(`${para.projectsPath}/`) === true;
+  if (inProjects) {
+    items.push({
+      label: "完了してアーカイブ（PARA）",
+      onSelect: () => para.onArchive(target.id, target.name),
+    });
+  }
   items.push({
     danger: true,
     label: "削除",
@@ -462,6 +475,10 @@ export function handleItemMenu(
   onNoteShare: (note: NoteSummary) => void,
   onRename: (id: string, name: string) => void,
   onDelete: (kind: ConfirmState["kind"], id: string, name: string) => void,
+  para: {
+    onArchive: (id: string, name: string) => void;
+    projectsPath: string | null;
+  },
 ) {
   const position = menuPosition(event);
   if (target.kind === "folder") {
@@ -475,6 +492,7 @@ export function handleItemMenu(
         onFolderShare,
         onRename,
         (id, name) => onDelete("folder", id, name),
+        para,
       ),
     });
     return;

@@ -2,6 +2,7 @@ import type {
   FolderAccess,
   FolderRecord,
   NoteSummary,
+  ParaBucket,
 } from "@miyulabmd/shared";
 import {
   type MouseEvent,
@@ -24,11 +25,22 @@ import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { fetchFolderChildren } from "../lib/api.ts";
+import {
+  archiveParaProject,
+  fetchFolderChildren,
+  fetchPara,
+  moveFolder,
+  moveNotes,
+} from "../lib/api.ts";
+import type { TreeDragItem } from "../lib/dnd.ts";
 import {
   HomeMetadataError,
   readHomeMetadata,
 } from "../lib/home-metadata-reader.ts";
+import {
+  invalidateFolderCache,
+  invalidateNotesCache,
+} from "../lib/list-cache.ts";
 import {
   readOfflineFolderDenial,
   readOfflineNoteDenial,
@@ -245,6 +257,7 @@ function HomePageDialogs({
 }
 
 const EMPTY_CHILDREN: FolderRecord[] = [];
+const EMPTY_PARA: ParaBucket[] = [];
 
 function HomePageView({
   user,
@@ -258,6 +271,8 @@ function HomePageView({
   flags,
   menu,
   onItemMenu,
+  onMove,
+  paraBuckets,
   dialogs,
 }: {
   user: AppShellContext["user"];
@@ -271,6 +286,10 @@ function HomePageView({
   flags: ReturnType<typeof homeListFlags>;
   menu: MenuState | null;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
+  onMove:
+    | ((source: TreeDragItem, destFolderId: string | null) => void)
+    | undefined;
+  paraBuckets: ParaBucket[];
   dialogs: ReactNode;
 }) {
   const showGuestTitle = !(user || folderId || userLoading);
@@ -306,7 +325,9 @@ function HomePageView({
           loadChildren={loadChildren}
           notes={notes}
           onItemMenu={onItemMenu}
+          onMove={onMove}
           openMenuId={menu?.id}
+          paraBuckets={paraBuckets}
           parentId={visibleFolder?.parentId ?? null}
           pending={flags.listPending}
           placeholder={flags.showPlaceholder}
@@ -359,6 +380,7 @@ function NetworkHomePage() {
   const [folderRenameError, setFolderRenameError] = useState<string | null>(
     null,
   );
+  const [paraBuckets, setParaBuckets] = useState<ParaBucket[]>([]);
 
   const flags = homeListFlags({
     error,
@@ -370,6 +392,69 @@ function NetworkHomePage() {
   });
   const headerFolder = headerFolderFor(visibleFolder, folderId);
   const shareLink = shareLinkFor(share);
+  const paraProjectsPath =
+    paraBuckets.find((bucket) => bucket.key === "projects")?.path ?? null;
+
+  const reloadPara = useCallback(() => {
+    if (!user) {
+      return;
+    }
+    void fetchPara({ viewerId: user.id })
+      .then((result) => {
+        if (result.ok) {
+          setParaBuckets(result.data.buckets);
+        }
+      })
+      .catch(() => {
+        // PARA section is optional chrome; ignore transient failures.
+      });
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      reloadPara();
+      return;
+    }
+    setParaBuckets([]);
+  }, [user, reloadPara]);
+
+  const refreshAfterMove = useCallback(() => {
+    invalidateNotesCache();
+    invalidateFolderCache();
+    setReloadRequest((value) => value + 1);
+    reloadPara();
+  }, [reloadPara]);
+
+  const onTreeMove = useCallback(
+    (source: TreeDragItem, destFolderId: string | null) => {
+      void (async () => {
+        const result =
+          source.kind === "note"
+            ? await moveNotes([source.id], destFolderId)
+            : await moveFolder(source.id, { destFolderId });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        refreshAfterMove();
+      })();
+    },
+    [refreshAfterMove],
+  );
+
+  const onArchiveProject = useCallback(
+    (id: string) => {
+      void (async () => {
+        const result = await archiveParaProject(id, { dated: true });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        refreshAfterMove();
+      })();
+    },
+    [refreshAfterMove],
+  );
 
   useEffect(() => {
     if (userLoading) {
@@ -660,8 +745,11 @@ function NetworkHomePage() {
             setConfirm({ id, kind, name });
             setConfirmError(null);
           },
+          { onArchive: onArchiveProject, projectsPath: paraProjectsPath },
         );
       }}
+      onMove={flags.canAdmin ? onTreeMove : undefined}
+      paraBuckets={flags.isDriveRoot ? paraBuckets : EMPTY_PARA}
       publicFolders={publicFolders}
       user={user}
       userLoading={userLoading}

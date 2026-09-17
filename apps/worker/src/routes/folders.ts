@@ -25,6 +25,11 @@ import {
   resolveFolderAccess,
   upsertFolderPolicy,
 } from "../services/access.ts";
+import {
+  type MoveError,
+  moveFolder,
+  moveFolderContents,
+} from "../services/move.ts";
 import { createNoteService } from "../services/notes.ts";
 
 const notes = createNoteService(env);
@@ -35,6 +40,22 @@ async function parseJsonBody<T>(request: Request): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+function moveErrorResponse(
+  set: { status?: number | string },
+  result: MoveError,
+): { error: string } {
+  if (result.kind === "not_found") {
+    set.status = 404;
+    return { error: "Not found" };
+  }
+  if (result.kind === "denied") {
+    set.status = result.status;
+    return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+  }
+  set.status = result.status;
+  return { error: result.error };
 }
 
 function normalizeFolderName(name: string): string | null {
@@ -316,6 +337,50 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
     }
 
     return resolveFolderAccess(env, user.id, folder, user);
+  })
+  .post("/:id/move", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const body = await parseJsonBody<{
+      destFolderId?: string | null;
+      name?: string;
+      dryRun?: boolean;
+    }>(request);
+    const result = await moveFolder(
+      env,
+      params.id,
+      {
+        destFolderId: body?.destFolderId,
+        dryRun: body?.dryRun,
+        name: body?.name,
+      },
+      user ?? undefined,
+    );
+    if (result.kind !== "ok") {
+      return moveErrorResponse(set, result);
+    }
+    return result.result;
+  })
+  .post("/:id/move-contents", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const body = await parseJsonBody<{
+      destFolderId?: string | null;
+      includeSubfolders?: boolean;
+      dryRun?: boolean;
+    }>(request);
+    const result = await moveFolderContents(
+      env,
+      params.id,
+      {
+        destFolderId: body?.destFolderId,
+        dryRun: body?.dryRun,
+        includeSubfolders: body?.includeSubfolders,
+      },
+      user ?? undefined,
+    );
+    if (result.kind !== "ok") {
+      return moveErrorResponse(set, result);
+    }
+    return result.result;
   })
   .patch("/:id", async ({ params, request, set }) => {
     const user = await readSession(request, env);

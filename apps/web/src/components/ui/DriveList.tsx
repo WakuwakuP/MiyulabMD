@@ -1,6 +1,8 @@
 import type { MouseEvent, ReactNode } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
 import { cn } from "../../lib/cn.ts";
+import { TREE_DRAG_MIME } from "../../lib/dnd.ts";
 import { IconButton } from "./IconButton.tsx";
 import { ChevronDownIcon, MoreIcon } from "./icons.tsx";
 
@@ -28,6 +30,43 @@ export type DriveRowToggle = {
   onToggle: () => void;
 };
 
+function dndHandlers(
+  dragPayload: string | undefined,
+  onDropPayload: ((payload: string) => void) | undefined,
+  readonly: boolean,
+  setDropActive: (active: boolean) => void,
+) {
+  const draggable = dragPayload !== undefined && !readonly;
+  return {
+    draggable,
+    onDragLeave: onDropPayload ? () => setDropActive(false) : undefined,
+    onDragOver: onDropPayload
+      ? (event: React.DragEvent<HTMLLIElement>) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDropActive(true);
+        }
+      : undefined,
+    onDragStart:
+      dragPayload !== undefined && !readonly
+        ? (event: React.DragEvent<HTMLLIElement>) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData(TREE_DRAG_MIME, dragPayload);
+          }
+        : undefined,
+    onDrop: onDropPayload
+      ? (event: React.DragEvent<HTMLLIElement>) => {
+          event.preventDefault();
+          setDropActive(false);
+          const payload = event.dataTransfer.getData(TREE_DRAG_MIME);
+          if (payload) {
+            onDropPayload(payload);
+          }
+        }
+      : undefined,
+  };
+}
+
 export function DriveRow({
   href,
   name,
@@ -39,6 +78,8 @@ export function DriveRow({
   readonly = false,
   depth = 0,
   toggle,
+  dragPayload,
+  onDropPayload,
 }: {
   href: string;
   name: string;
@@ -51,15 +92,28 @@ export function DriveRow({
   depth?: number;
   /** Tree slot: a chevron toggle, or "leaf" to keep leaf rows aligned. */
   toggle?: DriveRowToggle | "leaf";
+  /** Makes the row draggable; the payload is written to the drag event. */
+  dragPayload?: string;
+  /** Makes the row a drop target; called with the dropped payload. */
+  onDropPayload?: (payload: string) => void;
 }) {
+  const [dropActive, setDropActive] = useState(false);
+  const dnd = dndHandlers(
+    dragPayload,
+    readonly ? undefined : onDropPayload,
+    readonly,
+    setDropActive,
+  );
   return (
     <li
       className={cn(
         "group flex items-center border-b border-border p-0 last:border-b-0 hover:bg-surface",
         menuOpen && "bg-surface",
+        dropActive && "bg-surface shadow-[inset_0_0_0_2px_var(--color-accent)]",
       )}
       onContextMenu={readonly ? undefined : onMenu}
       style={depth > 0 ? { paddingLeft: `${depth * 1.5}rem` } : undefined}
+      {...dnd}
     >
       {toggle !== undefined &&
         (toggle === "leaf" ? (

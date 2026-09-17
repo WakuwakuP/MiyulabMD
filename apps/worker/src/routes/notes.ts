@@ -13,6 +13,7 @@ import { readSession } from "../auth/session.ts";
 import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import { listNoteLinks } from "../services/links.ts";
+import { moveNotes } from "../services/move.ts";
 import { createNoteService, type MutateNoteResult } from "../services/notes.ts";
 
 function documentRoom(noteId: string) {
@@ -116,6 +117,40 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
 
     set.status = 201;
     return created;
+  })
+  .post("/move", async ({ request, set }) => {
+    const user = await readSession(request, env);
+    const body = await parseJsonBody<{
+      noteIds?: string[];
+      destFolderId?: string | null;
+      dryRun?: boolean;
+    }>(request);
+    if (!(body && Array.isArray(body.noteIds))) {
+      set.status = 400;
+      return { error: "noteIds が必要です" };
+    }
+    const result = await moveNotes(
+      env,
+      {
+        destFolderId: body.destFolderId,
+        dryRun: body.dryRun,
+        noteIds: body.noteIds,
+      },
+      user ?? undefined,
+    );
+    if (result.kind === "not_found") {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+    if (result.kind === "denied") {
+      set.status = result.status;
+      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
+    }
+    if (result.kind === "invalid") {
+      set.status = result.status;
+      return { error: result.error };
+    }
+    return result.result;
   })
   .get("/:id/history", async ({ request, params, set }) => {
     const user = await readSession(request, env);
