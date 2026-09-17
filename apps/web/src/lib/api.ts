@@ -8,6 +8,7 @@ import type {
   FolderAccess,
   FolderChildrenResult,
   FolderRecord,
+  KnowledgeSettings,
   MoveFolderContentsResult,
   MoveFolderResult,
   MoveNotesResult,
@@ -226,6 +227,23 @@ export async function updateProfile(
   const res = await fetch("/api/me", {
     ...fetchOpts,
     body: JSON.stringify({ displayName }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { user: SessionUser };
+  return { data: body.user, ok: true };
+}
+
+/** settings.knowledge の部分更新（PATCH /api/me）。 */
+export async function updateKnowledgeSettings(
+  knowledge: Partial<KnowledgeSettings>,
+): Promise<ApiResult<SessionUser>> {
+  const res = await fetch("/api/me", {
+    ...fetchOpts,
+    body: JSON.stringify({ settings: { knowledge } }),
     headers: { "Content-Type": "application/json" },
     method: "PATCH",
   });

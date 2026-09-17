@@ -46,6 +46,20 @@ export {
   withClosedFrontmatter,
 } from "./frontmatter.ts";
 export type {
+  KnowledgeFeatureKey,
+  KnowledgeSettings,
+  UserSettings,
+} from "./knowledge.ts";
+export {
+  DEFAULT_KNOWLEDGE_SETTINGS,
+  DEFAULT_USER_SETTINGS,
+  isKnowledgeFeatureKey,
+  KNOWLEDGE_FEATURE_KEYS,
+  normalizeKnowledgeSettings,
+  parseUserSettingsObject,
+  userSettingsFromObject,
+} from "./knowledge.ts";
+export type {
   NoteLayer,
   NoteLayerEvent,
   PromoteGateCode,

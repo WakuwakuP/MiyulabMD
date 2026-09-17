@@ -6,7 +6,8 @@ CREATE TABLE users (
   email TEXT NOT NULL UNIQUE,
   display_name TEXT,
   created_at INTEGER NOT NULL,
-  last_login_at INTEGER
+  last_login_at INTEGER,
+  settings TEXT
 );
 
 CREATE TABLE notes (
