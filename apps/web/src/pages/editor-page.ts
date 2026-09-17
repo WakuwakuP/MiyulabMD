@@ -175,6 +175,8 @@ function onCollabSynced(
 
 export function bindEditorCollab(input: {
   noteId: string | undefined;
+  /** 編集キャッシュ（y-indexeddb）の資格判定に使う最新のノートメタデータ。 */
+  note: Note | null;
   hydrated: boolean;
   userLoading: boolean;
   viewMode: EditorMode;
@@ -204,7 +206,9 @@ export function bindEditorCollab(input: {
     return;
   }
 
-  const session = createYjsSession(input.noteId, input.user);
+  const session = createYjsSession(input.noteId, input.user, {
+    note: input.note,
+  });
   input.sessionRef.current = session;
   input.setCollab(session);
   input.setCollabReady(false);
