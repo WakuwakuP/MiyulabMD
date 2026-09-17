@@ -20,6 +20,7 @@ import {
   type NoteSummary,
   normalizeFolder,
   type PermissionPreset,
+  parseSearchQuery,
   presetFromScopes,
   rewriteFolderPrefix,
   type SearchScope,
@@ -57,11 +58,13 @@ import {
   deleteArticleSourcesInFolder,
   escapeLikePattern,
 } from "./articles.ts";
+import { ftsMatchQuery } from "./fts.ts";
 import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
 import { viewDeniedHttpStatus } from "./permissions.ts";
 import { schemeNoteTitlePrefix } from "./schemes.ts";
 import { createLineMatcher, type GrepScanOptions, grepRows } from "./search.ts";
+import { resolveSearchDsl, rowMatchesSearchDsl } from "./search-dsl.ts";
 
 export type NoteRow = {
   id: string;
@@ -211,6 +214,7 @@ export async function persistMarkdownSnapshot(
  * リンク索引を差し替える。作成・本文更新・メタ更新・snapshot 書き戻し時に呼ぶ。
  * `before` を渡すと、タイトル/フォルダ/別名が変わった場合に他ノートからの
  * リンクも再解決する。索引は再構築可能なので失敗しても本体処理は継続する。
+ * FTS 投影（notes_fts）もここで同期する。
  */
 export async function syncNoteLinks(
   env: Env,
@@ -232,6 +236,8 @@ export async function syncNoteLinks(
         before ?? { alias: null, folder: "", title: "" },
       );
     }
+    const { syncNoteFts } = await import("./fts.ts");
+    await syncNoteFts(env, after);
   } catch (error) {
     console.error("note_links reindex failed", error);
   }
@@ -446,6 +452,7 @@ function buildFolderPrefixCondition(folders: string[]): {
 
 async function listGuestInheritedRowsFromPublicFolders(
   env: Env,
+  ftsMatch?: string | null,
 ): Promise<NoteRow[]> {
   const publicFolders = await listPublicFolderCandidates(env);
   if (publicFolders.length === 0) {
@@ -466,6 +473,9 @@ async function listGuestInheritedRowsFromPublicFolders(
       continue;
     }
 
+    const ftsClause = ftsMatch
+      ? " AND id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)"
+      : "";
     const rows = await db(env)
       .prepare(
         `SELECT ${NOTE_COLUMNS}
@@ -473,10 +483,10 @@ async function listGuestInheritedRowsFromPublicFolders(
           WHERE owner_id = ?
             AND read_scope IS NULL
             AND write_scope IS NULL
-            AND ${clause}
+            AND ${clause}${ftsClause}
           ORDER BY updated_at DESC`,
       )
-      .bind(ownerId, ...binds)
+      .bind(ownerId, ...binds, ...(ftsMatch ? [ftsMatch] : []))
       .all<NoteRow>();
     candidates.push(...(rows.results ?? []));
   }
@@ -484,10 +494,20 @@ async function listGuestInheritedRowsFromPublicFolders(
   return candidates;
 }
 
+/**
+ * Optional FTS5 narrowing: when `ftsMatch` is set, only notes whose
+ * title/body MATCH it are loaded. The FTS set is global — permission
+ * filtering below still decides visibility.
+ */
 export async function listAccessibleRows(
   env: Env,
   user: SessionUser,
+  ftsMatch?: string | null,
 ): Promise<NoteRow[]> {
+  const ftsClause = ftsMatch
+    ? " AND n.id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)"
+    : "";
+  const ftsBinds = ftsMatch ? [ftsMatch] : [];
   const owned = await db(env)
     .prepare(
       `SELECT DISTINCT ${NOTE_COLUMNS_N}
@@ -495,20 +515,23 @@ export async function listAccessibleRows(
            LEFT JOIN access_grants ag
              ON ag.target_kind = 'note' AND ag.target_key = n.id
             AND (ag.user_id = ? OR ag.email = ?)
-           WHERE n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope = 'public'
+           WHERE (n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope = 'public')${ftsClause}
            ORDER BY n.updated_at DESC`,
     )
-    .bind(user.id, user.email, user.id)
+    .bind(user.id, user.email, user.id, ...ftsBinds)
     .all<NoteRow>();
 
   const folderGrants = await listSharedFolderCandidates(env, user);
   const extra: NoteRow[] = [];
+  const extraClause = ftsMatch
+    ? " AND id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)"
+    : "";
   for (const grant of folderGrants) {
     const rows = await db(env)
       .prepare(
-        `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ? ORDER BY updated_at DESC`,
+        `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?${extraClause} ORDER BY updated_at DESC`,
       )
-      .bind(grant.ownerId)
+      .bind(grant.ownerId, ...ftsBinds)
       .all<NoteRow>();
     for (const row of rows.results ?? []) {
       if (noteMatchesFolderGrant(row.folder ?? "", grant.folder)) {
@@ -528,19 +551,26 @@ export async function listAccessibleRows(
   return visible.filter((row): row is NoteRow => row !== null);
 }
 
-async function listGuestRows(env: Env): Promise<NoteRow[]> {
+async function listGuestRows(
+  env: Env,
+  ftsMatch?: string | null,
+): Promise<NoteRow[]> {
   const allowAnonymousViews = instanceFlags(env).allowAnonymousViews;
   if (!allowAnonymousViews) {
     return [];
   }
 
+  const ftsClause = ftsMatch
+    ? " AND id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)"
+    : "";
   const [publicDirect, inheritedFromFolder] = await Promise.all([
     db(env)
       .prepare(
-        `SELECT ${NOTE_COLUMNS} FROM notes WHERE read_scope = 'public' ORDER BY updated_at DESC`,
+        `SELECT ${NOTE_COLUMNS} FROM notes WHERE read_scope = 'public'${ftsClause} ORDER BY updated_at DESC`,
       )
+      .bind(...(ftsMatch ? [ftsMatch] : []))
       .all<NoteRow>(),
-    listGuestInheritedRowsFromPublicFolders(env),
+    listGuestInheritedRowsFromPublicFolders(env, ftsMatch),
   ]);
 
   const candidates = mergeNoteRows([
@@ -588,15 +618,28 @@ type SearchRowsResult = { kind: "ok"; rows: NoteRow[] } | { kind: "not_found" };
 /**
  * Permission-filtered candidate rows for search/grep, optionally restricted to
  * a folder subtree. The folder check hides folders the user cannot view.
+ * `ftsMatch` narrows via the FTS index before loading snapshots; on index
+ * failure (e.g. unmigrated DB) it falls back to a full scan.
  */
 async function rowsForSearch(
   env: Env,
   user: SessionUser | undefined,
   folderId: string | undefined,
+  ftsMatch?: string | null,
 ): Promise<SearchRowsResult> {
-  const rows = user
-    ? await listAccessibleRows(env, user)
-    : await listGuestRows(env);
+  let rows: NoteRow[];
+  try {
+    rows = user
+      ? await listAccessibleRows(env, user, ftsMatch)
+      : await listGuestRows(env, ftsMatch);
+  } catch (error) {
+    if (!ftsMatch) {
+      throw error;
+    }
+    rows = user
+      ? await listAccessibleRows(env, user, null)
+      : await listGuestRows(env, null);
+  }
   if (!folderId) {
     return { kind: "ok", rows };
   }
@@ -649,7 +692,7 @@ async function searchHitForRow(
 ): Promise<NoteSearchHit> {
   const summary = await toSummary(env, row, user);
   const markdown = row.markdown_snapshot ?? "";
-  const markdownIndex = markdown.toLowerCase().indexOf(needle);
+  const markdownIndex = needle ? markdown.toLowerCase().indexOf(needle) : -1;
   return {
     ...summary,
     snippet:
@@ -840,6 +883,10 @@ async function deleteOwnedNotesInFolder(
       .bind(row.id)
       .run();
     await db(env).prepare("DELETE FROM notes WHERE id = ?").bind(row.id).run();
+    await db(env)
+      .prepare("DELETE FROM notes_fts WHERE note_id = ?")
+      .bind(row.id)
+      .run();
     await db(env)
       .prepare("DELETE FROM note_links WHERE src_note_id = ?")
       .bind(row.id)
@@ -1256,6 +1303,10 @@ export function createNoteService(env: Env) {
         .bind(row.id)
         .run();
       await db(env)
+        .prepare("DELETE FROM notes_fts WHERE note_id = ?")
+        .bind(row.id)
+        .run();
+      await db(env)
         .prepare("DELETE FROM note_links WHERE src_note_id = ?")
         .bind(row.id)
         .run();
@@ -1340,20 +1391,35 @@ export function createNoteService(env: Env) {
         query: string;
         scope?: SearchScope;
         folderId?: string;
+        layer?: NoteLayer;
         limit?: number;
         cursor?: string;
       },
     ): Promise<({ kind: "ok" } & NoteSearchPage) | { kind: "not_found" }> {
-      const scoped = await rowsForSearch(env, user, options.folderId);
+      const scope = options.scope ?? "all";
+      const parsed = parseSearchQuery(options.query);
+      const resolved = await resolveSearchDsl(env, user, parsed);
+      if (options.layer) {
+        resolved.layers.push({ negated: false, value: options.layer });
+      }
+      if (resolved.empty) {
+        return { kind: "ok", nextCursor: null, notes: [] };
+      }
+      const scoped = await rowsForSearch(
+        env,
+        user,
+        options.folderId,
+        ftsMatchQuery(parsed.terms, scope),
+      );
       if (scoped.kind !== "ok") {
         return scoped;
       }
-      const needle = options.query.trim().toLowerCase();
-      const matched = filterSearchRows(
-        scoped.rows,
-        options.query,
-        options.scope ?? "all",
+      const matched = scoped.rows.filter((row) =>
+        rowMatchesSearchDsl(row, resolved, scope),
       );
+      const needle =
+        parsed.terms.find((term) => !term.negated)?.value ??
+        options.query.trim().toLowerCase();
       const limit = clampSearchLimit(options.limit);
       const offset = parseSearchCursor(options.cursor);
       const pageRows = matched.slice(offset, offset + limit);
@@ -1373,20 +1439,37 @@ export function createNoteService(env: Env) {
       options: { contextAfter?: number; contextBefore?: number } = {},
     ): Promise<WorkspaceSearchResult> {
       const trimmed = query.trim();
-      const scoped = await rowsForSearch(env, user, undefined);
+      const parsed = parseSearchQuery(trimmed);
+      const resolved = await resolveSearchDsl(env, user, parsed);
+      if (resolved.empty) {
+        return {
+          grep: { matches: [], scannedNotes: 0, truncated: false },
+          notes: [],
+          query: trimmed,
+        };
+      }
+      const scoped = await rowsForSearch(
+        env,
+        user,
+        undefined,
+        ftsMatchQuery(parsed.terms, "all"),
+      );
       const rows = scoped.kind === "ok" ? scoped.rows : [];
-      const needle = trimmed.toLowerCase();
-      const matched = filterSearchRows(rows, trimmed, "all").slice(
-        0,
-        WORKSPACE_SEARCH_NOTE_LIMIT,
+      const filtered = rows.filter((row) =>
+        rowMatchesSearchDsl(row, resolved, "all"),
       );
+      const needle =
+        parsed.terms.find((term) => !term.negated)?.value ??
+        trimmed.toLowerCase();
       const notes = await Promise.all(
-        matched.map((row) => searchHitForRow(env, row, user, needle)),
+        filtered
+          .slice(0, WORKSPACE_SEARCH_NOTE_LIMIT)
+          .map((row) => searchHitForRow(env, row, user, needle)),
       );
-      const matcher = createLineMatcher(trimmed, {});
+      const matcher = needle ? createLineMatcher(needle, {}) : null;
       const grep =
-        matcher.kind === "ok"
-          ? grepRows(rows, matcher.matcher, options)
+        matcher?.kind === "ok"
+          ? grepRows(filtered, matcher.matcher, options)
           : { matches: [], scannedNotes: 0, truncated: false };
       return { grep, notes, query: trimmed };
     },

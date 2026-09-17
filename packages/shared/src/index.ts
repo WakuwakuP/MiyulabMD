@@ -176,6 +176,22 @@ export {
   parseJdId,
   zettelStamp,
 } from "./schemes.ts";
+export type {
+  SearchDslFilter,
+  SearchDslOperator,
+  SearchQuery,
+  SearchTerm,
+} from "./search-dsl.ts";
+export {
+  layerFilterValue,
+  paraFilterValue,
+  parseSearchQuery,
+  pathFilterMatches,
+  SEARCH_DSL_OPERATORS,
+  schemeFilterValue,
+  tagFilterValue,
+  tokenizeSearchQuery,
+} from "./search-dsl.ts";
 export {
   encodeSnapshotSaved,
   isSnapshotSavedForRoom,

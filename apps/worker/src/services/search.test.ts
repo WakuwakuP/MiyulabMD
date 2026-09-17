@@ -4,11 +4,15 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
 import {
+  ensureFolderRow,
   getFolderByPath,
   replaceGrants,
   upsertFolderPolicy,
 } from "./access.ts";
+import { setNoteLayer } from "./layers.ts";
 import { createNoteService } from "./notes.ts";
+import { ensureParaBuckets } from "./para.ts";
+import { createSchemeChild, setFolderScheme } from "./schemes.ts";
 
 const MIGRATIONS = [
   "0001_init.sql",
@@ -24,6 +28,7 @@ const MIGRATIONS = [
   "0011_para_buckets.sql",
   "0012_naming_schemes.sql",
   "0013_medallion_layers.sql",
+  "0014_notes_fts.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -465,5 +470,353 @@ test("guest search only sees public notes", async (t) => {
   assert.deepEqual(
     result.grep.matches.map((match) => match.title),
     ["Public"],
+  );
+});
+
+test("searchNotes DSL: phrases, negation, and ANDed terms", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, {
+    markdown: "# Alpha\nmedallion design draft\n",
+    title: "Alpha",
+  });
+  await notes.create(owner, {
+    markdown: "# Beta\nmedallion design final\n",
+    title: "Beta",
+  });
+  await notes.create(owner, {
+    markdown: "# Gamma\nunrelated\n",
+    title: "Gamma",
+  });
+
+  const result = await notes.searchNotes(owner, {
+    query: 'medallion -draft "design final"',
+  });
+  assert.equal(result.kind, "ok");
+  if (result.kind !== "ok") {
+    return;
+  }
+  assert.deepEqual(
+    result.notes.map((note) => note.title),
+    ["Beta"],
+  );
+});
+
+test("searchNotes DSL: path/tag/layer filters", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, {
+    folder: "Knowledge",
+    markdown: "# InKnowledge\nneedle #arch\n",
+    title: "InKnowledge",
+  });
+  await notes.create(owner, {
+    folder: "Knowledge/Sub",
+    markdown: "# InSub\nneedle #archive deeper\n",
+    title: "InSub",
+  });
+  await notes.create(owner, {
+    folder: "Elsewhere",
+    markdown: "# Outside\nneedle #arch\n",
+    title: "Outside",
+  });
+
+  const byPath = await notes.searchNotes(owner, {
+    query: "needle path:Knowledge",
+  });
+  assert.equal(byPath.kind, "ok");
+  if (byPath.kind !== "ok") {
+    return;
+  }
+  assert.deepEqual(byPath.notes.map((note) => note.title).sort(), [
+    "InKnowledge",
+    "InSub",
+  ]);
+
+  // #arch must not match the longer #archive tag.
+  const byTag = await notes.searchNotes(owner, {
+    query: "needle tag:arch",
+  });
+  assert.equal(byTag.kind, "ok");
+  if (byTag.kind !== "ok") {
+    return;
+  }
+  assert.deepEqual(byTag.notes.map((note) => note.title).sort(), [
+    "InKnowledge",
+    "Outside",
+  ]);
+
+  const negatedPath = await notes.searchNotes(owner, {
+    query: "needle -path:Knowledge",
+  });
+  assert.equal(negatedPath.kind, "ok");
+  if (negatedPath.kind !== "ok") {
+    return;
+  }
+  assert.deepEqual(
+    negatedPath.notes.map((note) => note.title),
+    ["Outside"],
+  );
+
+  const gold = await notes.create(owner, {
+    markdown: "# Golden\nneedle\n",
+    title: "Golden",
+  });
+  assert.ok(!("error" in gold));
+  const promoted = await setNoteLayer(env, gold.id, "gold", null, owner);
+  assert.equal(promoted.kind, "ok");
+
+  const byLayer = await notes.searchNotes(owner, {
+    query: "needle layer:gold",
+  });
+  assert.equal(byLayer.kind, "ok");
+  if (byLayer.kind !== "ok") {
+    return;
+  }
+  assert.deepEqual(
+    byLayer.notes.map((note) => note.title),
+    ["Golden"],
+  );
+
+  const byLayerOption = await notes.searchNotes(owner, {
+    layer: "gold",
+    query: "needle",
+  });
+  assert.equal(byLayerOption.kind, "ok");
+  if (byLayerOption.kind === "ok") {
+    assert.deepEqual(
+      byLayerOption.notes.map((note) => note.title),
+      ["Golden"],
+    );
+  }
+
+  // invalid layer value resolves to an empty result, not an error
+  const badLayer = await notes.searchNotes(owner, {
+    query: "needle layer:platinum",
+  });
+  assert.equal(badLayer.kind, "ok");
+  if (badLayer.kind === "ok") {
+    assert.equal(badLayer.notes.length, 0);
+  }
+});
+
+test("searchNotes DSL: jd: and para: resolve through folder metadata", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  const ensured = await ensureFolderRow(env, owner.id, "");
+  assert.ok(ensured);
+  const rootId = { id: ensured };
+  assert.equal((await setFolderScheme(env, rootId.id, "jd", owner)).kind, "ok");
+  const area = await createSchemeChild(
+    env,
+    rootId.id,
+    { title: "仕事" },
+    owner,
+  );
+  assert.equal(area.kind, "ok");
+  if (area.kind !== "ok") {
+    return;
+  }
+  const category = await createSchemeChild(
+    env,
+    area.result.folder.id ?? "",
+    { title: "経費" },
+    owner,
+  );
+  assert.equal(category.kind, "ok");
+  if (category.kind !== "ok") {
+    return;
+  }
+  const id = await createSchemeChild(
+    env,
+    category.result.folder.id ?? "",
+    {},
+    owner,
+  );
+  assert.equal(id.kind, "ok");
+  if (id.kind !== "ok") {
+    return;
+  }
+  assert.equal(id.result.schemeId, "10.11");
+
+  await notes.create(owner, {
+    folder: id.result.folder.folder,
+    markdown: "# JdNote\nneedle inside jd\n",
+    title: "JdNote",
+  });
+  await notes.create(owner, {
+    folder: "loose",
+    markdown: "# Loose\nneedle outside jd\n",
+    title: "Loose",
+  });
+
+  const byJd = await notes.searchNotes(owner, { query: "needle jd:10.11" });
+  assert.equal(byJd.kind, "ok");
+  if (byJd.kind === "ok") {
+    assert.deepEqual(
+      byJd.notes.map((note) => note.title),
+      ["JdNote"],
+    );
+  }
+
+  const buckets = await ensureParaBuckets(env, owner.id);
+  const projects = buckets.find((bucket) => bucket.bucket === "projects");
+  assert.ok(projects);
+  await notes.create(owner, {
+    folder: projects.path,
+    markdown: "# ParaNote\nneedle in projects\n",
+    title: "ParaNote",
+  });
+  const byPara = await notes.searchNotes(owner, {
+    query: "needle para:projects",
+  });
+  assert.equal(byPara.kind, "ok");
+  if (byPara.kind === "ok") {
+    assert.deepEqual(
+      byPara.notes.map((note) => note.title),
+      ["ParaNote"],
+    );
+  }
+});
+
+test("searchNotes finds Japanese text and falls back for short terms", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, {
+    markdown: "# 会議メモ\n金曜日の議事録をまとめる\n",
+    title: "会議メモ",
+  });
+  await notes.create(owner, {
+    markdown: "# Other\n月曜日の予定\n",
+    title: "Other",
+  });
+
+  // 3+ chars → trigram FTS narrowing path.
+  const fts = await notes.searchNotes(owner, { query: "金曜日" });
+  assert.equal(fts.kind, "ok");
+  if (fts.kind === "ok") {
+    assert.deepEqual(
+      fts.notes.map((note) => note.title),
+      ["会議メモ"],
+    );
+  }
+
+  // 2 chars → below the trigram minimum, JS substring fallback.
+  const short = await notes.searchNotes(owner, { query: "金曜" });
+  assert.equal(short.kind, "ok");
+  if (short.kind === "ok") {
+    assert.deepEqual(
+      short.notes.map((note) => note.title),
+      ["会議メモ"],
+    );
+  }
+});
+
+test("FTS index stays in sync on update and delete", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  const created = await notes.create(owner, {
+    markdown: "# Synced\nuniquefern body\n",
+    title: "Synced",
+  });
+  assert.ok(!("error" in created));
+
+  const hit = await notes.searchNotes(owner, { query: "uniquefern" });
+  assert.equal(hit.kind, "ok");
+  if (hit.kind === "ok") {
+    assert.equal(hit.notes.length, 1);
+  }
+
+  await notes.updateMarkdown(created.id, owner, "# Synced\nrewritten\n");
+  const afterUpdate = await notes.searchNotes(owner, { query: "uniquefern" });
+  assert.equal(afterUpdate.kind, "ok");
+  if (afterUpdate.kind === "ok") {
+    assert.equal(afterUpdate.notes.length, 0);
+  }
+  const newTerm = await notes.searchNotes(owner, { query: "rewritten" });
+  assert.equal(newTerm.kind, "ok");
+  if (newTerm.kind === "ok") {
+    assert.equal(newTerm.notes.length, 1);
+  }
+
+  await notes.remove(created.id, owner);
+  const afterDelete = await notes.searchNotes(owner, { query: "rewritten" });
+  assert.equal(afterDelete.kind, "ok");
+  if (afterDelete.kind === "ok") {
+    assert.equal(afterDelete.notes.length, 0);
+  }
+});
+
+test("searchNotes DSL never leaks notes outside the caller's visibility", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, {
+    markdown: "# Hidden\nneedle hidden\n",
+    permission: "private",
+    title: "Hidden",
+  });
+  await notes.create(owner, {
+    markdown: "# Open\nneedle visible\n",
+    readScope: "public",
+    title: "Open",
+  });
+
+  const result = await notes.searchNotes(viewer, {
+    query: "needle -other",
+  });
+  assert.equal(result.kind, "ok");
+  if (result.kind === "ok") {
+    assert.deepEqual(
+      result.notes.map((note) => note.title),
+      ["Open"],
+    );
+  }
+
+  const guest = await notes.searchNotes(undefined, { query: "needle" });
+  assert.equal(guest.kind, "ok");
+  if (guest.kind === "ok") {
+    assert.deepEqual(
+      guest.notes.map((note) => note.title),
+      ["Open"],
+    );
+  }
+});
+
+test("searchWorkspace applies DSL operators to both notes and grep", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await notes.create(owner, {
+    folder: "keep",
+    markdown: "# Keep\nneedle line\n",
+    title: "Keep",
+  });
+  await notes.create(owner, {
+    folder: "drop",
+    markdown: "# Drop\nneedle line\n",
+    title: "Drop",
+  });
+
+  const result = await notes.searchWorkspace(owner, "needle path:keep");
+  assert.deepEqual(
+    result.notes.map((note) => note.title),
+    ["Keep"],
+  );
+  assert.deepEqual(
+    result.grep.matches.map((match) => match.title),
+    ["Keep"],
   );
 });

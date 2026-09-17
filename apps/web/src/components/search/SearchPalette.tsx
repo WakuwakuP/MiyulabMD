@@ -279,6 +279,11 @@ export function SearchPalette({
             </MutedText>
           )}
         </div>
+        <div className="border-border border-t px-3 py-2">
+          <MutedText className="font-mono text-xs">
+            "フレーズ" -除外 path: tag: layer: jd: para:
+          </MutedText>
+        </div>
       </div>
     </div>
   );

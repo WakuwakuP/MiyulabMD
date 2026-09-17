@@ -1,5 +1,9 @@
 import { env } from "cloudflare:workers";
-import { isSearchScope, type WorkspaceSearchResult } from "@miyulabmd/shared";
+import {
+  isNoteLayer,
+  isSearchScope,
+  type WorkspaceSearchResult,
+} from "@miyulabmd/shared";
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
@@ -80,6 +84,9 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
       const scopeParam = url.searchParams.get("scope");
       const scope =
         scopeParam && isSearchScope(scopeParam) ? scopeParam : undefined;
+      const layerParam = url.searchParams.get("layer");
+      const layer =
+        layerParam && isNoteLayer(layerParam) ? layerParam : undefined;
       const target = await folderIdParam(url, user);
       if (target.notFound) {
         set.status = 404;
@@ -88,6 +95,7 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
       const result = await notes.searchNotes(user ?? undefined, {
         cursor: url.searchParams.get("cursor") ?? undefined,
         folderId: target.folderId,
+        layer,
         limit: intParam(url, "limit", 50, 200),
         query,
         scope,

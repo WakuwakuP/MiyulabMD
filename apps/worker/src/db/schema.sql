@@ -185,3 +185,10 @@ CREATE INDEX note_links_dest_idx ON note_links (dest_note_id);
 CREATE INDEX note_links_src_status_idx ON note_links (src_note_id, dest_status);
 CREATE INDEX notes_owner_layer_idx ON notes (owner_id, layer);
 CREATE INDEX note_layer_events_note_idx ON note_layer_events (note_id, created_at);
+
+CREATE VIRTUAL TABLE notes_fts USING fts5(
+  note_id UNINDEXED,
+  title,
+  body,
+  tokenize = 'trigram'
+);

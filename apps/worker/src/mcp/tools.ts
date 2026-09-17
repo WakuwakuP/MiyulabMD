@@ -857,7 +857,7 @@ export function createMcpServerFactory() {
     "search_notes",
     {
       description:
-        "Search accessible notes by title or markdown snapshot substring. Use scope=title for fast title-only lookup; use grep_notes for line-level body hits.",
+        'Search accessible notes by title or markdown snapshot. Query supports a small DSL: `word`, `"exact phrase"`, `-excluded`, and filters `path:folder`, `tag:name`, `layer:bronze|silver|gold`, `scheme:`/`jd:15.22`, `para:projects`. Use scope=title for fast title-only lookup; use grep_notes for line-level body hits.',
       inputSchema: {
         cursor: z
           .string()
@@ -867,6 +867,10 @@ export function createMcpServerFactory() {
           .string()
           .optional()
           .describe("Restrict to notes inside this folder UUID (recursive)"),
+        layer: z
+          .enum(["bronze", "silver", "gold"])
+          .optional()
+          .describe("Restrict to a medallion layer"),
         limit: z
           .number()
           .int()
@@ -887,7 +891,7 @@ export function createMcpServerFactory() {
           .describe("Where to match (default: all)"),
       },
     },
-    async ({ query, scope, folder_id, limit, cursor, scheme_id }) => {
+    async ({ query, scope, folder_id, layer, limit, cursor, scheme_id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -905,6 +909,7 @@ export function createMcpServerFactory() {
       const result = await notes.searchNotes(user, {
         cursor,
         folderId: target.folderId,
+        layer,
         limit,
         query: trimmedQuery,
         scope,

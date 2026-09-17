@@ -1,6 +1,6 @@
 # 作業引き継ぎメモ
 
-最終更新: 2026-09-17。#114 まで実装済み。**実装作業は親リポジトリで直接行う**（worktree は参照のみ。ユーザー指示）。
+最終更新: 2026-09-17。#115 まで実装済み。**実装作業は親リポジトリで直接行う**（worktree は参照のみ。ユーザー指示）。
 
 ## リポジトリ構成
 
@@ -31,7 +31,7 @@
 | #112 | フォルダ一括移動（PARA 土台） | P1 | **実装完了**（move 系 + PARA + REST/MCP/UI + テスト済。close 判断は要ユーザー確認） |
 | #113 | Johnny.Decimal 採番 | P2 | **実装完了**（汎用命名規則基盤 + JD/Zettel + REST/MCP/UI + テスト済。close 判断は要ユーザー確認） |
 | #114 | メダリオン層 + gold ロック | P2 | **実装完了**（層サービス/ゲート/ロック強制/監査/pin/REST/MCP/UI/テスト済。close 判断は要ユーザー確認） |
-| #115 | 検索 DSL / FTS・日本語 | P2-3 | 未着手（#109 の後） |
+| #115 | 検索 DSL / FTS・日本語 | P2-3 | **実装完了**（DSL パーサ/FTS5 trigram/権限フィルタ統合/REST/MCP/UI ヒント/テスト済。セマンティック検索はスコープ外） |
 
 ### 依存グラフ
 
@@ -235,17 +235,43 @@
 - `POST /:id/layer` で rank>1（bronze→gold 直跳び）は 400。`promote_note` は常に1段階
 - layer events は REST のみ（MCP の履歴系は `list_note_history` が編集履歴を担う）
 
+## #115 の実装内容
+
+**設計:** Obsidian 風の検索 DSL（糖衣構文）+ FTS5 `trigram` 索引（日本語・部分一致対応）。**FTS は権限境界ではない** — 候補絞り込みにのみ使い、権限フィルタ済み行を JS 側で権威的に検証する。
+
+**Shared:** `search-dsl.ts`（新規）— `parseSearchQuery`/`tokenizeSearchQuery`：`word`（AND 部分一致・小文字化）、`"phrase"`、`-term` 否定、`path:`/`tag:`/`layer:`/`scheme:`/`jd:`/`para:`。`pathFilterMatches`（フォルダ自身+サブツリー、前後 `/` 正規化）、`tagFilterValue`（`#` 正規化）、`layerFilterValue`/`paraFilterValue`/`schemeFilterValue`（`jd:15.22` と `scheme:jd:15.22` 両対応）。既知演算子の空値（`path:`）は drop、未知演算子（`foo:bar`）は term 扱い。`search-dsl.test.ts` 12 件。
+
+**Worker:**
+
+- `db/migrations/0014_notes_fts.sql` + `schema.sql` — `notes_fts`（`note_id UNINDEXED`/`title`/`body`、`trigram`）+ 既存行バックフィル `INSERT ... SELECT`
+- `services/fts.ts`（新規）— `syncNoteFts`（FTS5 に一意制約が無いので delete+insert、索引は再構築可能な派生物なので失敗は握り潰す）、`deleteNoteFts`、`ftsMatchQuery`（正の語のみ・3文字未満は除外・`title:`/`body:` カラム絞り・フレーズは `"..."` エスケープ）、`FTS_MIN_TERM_LENGTH=3`。トリガ不使用（migration を plain statement に保つため）
+- `services/search-dsl.ts`（新規）— `resolveSearchDsl`（`scheme:`/`jd:`/`para:` を caller 自身のフォルダメタ経由でフォルダパス接頭辞に解決。非 owner は fail-closed、非否定フィルタが未解決なら `empty` で結果0件）、`rowMatchesSearchDsl`（権威的検証：正項は scope ごとに必須、否定項は非存在必須、`#tag` は境界チェックで `#foo` が `#foobar` にヒットしない）
+- `services/notes.ts` — `listAccessibleRows`/`listGuestRows`/`listGuestInheritedRowsFromPublicFolders` に `ftsMatch` を SQL 段階で畳み込み（`AND id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)`、常に AND なので権限を広げない。索引未作成等で失敗時は full scan にフォールバック）。`searchNotes`/`searchWorkspace` を `parseSearchQuery`→`resolveSearchDsl`→FTS 絞り込み→`rowMatchesSearchDsl` に置換。`searchNotes` に `layer` オプション追加。`syncNoteLinks` に FTS 同期を統合（作成/本文更新/メタ更新/フォルダ移動/snapshot 書き戻しの全経路をカバー）、削除2経路に `DELETE FROM notes_fts`
+- REST — `GET /api/search/notes` に `layer` パラメータ（`isNoteLayer` 検証）。query は DSL として透過。`/api/search`（workspace）も DSL 対応
+- MCP — `search_notes` に `layer` enum 追加、description に DSL 構文を記載
+- テスト `search.test.ts` +7 件（DSL フレーズ/否定/AND、`path:`/`tag:`/`layer:`+layer オプション+不正値→空、`jd:`/`para:` 解決、日本語 3 文字 FTS / 2 文字 JS フォールバック、FTS 更新/削除同期、権限漏洩なし、searchWorkspace DSL）
+
+**Web:** `SearchPalette` フッタに DSL ヒント（`"フレーズ" -除外 path: tag: layer: jd: para:`）を表示
+
+**留意点:**
+
+- `tag:` は本文中の `#tag` リテラルにマッチ（frontmatter パースはしない）。`#foo` は `#foo/bar` にも `#foo` にもマッチするが `#foobar` にはマッチしない
+- `scheme:`/`jd:`/`para:` は caller の owner メタで解決 — 他人の scheme ID を指定しても未解決→0件（漏洩なし）
+- FTS5 MATCH は正の 3 文字以上の語のみ。否定・短語・構造フィルタは全て JS 側検証（FTS NOT は列非対応で scope と齟齬するため使わない）
+- `searchForUser`（MCP `list_notes` の query フィルタ）は従来の部分一致のまま（DSL 化していない）
+- セマンティック検索はスコープ外（将来課題）
+
 ## 検証コマンドと最新結果
 
 ```sh
 pnpm --filter @miyulabmd/web typecheck      # web（tsc × 2）
 pnpm --filter @miyulabmd/worker typecheck   # worker
 pnpm -r typecheck                           # 全ワークスペース
-pnpm --filter @miyulabmd/worker test        # node:test。130/130 ✓（+8 layers）
+pnpm --filter @miyulabmd/worker test        # node:test。137/137 ✓（+7 search-dsl/fts）
 pnpm --filter @miyulabmd/web test           # node:test。129/129 ✓
 pnpm --filter @miyulabmd/markdown test      # node:test。26/26 ✓
-pnpm --filter @miyulabmd/shared test        # wikilinks パーサテスト等
-cd apps/web && node scripts/playwright.mjs test  # ブラウザ全量（+4 note-layers）
+pnpm --filter @miyulabmd/shared test        # 44/44 ✓（+12 search-dsl）
+cd apps/web && node scripts/playwright.mjs test  # ブラウザ全量 284（既知フレーク: 並列負荷で home-metadata/mydrive-prefetch 系が稀に落ちるが単独再実行は全パス）
 ```
 
 注意: `vitest` は存在しない。テストは Node 組み込みランナー。Playwright は `apps/web/scripts/playwright.mjs` 経由。
