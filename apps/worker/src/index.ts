@@ -25,6 +25,7 @@ import { searchRoutes } from "./routes/search.ts";
 import { tokenRoutes } from "./routes/tokens.ts";
 import { createNoteService } from "./services/notes.ts";
 import { peekOgCards, warmOgCards } from "./services/og.ts";
+import { readUserSettings } from "./services/settings.ts";
 import {
   injectNotePage,
   isPublicGuestCacheable,
@@ -37,7 +38,11 @@ const api = new Elysia({ adapter: CloudflareAdapter })
   .get("/api/health", () => ({ ok: true }))
   .get("/api/me", async ({ request }) => {
     const user = await readSession(request, env);
-    return { user };
+    if (!user) {
+      return { user: null };
+    }
+    const settings = await readUserSettings(env, user.id);
+    return { user: { ...user, settings } };
   })
   .get("/api/auth/config", () => {
     const access = isAccessConfigured(env);
