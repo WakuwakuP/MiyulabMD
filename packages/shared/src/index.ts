@@ -45,14 +45,53 @@ export {
   validateArticleDocument,
   withClosedFrontmatter,
 } from "./frontmatter.ts";
+export type {
+  NoteLayer,
+  NoteLayerEvent,
+  PromoteGateCode,
+  PromoteGateFailure,
+} from "./layers.ts";
+export {
+  GOLD_LOCK_WS_CLOSE_CODE,
+  GOLD_LOCK_WS_CLOSE_REASON,
+  GOLD_UNLOCK_DEFAULT_MINUTES,
+  GOLD_UNLOCK_MAX_MINUTES,
+  isGoldLockedAt,
+  isNoteLayer,
+  LAYER_RANK,
+  NOTE_LAYER_LABELS,
+  NOTE_LAYERS,
+  nextLayer,
+  PROMOTE_GATE_CODES,
+} from "./layers.ts";
 export type { McpToolName } from "./mcp.ts";
 export { MCP_NOTE_URL_HINT, MCP_TOOLS } from "./mcp.ts";
+export type {
+  MoveFolderContentsResult,
+  MoveFolderItem,
+  MoveFolderResult,
+  MoveItemReason,
+  MoveItemStatus,
+  MoveNoteItem,
+  MoveNotesResult,
+  MovePlan,
+  ParaBucket,
+  ParaBucketKey,
+  ParaListResult,
+} from "./move.ts";
+export { isParaBucketKey, MOVE_MAX_ITEMS, PARA_BUCKETS } from "./move.ts";
 export type {
   AccessGrantInput,
   CreateNoteInput,
   FolderAccess,
+  FolderChildrenResult,
   FolderCrumb,
+  FolderEntry,
+  FolderEntryFolder,
+  FolderEntryNote,
   FolderRecord,
+  GrepMatch,
+  GrepResult,
   Note,
   NoteAccess,
   NoteCollaborator,
@@ -65,16 +104,22 @@ export type {
   NoteRevision,
   NoteRevisionBody,
   NoteRevisionRestore,
+  NoteSearchHit,
+  NoteSearchPage,
   NoteSummary,
+  SearchScope,
   UpdateFolderAccessInput,
   UpdateNoteMetaInput,
+  WorkspaceSearchResult,
 } from "./note.ts";
 export {
   isNoteEditOp,
   isNoteHistoryActorKind,
+  isSearchScope,
   NOTE_EDIT_OPS,
   NOTE_HISTORY_ACTOR_KINDS,
   NOTE_RESTORE_MESSAGE,
+  SEARCH_SCOPES,
 } from "./note.ts";
 export type {
   AccessGrant,
@@ -107,6 +152,54 @@ export {
   rewriteFolderPrefix,
   scopesFromPreset,
 } from "./permission.ts";
+export type {
+  JdLevel,
+  NamingScheme,
+  SchemeSuggestion,
+  SchemeValidateResult,
+  SchemeValidationIssue,
+} from "./schemes.ts";
+export {
+  formatJdArea,
+  formatJdId,
+  formatSchemeFolderName,
+  isNamingScheme,
+  isZettelId,
+  JD_GROUP_MAX,
+  JD_ID_MAX,
+  JD_RESERVED_MAX,
+  jdChildLevel,
+  jdLevelOf,
+  looksLikeSchemeId,
+  NAMING_SCHEME_LABELS,
+  NAMING_SCHEMES,
+  parseJdArea,
+  parseJdCategory,
+  parseJdId,
+  zettelStamp,
+} from "./schemes.ts";
+export type {
+  SearchDslFilter,
+  SearchDslOperator,
+  SearchQuery,
+  SearchTerm,
+} from "./search-dsl.ts";
+export {
+  layerFilterValue,
+  paraFilterValue,
+  parseSearchQuery,
+  pathFilterMatches,
+  SEARCH_DSL_OPERATORS,
+  schemeFilterValue,
+  tagFilterValue,
+  tokenizeSearchQuery,
+} from "./search-dsl.ts";
+export {
+  encodeSnapshotSaved,
+  isSnapshotSavedForRoom,
+  MESSAGE_SNAPSHOT_SAVED,
+  SNAPSHOT_SAVED_VERSION,
+} from "./snapshot-saved.ts";
 export {
   defaultNoteMarkdown,
   folderUrl,
@@ -117,3 +210,19 @@ export {
   titleFromMarkdown,
 } from "./title.ts";
 export type { SessionUser, User } from "./user.ts";
+export type {
+  BrokenLinkItem,
+  NoteBacklinkItem,
+  NoteLinkItem,
+  NoteLinksResult,
+  NoteLinkType,
+  ParsedNoteLink,
+  WikiLinkResolution,
+} from "./wikilinks.ts";
+export {
+  lineForOffset,
+  maskCodeRegions,
+  NOTE_UUID_RE,
+  parseNoteLinks,
+  parseWikiLinkInner,
+} from "./wikilinks.ts";

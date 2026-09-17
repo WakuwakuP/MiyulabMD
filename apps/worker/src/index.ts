@@ -3,6 +3,7 @@ import { collectOgUrls, renderMarkdownHtml } from "@miyulabmd/markdown";
 import { Elysia } from "elysia";
 import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { isAccessConfigured } from "./auth/access.ts";
+import { withApiSessionIdentity } from "./auth/api-response.ts";
 import { readSession } from "./auth/session.ts";
 import { envTruthy } from "./env.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
@@ -18,6 +19,9 @@ import { folderRoutes } from "./routes/folders.ts";
 import { imageRoutes } from "./routes/images.ts";
 import { noteRoutes } from "./routes/notes.ts";
 import { ogRoutes } from "./routes/og.ts";
+import { paraRoutes } from "./routes/para.ts";
+import { schemeRoutes } from "./routes/schemes.ts";
+import { searchRoutes } from "./routes/search.ts";
 import { tokenRoutes } from "./routes/tokens.ts";
 import { createNoteService } from "./services/notes.ts";
 import { peekOgCards, warmOgCards } from "./services/og.ts";
@@ -48,6 +52,9 @@ const api = new Elysia({ adapter: CloudflareAdapter })
   .use(articleSourceRoutes)
   .use(folderRoutes)
   .use(ogRoutes)
+  .use(paraRoutes)
+  .use(schemeRoutes)
+  .use(searchRoutes)
   .use(tokenRoutes)
   .use(imageRoutes)
   .use(mcpRoutes)
@@ -170,7 +177,10 @@ async function handleNoteWebSocket(
   const id = env.DOCUMENT_ROOM.idFromName(note.id);
   const headers = new Headers(request.headers);
   headers.set("X-Note-Id", note.id);
-  headers.set("X-Can-Edit", note.access.flags.canEdit ? "true" : "false");
+  headers.set(
+    "X-Can-Edit",
+    note.access.flags.canEdit && !note.goldLocked ? "true" : "false",
+  );
   if (user) {
     applyWsUserHeaders(headers, user);
   }
@@ -217,6 +227,20 @@ export default {
     const noteId = noteIdFromWsPath(pathname);
     if (noteId) {
       return handleNoteWebSocket(request, env, noteId);
+    }
+
+    if (pathname.startsWith("/api/")) {
+      const user = await readSession(request, env);
+      let response: Response;
+      try {
+        response =
+          (await handleAuthAndMeRoutes(request, env, pathname)) ??
+          (await api.fetch(request));
+      } catch {
+        // Elysia handles route errors; this also covers non-Elysia API handlers.
+        response = new Response("Internal Server Error", { status: 500 });
+      }
+      return withApiSessionIdentity(response, user);
     }
 
     const special = await handleAuthAndMeRoutes(request, env, pathname);

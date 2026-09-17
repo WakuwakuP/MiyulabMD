@@ -18,6 +18,10 @@ const GROUPS: SettingsGroup[] = [
     label: "アカウント",
   },
   {
+    items: [{ label: "エディタ設定", to: "/settings/editor" }],
+    label: "エディタ",
+  },
+  {
     items: [{ label: "MCP設定", to: "/settings/mcp" }],
     label: "開発者",
   },

@@ -6,11 +6,16 @@ import {
   FileText,
   Folder,
   History,
+  Link2,
+  Lock,
+  LockOpen,
+  Medal,
   Monitor,
   Moon,
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Share2,
   Sun,
   X,
@@ -82,6 +87,26 @@ export function HistoryIcon({ className }: IconProps) {
 
 export function RefreshIcon({ className }: IconProps) {
   return <RefreshCw aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function LinkIcon({ className }: IconProps) {
+  return <Link2 aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function MedalIcon({ className }: IconProps) {
+  return <Medal aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function LockIcon({ className }: IconProps) {
+  return <Lock aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function LockOpenIcon({ className }: IconProps) {
+  return <LockOpen aria-hidden={true} className={cn("size-4", className)} />;
+}
+
+export function SearchIcon({ className }: IconProps) {
+  return <Search aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function ArticleIcon({ className }: IconProps) {

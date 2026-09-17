@@ -20,7 +20,7 @@ export {
   resolveLanguage,
   serializeFenceInfo,
 } from "./fence-info.ts";
-export { renderMarkdownHtml } from "./render.ts";
+export { collectImageUrls, renderMarkdownHtml } from "./render.ts";
 export {
   collectStandaloneLinkUrls,
   mapLinesOutsideFences,
@@ -33,3 +33,4 @@ export {
   type TaskCheckboxUpdate,
   taskContextHash,
 } from "./task-list.ts";
+export { remarkWikiLinks, type WikiLinkMap } from "./wikilinks.ts";

@@ -5,6 +5,8 @@ import { Link } from "react-router";
 import type { AuthConfig } from "../../lib/api.ts";
 import { cn } from "../../lib/cn.ts";
 
+import { IconButton } from "../ui/IconButton.tsx";
+import { SearchIcon } from "../ui/icons.tsx";
 import { MutedText } from "../ui/Text.tsx";
 import { AccountMenu } from "./AccountMenu.tsx";
 import { SitePublishButton } from "./SitePublishButton.tsx";
@@ -16,6 +18,7 @@ type Props = {
   user: SessionUser | null;
   loading: boolean;
   authConfig: AuthConfig;
+  onOpenSearch?: () => void;
 };
 
 export function AppHeader({
@@ -25,6 +28,7 @@ export function AppHeader({
   user,
   loading,
   authConfig,
+  onOpenSearch,
 }: Props) {
   const headerRef = useRef<HTMLElement>(null);
 
@@ -78,6 +82,16 @@ export function AppHeader({
           actions ? "col-start-3" : "col-start-2",
         )}
       >
+        {onOpenSearch && (
+          <IconButton
+            aria-label="検索 (Ctrl+K)"
+            onClick={onOpenSearch}
+            title="検索 (Ctrl+K)"
+            variant="ghost"
+          >
+            <SearchIcon />
+          </IconButton>
+        )}
         <SitePublishButton folder={folder} user={user} />
         {end}
         {loading ? (

@@ -6,17 +6,32 @@ import type {
   ArticleSourceStatus,
   CreateNoteInput,
   FolderAccess,
+  FolderChildrenResult,
   FolderRecord,
+  MoveFolderContentsResult,
+  MoveFolderResult,
+  MoveNotesResult,
   Note,
   NoteHistoryPage,
+  NoteLayer,
+  NoteLayerEvent,
+  NoteLinksResult,
   NoteRevisionBody,
   NoteRevisionRestore,
   NoteSummary,
+  ParaBucketKey,
+  ParaListResult,
   PermissionPreset,
+  PromoteGateFailure,
+  SchemeSuggestion,
   SessionUser,
+  WorkspaceSearchResult,
 } from "@miyulabmd/shared";
+import { apiFetch as fetch } from "./api-fetch.ts";
+import { ApiHttpError, requestJson } from "./api-transport.ts";
 import { notifyArticleChanged } from "./article-changed.ts";
 import type { OgPreview } from "./embeds.ts";
+import { fetchNoteRequest } from "./note-request.ts";
 
 const fetchOpts: RequestInit = { credentials: "include" };
 
@@ -37,6 +52,19 @@ export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; error: string };
 
+export type ReadOptions = {
+  signal?: AbortSignal;
+  viewerId?: string | null;
+  noteAuthorityGeneration?: number;
+  noteAuthorityEpoch?: string;
+};
+
+export {
+  ApiCommunicationError,
+  ApiHttpError,
+  ApiIdentityError,
+} from "./api-transport.ts";
+
 async function parseError(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { error?: string };
@@ -52,37 +80,44 @@ export type AuthConfig = {
 };
 
 export async function fetchAuthConfig(): Promise<AuthConfig> {
-  const res = await fetch("/api/auth/config", fetchOpts);
-  if (!res.ok) {
+  const result = await requestJson<AuthConfig>("/api/auth/config", fetchOpts);
+  if (!result.ok) {
     return { access: false, mock: true };
   }
-  return (await res.json()) as AuthConfig;
+  return result.data;
 }
 
 export async function fetchMe(): Promise<SessionUser | null> {
-  const res = await fetch("/api/me", fetchOpts);
-  if (!res.ok) {
+  const result = await requestJson<{ user: SessionUser | null }>(
+    "/api/me",
+    fetchOpts,
+  );
+  if (!result.ok) {
     return null;
   }
-  const body = (await res.json()) as { user: SessionUser | null };
-  return body.user;
+  return result.data.user;
 }
 
-export async function fetchNotes(): Promise<NoteSummary[]> {
-  const res = await fetch("/api/notes", fetchOpts);
+export async function fetchNotes(
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<NoteSummary[]> {
+  const res = await fetch(
+    "/api/notes",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
-    throw new Error(await parseError(res));
+    throw new ApiHttpError(await parseError(res), res.status);
   }
   const body = (await res.json()) as { notes: NoteSummary[] };
   return body.notes;
 }
 
-export async function fetchNote(id: string): Promise<ApiResult<Note>> {
-  const res = await fetch(`/api/notes/${id}`, fetchOpts);
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as Note, ok: true };
+export function fetchNote(
+  id: string,
+  options: ReadOptions = {},
+): Promise<ApiResult<Note>> {
+  return fetchNoteRequest(id, options);
 }
 
 export async function updateTaskCheckbox(
@@ -101,9 +136,25 @@ export async function updateTaskCheckbox(
   return { data: await res.json(), ok: true };
 }
 
+export async function fetchNoteLinks(
+  id: string,
+  options: ReadOptions = {},
+): Promise<ApiResult<NoteLinksResult>> {
+  const res = await fetch(
+    `/api/notes/${id}/links`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as NoteLinksResult, ok: true };
+}
+
 export async function fetchNoteHistory(
   id: string,
   query: { limit?: number; before?: number } = {},
+  options: ReadOptions = {},
 ): Promise<ApiResult<NoteHistoryPage>> {
   const params = new URLSearchParams();
   if (query.limit !== undefined) {
@@ -113,7 +164,11 @@ export async function fetchNoteHistory(
     params.set("before", String(query.before));
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  const res = await fetch(`/api/notes/${id}/history${suffix}`, fetchOpts);
+  const res = await fetch(
+    `/api/notes/${id}/history${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -123,10 +178,12 @@ export async function fetchNoteHistory(
 export async function fetchNoteRevision(
   id: string,
   revisionId: string,
+  options: ReadOptions = {},
 ): Promise<ApiResult<NoteRevisionBody>> {
   const res = await fetch(
     `/api/notes/${id}/revisions/${revisionId}`,
-    fetchOpts,
+    { ...fetchOpts, signal: options.signal },
+    options,
   );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
@@ -205,8 +262,14 @@ export async function updateNote(
   return { data: (await res.json()) as Note, ok: true };
 }
 
-export async function fetchFolderTree(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/tree", fetchOpts);
+export async function fetchFolderTree(
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<FolderRecord[]>> {
+  const res = await fetch(
+    "/api/folders/tree",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -214,8 +277,14 @@ export async function fetchFolderTree(): Promise<ApiResult<FolderRecord[]>> {
   return { data: body.folders, ok: true };
 }
 
-export async function fetchPublicFolders(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/public", fetchOpts);
+export async function fetchPublicFolders(
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<FolderRecord[]>> {
+  const res = await fetch(
+    "/api/folders/public",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -223,18 +292,50 @@ export async function fetchPublicFolders(): Promise<ApiResult<FolderRecord[]>> {
   return { data: body.folders, ok: true };
 }
 
-export async function fetchSharedFolders(): Promise<ApiResult<FolderRecord[]>> {
-  const res = await fetch("/api/folders/shared", fetchOpts);
+export async function fetchSharedFolders(
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<FolderRecord[]>> {
+  const res = await fetch(
+    "/api/folders/shared",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
   const body = (await res.json()) as { folders: FolderRecord[] };
   return { data: body.folders, ok: true };
+}
+
+export async function searchWorkspace(
+  query: string,
+  options: {
+    context?: number;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
+): Promise<ApiResult<WorkspaceSearchResult>> {
+  const params = new URLSearchParams({ query });
+  if (options.context !== undefined) {
+    params.set("context", String(options.context));
+  }
+  const res = await fetch(
+    `/api/search?${params.toString()}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as WorkspaceSearchResult, ok: true };
 }
 
 export async function createFolder(input: {
   name: string;
   parentId?: string | null;
+  /** Mint the name from the parent's naming scheme (JD/Zettelkasten). */
+  useScheme?: boolean;
+  schemeId?: string;
 }): Promise<ApiResult<FolderAccess>> {
   const res = await fetch("/api/folders", {
     ...fetchOpts,
@@ -250,15 +351,45 @@ export async function createFolder(input: {
 
 export async function fetchFolder(
   id?: string | null,
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
 ): Promise<ApiResult<FolderAccess>> {
   const res = await fetch(
     id ? `/api/folders/${id}` : "/api/folders",
-    fetchOpts,
+    { ...fetchOpts, signal: options.signal },
+    options,
   );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as FolderAccess, ok: true };
+}
+
+export async function fetchFolderChildren(
+  id: string,
+  options: {
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
+): Promise<ApiResult<FolderChildrenResult>> {
+  const params = new URLSearchParams();
+  if (options.cursor) {
+    params.set("cursor", options.cursor);
+  }
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const res = await fetch(
+    `/api/folders/${id}/children${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as FolderChildrenResult, ok: true };
 }
 
 export async function renameFolder(
@@ -375,6 +506,255 @@ export async function uploadImage(
   return { data: (await res.json()) as { id: string; url: string }, ok: true };
 }
 
+export async function moveFolder(
+  id: string,
+  input: { destFolderId?: string | null; name?: string; dryRun?: boolean },
+): Promise<ApiResult<MoveFolderResult>> {
+  const res = await fetch(`/api/folders/${id}/move`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveFolderResult, ok: true };
+}
+
+export async function moveFolderContents(
+  id: string,
+  input: {
+    destFolderId?: string | null;
+    includeSubfolders?: boolean;
+    dryRun?: boolean;
+  },
+): Promise<ApiResult<MoveFolderContentsResult>> {
+  const res = await fetch(`/api/folders/${id}/move-contents`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveFolderContentsResult, ok: true };
+}
+
+export async function moveNotes(
+  noteIds: string[],
+  destFolderId: string | null,
+): Promise<ApiResult<MoveNotesResult>> {
+  const res = await fetch("/api/notes/move", {
+    ...fetchOpts,
+    body: JSON.stringify({ destFolderId, noteIds }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveNotesResult, ok: true };
+}
+
+export async function fetchPara(
+  options: {
+    bucket?: ParaBucketKey;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
+): Promise<ApiResult<ParaListResult>> {
+  const params = new URLSearchParams();
+  if (options.bucket) {
+    params.set("bucket", options.bucket);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const res = await fetch(
+    `/api/para${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as ParaListResult, ok: true };
+}
+
+export async function archiveParaProject(
+  folderId: string,
+  input: { dated?: boolean; name?: string; dryRun?: boolean } = {},
+): Promise<ApiResult<MoveFolderResult>> {
+  const res = await fetch("/api/para/archive", {
+    ...fetchOpts,
+    body: JSON.stringify({ folderId, ...input }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as MoveFolderResult, ok: true };
+}
+
+export type SchemeSuggestResponse = {
+  suggestion: SchemeSuggestion | null;
+};
+
+export async function fetchSchemeSuggestion(
+  folderId: string,
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<SchemeSuggestResponse>> {
+  const res = await fetch(
+    `/api/schemes/suggest?folderId=${encodeURIComponent(folderId)}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SchemeSuggestResponse, ok: true };
+}
+
+export async function updateFolderScheme(
+  folderId: string,
+  scheme: string | null,
+): Promise<ApiResult<{ folder: string; id: string; scheme: string | null }>> {
+  const res = await fetch(`/api/folders/${folderId}/scheme`, {
+    ...fetchOpts,
+    body: JSON.stringify({ scheme }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return {
+    data: (await res.json()) as {
+      folder: string;
+      id: string;
+      scheme: string | null;
+    },
+    ok: true,
+  };
+}
+
+export type SchemeResolveResponse = {
+  folder: {
+    folder: string;
+    id: string;
+    name: string;
+    scheme: string | null;
+    schemeId: string;
+    schemeTitle: string | null;
+  };
+};
+
+export async function resolveSchemeId(
+  id: string,
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<SchemeResolveResponse>> {
+  const res = await fetch(
+    `/api/schemes/resolve?id=${encodeURIComponent(id)}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SchemeResolveResponse, ok: true };
+}
+
+// --- medallion layers -------------------------------------------------------
+
+export type LayerChangeResult =
+  | {
+      ok: true;
+      note: NoteSummary;
+      unlockedUntil?: number;
+    }
+  | {
+      ok: false;
+      status: number;
+      error?: string;
+      /** 422 promote gate failures (machine-readable). */
+      failures?: PromoteGateFailure[];
+      to?: NoteLayer;
+    };
+
+/** 層を1段階 promote（ゲート評価）または demote（reason 必須）する。 */
+export async function changeNoteLayer(
+  noteId: string,
+  input: { confirm?: boolean; reason?: string; to: NoteLayer },
+): Promise<LayerChangeResult> {
+  const res = await fetch(`/api/notes/${noteId}/layer`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    failures?: PromoteGateFailure[];
+    note?: NoteSummary;
+    to?: NoteLayer;
+    unlockedUntil?: number;
+  };
+  if (!res.ok) {
+    return {
+      error: body.error,
+      failures: body.failures,
+      ok: false,
+      status: res.status,
+      to: body.to,
+    };
+  }
+  return { note: body.note as NoteSummary, ok: true };
+}
+
+export async function unlockNoteForEdit(
+  noteId: string,
+  minutes?: number,
+): Promise<LayerChangeResult> {
+  const res = await fetch(`/api/notes/${noteId}/unlock`, {
+    ...fetchOpts,
+    body: JSON.stringify({ minutes }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    note?: NoteSummary;
+    unlockedUntil?: number;
+  };
+  if (!res.ok) {
+    return { error: body.error, ok: false, status: res.status };
+  }
+  return {
+    note: body.note as NoteSummary,
+    ok: true,
+    unlockedUntil: body.unlockedUntil,
+  };
+}
+
+export async function fetchLayerEvents(
+  noteId: string,
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<{ events: NoteLayerEvent[] }>> {
+  const res = await fetch(
+    `/api/notes/${noteId}/layer-events`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return {
+    data: (await res.json()) as { events: NoteLayerEvent[] },
+    ok: true,
+  };
+}
+
 export async function deleteFolder(id: string): Promise<ApiResult<void>> {
   const res = await fetch(`/api/folders/${id}`, {
     ...fetchOpts,
@@ -398,7 +778,7 @@ export async function deleteNote(id: string): Promise<ApiResult<void>> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch("/auth/logout", { ...fetchOpts, method: "POST" });
+  await globalThis.fetch("/auth/logout", { ...fetchOpts, method: "POST" });
 }
 
 export type ApiTokenSummary = {
@@ -412,8 +792,14 @@ export type ApiTokenCreated = ApiTokenSummary & {
   token: string;
 };
 
-export async function fetchTokens(): Promise<ApiResult<ApiTokenSummary[]>> {
-  const res = await fetch("/api/tokens", fetchOpts);
+export async function fetchTokens(
+  options: ReadOptions = {},
+): Promise<ApiResult<ApiTokenSummary[]>> {
+  const res = await fetch(
+    "/api/tokens",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -445,10 +831,14 @@ export type ArticleSourceWrite = {
   webhookAuthorization?: string | null;
 };
 
-export async function fetchArticleSources(): Promise<
-  ApiResult<ArticleSource[]>
-> {
-  const res = await fetch("/api/article-sources", fetchOpts);
+export async function fetchArticleSources(
+  options: ReadOptions = {},
+): Promise<ApiResult<ArticleSource[]>> {
+  const res = await fetch(
+    "/api/article-sources",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }
@@ -456,10 +846,14 @@ export async function fetchArticleSources(): Promise<
   return { data: body.sources, ok: true };
 }
 
-export async function fetchArticleSourceStatus(): Promise<
-  ApiResult<ArticleSourceStatus>
-> {
-  const res = await fetch("/api/article-sources/status", fetchOpts);
+export async function fetchArticleSourceStatus(
+  options: ReadOptions = {},
+): Promise<ApiResult<ArticleSourceStatus>> {
+  const res = await fetch(
+    "/api/article-sources/status",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
   if (!res.ok) {
     return { error: await parseError(res), ok: false, status: res.status };
   }

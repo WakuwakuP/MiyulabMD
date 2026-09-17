@@ -2,12 +2,16 @@ import type {
   FolderAccess,
   FolderRecord,
   NoteSummary,
+  ParaBucket,
+  SchemeSuggestion,
 } from "@miyulabmd/shared";
 import {
   type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
   useState,
 } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router";
@@ -18,11 +22,35 @@ import { ContextMenu } from "../components/notes/ContextMenu.tsx";
 import { DrivePlaceNav } from "../components/notes/DrivePlaceNav.tsx";
 import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
 import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
+import { SchemeDialog } from "../components/notes/SchemeDialog.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
-import { peekFolder, peekNotes } from "../lib/list-cache.ts";
+import {
+  archiveParaProject,
+  fetchFolderChildren,
+  fetchPara,
+  fetchSchemeSuggestion,
+  moveFolder,
+  moveNotes,
+} from "../lib/api.ts";
+import type { TreeDragItem } from "../lib/dnd.ts";
+import {
+  HomeMetadataError,
+  readHomeMetadata,
+} from "../lib/home-metadata-reader.ts";
+import {
+  invalidateFolderCache,
+  invalidateNotesCache,
+} from "../lib/list-cache.ts";
+import {
+  readOfflineFolderDenial,
+  readOfflineNoteDenial,
+  subscribeOfflineCacheFolderDenial,
+  subscribeOfflineCacheNoteDenial,
+} from "../lib/offline-cache.ts";
+import { CachedDriveView } from "./CachedDriveView.tsx";
 import {
   type ConfirmState,
   confirmCopy,
@@ -33,6 +61,7 @@ import {
   type MenuState,
   openFolderShare,
   openNoteShare,
+  persistFolderScheme,
   persistHomeDelete,
   persistHomeShare,
   persistNewFolder,
@@ -40,8 +69,6 @@ import {
   persistRenameFolder,
   type ShareState,
   shareLinkFor,
-  subscribeHomeFolder,
-  subscribeHomeNotes,
 } from "./home-page.ts";
 
 function HomeHeaderEnd({
@@ -86,6 +113,7 @@ function useHomeHeader(
   user: AppShellContext["user"],
   folderId: string | undefined,
   visibleFolder: FolderAccess | null,
+  folderPending: boolean,
   canAdmin: boolean,
   creating: boolean,
   setHeader: AppShellContext["setHeader"],
@@ -103,7 +131,9 @@ function useHomeHeader(
           creating={creating}
           onCreateFolder={onCreateFolder}
           onCreateNote={onCreateNote}
-          showEnd={Boolean(visibleFolder || !folderId)}
+          showEnd={Boolean(
+            visibleFolder || !(folderId || user || folderPending),
+          )}
         />
       ),
       folder: headerFolder,
@@ -112,6 +142,7 @@ function useHomeHeader(
   }, [
     headerFolder,
     visibleFolder,
+    folderPending,
     folderId,
     canAdmin,
     creating,
@@ -134,6 +165,10 @@ function HomePageDialogs({
   confirm,
   confirmBusy,
   confirmError,
+  schemeDialog,
+  schemeBusy,
+  schemeError,
+  schemeSuggestion,
   share,
   shareError,
   shareLink,
@@ -144,6 +179,8 @@ function HomePageDialogs({
   onCloseRename,
   onConfirmDelete,
   onCloseConfirm,
+  onPersistScheme,
+  onCloseScheme,
   onPersistShare,
   onCloseShare,
 }: {
@@ -158,6 +195,10 @@ function HomePageDialogs({
   confirm: ConfirmState | null;
   confirmBusy: boolean;
   confirmError: string | null;
+  schemeDialog: { id: string; name: string; scheme: string | null } | null;
+  schemeBusy: boolean;
+  schemeError: string | null;
+  schemeSuggestion: SchemeSuggestion | null;
   share: ShareState | null;
   shareError: string | null;
   shareLink: string;
@@ -168,6 +209,8 @@ function HomePageDialogs({
   onCloseRename: () => void;
   onConfirmDelete: () => void;
   onCloseConfirm: () => void;
+  onPersistScheme: (scheme: string | null) => void;
+  onCloseScheme: () => void;
   onPersistShare: (next: AccessDraft) => void;
   onCloseShare: () => void;
 }) {
@@ -188,6 +231,17 @@ function HomePageDialogs({
           error={folderCreateError}
           onClose={onCloseCreateFolder}
           onSubmit={onCreateFolder}
+          suggestion={schemeSuggestion}
+        />
+      )}
+      {schemeDialog && (
+        <SchemeDialog
+          busy={schemeBusy}
+          current={schemeDialog.scheme}
+          error={schemeError}
+          folderName={schemeDialog.name}
+          onClose={onCloseScheme}
+          onSubmit={onPersistScheme}
         />
       )}
       {folderRename && (
@@ -229,6 +283,9 @@ function HomePageDialogs({
   );
 }
 
+const EMPTY_CHILDREN: FolderRecord[] = [];
+const EMPTY_PARA: ParaBucket[] = [];
+
 function HomePageView({
   user,
   folderId,
@@ -237,9 +294,12 @@ function HomePageView({
   visibleFolder,
   publicFolders,
   error,
+  cacheWarning,
   flags,
   menu,
   onItemMenu,
+  onMove,
+  paraBuckets,
   dialogs,
 }: {
   user: AppShellContext["user"];
@@ -249,29 +309,52 @@ function HomePageView({
   visibleFolder: FolderAccess | null;
   publicFolders: FolderRecord[];
   error: string | null;
+  cacheWarning: string | null;
   flags: ReturnType<typeof homeListFlags>;
   menu: MenuState | null;
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
+  onMove:
+    | ((source: TreeDragItem, destFolderId: string | null) => void)
+    | undefined;
+  paraBuckets: ParaBucket[];
   dialogs: ReactNode;
 }) {
   const showGuestTitle = !(user || folderId || userLoading);
+  const childrenFolders = useMemo(
+    () =>
+      user || folderId
+        ? (visibleFolder?.children ?? EMPTY_CHILDREN)
+        : publicFolders,
+    [user, folderId, visibleFolder, publicFolders],
+  );
+  const loadChildren = useCallback(
+    (id: string, options: { cursor: string | null; limit?: number }) =>
+      fetchFolderChildren(id, {
+        cursor: options.cursor ?? undefined,
+        limit: options.limit,
+        viewerId: user?.id ?? null,
+      }),
+    [user?.id],
+  );
   return (
     <section>
       {showGuestTitle && (
         <h1 className="mb-3 text-lg font-semibold">全体公開</h1>
       )}
       {error && <ErrorText>{error}</ErrorText>}
+      {cacheWarning && <p role="status">{cacheWarning}</p>}
       {flags.showTree ? (
         <NoteTree
-          childrenFolders={
-            user || folderId ? (visibleFolder?.children ?? []) : publicFolders
-          }
+          childrenFolders={childrenFolders}
           crumbs={visibleFolder?.crumbs ?? []}
           currentFolderId={visibleFolder?.id ?? null}
           isDriveRoot={flags.isDriveRoot}
+          loadChildren={loadChildren}
           notes={notes}
           onItemMenu={onItemMenu}
+          onMove={onMove}
           openMenuId={menu?.id}
+          paraBuckets={paraBuckets}
           parentId={visibleFolder?.parentId ?? null}
           pending={flags.listPending}
           placeholder={flags.showPlaceholder}
@@ -285,20 +368,26 @@ function HomePageView({
   );
 }
 
-export function HomePage() {
+function NetworkHomePage() {
   const navigate = useNavigate();
   const { folderId } = useParams();
-  const { user, userLoading, setHeader } = useOutletContext<AppShellContext>();
-  const [notes, setNotes] = useState<NoteSummary[]>(() => peekNotes() ?? []);
-  const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(
-    () => peekFolder(folderId) ?? null,
-  );
-  const [folderPending, setFolderPending] = useState(
-    () => !peekFolder(folderId),
-  );
+  const { user, userLoading, viewer, setHeader } =
+    useOutletContext<AppShellContext>();
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
+  const [visibleFolder, setVisibleFolder] = useState<FolderAccess | null>(null);
+  const [folderPending, setFolderPending] = useState(true);
   const [publicFolders, setPublicFolders] = useState<FolderRecord[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null);
+  const [reloadRequest, setReloadRequest] = useState(0);
+  const latestReloadRequest = useRef(reloadRequest);
+  latestReloadRequest.current = reloadRequest;
+  const notesRef = useRef<NoteSummary[]>([]);
+  const visibleFolderRef = useRef<FolderAccess | null>(null);
+  const reloadOwnerRef = useRef(0);
+  const homeReadOwnerRef = useRef<object | null>(null);
+  const homeReadActiveRef = useRef(false);
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -318,8 +407,17 @@ export function HomePage() {
   const [folderRenameError, setFolderRenameError] = useState<string | null>(
     null,
   );
+  const [paraBuckets, setParaBuckets] = useState<ParaBucket[]>([]);
+  const [schemeDialog, setSchemeDialog] = useState<{
+    id: string;
+    name: string;
+    scheme: string | null;
+  } | null>(null);
+  const [schemeBusy, setSchemeBusy] = useState(false);
+  const [schemeError, setSchemeError] = useState<string | null>(null);
+  const [schemeSuggestion, setSchemeSuggestion] =
+    useState<SchemeSuggestion | null>(null);
 
-  const sessionKey = user?.id ?? "guest";
   const flags = homeListFlags({
     error,
     folderId,
@@ -330,20 +428,239 @@ export function HomePage() {
   });
   const headerFolder = headerFolderFor(visibleFolder, folderId);
   const shareLink = shareLinkFor(share);
+  const paraProjectsPath =
+    paraBuckets.find((bucket) => bucket.key === "projects")?.path ?? null;
+
+  const reloadPara = useCallback(() => {
+    if (!user) {
+      return;
+    }
+    void fetchPara({ viewerId: user.id })
+      .then((result) => {
+        if (result.ok) {
+          setParaBuckets(result.data.buckets);
+        }
+      })
+      .catch(() => {
+        // PARA section is optional chrome; ignore transient failures.
+      });
+  }, [user]);
 
   useEffect(() => {
-    void sessionKey;
-    return subscribeHomeNotes(userLoading, setNotes);
-  }, [sessionKey, userLoading]);
+    if (user) {
+      reloadPara();
+      return;
+    }
+    setParaBuckets([]);
+  }, [user, reloadPara]);
 
+  // 作成ダイアログを開いたら親フォルダの命名規則から「次の番号」ヒントを引く。
   useEffect(() => {
-    return subscribeHomeFolder(folderId, user, userLoading, {
-      setError,
-      setFolderPending,
-      setPublicFolders,
-      setVisibleFolder,
+    if (!(folderCreateOpen && visibleFolder?.id)) {
+      setSchemeSuggestion(null);
+      return;
+    }
+    const controller = new AbortController();
+    void fetchSchemeSuggestion(visibleFolder.id, {
+      signal: controller.signal,
+      viewerId: user?.id,
+    }).then((result) => {
+      if (result.ok && !controller.signal.aborted) {
+        setSchemeSuggestion(result.data.suggestion);
+      }
     });
-  }, [folderId, user, userLoading]);
+    return () => controller.abort();
+  }, [folderCreateOpen, visibleFolder?.id, user?.id]);
+
+  const refreshAfterMove = useCallback(() => {
+    invalidateNotesCache();
+    invalidateFolderCache();
+    setReloadRequest((value) => value + 1);
+    reloadPara();
+  }, [reloadPara]);
+
+  const onTreeMove = useCallback(
+    (source: TreeDragItem, destFolderId: string | null) => {
+      void (async () => {
+        const result =
+          source.kind === "note"
+            ? await moveNotes([source.id], destFolderId)
+            : await moveFolder(source.id, { destFolderId });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        refreshAfterMove();
+      })();
+    },
+    [refreshAfterMove],
+  );
+
+  const onArchiveProject = useCallback(
+    (id: string) => {
+      void (async () => {
+        const result = await archiveParaProject(id, { dated: true });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        refreshAfterMove();
+      })();
+    },
+    [refreshAfterMove],
+  );
+
+  useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+    const controller = new AbortController();
+    const owner = {};
+    let current = true;
+    const requestOwner = reloadRequest;
+    homeReadOwnerRef.current = owner;
+    homeReadActiveRef.current = true;
+    const finishRead = () => {
+      if (homeReadOwnerRef.current === owner) {
+        homeReadOwnerRef.current = null;
+        homeReadActiveRef.current = false;
+      }
+    };
+    const isCurrentOwner = () =>
+      current &&
+      latestReloadRequest.current === requestOwner &&
+      homeReadOwnerRef.current === owner &&
+      homeReadActiveRef.current;
+    setError(null);
+    setCacheWarning(null);
+    setFolderPending(true);
+    ++reloadOwnerRef.current;
+    void readHomeMetadata({
+      folderId,
+      isCurrentOwner,
+      signal: controller.signal,
+      viewer,
+    })
+      .then((snapshot) => {
+        const ownerCurrent = isCurrentOwner();
+        finishRead();
+        if (!ownerCurrent || controller.signal.aborted) {
+          return;
+        }
+        notesRef.current = snapshot.notes;
+        visibleFolderRef.current = snapshot.visibleFolder;
+        setNotes(snapshot.notes);
+        setVisibleFolder(snapshot.visibleFolder);
+        setPublicFolders(snapshot.publicFolders);
+        setCacheWarning(snapshot.cacheWarning ?? null);
+        setFolderPending(false);
+      })
+      .catch((error: unknown) => {
+        const ownerCurrent = isCurrentOwner();
+        finishRead();
+        if (!ownerCurrent || controller.signal.aborted) {
+          return;
+        }
+        setFolderPending(false);
+        notesRef.current = [];
+        setVisibleFolder(null);
+        visibleFolderRef.current = null;
+        setPublicFolders([]);
+        setNotes([]);
+        if (error instanceof HomeMetadataError) {
+          setCacheWarning(error.cacheWarning ?? null);
+        }
+        if (error instanceof HomeMetadataError || error instanceof Error) {
+          setError(error.message);
+        } else {
+          setError("データを取得できませんでした。");
+        }
+      });
+    return () => {
+      current = false;
+      controller.abort();
+      finishRead();
+    };
+  }, [folderId, reloadRequest, userLoading, viewer]);
+
+  useEffect(() => {
+    if (viewer.cacheViewerId === null) {
+      return;
+    }
+    let active = true;
+    const unsubscribe = subscribeOfflineCacheNoteDenial((event) => {
+      const receiptOwner = reloadOwnerRef.current;
+      if (event.userId !== viewer.cacheViewerId || !active) {
+        return;
+      }
+      const identities = event.resource.aliases.filter((alias) =>
+        notesRef.current.some(
+          (current) => current.id === alias || current.shortId === alias,
+        ),
+      );
+      if (identities.length === 0) {
+        return;
+      }
+      void readOfflineNoteDenial(event, identities).then((denied) => {
+        if (
+          denied === false ||
+          !active ||
+          receiptOwner !== reloadOwnerRef.current ||
+          viewer.cacheViewerId !== event.userId
+        ) {
+          return;
+        }
+        setReloadRequest((value) => value + 1);
+      });
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [viewer.cacheViewerId]);
+
+  useEffect(() => {
+    let active = true;
+    const targetUserId = viewer.user?.id;
+    const unsubscribe = subscribeOfflineCacheFolderDenial((event) => {
+      const relationIds = new Set<string | null>([
+        folderId ?? null,
+        visibleFolderRef.current?.id ?? null,
+        ...(visibleFolderRef.current?.children ?? []).map((child) => child.id),
+        ...(visibleFolderRef.current?.crumbs ?? []).map((crumb) => crumb.id),
+        ...notesRef.current.map((note) => note.folderId),
+      ]);
+      const relevant = event.resource.aliases.some((id) => relationIds.has(id));
+      if (
+        active &&
+        !homeReadActiveRef.current &&
+        event.userId === targetUserId &&
+        relevant
+      ) {
+        const receiptOwner = homeReadOwnerRef.current;
+        void readOfflineFolderDenial(event).then((denied) => {
+          if (
+            active &&
+            homeReadOwnerRef.current === receiptOwner &&
+            !homeReadActiveRef.current &&
+            denied !== null
+          ) {
+            setReloadRequest((value) => value + 1);
+          } else if (
+            active &&
+            homeReadOwnerRef.current === receiptOwner &&
+            !homeReadActiveRef.current
+          ) {
+            setCacheWarning("オフラインキャッシュを確認できませんでした。");
+          }
+        });
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [folderId, viewer.user?.id]);
 
   // Header updates re-render AppShell and this page. Keep its callbacks stable
   // so useHomeHeader does not publish another header on every parent render.
@@ -360,6 +677,7 @@ export function HomePage() {
     user,
     folderId,
     visibleFolder,
+    folderPending,
     flags.canAdmin,
     creating,
     setHeader,
@@ -369,6 +687,7 @@ export function HomePage() {
 
   return (
     <HomePageView
+      cacheWarning={cacheWarning}
       dialogs={
         <HomePageDialogs
           confirm={confirm}
@@ -397,6 +716,11 @@ export function HomePage() {
               setFolderRename(null);
             }
           }}
+          onCloseScheme={() => {
+            if (!schemeBusy) {
+              setSchemeDialog(null);
+            }
+          }}
           onCloseShare={() => setShare(null)}
           onConfirmDelete={() => {
             void persistHomeDelete(
@@ -415,13 +739,35 @@ export function HomePage() {
             );
           }}
           onCreateFolder={(name) => {
-            void persistNewFolder(name, visibleFolder, navigate, {
-              setFolderCreateError,
-              setFolderCreateOpen,
-              setFolderCreating,
-              setShare,
-              setShareError,
-            });
+            void persistNewFolder(
+              name,
+              visibleFolder,
+              navigate,
+              {
+                setFolderCreateError,
+                setFolderCreateOpen,
+                setFolderCreating,
+                setShare,
+                setShareError,
+              },
+              { useScheme: schemeSuggestion !== null },
+            );
+          }}
+          onPersistScheme={(scheme) => {
+            void persistFolderScheme(
+              schemeDialog,
+              scheme,
+              folderId,
+              user,
+              navigate,
+              {
+                setNotes,
+                setSchemeBusy,
+                setSchemeDialog,
+                setSchemeError,
+                setVisibleFolder,
+              },
+            );
           }}
           onPersistShare={(next) => {
             void persistHomeShare(share, next, visibleFolder?.id, {
@@ -448,6 +794,10 @@ export function HomePage() {
               },
             );
           }}
+          schemeBusy={schemeBusy}
+          schemeDialog={schemeDialog}
+          schemeError={schemeError}
+          schemeSuggestion={schemeSuggestion}
           share={share}
           shareError={shareError}
           shareLink={shareLink}
@@ -480,12 +830,51 @@ export function HomePage() {
             setConfirm({ id, kind, name });
             setConfirmError(null);
           },
+          {
+            onArchive: onArchiveProject,
+            onScheme: (id, name, scheme) => {
+              setSchemeDialog({ id, name, scheme });
+              setSchemeError(null);
+            },
+            projectsPath: paraProjectsPath,
+          },
         );
       }}
+      onMove={flags.canAdmin ? onTreeMove : undefined}
+      paraBuckets={flags.isDriveRoot ? paraBuckets : EMPTY_PARA}
       publicFolders={publicFolders}
       user={user}
       userLoading={userLoading}
       visibleFolder={visibleFolder}
     />
   );
+}
+
+export function HomePage() {
+  const { folderId } = useParams();
+  const { user, userLoading, viewer } = useOutletContext<AppShellContext>();
+  const networkViewerKey = JSON.stringify([
+    viewer.mode,
+    user?.id ?? null,
+    viewer.cacheViewerId,
+  ]);
+
+  if (userLoading) {
+    return <NetworkHomePage key={networkViewerKey} />;
+  }
+  if (viewer.mode === "cached" && viewer.cacheViewerId !== null) {
+    return (
+      <CachedDriveView
+        key={JSON.stringify([viewer.cacheViewerId, folderId ?? null])}
+      />
+    );
+  }
+  if (viewer.mode === "unavailable") {
+    return (
+      <p role="status">
+        閲覧者を確認できないため、この画面を表示できません。しばらくしてから再試行してください。
+      </p>
+    );
+  }
+  return <NetworkHomePage key={networkViewerKey} />;
 }

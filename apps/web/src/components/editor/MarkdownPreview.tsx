@@ -1,6 +1,12 @@
+import type { WikiLinkMap } from "@miyulabmd/markdown";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import { loadOgCards, renderMarkdownHtml } from "../../lib/markdown.ts";
+import {
+  type ImageViewContext,
+  resolvePreviewImages,
+  usePreviewImages,
+} from "../../lib/preview-images.ts";
 import { useTaskCheckboxes } from "../../lib/task-checkboxes.ts";
 import {
   documentPaneScrollClass,
@@ -15,6 +21,9 @@ type Props = {
   className?: string;
   documentScroll?: boolean;
   taskNoteId?: string;
+  imageContext?: ImageViewContext;
+  /** Resolved [[wiki link]] targets → note id; undefined keeps them literal. */
+  wikiLinks?: WikiLinkMap;
 };
 
 function scrollRatioFrom(el: HTMLElement): number {
@@ -29,22 +38,28 @@ export function MarkdownPreview({
   className,
   documentScroll = false,
   taskNoteId,
+  imageContext,
+  wikiLinks,
 }: Props) {
   const articleRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const applyingScroll = useRef(false);
   const deferredMarkdown = useDeferredValue(markdown);
+  const images = usePreviewImages(deferredMarkdown, imageContext);
   const [enhanced, setEnhanced] = useState<{ md: string; html: string } | null>(
     null,
   );
 
   const rendered = useMemo(() => {
     try {
-      return { error: null, html: renderMarkdownHtml(deferredMarkdown) };
+      return {
+        error: null,
+        html: renderMarkdownHtml(deferredMarkdown, undefined, wikiLinks),
+      };
     } catch {
       return { error: "プレビューの生成に失敗しました。", html: "" };
     }
-  }, [deferredMarkdown]);
+  }, [deferredMarkdown, wikiLinks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,16 +68,20 @@ export function MarkdownPreview({
         return;
       }
       setEnhanced({
-        html: renderMarkdownHtml(markdown, cards),
+        html: renderMarkdownHtml(markdown, cards, wikiLinks),
         md: markdown,
       });
     });
     return () => {
       cancelled = true;
     };
-  }, [markdown]);
+  }, [markdown, wikiLinks]);
 
-  const html = enhanced?.md === markdown ? enhanced.html : rendered.html;
+  const sourceHtml = enhanced?.md === markdown ? enhanced.html : rendered.html;
+  const html = useMemo(
+    () => resolvePreviewImages(sourceHtml, images),
+    [sourceHtml, images],
+  );
   // Keep React from replacing imperatively updated checkboxes on unrelated renders.
   const innerHtml = useMemo(() => ({ __html: html }), [html]);
   const error = rendered.error;
@@ -73,6 +92,7 @@ export function MarkdownPreview({
     taskNoteId,
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reapply the scroll ratio when rendered content changes height.
   useEffect(() => {
     if (documentScroll) {
       return;
@@ -133,7 +153,7 @@ export function MarkdownPreview({
     <>
       <article
         className={columnClass}
-        // HTML は rehype-sanitize 済み。
+        // HTML is sanitized before view-owned image URL resolution.
         dangerouslySetInnerHTML={innerHtml}
         ref={articleRef}
       />

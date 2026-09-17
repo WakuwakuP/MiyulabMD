@@ -1,5 +1,4 @@
-// Kill switch for the #104 PWA worker. Browsers fetch /sw.js bypassing the
-// old controller, then this script unregisters itself and reloads clients.
+// Test-only copy of the former #104 emergency kill switch.
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });
