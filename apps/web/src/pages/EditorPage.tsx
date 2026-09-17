@@ -378,6 +378,7 @@ function EditorPageView({
   loading,
   loadError,
   paused,
+  unsentEdits,
   readSource,
   cachedAt,
   note,
@@ -387,6 +388,7 @@ function EditorPageView({
   loading: boolean;
   loadError: string | null;
   paused: boolean;
+  unsentEdits: boolean;
   readSource: "pending" | "network" | "cache";
   cachedAt: number | null;
   note: Note | null;
@@ -418,6 +420,11 @@ function EditorPageView({
         <p className="px-5 py-2" role="status">
           共同編集の接続が切れました。入力済みの内容はこの画面に保持しています。
           再接続・再同期が完了するまで編集できません。
+        </p>
+      )}
+      {unsentEdits && (
+        <p className="px-5 py-2" role="status">
+          未送信の編集あり（オフライン）
         </p>
       )}
       {note.goldLocked && (
@@ -544,6 +551,7 @@ export function EditorPage() {
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
   const [collabWritable, setCollabWritable] = useState(false);
+  const [unsentEdits, setUnsentEdits] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
@@ -756,6 +764,7 @@ export function EditorPage() {
   useEffect(() => {
     bindEditorCollab({
       hydrated: hydratedRef.current,
+      note: canEdit ? note : null,
       noteId: canEdit ? noteId : undefined,
       onGoldLocked: () => {
         // The server closed the writable session: reflect the lock so the
@@ -774,11 +783,23 @@ export function EditorPage() {
       userLoading,
       viewMode,
     });
-  }, [noteId, userLoading, viewMode, user, canEdit]);
+  }, [noteId, userLoading, viewMode, user, canEdit, note]);
 
   useEffect(() => {
     syncCollabUser(collab, user);
   }, [collab, user]);
+
+  useEffect(() => {
+    const editCache = collab?.editCache;
+    if (!editCache) {
+      setUnsentEdits(false);
+      return;
+    }
+    setUnsentEdits(editCache.hasUnsentEdits());
+    return editCache.subscribeUnsent(() => {
+      setUnsentEdits(editCache.hasUnsentEdits());
+    });
+  }, [collab]);
 
   useEffect(() => {
     const previous = document.title;
@@ -833,6 +854,7 @@ export function EditorPage() {
       note={note}
       paused={paused}
       readSource={readSource}
+      unsentEdits={unsentEdits}
       workspace={
         currentReadState?.phase === "success" && note && accessDraft ? (
           <EditorWorkspace
