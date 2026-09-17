@@ -28,6 +28,14 @@ type Props = {
   onChanged: (note: NoteSummary) => void;
 };
 
+export type LayerPanelProps = Props & {
+  /**
+   * §3.3: layers OFF でもノート単位の編集ロックの解除導線は残す。
+   * false のとき昇格/降格の層操作だけを隠し、ロック解除は表示し続ける。
+   */
+  showLayerControls?: boolean;
+};
+
 type BusyAction = "demote" | "promote" | "unlock" | null;
 
 function GateFailures({ failures }: { failures: PromoteGateFailure[] }) {
@@ -45,15 +53,21 @@ function GateFailures({ failures }: { failures: PromoteGateFailure[] }) {
   );
 }
 
-export function LayerMenu({ isOwner, note, onChanged }: Props) {
-  const [open, setOpen] = useState(false);
+/**
+ * 層パネルの中身。「⋯ ノート」メニューの「編集ロック」サブビューからも
+ * 再利用する（specs/knowledge-management.html §3.1）。
+ */
+export function LayerMenuPanel({
+  isOwner,
+  note,
+  onChanged,
+  showLayerControls = true,
+}: LayerPanelProps) {
   const [busy, setBusy] = useState<BusyAction>(null);
   const [error, setError] = useState<string | null>(null);
   const [failures, setFailures] = useState<PromoteGateFailure[]>([]);
   const [demoteReason, setDemoteReason] = useState("");
   const [demoteOpen, setDemoteOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  useDismiss(open, () => setOpen(false), rootRef);
 
   const up = nextLayer(note.layer);
   const down =
@@ -120,6 +134,106 @@ export function LayerMenu({ isOwner, note, onChanged }: Props) {
   }
 
   return (
+    <div className="grid gap-2 px-3 py-2">
+      <p className="m-0 text-[0.85rem] font-medium">
+        {showLayerControls ? NOTE_LAYER_LABELS[note.layer] : "編集ロック"}
+        {note.layer === "gold" &&
+          (note.goldLocked ? (
+            <span className="ml-2 text-[0.75rem] font-normal text-muted">
+              ロック中
+            </span>
+          ) : (
+            <span className="ml-2 text-[0.75rem] font-normal text-accent">
+              解除中（残り約{Math.ceil(unlockLeft / 60000)}分）
+            </span>
+          ))}
+      </p>
+      {!isOwner && <MutedText>閲覧のみ</MutedText>}
+      {isOwner && (
+        <>
+          {note.goldLocked && (
+            <Button
+              className="w-full"
+              disabled={busy !== null}
+              onClick={unlock}
+              type="button"
+              variant="accent"
+            >
+              <LockOpenIcon />
+              解除して編集（{GOLD_UNLOCK_DEFAULT_MINUTES}分）
+            </Button>
+          )}
+          {showLayerControls && (
+            <>
+              {up && (
+                <Button
+                  className="w-full"
+                  disabled={busy !== null}
+                  onClick={() => promote(needsConfirm)}
+                  type="button"
+                >
+                  {needsConfirm ? "確認して" : ""}
+                  {NOTE_LAYER_LABELS[up].replace(/（.*）/, "")} に昇格
+                </Button>
+              )}
+              <GateFailures failures={failures} />
+              {down && (
+                <>
+                  <MenuSeparator />
+                  {demoteOpen ? (
+                    <form
+                      className="grid gap-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        demote();
+                      }}
+                    >
+                      <Input
+                        aria-label="降格理由"
+                        className="w-full"
+                        onChange={(event) =>
+                          setDemoteReason(event.target.value)
+                        }
+                        placeholder="降格理由（必須）"
+                        type="text"
+                        value={demoteReason}
+                        variant="pill"
+                      />
+                      <Button
+                        className="w-full"
+                        disabled={busy !== null || !demoteReason.trim()}
+                        type="submit"
+                      >
+                        {NOTE_LAYER_LABELS[down].replace(/（.*）/, "")} に降格
+                      </Button>
+                    </form>
+                  ) : (
+                    <Button
+                      className="w-full"
+                      disabled={busy !== null}
+                      onClick={() => setDemoteOpen(true)}
+                      type="button"
+                    >
+                      降格…
+                    </Button>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
+      {error && <ErrorText>{error}</ErrorText>}
+    </div>
+  );
+}
+
+export function LayerMenu({ isOwner, note, onChanged }: Props) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useDismiss(open, () => setOpen(false), rootRef);
+
+  return (
     <div className="relative" ref={rootRef}>
       <HeaderButton
         aria-expanded={open}
@@ -131,93 +245,7 @@ export function LayerMenu({ isOwner, note, onChanged }: Props) {
       />
       {open && (
         <MenuPanel role="dialog" width="17rem">
-          <div className="grid gap-2 px-3 py-2">
-            <p className="m-0 text-[0.85rem] font-medium">
-              {NOTE_LAYER_LABELS[note.layer]}
-              {note.layer === "gold" &&
-                (note.goldLocked ? (
-                  <span className="ml-2 text-[0.75rem] font-normal text-muted">
-                    ロック中
-                  </span>
-                ) : (
-                  <span className="ml-2 text-[0.75rem] font-normal text-accent">
-                    解除中（残り約{Math.ceil(unlockLeft / 60000)}分）
-                  </span>
-                ))}
-            </p>
-            {!isOwner && <MutedText>閲覧のみ</MutedText>}
-            {isOwner && (
-              <>
-                {note.goldLocked && (
-                  <Button
-                    className="w-full"
-                    disabled={busy !== null}
-                    onClick={unlock}
-                    type="button"
-                    variant="accent"
-                  >
-                    <LockOpenIcon />
-                    解除して編集（{GOLD_UNLOCK_DEFAULT_MINUTES}分）
-                  </Button>
-                )}
-                {up && (
-                  <Button
-                    className="w-full"
-                    disabled={busy !== null}
-                    onClick={() => promote(needsConfirm)}
-                    type="button"
-                  >
-                    {needsConfirm ? "確認して" : ""}
-                    {NOTE_LAYER_LABELS[up].replace(/（.*）/, "")} に昇格
-                  </Button>
-                )}
-                <GateFailures failures={failures} />
-                {down && (
-                  <>
-                    <MenuSeparator />
-                    {demoteOpen ? (
-                      <form
-                        className="grid gap-2"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          demote();
-                        }}
-                      >
-                        <Input
-                          aria-label="降格理由"
-                          className="w-full"
-                          onChange={(event) =>
-                            setDemoteReason(event.target.value)
-                          }
-                          placeholder="降格理由（必須）"
-                          type="text"
-                          value={demoteReason}
-                          variant="pill"
-                        />
-                        <Button
-                          className="w-full"
-                          disabled={busy !== null || !demoteReason.trim()}
-                          type="submit"
-                        >
-                          {NOTE_LAYER_LABELS[down].replace(/（.*）/, "")} に降格
-                        </Button>
-                      </form>
-                    ) : (
-                      <Button
-                        className="w-full"
-                        disabled={busy !== null}
-                        onClick={() => setDemoteOpen(true)}
-                        type="button"
-                      >
-                        降格…
-                      </Button>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-            {error && <ErrorText>{error}</ErrorText>}
-          </div>
+          <LayerMenuPanel isOwner={isOwner} note={note} onChanged={onChanged} />
         </MenuPanel>
       )}
     </div>
