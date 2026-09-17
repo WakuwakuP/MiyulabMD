@@ -10,7 +10,7 @@ test("private history, token, and source callers reject a mismatched cookie acto
     );
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response(JSON.stringify({ events: [], tokens: [], sources: [] }), {
+      new Response(JSON.stringify({ events: [], sources: [], tokens: [] }), {
         headers: { "X-MiyulabMD-Session-User": "user:bob" },
       });
     try {

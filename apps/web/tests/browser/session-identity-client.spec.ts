@@ -53,7 +53,7 @@ test("private history and settings/source reads reject a cookie actor mismatch",
     );
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response(JSON.stringify({ events: [], tokens: [], sources: [] }), {
+      new Response(JSON.stringify({ events: [], sources: [], tokens: [] }), {
         headers: { "X-MiyulabMD-Session-User": "user:bob" },
       });
     try {
@@ -74,7 +74,11 @@ test("private history and settings/source reads reject a cookie actor mismatch",
       globalThis.fetch = originalFetch;
     }
   });
-  expect(result).toEqual(["ApiIdentityError", "ApiIdentityError", "ApiIdentityError"]);
+  expect(result).toEqual([
+    "ApiIdentityError",
+    "ApiIdentityError",
+    "ApiIdentityError",
+  ]);
 });
 
 test("a guest note session cannot publish a newly authenticated cookie's response", async ({

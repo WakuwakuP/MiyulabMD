@@ -2250,18 +2250,18 @@ function throwFolderDenialFailure(
   throw error;
 }
 
-function applyFolderOperation(
-  transaction: IDBTransaction,
-  operation: FolderOperation,
-  sequence: number,
+type FolderMarkerState = {
+  denied: boolean;
+  generation: number;
+  id: string | null;
+};
+
+function readFolderMarkerStates(
+  userId: string,
   ids: (string | null)[],
   records: Map<string, MetadataRecord>,
-  epoch: string | null,
-  receipt: { value?: FolderDenialReceipt },
-): void {
-  const { userId, action, orderingToken, save } = operation;
-  const store = transaction.objectStore(METADATA_STORE);
-  const current = ids.map((id) => {
+): FolderMarkerState[] {
+  return ids.map((id) => {
     const marker = parseFolderDenialMarker(
       records.get(deniedFolderKey(userId, id)),
       id,
@@ -2272,33 +2272,44 @@ function applyFolderOperation(
       id,
     };
   });
-  const currentGeneration = Math.max(
-    ...current.map((marker) => marker.generation),
-  );
-  receipt.value = {
-    aliases: ids,
-    committed: false,
-    epoch,
-    generation: currentGeneration,
-  };
-  if (
+}
+
+// A stale deny is dropped, never thrown: a denial newer than the caller's
+// token already won, so resubmitting it would only roll the state back.
+function isStaleFolderDeny(
+  action: FolderOperation["action"],
+  orderingToken: number | undefined,
+  currentGeneration: number,
+): boolean {
+  return (
     action === "deny" &&
     orderingToken !== undefined &&
     currentGeneration > orderingToken
+  );
+}
+
+// "check" throws only when a denied marker is newer than the token.
+// Generation advances written by clear/putFolder carry denied: false and
+// must not invalidate a read that was captured after them.
+function assertFolderReadFresh(
+  orderingToken: number | undefined,
+  current: FolderMarkerState[],
+): void {
+  if (
+    orderingToken === undefined ||
+    current.some((marker) => marker.denied && marker.generation > orderingToken)
   ) {
-    return;
+    throw invalidatedError();
   }
-  if (action === "check") {
-    if (
-      orderingToken === undefined ||
-      current.some(
-        (marker) => marker.denied && marker.generation > orderingToken,
-      )
-    ) {
-      throw invalidatedError();
-    }
-    return;
-  }
+}
+
+// "clear" (including putFolder saves) requires a token newer than every
+// recorded generation; "deny" already passed its staleness fence above.
+function assertFolderWriteFresh(
+  action: FolderOperation["action"],
+  orderingToken: number | undefined,
+  current: FolderMarkerState[],
+): void {
   if (
     action !== "deny" &&
     (orderingToken === undefined ||
@@ -2306,7 +2317,15 @@ function applyFolderOperation(
   ) {
     throw invalidatedError();
   }
-  const generation = sequence + 1;
+}
+
+function putFolderOperationMarkers(
+  store: IDBObjectStore,
+  userId: string,
+  action: FolderOperation["action"],
+  generation: number,
+  current: FolderMarkerState[],
+): void {
   if (action === "deny" || action === "clear") {
     store.put({
       key: folderSequenceKey(userId),
@@ -2326,12 +2345,14 @@ function applyFolderOperation(
       store.delete(legacyDeniedFolderKey(userId, marker.id));
     }
   }
-  receipt.value = {
-    aliases: ids,
-    committed: true,
-    epoch,
-    generation,
-  };
+}
+
+function putFolderOperationSave(
+  transaction: IDBTransaction,
+  store: IDBObjectStore,
+  userId: string,
+  save: FolderOperation["save"],
+): void {
   if (!save) {
     return;
   }
@@ -2342,6 +2363,46 @@ function applyFolderOperation(
       value: JSON.stringify(save.record.folderId),
     } satisfies MetadataRecord);
   }
+}
+
+function applyFolderOperation(
+  transaction: IDBTransaction,
+  operation: FolderOperation,
+  sequence: number,
+  ids: (string | null)[],
+  records: Map<string, MetadataRecord>,
+  epoch: string | null,
+  receipt: { value?: FolderDenialReceipt },
+): void {
+  const { userId, action, orderingToken, save } = operation;
+  const store = transaction.objectStore(METADATA_STORE);
+  const current = readFolderMarkerStates(userId, ids, records);
+  const currentGeneration = Math.max(
+    ...current.map((marker) => marker.generation),
+  );
+  receipt.value = {
+    aliases: ids,
+    committed: false,
+    epoch,
+    generation: currentGeneration,
+  };
+  if (isStaleFolderDeny(action, orderingToken, currentGeneration)) {
+    return;
+  }
+  if (action === "check") {
+    assertFolderReadFresh(orderingToken, current);
+    return;
+  }
+  assertFolderWriteFresh(action, orderingToken, current);
+  const generation = sequence + 1;
+  putFolderOperationMarkers(store, userId, action, generation, current);
+  receipt.value = {
+    aliases: ids,
+    committed: true,
+    epoch,
+    generation,
+  };
+  putFolderOperationSave(transaction, store, userId, save);
 }
 
 function queueFolderOperation(

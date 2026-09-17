@@ -196,6 +196,34 @@ test("Tab indents in the rich editor too", async ({ page }) => {
   await expect.poll(() => focusInEditor(page, ".tiptap")).toBe(false);
 });
 
+test("Escape pass-through lets Tab leave a rich-editor list item", async ({
+  page,
+}) => {
+  await mockApp(page, "# Tab test\n\n- one\n- two\n");
+  await page.addInitScript(() => {
+    localStorage.setItem("miyulabmd:editor-tab-hint-dismissed", "1");
+    localStorage.setItem("miyulabmd:editor-mode", "rich");
+    localStorage.setItem("miyulabmd:editor-edit-mode", "rich");
+  });
+  await page.goto(`/n/${tabNote.id}`);
+  await expect(page.getByText("two")).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "Edit" }).click();
+  const rich = page.locator(".tiptap");
+  await expect(rich).toBeVisible();
+  await rich.locator("li", { hasText: "two" }).click();
+
+  // Indent mode still sinks the item via the list keymap.
+  await page.keyboard.press("Tab");
+  await expect(rich.locator("ul ul > li")).toHaveText("two");
+
+  // In the Escape window the list keymap must not lift the item back; the
+  // browser moves focus instead.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(() => focusInEditor(page, ".tiptap")).toBe(false);
+  await expect(rich.locator("ul ul > li")).toHaveText("two");
+});
+
 test("the settings page switches Tab behavior and documents the escape hatch", async ({
   page,
 }) => {

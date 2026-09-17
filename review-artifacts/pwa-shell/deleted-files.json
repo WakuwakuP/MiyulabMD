@@ -1,4 +1,1 @@
-[
-  "public/sw.js",
-  "src/lib/unregister-service-workers.ts"
-]
+["public/sw.js", "src/lib/unregister-service-workers.ts"]

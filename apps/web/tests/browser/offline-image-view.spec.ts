@@ -49,7 +49,11 @@ test("an app-attached image remains visible with its cached note after reload", 
     if (pathname === "/api/article-sources") {
       return route.fulfill({ headers, json: { sources: [] } });
     }
-    return route.fulfill({ headers, json: { error: "No fixture" }, status: 404 });
+    return route.fulfill({
+      headers,
+      json: { error: "No fixture" },
+      status: 404,
+    });
   });
   await page.goto(`/n/${note.id}`);
   const image = page.getByRole("img", { name: "Cached attachment" });

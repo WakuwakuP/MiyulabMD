@@ -54,7 +54,11 @@ test("prefetch acquires images only after all bodies and uses the referenced par
         headers,
       });
     }
-    return route.fulfill({ headers, json: { error: "No fixture" }, status: 404 });
+    return route.fulfill({
+      headers,
+      json: { error: "No fixture" },
+      status: 404,
+    });
   });
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async () => {

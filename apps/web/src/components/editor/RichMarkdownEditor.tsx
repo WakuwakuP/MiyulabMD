@@ -186,12 +186,16 @@ function handleTabPress(
   editor: Editor | null,
   state: RichKeydownState,
 ): boolean {
+  // Claim the event (no preventDefault) so ProseMirror skips its keymaps —
+  // otherwise the list extension sinks/lifts the item — while the browser's
+  // default Tab/Shift-Tab still moves focus, matching the CodeMirror path
+  // where Tab is simply unbound in these states.
   if (state.readOnly.current || state.tabKeyMode.current === "focus") {
-    return false;
+    return true;
   }
   const focusMode = state.tabFocusMode.current;
   if (focusMode === 0 || (focusMode > 0 && Date.now() <= focusMode)) {
-    return false;
+    return true;
   }
   state.tabFocusMode.current = -1;
   event.preventDefault();

@@ -222,7 +222,11 @@ test("failed verification preserves cached reading state and permits a later ret
     if (path === `/api/notes/${note.id}`) {
       return route.fulfill({ headers, json: { ...note, markdown: text } });
     }
-    return route.fulfill({ headers, json: { error: "No fixture" }, status: 404 });
+    return route.fulfill({
+      headers,
+      json: { error: "No fixture" },
+      status: 404,
+    });
   });
   try {
     await page.goto(`/n/${note.id}`);

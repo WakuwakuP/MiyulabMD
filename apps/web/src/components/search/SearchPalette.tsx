@@ -65,6 +65,7 @@ export function SearchPalette({
         const trimmed = value.trim();
         abortRef.current?.abort();
         if (!trimmed) {
+          generationRef.current += 1;
           setState({ kind: "idle" });
           return;
         }
@@ -78,7 +79,7 @@ export function SearchPalette({
           ? resolveSchemeId(trimmed, {
               signal: controller.signal,
               viewerId,
-            })
+            }).catch(() => null)
           : Promise.resolve(null);
         void Promise.all([
           searchWorkspace(trimmed, {
@@ -126,7 +127,13 @@ export function SearchPalette({
             });
             setActive(0);
           },
-          () => {
+          (error: unknown) => {
+            if (
+              controller.signal.aborted ||
+              (error instanceof DOMException && error.name === "AbortError")
+            ) {
+              return;
+            }
             if (generationRef.current === generation) {
               setState({
                 kind: "error",
