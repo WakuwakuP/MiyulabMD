@@ -23,7 +23,9 @@ CREATE TABLE notes (
   snapshot_updated_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  article_meta TEXT
+  article_meta TEXT,
+  layer TEXT NOT NULL DEFAULT 'bronze',
+  gold_unlocked_until INTEGER
 );
 
 CREATE TABLE note_collaborators (
@@ -38,10 +40,27 @@ CREATE TABLE folders (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
   folder TEXT NOT NULL,
+  para_bucket TEXT,
+  scheme TEXT,
+  scheme_id TEXT,
+  scheme_title TEXT,
   created_at INTEGER NOT NULL
 );
 
 CREATE UNIQUE INDEX folders_owner_folder_idx ON folders (owner_id, folder);
+CREATE UNIQUE INDEX folders_owner_para_bucket_idx
+  ON folders (owner_id, para_bucket)
+  WHERE para_bucket IS NOT NULL;
+CREATE UNIQUE INDEX folders_owner_scheme_id_idx
+  ON folders (owner_id, scheme_id)
+  WHERE scheme_id IS NOT NULL;
+
+CREATE TABLE id_counters (
+  owner_id TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  next_value INTEGER NOT NULL,
+  PRIMARY KEY (owner_id, scope)
+);
 
 CREATE TABLE folder_policies (
   owner_id TEXT NOT NULL,
@@ -122,7 +141,33 @@ CREATE TABLE note_revisions (
   actor_kind TEXT NOT NULL,
   actor_user_id TEXT,
   actor_name TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE note_layer_events (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL REFERENCES notes (id) ON DELETE CASCADE,
+  from_layer TEXT,
+  to_layer TEXT NOT NULL,
+  actor_user_id TEXT,
+  actor_name TEXT NOT NULL,
+  reason TEXT,
   created_at INTEGER NOT NULL
+);
+
+CREATE TABLE note_links (
+  src_note_id TEXT NOT NULL REFERENCES notes (id) ON DELETE CASCADE,
+  dest_note_id TEXT REFERENCES notes (id) ON DELETE SET NULL,
+  dest_raw TEXT NOT NULL,
+  dest_display TEXT,
+  link_type TEXT NOT NULL,
+  heading TEXT,
+  offset_start INTEGER NOT NULL,
+  offset_end INTEGER NOT NULL,
+  dest_status TEXT NOT NULL DEFAULT 'missing',
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (src_note_id, offset_start, dest_raw)
 );
 
 CREATE INDEX notes_owner_id_idx ON notes (owner_id);
@@ -136,3 +181,14 @@ CREATE INDEX access_grants_owner_id_idx ON access_grants (owner_id);
 CREATE INDEX notes_updated_at_idx ON notes (updated_at);
 CREATE INDEX images_note_id_idx ON images (note_id);
 CREATE INDEX api_tokens_user_id_idx ON api_tokens (user_id);
+CREATE INDEX note_links_dest_idx ON note_links (dest_note_id);
+CREATE INDEX note_links_src_status_idx ON note_links (src_note_id, dest_status);
+CREATE INDEX notes_owner_layer_idx ON notes (owner_id, layer);
+CREATE INDEX note_layer_events_note_idx ON note_layer_events (note_id, created_at);
+
+CREATE VIRTUAL TABLE notes_fts USING fts5(
+  note_id UNINDEXED,
+  title,
+  body,
+  tokenize = 'trigram'
+);

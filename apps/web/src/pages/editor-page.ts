@@ -1,4 +1,8 @@
-import type { Note, SessionUser } from "@miyulabmd/shared";
+import {
+  GOLD_LOCK_WS_CLOSE_CODE,
+  type Note,
+  type SessionUser,
+} from "@miyulabmd/shared";
 import type { MutableRefObject } from "react";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import {
@@ -119,15 +123,23 @@ export function subscribeArticleSources(
     setArticleSources([]);
     return undefined;
   }
-  let cancelled = false;
-  void fetchArticleSources().then((result) => {
-    if (cancelled || !result.ok) {
-      return;
-    }
-    setArticleSources(result.data);
-  });
+  const controller = new AbortController();
+  void fetchArticleSources({
+    signal: controller.signal,
+    viewerId: user.id,
+  }).then(
+    (result) => {
+      if (controller.signal.aborted || !result.ok) {
+        return;
+      }
+      setArticleSources(result.data);
+    },
+    () => {
+      // Aborted or failed source discovery is non-fatal to the editor.
+    },
+  );
   return () => {
-    cancelled = true;
+    controller.abort();
   };
 }
 
@@ -172,6 +184,9 @@ export function bindEditorCollab(input: {
   setCollab: (session: YjsSession | null) => void;
   setCollabReady: (ready: boolean) => void;
   setMarkdown: (markdown: string) => void;
+  setCollabWritable: (writable: boolean) => void;
+  /** Server revoked edit access mid-session (gold lock engaged). */
+  onGoldLocked?: () => void;
 }) {
   if (!(input.noteId && input.hydrated) || input.userLoading) {
     return;
@@ -195,13 +210,25 @@ export function bindEditorCollab(input: {
   input.setCollabReady(false);
 
   const onSynced = (synced: boolean) => {
+    input.setCollabWritable(session.provider.wsconnected && synced);
     onCollabSynced(synced, session, input.setCollabReady, input.setMarkdown);
   };
+  const onStatus = () => {
+    input.setCollabWritable(editorSessionWritable(session));
+  };
+  const onClosed = (event: { code: number; reason: string }) => {
+    // A 4400-4499 close is terminal: the server will not accept writes on a
+    // reconnection either, so flip the note into its locked read-only state.
+    if (event.code === GOLD_LOCK_WS_CLOSE_CODE) {
+      input.onGoldLocked?.();
+    }
+  };
 
+  session.provider.on("sync", onSynced);
+  session.provider.on("status", onStatus);
+  session.provider.on("closed", onClosed);
   if (session.provider.synced) {
     onSynced(true);
-  } else {
-    session.provider.on("sync", onSynced);
   }
 
   const onMarkdownChange = () => {
@@ -210,8 +237,14 @@ export function bindEditorCollab(input: {
   session.yMarkdown.observe(onMarkdownChange);
   input.unbindRef.current = () => {
     session.provider.off("sync", onSynced);
+    session.provider.off("status", onStatus);
+    session.provider.off("closed", onClosed);
     session.yMarkdown.unobserve(onMarkdownChange);
   };
+}
+
+export function editorSessionWritable(session: YjsSession | null): boolean {
+  return !session || (session.provider.wsconnected && session.provider.synced);
 }
 
 export function syncCollabUser(
@@ -225,22 +258,40 @@ export function syncCollabUser(
   applyAwarenessUser(collab.awareness, user);
 }
 
+type MutationSetters = {
+  // Dispatch permission is transient; completion ownership survives a pause.
+  canStart: () => boolean;
+  isCurrent: () => boolean;
+  setSaveError: (error: string | null) => void;
+  setNote: (note: Note) => void;
+};
+
 export async function persistEditorAccess(
   note: Note | null,
   next: AccessDraft,
-  setters: {
-    setAccessDraft: (draft: AccessDraft) => void;
-    setSaveError: (error: string | null) => void;
-    setNote: (note: Note) => void;
-  },
+  setters: MutationSetters & { setAccessDraft: (draft: AccessDraft) => void },
 ) {
-  if (!note) {
+  if (!(note && setters.isCurrent() && setters.canStart())) {
     return;
   }
   setters.setAccessDraft(next);
   setters.setSaveError(null);
 
-  const result = await updateNote(note.id, noteAccessPatch(next));
+  let result: Awaited<ReturnType<typeof updateNote>>;
+  try {
+    result = await updateNote(note.id, noteAccessPatch(next));
+  } catch (error) {
+    if (setters.isCurrent()) {
+      setters.setAccessDraft(draftFromNote(note));
+      setters.setSaveError(
+        error instanceof Error ? error.message : "保存できませんでした。",
+      );
+    }
+    return;
+  }
+  if (!setters.isCurrent()) {
+    return;
+  }
   if (!result.ok) {
     setters.setSaveError(result.error);
     setters.setAccessDraft(draftFromNote(note));
@@ -255,14 +306,12 @@ export async function persistEditorFolder(
   note: Note | null,
   folder: string,
   normalizeFolder: (value: string) => string,
-  setters: {
+  setters: MutationSetters & {
     setFolder: (folder: string) => void;
-    setSaveError: (error: string | null) => void;
-    setNote: (note: Note) => void;
     setAccessDraft: (draft: AccessDraft) => void;
   },
 ) {
-  if (!note) {
+  if (!(note && setters.isCurrent() && setters.canStart())) {
     return;
   }
   const next = normalizeFolder(folder);
@@ -270,7 +319,21 @@ export async function persistEditorFolder(
     return;
   }
 
-  const result = await updateNote(note.id, { folder: next });
+  let result: Awaited<ReturnType<typeof updateNote>>;
+  try {
+    result = await updateNote(note.id, { folder: next });
+  } catch (error) {
+    if (setters.isCurrent()) {
+      setters.setFolder(note.folder);
+      setters.setSaveError(
+        error instanceof Error ? error.message : "保存できませんでした。",
+      );
+    }
+    return;
+  }
+  if (!setters.isCurrent()) {
+    return;
+  }
   if (!result.ok) {
     setters.setFolder(note.folder);
     setters.setSaveError(result.error);

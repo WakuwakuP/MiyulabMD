@@ -1,4 +1,5 @@
 import type { ArticleMeta } from "./article.ts";
+import type { NoteLayer } from "./layers.ts";
 import type {
   AccessScope,
   CollaboratorRole,
@@ -90,11 +91,46 @@ export type FolderRecord = {
   /** Effective scopes for list display (not a path leak). */
   readScope?: AccessScope;
   writeScope?: AccessScope;
+  /** Owner views only: naming rule declared for this folder's children. */
+  scheme?: string | null;
+  /** Owner views only: ID minted by a parent's scheme. */
+  schemeId?: string | null;
+  schemeTitle?: string | null;
 };
 
 export type FolderCrumb = {
   id: string;
   name: string;
+};
+
+export type FolderEntryFolder = {
+  type: "folder";
+  id: string;
+  name: string;
+  parentId: string | null;
+  updatedAt: number;
+  /** Owner views only: recursive count of notes inside this folder. */
+  noteCount?: number;
+  /** Owner views only: naming rule declared for this folder's children. */
+  scheme?: string | null;
+  /** Owner views only: ID minted by a parent's scheme. */
+  schemeId?: string | null;
+  schemeTitle?: string | null;
+};
+
+export type FolderEntryNote = {
+  type: "note";
+  id: string;
+  title: string;
+  updatedAt: number;
+};
+
+export type FolderEntry = FolderEntryFolder | FolderEntryNote;
+
+export type FolderChildrenResult = {
+  folder: { id: string | null; name: string; path: string[] };
+  entries: FolderEntry[];
+  nextCursor: string | null;
 };
 
 export type Note = {
@@ -105,6 +141,15 @@ export type Note = {
   title: string;
   folder: string;
   folderId: string | null;
+  /** Scheme ID of the containing folder (e.g. `15.22`), when folderId is visible. */
+  folderSchemeId?: string | null;
+  /** Title part of the containing folder's scheme name. */
+  folderSchemeTitle?: string | null;
+  /** Medallion layer. Gold notes reject body edits while locked. */
+  layer: NoteLayer;
+  /** True when layer === 'gold' and the unlock window has expired/absent. */
+  goldLocked: boolean;
+  goldUnlockedUntil: number | null;
   permission: PermissionPreset;
   access: NoteAccess;
   markdown: string;
@@ -114,6 +159,51 @@ export type Note = {
 };
 
 export type NoteSummary = Omit<Note, "markdown">;
+
+export const SEARCH_SCOPES = ["title", "body", "all"] as const;
+export type SearchScope = (typeof SEARCH_SCOPES)[number];
+
+export function isSearchScope(value: string): value is SearchScope {
+  return (SEARCH_SCOPES as readonly string[]).includes(value);
+}
+
+export type NoteSearchHit = NoteSummary & {
+  snippet?: string;
+};
+
+export type NoteSearchPage = {
+  notes: NoteSearchHit[];
+  nextCursor: string | null;
+};
+
+export type GrepMatch = {
+  noteId: NoteId;
+  title: string;
+  /** 1-based line number inside markdown_snapshot. */
+  line: number;
+  /** 1-based column where the match starts. */
+  column: number;
+  /** Full text of the matching line. */
+  text: string;
+  before: string[];
+  after: string[];
+  /** Snapshot freshness — the live document may be newer. */
+  snapshotUpdatedAt: number | null;
+};
+
+export type GrepResult = {
+  matches: GrepMatch[];
+  /** True when a scan/match/time limit cut the result short. */
+  truncated: boolean;
+  scannedNotes: number;
+};
+
+/** Combined title hits + line-level body hits for the search palette. */
+export type WorkspaceSearchResult = {
+  query: string;
+  notes: NoteSearchHit[];
+  grep: GrepResult;
+};
 
 export type NoteCollaborator = {
   noteId: NoteId;
@@ -159,6 +249,11 @@ export type FolderAccess = EffectiveAccess & {
   children: FolderRecord[];
   flags: PermissionFlags;
   locked?: boolean;
+  /** Naming rule this folder declares for its children. */
+  scheme?: string | null;
+  /** ID this folder carries from a parent's scheme. */
+  schemeId?: string | null;
+  schemeTitle?: string | null;
 };
 
 export type UpdateFolderAccessInput = {

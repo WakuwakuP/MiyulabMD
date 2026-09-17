@@ -3,6 +3,7 @@ import {
   isAccessConfigured,
   verifyAccessJwt,
 } from "../auth/access.ts";
+import { withApiSessionIdentity } from "../auth/api-response.ts";
 import {
   clearSessionCookieHeader,
   createSessionToken,
@@ -132,6 +133,29 @@ function logoutResponse(
   return new Response(JSON.stringify({ ok: true }), { headers, status: 200 });
 }
 
+async function handleLogout(request: Request, env: Env): Promise<Response> {
+  if (
+    request.method !== "POST" ||
+    request.headers.get("X-MiyulabMD-Logout") !== "prepare"
+  ) {
+    return logoutResponse(request, env, request.method === "GET");
+  }
+  // Preparation clears the app cookie without following Access through fetch.
+  // The client must still navigate the native GET for Access completion.
+  const actor = await readSession(request, env);
+  return withApiSessionIdentity(
+    Response.json(
+      { ok: true },
+      {
+        headers: {
+          "Set-Cookie": clearSessionCookieHeader(requestIsHttps(request)),
+        },
+      },
+    ),
+    actor,
+  );
+}
+
 /** Access 通過後の生 Request を Elysia を介さず処理する。 */
 export async function handleAuthRequest(
   request: Request,
@@ -143,7 +167,7 @@ export async function handleAuthRequest(
   }
 
   if (pathname === "/auth/logout") {
-    return logoutResponse(request, env, request.method === "GET");
+    return handleLogout(request, env);
   }
 
   if (pathname !== "/auth/login" && pathname !== "/auth/callback") {
