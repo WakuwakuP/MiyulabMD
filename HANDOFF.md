@@ -197,13 +197,20 @@
 - zettel 採番は `YYYYMMDDHHmm`、分内衝突は `+1分` 繰り上げで UNIQUE を回避
 - `moveFolder` で採番済みノードを規則外へ動かすと `wrong_parent` として `jd_validate_tree` が検出（移動禁止はしない）
 
+**search/get/list への統合（後追い追加分）:**
+
+- `Note`/`NoteSummary` に `folderSchemeId`/`folderSchemeTitle`（所属フォルダの採番 ID。`folderId` が見える閲覧者にのみ付与 — 非 owner で folderId が隠れる場合は同様に隠す）
+- `folderIdForSchemeId`（`services/schemes.ts`）— owner 配下で scheme_id → フォルダ UUID を解決
+- REST `GET /api/search/notes`・`/api/search/grep` に `schemeId` パラメータ（フォルダサブツリー絞り込み、未解決は 404）
+- MCP `list_notes`/`search_notes`/`grep_notes` に `scheme_id` パラメータ（`folder_id` と排他）— エージェントが `scheme_get` で UUID を引かずに `15.22` 直接指定で絞り込める
+
 ## 検証コマンドと最新結果
 
 ```sh
 pnpm --filter @miyulabmd/web typecheck      # web（tsc × 2）
 pnpm --filter @miyulabmd/worker typecheck   # worker
 pnpm -r typecheck                           # 全ワークスペース
-pnpm --filter @miyulabmd/worker test        # node:test。120/120 ✓（+13 schemes）
+pnpm --filter @miyulabmd/worker test        # node:test。122/122 ✓（+15 schemes）
 pnpm --filter @miyulabmd/web test           # node:test。129/129 ✓
 pnpm --filter @miyulabmd/markdown test      # node:test。26/26 ✓
 pnpm --filter @miyulabmd/shared test        # wikilinks パーサテスト等

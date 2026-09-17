@@ -5,8 +5,10 @@ import { test } from "node:test";
 import { type SessionUser, zettelStamp } from "@miyulabmd/shared";
 import { upsertUserByEmail } from "../db/users.ts";
 import { ensureFolderRow } from "./access.ts";
+import { createNoteService } from "./notes.ts";
 import {
   createSchemeChild,
+  folderIdForSchemeId,
   jdAllocateId,
   jdListCategory,
   schemeGet,
@@ -470,6 +472,70 @@ test("zettel フォルダではノートタイトルにタイムスタンプが�
   await setFolderScheme(env, rootId, "jd", owner);
   const jdPrefix = await schemeNoteTitlePrefix(env, owner.id, "", now);
   assert.equal(jdPrefix, null);
+});
+
+test("folderIdForSchemeId は scheme_id をフォルダ UUID に解決する", async () => {
+  const { env, other, owner, sqlite } = await createEnv();
+  const { category } = await buildJdPath(env, owner, sqlite);
+  const item = await createSchemeChild(
+    env,
+    category.folder.id ?? "",
+    { title: "領収書" },
+    owner,
+  );
+  assert.equal(item.kind, "ok");
+  if (item.kind !== "ok") {
+    return;
+  }
+
+  const resolved = await folderIdForSchemeId(env, owner.id, "10.11");
+  assert.equal(resolved, item.result.folder.id);
+  // 未存在 ID・他人スコープは null。
+  assert.equal(await folderIdForSchemeId(env, owner.id, "99.99"), null);
+  assert.equal(await folderIdForSchemeId(env, other.id, "10.11"), null);
+  assert.equal(await folderIdForSchemeId(env, owner.id, "  "), null);
+});
+
+test("ノートの get/create は所属フォルダの scheme_id を返す", async () => {
+  const { env, owner, sqlite } = await createEnv();
+  const { category } = await buildJdPath(env, owner, sqlite);
+  const item = await createSchemeChild(
+    env,
+    category.folder.id ?? "",
+    { title: "領収書" },
+    owner,
+  );
+  assert.equal(item.kind, "ok");
+  if (item.kind !== "ok") {
+    return;
+  }
+
+  const notes = createNoteService(env);
+  const created = await notes.create(owner, {
+    folderId: item.result.folder.id ?? undefined,
+    markdown: "# レシート",
+  });
+  assert.ok(!("error" in created));
+  if ("error" in created) {
+    return;
+  }
+  assert.equal(created.folderSchemeId, "10.11");
+  assert.equal(created.folderSchemeTitle, "領収書");
+
+  const got = await notes.get(created.id, owner);
+  assert.equal(got.kind, "ok");
+  if (got.kind !== "ok") {
+    return;
+  }
+  assert.equal(got.note.folderSchemeId, "10.11");
+
+  // 規則なしフォルダのノートは null。
+  const plain = await notes.create(owner, { markdown: "# 雑多" });
+  assert.ok(!("error" in plain));
+  if ("error" in plain) {
+    return;
+  }
+  assert.equal(plain.folderSchemeId, null);
 });
 
 test("他人のフォルダには規則を設定・採番できない", async () => {

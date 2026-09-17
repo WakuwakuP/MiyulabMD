@@ -44,6 +44,7 @@ import {
 import { paraArchiveProject, paraList } from "../services/para.ts";
 import {
   createSchemeChild,
+  folderIdForSchemeId,
   jdAllocateId,
   jdListCategory,
   type SchemeError,
@@ -99,6 +100,22 @@ async function listNotesForTool(
     list = list.filter((note) => note.title.toLowerCase().includes(needle));
   }
   return { notes: list };
+}
+
+/** folder_id か scheme_id（`15.22` 等）から対象フォルダ UUID を決める。 */
+async function folderIdArg(
+  user: SessionUser,
+  folderId: string | undefined,
+  schemeId: string | undefined,
+): Promise<{ folderId?: string } | { error: string }> {
+  if (!schemeId) {
+    return { folderId };
+  }
+  if (folderId) {
+    return { error: "Specify either folder_id or scheme_id, not both" };
+  }
+  const resolved = await folderIdForSchemeId(env, user.id, schemeId);
+  return resolved ? { folderId: resolved } : { error: "Not found" };
 }
 
 function moveToolError(result: MoveError | SchemeError) {
@@ -423,15 +440,25 @@ export function createMcpServerFactory() {
           .describe(
             "With folder_id, include notes in descendant folders (default: direct children only)",
           ),
+        scheme_id: z
+          .string()
+          .optional()
+          .describe(
+            "Restrict to the folder carrying this naming-scheme ID (e.g. `15.22`, `202609171230`); alternative to folder_id",
+          ),
       },
     },
-    async ({ folder_id, query, recursive }) => {
+    async ({ folder_id, query, recursive, scheme_id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
       }
+      const target = await folderIdArg(user, folder_id, scheme_id);
+      if ("error" in target) {
+        return textError(target.error);
+      }
       const result = await listNotesForTool(notes, user, {
-        folderId: folder_id,
+        folderId: target.folderId,
         query,
         recursive: recursive ?? false,
       });
@@ -805,13 +832,19 @@ export function createMcpServerFactory() {
           .optional()
           .describe("Max notes to return (default 50, max 200)"),
         query: z.string().describe("Search query"),
+        scheme_id: z
+          .string()
+          .optional()
+          .describe(
+            "Restrict to the folder carrying this naming-scheme ID (e.g. `15.22`); alternative to folder_id",
+          ),
         scope: z
           .enum(["title", "body", "all"])
           .optional()
           .describe("Where to match (default: all)"),
       },
     },
-    async ({ query, scope, folder_id, limit, cursor }) => {
+    async ({ query, scope, folder_id, limit, cursor, scheme_id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -821,10 +854,14 @@ export function createMcpServerFactory() {
       if (!trimmedQuery) {
         return textError("query is required");
       }
+      const target = await folderIdArg(user, folder_id, scheme_id);
+      if ("error" in target) {
+        return textError(target.error);
+      }
 
       const result = await notes.searchNotes(user, {
         cursor,
-        folderId: folder_id,
+        folderId: target.folderId,
         limit,
         query: trimmedQuery,
         scope,
@@ -896,6 +933,12 @@ export function createMcpServerFactory() {
           .min(1)
           .max(500)
           .describe("Text or regex to find in note bodies"),
+        scheme_id: z
+          .string()
+          .optional()
+          .describe(
+            "Restrict to the folder carrying this naming-scheme ID (e.g. `15.22`); alternative to folder_id",
+          ),
       },
     },
     async ({
@@ -908,10 +951,15 @@ export function createMcpServerFactory() {
       glob_title,
       max_matches_per_note,
       max_notes,
+      scheme_id,
     }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
+      }
+      const target = await folderIdArg(user, folder_id, scheme_id);
+      if ("error" in target) {
+        return textError(target.error);
       }
 
       const result = await notes.grep(user, {
@@ -919,7 +967,7 @@ export function createMcpServerFactory() {
         contextAfter: context_after,
         contextBefore: context_before,
         fixedString: fixed_string,
-        folderId: folder_id,
+        folderId: target.folderId,
         globTitle: glob_title,
         maxMatchesPerNote: max_matches_per_note,
         maxNotes: max_notes,

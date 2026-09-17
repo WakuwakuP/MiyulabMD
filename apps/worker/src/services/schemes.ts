@@ -606,6 +606,23 @@ export async function schemeGet(
   };
 }
 
+/** owner 配下で scheme_id に一致するフォルダの UUID を返す（検索フィルタ用）。 */
+export async function folderIdForSchemeId(
+  env_: Env,
+  ownerId: string,
+  schemeId: string,
+): Promise<string | null> {
+  const id = schemeId.trim();
+  if (!id) {
+    return null;
+  }
+  const row = await db(env_)
+    .prepare("SELECT id FROM folders WHERE owner_id = ? AND scheme_id = ?")
+    .bind(ownerId, id)
+    .first<{ id: string }>();
+  return row?.id ?? null;
+}
+
 export type JdListEntry = {
   folder: string;
   id: string;

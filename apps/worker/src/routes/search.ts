@@ -4,6 +4,7 @@ import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
 import { createNoteService } from "../services/notes.ts";
+import { folderIdForSchemeId } from "../services/schemes.ts";
 import { GREP_LIMITS } from "../services/search.ts";
 
 const notes = createNoteService(env);
@@ -16,6 +17,22 @@ function emptyResult(query: string): WorkspaceSearchResult {
     notes: [],
     query,
   };
+}
+
+/** schemeId（`15.22` 等）が指定されたら owner 配下のフォルダ UUID に解決する。 */
+async function folderIdParam(
+  url: URL,
+  user: { id: string } | null,
+): Promise<{ folderId?: string; notFound?: boolean }> {
+  const schemeId = url.searchParams.get("schemeId");
+  if (!schemeId) {
+    return { folderId: url.searchParams.get("folderId") ?? undefined };
+  }
+  if (!user) {
+    return { notFound: true };
+  }
+  const folderId = await folderIdForSchemeId(env, user.id, schemeId);
+  return folderId ? { folderId } : { notFound: true };
 }
 
 function intParam(
@@ -63,9 +80,14 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
       const scopeParam = url.searchParams.get("scope");
       const scope =
         scopeParam && isSearchScope(scopeParam) ? scopeParam : undefined;
+      const target = await folderIdParam(url, user);
+      if (target.notFound) {
+        set.status = 404;
+        return { error: "Not found" };
+      }
       const result = await notes.searchNotes(user ?? undefined, {
         cursor: url.searchParams.get("cursor") ?? undefined,
-        folderId: url.searchParams.get("folderId") ?? undefined,
+        folderId: target.folderId,
         limit: intParam(url, "limit", 50, 200),
         query,
         scope,
@@ -83,6 +105,11 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
       const user = await readSession(request, env);
       const url = new URL(request.url);
       const pattern = url.searchParams.get("pattern") ?? "";
+      const target = await folderIdParam(url, user);
+      if (target.notFound) {
+        set.status = 404;
+        return { error: "Not found" };
+      }
       const result = await notes.grep(user ?? undefined, {
         caseSensitive: url.searchParams.get("caseSensitive") === "true",
         contextAfter: intParam(url, "contextAfter", 1, GREP_LIMITS.maxContext),
@@ -93,7 +120,7 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
           GREP_LIMITS.maxContext,
         ),
         fixedString: url.searchParams.get("fixedString") !== "false",
-        folderId: url.searchParams.get("folderId") ?? undefined,
+        folderId: target.folderId,
         globTitle: url.searchParams.get("globTitle") ?? undefined,
         maxMatchesPerNote: intParam(
           url,

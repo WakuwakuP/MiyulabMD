@@ -140,6 +140,10 @@ export type Note = {
   title: string;
   folder: string;
   folderId: string | null;
+  /** Scheme ID of the containing folder (e.g. `15.22`), when folderId is visible. */
+  folderSchemeId?: string | null;
+  /** Title part of the containing folder's scheme name. */
+  folderSchemeTitle?: string | null;
   permission: PermissionPreset;
   access: NoteAccess;
   markdown: string;

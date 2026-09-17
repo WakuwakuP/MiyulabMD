@@ -116,6 +116,14 @@ async function toNote(
   ) {
     visibleFolderId = folderId;
   }
+  // スキームメタは folderId が見える閲覧者にだけ付ける（存在漏洩を folderId と揃える）。
+  let folderSchemeId: string | null = null;
+  let folderSchemeTitle: string | null = null;
+  if (visibleFolderId) {
+    const folderRow = await getFolderById(env, visibleFolderId);
+    folderSchemeId = folderRow?.scheme_id ?? null;
+    folderSchemeTitle = folderRow?.scheme_title ?? null;
+  }
   return {
     access: isOwner ? access : { ...access, grants: [], sourceFolder: null },
     alias: row.alias,
@@ -123,6 +131,8 @@ async function toNote(
     createdAt: row.created_at,
     folder: isOwner ? folder : "",
     folderId: visibleFolderId,
+    folderSchemeId,
+    folderSchemeTitle,
     id: row.id,
     markdown: row.markdown_snapshot,
     ownerId: row.owner_id,
