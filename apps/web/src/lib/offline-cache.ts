@@ -526,8 +526,18 @@ function readScopeEpochs(
   });
 }
 
+const SCOPE_INVALIDATED_MESSAGE = "Offline cache scope invalidated";
+
 function invalidatedError(): DOMException {
-  return new DOMException("Offline cache scope invalidated", "AbortError");
+  return new DOMException(SCOPE_INVALIDATED_MESSAGE, "AbortError");
+}
+
+export function isOfflineCacheScopeInvalidated(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    error.name === "AbortError" &&
+    error.message === SCOPE_INVALIDATED_MESSAGE
+  );
 }
 
 function isValidEpoch(epoch: unknown): epoch is string {
@@ -575,23 +585,22 @@ async function captureOfflineCacheScopeUnlocked(
     const epochs = await readScopeEpochs(database, userId);
     epoch = composeEpoch(epochs.global, epochs.user);
     devicePurging = epochs.state === DEVICE_CLEAR_PURGING;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
-    }
+  } catch {
     // Cache availability must not gate healthy network display.
   }
-  const scope = { epoch, lifetime, userId };
   if (
-    isPurgingEpoch(epoch) ||
-    devicePurging ||
-    globalSuspended ||
-    globalLifetime !== capturedGlobalLifetime ||
-    !isOfflineCacheUserClearLifetimeCurrent(userId, lifetime)
+    epoch !== null &&
+    (isPurgingEpoch(epoch) ||
+      devicePurging ||
+      globalSuspended ||
+      globalLifetime !== capturedGlobalLifetime ||
+      !isOfflineCacheUserClearLifetimeCurrent(userId, lifetime))
   ) {
-    throw invalidatedError();
+    // A suspended or already-invalidated realm captures no authority. Cache
+    // writes remain fenced by assertOfflineCacheScope and guardTransaction.
+    epoch = null;
   }
-  return scope;
+  return { epoch, lifetime, userId };
 }
 
 export function captureOfflineCacheScope(
@@ -609,6 +618,9 @@ async function assertOfflineCacheScopeUnlocked(
   const capturedGlobalLifetime = globalLifetime;
   if (!isOfflineCacheUserClearLifetimeCurrent(scope.userId, scope.lifetime)) {
     throw invalidatedError();
+  }
+  if (scope.epoch === null && !requireStorage) {
+    return;
   }
   let epoch: string | null = null;
   try {
@@ -3133,7 +3145,7 @@ async function openOfflineCacheUnlocked(
       !isOfflineCacheUserClearLifetimeCurrent(userId, clearLifetime) ||
       (options.scope &&
         (options.scope.userId !== userId ||
-          options.scope.epoch !== epoch ||
+          (options.scope.epoch !== null && options.scope.epoch !== epoch) ||
           !isOfflineCacheUserClearLifetimeCurrent(
             userId,
             options.scope.lifetime,
