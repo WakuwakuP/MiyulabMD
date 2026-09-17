@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
 import { moveFolder, moveFolderContents, moveNotes } from "./move.ts";
 import { createNoteService } from "./notes.ts";
-import { paraArchiveProject, paraList } from "./para.ts";
+import { ensureParaBuckets, paraArchiveProject, paraList } from "./para.ts";
 
 const MIGRATIONS = [
   "0001_init.sql",
@@ -323,6 +323,8 @@ test("para_list materializes buckets and para_archive_project moves into Archive
   });
   assert.ok(!("error" in project));
 
+  // §2.4: paraList is read-only now; setup happens via explicit enable.
+  await ensureParaBuckets(env, owner.id);
   const listed = await paraList(env, owner, "projects");
   assert.equal(listed.kind, "ok");
   if (listed.kind !== "ok") {
@@ -363,7 +365,7 @@ test("para_archive_project rejects folders outside Projects", async (t) => {
 
   const misc = await ensureFolderRow(env, owner.id, "Misc");
   assert.ok(misc);
-  await paraList(env, owner); // materialize buckets
+  await ensureParaBuckets(env, owner.id); // materialize buckets
   const result = await paraArchiveProject(env, misc, {}, owner);
   assert.equal(result.kind, "invalid");
 });

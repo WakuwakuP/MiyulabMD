@@ -34,6 +34,66 @@ export type ParaListResult = {
   children?: FolderChildrenResult;
 };
 
+// --- §2.4 enable flow: plan (side-effect-free) + enable (resolutions) -------
+
+export type ParaPlanStatus = "assigned" | "vacant" | "collision";
+
+export type ParaPlanExisting = {
+  id: string;
+  name: string;
+};
+
+export type ParaPlanBucket = {
+  bucket: ParaBucketKey;
+  /**
+   * assigned = para_bucket already set on a folder / vacant = default name is
+   * free to create / collision = a top-level folder holds the default name but
+   * is not bucket-assigned.
+   */
+  status: ParaPlanStatus;
+  /** For collision: the folder occupying the default name. For assigned: the
+   * folder fulfilling the bucket (name may differ after renames). */
+  existing?: ParaPlanExisting;
+};
+
+export type ParaSpacePlan = {
+  status: "exists" | "vacant" | "collision";
+  existing?: ParaPlanExisting;
+};
+
+/**
+ * Side-effect-free setup inspection. `space` is the §2.5 multi-space wrapper;
+ * for now only the default (rootless) space exists, always "exists".
+ */
+export type ParaPlan = {
+  space: ParaSpacePlan;
+  buckets: ParaPlanBucket[];
+};
+
+export type ParaBucketResolution =
+  | { action: "create" }
+  | { action: "adopt"; folderId: string }
+  | { action: "rename"; folderId: string; newName: string }
+  | { action: "skip" };
+
+/** Reserved for §2.5: selects a named space root. Omit for the default space. */
+export type ParaSpaceRef = { id: string } | { name: string };
+
+export type ParaEnableInput = {
+  space?: ParaSpaceRef | "default" | null;
+  resolutions?: Partial<Record<ParaBucketKey, ParaBucketResolution>>;
+};
+
+export type ParaEnableResult = {
+  /** Post-enable plan; skipped buckets keep their pre-enable status. */
+  plan: ParaPlan;
+  /**
+   * Buckets still unassigned because a name collision was not resolved.
+   * Non-empty means the caller should collect resolutions and re-run enable.
+   */
+  pending: ParaBucketKey[];
+};
+
 /** Max entities (notes + folders) one move request may touch. */
 export const MOVE_MAX_ITEMS = 500;
 

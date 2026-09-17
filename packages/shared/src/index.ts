@@ -91,7 +91,16 @@ export type {
   MovePlan,
   ParaBucket,
   ParaBucketKey,
+  ParaBucketResolution,
+  ParaEnableInput,
+  ParaEnableResult,
   ParaListResult,
+  ParaPlan,
+  ParaPlanBucket,
+  ParaPlanExisting,
+  ParaPlanStatus,
+  ParaSpacePlan,
+  ParaSpaceRef,
 } from "./move.ts";
 export { isParaBucketKey, MOVE_MAX_ITEMS, PARA_BUCKETS } from "./move.ts";
 export type {

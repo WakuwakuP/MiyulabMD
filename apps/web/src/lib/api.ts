@@ -21,7 +21,10 @@ import type {
   NoteRevisionRestore,
   NoteSummary,
   ParaBucketKey,
+  ParaEnableInput,
+  ParaEnableResult,
   ParaListResult,
+  ParaPlan,
   PermissionPreset,
   PromoteGateFailure,
   SchemeSuggestion,
@@ -597,6 +600,41 @@ export async function fetchPara(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as ParaListResult, ok: true };
+}
+
+/** §2.4: side-effect-free PARA setup inspection (default space). */
+export async function fetchParaPlan(
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<ParaPlan>> {
+  const res = await fetch(
+    "/api/para/plan",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as ParaPlan, ok: true };
+}
+
+/**
+ * §2.4: idempotent PARA enable. Vacant buckets are created; collisions need a
+ * resolution (create/adopt/rename/skip). The response `pending` lists bucket
+ * keys still blocked by unresolved collisions — re-run after resolving them.
+ */
+export async function enablePara(
+  input: ParaEnableInput = {},
+): Promise<ApiResult<ParaEnableResult>> {
+  const res = await fetch("/api/para/enable", {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as ParaEnableResult, ok: true };
 }
 
 export async function archiveParaProject(
