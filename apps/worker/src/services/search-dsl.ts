@@ -20,10 +20,16 @@ import { db } from "../db/client.ts";
 export type LayerFilter = { value: NoteLayer; negated: boolean };
 export type TagFilter = { value: string; negated: boolean };
 export type FolderPrefixFilter = { value: string; negated: boolean };
+/**
+ * OR-ed set of folder prefixes (e.g. `para:projects` across every space).
+ * Positive filters need one matching prefix; negated ones need none to match.
+ */
+export type FolderPrefixSetFilter = { values: string[]; negated: boolean };
 
 export type ResolvedSearchDsl = {
   parsed: SearchQuery;
   folderPrefixes: FolderPrefixFilter[];
+  folderPrefixSets: FolderPrefixSetFilter[];
   layers: LayerFilter[];
   tags: TagFilter[];
   /** A non-negated filter resolved to nothing — the result set is empty. */
@@ -42,46 +48,87 @@ async function folderPathForSchemeId(
   return row?.folder ?? null;
 }
 
-async function folderPathForParaBucket(
+/**
+ * `para:projects` → every space's Projects path; `para:work.projects` → the
+ * bucket inside that space only. The default space resolves via its materialized
+ * rootless row (`para_space_id IS NULL` on its bucket folders).
+ */
+async function folderPathsForParaBucket(
   env: Env,
   ownerId: string,
   bucket: string,
-): Promise<string | null> {
-  const row = await db(env)
+  spaceName?: string,
+): Promise<string[]> {
+  if (spaceName === undefined) {
+    const rows = await db(env)
+      .prepare(
+        "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ?",
+      )
+      .bind(ownerId, bucket)
+      .all<{ folder: string }>();
+    return (rows.results ?? []).map((row) => row.folder);
+  }
+  const space = await db(env)
     .prepare(
-      "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ?",
+      "SELECT id, root_folder_id FROM para_spaces WHERE owner_id = ? AND name = ?",
     )
-    .bind(ownerId, bucket)
-    .first<{ folder: string }>();
-  return row?.folder ?? null;
+    .bind(ownerId, spaceName)
+    .first<{ id: string; root_folder_id: string | null }>();
+  if (!space) {
+    return [];
+  }
+  const rows =
+    space.root_folder_id === null
+      ? await db(env)
+          .prepare(
+            "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ? AND para_space_id IS NULL",
+          )
+          .bind(ownerId, bucket)
+          .all<{ folder: string }>()
+      : await db(env)
+          .prepare(
+            "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ? AND para_space_id = ?",
+          )
+          .bind(ownerId, bucket, space.id)
+          .all<{ folder: string }>();
+  return (rows.results ?? []).map((row) => row.folder);
 }
 
 type ResolvedFilter =
   | { kind: "folder"; value: string }
+  | { kind: "folder-set"; values: string[] }
   | { kind: "layer"; value: NoteLayer }
   | { kind: "tag"; value: string }
   | "drop"
   | "empty";
 
-/** scheme:/jd:/para: all resolve to a folder path under the caller's drive. */
-function folderPathForFilter(
+/** scheme:/jd: resolve to a folder path; para: to a per-space path set. */
+async function folderPathForFilter(
   env: Env,
   user: { id: string } | undefined,
   filter: { kind: string; value: string },
-): Promise<string | null> {
+): Promise<ResolvedFilter | null> {
   if (!user) {
-    return Promise.resolve(null);
+    return null;
   }
   if (filter.kind === "para") {
-    const bucket = paraFilterValue(filter.value);
-    return bucket
-      ? folderPathForParaBucket(env, user.id, bucket)
-      : Promise.resolve(null);
+    const parsed = paraFilterValue(filter.value);
+    if (!parsed) {
+      return null;
+    }
+    const paths = await folderPathsForParaBucket(
+      env,
+      user.id,
+      parsed.bucket,
+      parsed.space,
+    );
+    return paths.length > 0 ? { kind: "folder-set", values: paths } : null;
   }
   const schemeId = schemeFilterValue(filter.value);
-  return schemeId
-    ? folderPathForSchemeId(env, user.id, schemeId)
-    : Promise.resolve(null);
+  const path = schemeId
+    ? await folderPathForSchemeId(env, user.id, schemeId)
+    : null;
+  return path === null ? null : { kind: "folder", value: path };
 }
 
 /**
@@ -110,8 +157,8 @@ async function resolveFilter(
     case "scheme":
     case "jd":
     case "para": {
-      const path = await folderPathForFilter(env, user, filter);
-      return path === null ? miss : { kind: "folder", value: path };
+      const resolved = await folderPathForFilter(env, user, filter);
+      return resolved === null ? miss : resolved;
     }
     default:
       return "drop";
@@ -124,6 +171,7 @@ export async function resolveSearchDsl(
   parsed: SearchQuery,
 ): Promise<ResolvedSearchDsl> {
   const folderPrefixes: FolderPrefixFilter[] = [];
+  const folderPrefixSets: FolderPrefixSetFilter[] = [];
   const layers: LayerFilter[] = [];
   const tags: TagFilter[] = [];
   let empty = false;
@@ -139,13 +187,18 @@ export async function resolveSearchDsl(
     }
     if (resolved.kind === "folder") {
       folderPrefixes.push({ negated: filter.negated, value: resolved.value });
+    } else if (resolved.kind === "folder-set") {
+      folderPrefixSets.push({
+        negated: filter.negated,
+        values: resolved.values,
+      });
     } else if (resolved.kind === "layer") {
       layers.push({ negated: filter.negated, value: resolved.value });
     } else {
       tags.push({ negated: filter.negated, value: resolved.value });
     }
   }
-  return { empty, folderPrefixes, layers, parsed, tags };
+  return { empty, folderPrefixes, folderPrefixSets, layers, parsed, tags };
 }
 
 function rowLayer(row: { layer: string | null }): NoteLayer {
@@ -210,6 +263,14 @@ export function rowMatchesSearchDsl(
   }
   for (const prefix of resolved.folderPrefixes) {
     if (pathFilterMatches(row.folder, prefix.value) === prefix.negated) {
+      return false;
+    }
+  }
+  for (const set of resolved.folderPrefixSets) {
+    const any = set.values.some((value) =>
+      pathFilterMatches(row.folder, value),
+    );
+    if (any === set.negated) {
       return false;
     }
   }

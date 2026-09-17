@@ -11,7 +11,7 @@ import {
 } from "./access.ts";
 import { setNoteLayer } from "./layers.ts";
 import { createNoteService } from "./notes.ts";
-import { ensureParaBuckets } from "./para.ts";
+import { enablePara, ensureParaBuckets } from "./para.ts";
 import { createSchemeChild, setFolderScheme } from "./schemes.ts";
 
 const MIGRATIONS = [
@@ -29,6 +29,7 @@ const MIGRATIONS = [
   "0012_naming_schemes.sql",
   "0013_medallion_layers.sql",
   "0014_notes_fts.sql",
+  "0016_para_spaces.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -711,6 +712,59 @@ test("searchNotes DSL: jd: and para: resolve through folder metadata", async (t)
       byPara.notes.map((note) => note.title),
       ["ParaNote"],
     );
+  }
+});
+
+test("searchNotes DSL: para:<space>.<bucket> scopes to one space", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  // Default space + a named "work" space.
+  await ensureParaBuckets(env, owner.id);
+  const enabled = await enablePara(env, { space: { name: "work" } }, owner);
+  assert.equal(enabled.kind, "ok");
+
+  await notes.create(owner, {
+    folder: "Projects",
+    markdown: "# DefaultProj\nneedle default-space\n",
+    title: "DefaultProj",
+  });
+  await notes.create(owner, {
+    folder: "work/Projects",
+    markdown: "# WorkProj\nneedle work-space\n",
+    title: "WorkProj",
+  });
+
+  // Unqualified: matches across all spaces.
+  const all = await notes.searchNotes(owner, { query: "needle para:projects" });
+  assert.equal(all.kind, "ok");
+  if (all.kind === "ok") {
+    assert.deepEqual(
+      all.notes.map((note) => note.title).sort(),
+      ["DefaultProj", "WorkProj"],
+    );
+  }
+
+  // Space-qualified: only the work space's bucket.
+  const work = await notes.searchNotes(owner, {
+    query: "needle para:work.projects",
+  });
+  assert.equal(work.kind, "ok");
+  if (work.kind === "ok") {
+    assert.deepEqual(
+      work.notes.map((note) => note.title),
+      ["WorkProj"],
+    );
+  }
+
+  // An unknown space resolves to an empty result set.
+  const missing = await notes.searchNotes(owner, {
+    query: "needle para:nosuch.projects",
+  });
+  assert.equal(missing.kind, "ok");
+  if (missing.kind === "ok") {
+    assert.deepEqual(missing.notes, []);
   }
 });
 

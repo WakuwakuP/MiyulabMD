@@ -146,9 +146,33 @@ export function layerFilterValue(value: string): NoteLayer | null {
   return isNoteLayer(normalized) ? normalized : null;
 }
 
-export function paraFilterValue(value: string): ParaBucketKey | null {
-  const normalized = value.toLowerCase();
-  return isParaBucketKey(normalized) ? normalized : null;
+export type ParaFilterValue = {
+  bucket: ParaBucketKey;
+  /** §2.5: space name qualifier (`para:work.projects`); omitted = all spaces. */
+  space?: string;
+};
+
+/**
+ * `para:projects` targets the bucket across all spaces; `para:work.projects`
+ * pins one space. The split is at the LAST dot so space names may contain
+ * dots themselves.
+ */
+export function paraFilterValue(value: string): ParaFilterValue | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const dot = trimmed.lastIndexOf(".");
+  if (dot < 0) {
+    const bucket = trimmed.toLowerCase();
+    return isParaBucketKey(bucket) ? { bucket } : null;
+  }
+  const space = trimmed.slice(0, dot).trim();
+  const bucket = trimmed.slice(dot + 1).toLowerCase();
+  if (!(space && isParaBucketKey(bucket))) {
+    return null;
+  }
+  return { bucket, space };
 }
 
 /** `scheme:`/`jd:` filter values must look like a scheme ID. */

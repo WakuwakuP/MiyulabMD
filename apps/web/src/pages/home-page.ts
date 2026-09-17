@@ -2,7 +2,7 @@ import type {
   FolderAccess,
   FolderRecord,
   NoteSummary,
-  ParaBucket,
+  ParaSpaceSummary,
   SessionUser,
 } from "@miyulabmd/shared";
 import { folderUrl } from "@miyulabmd/shared";
@@ -398,18 +398,19 @@ export async function persistHomeShare(
 }
 
 /**
- * §2.4: fetch the caller's PARA buckets, but only when the para feature flag
- * is on — flag OFF means /api/para is never called and the section stays hidden.
+ * §2.4/§2.5: fetch the caller's PARA spaces (with buckets), but only when the
+ * para feature flag is on — flag OFF means /api/para is never called and the
+ * section stays hidden.
  */
-export async function loadParaBuckets(
+export async function loadParaSpaces(
   user: SessionUser | null | undefined,
   paraEnabled: boolean,
-): Promise<ParaBucket[]> {
+): Promise<ParaSpaceSummary[]> {
   if (!(user && paraEnabled)) {
     return [];
   }
   const result = await fetchPara({ viewerId: user.id });
-  return result.ok ? result.data.buckets : [];
+  return result.ok ? result.data.spaces : [];
 }
 
 export function menuPosition(event: MouseEvent) {
@@ -437,7 +438,7 @@ function folderMenuItems(
   options: {
     onArchive: (id: string, name: string) => void;
     onScheme: (id: string, name: string, scheme: string | null) => void;
-    projectsPath: string | null;
+    projectsPaths: string[];
   },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
@@ -456,9 +457,9 @@ function folderMenuItems(
     onSelect: () =>
       options.onScheme(target.id, target.name, target.scheme ?? null),
   });
-  const inProjects =
-    options.projectsPath !== null &&
-    target.path?.startsWith(`${options.projectsPath}/`) === true;
+  const inProjects = options.projectsPaths.some(
+    (path) => target.path?.startsWith(`${path}/`) === true,
+  );
   if (inProjects) {
     items.push({
       label: "完了してアーカイブ（PARA）",
@@ -507,7 +508,7 @@ export function handleItemMenu(
   options: {
     onArchive: (id: string, name: string) => void;
     onScheme: (id: string, name: string, scheme: string | null) => void;
-    projectsPath: string | null;
+    projectsPaths: string[];
   },
 ) {
   const position = menuPosition(event);

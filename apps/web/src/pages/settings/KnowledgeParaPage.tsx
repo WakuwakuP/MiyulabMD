@@ -2,110 +2,236 @@ import type {
   ParaBucketKey,
   ParaBucketResolution,
   ParaPlan,
+  ParaResolutionKey,
+  ParaSpaceSelector,
+  ParaSpaceSummary,
 } from "@miyulabmd/shared";
 import { PARA_BUCKETS } from "@miyulabmd/shared";
 import { useCallback, useEffect, useState } from "react";
 import { ParaConflictModal } from "../../components/notes/ParaConflictModal.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { CheckLabel } from "../../components/ui/Field.tsx";
+import { Input } from "../../components/ui/Input.tsx";
 import { ErrorText, MutedText } from "../../components/ui/Text.tsx";
-import { enablePara, fetchParaPlan } from "../../lib/api.ts";
+import {
+  deleteParaSpace,
+  enablePara,
+  fetchPara,
+  fetchParaPlan,
+  renameParaSpace,
+} from "../../lib/api.ts";
 import {
   KNOWLEDGE_FEATURES,
   useKnowledgeFeatureToggle,
 } from "../../lib/knowledge-features.ts";
-import { paraPlanConflicts } from "../../lib/para-conflict.ts";
+import { paraPlanHasConflicts } from "../../lib/para-conflict.ts";
 
 const feature = KNOWLEDGE_FEATURES.para;
 
 const BUCKET_LABELS: Record<ParaBucketKey, string> = {
-  archives: "Archives（アーカイブ）",
-  areas: "Areas（継続領域）",
-  projects: "Projects（進行中のプロジェクト）",
-  resources: "Resources（参照資料）",
+  archives: "Archives",
+  areas: "Areas",
+  projects: "Projects",
+  resources: "Resources",
 };
 
-function bucketStatusText(bucket: ParaPlan["buckets"][number]): string {
-  switch (bucket.status) {
-    case "assigned":
-      return `割当済み: ${bucket.existing?.name ?? ""}`;
-    case "vacant":
-      return "未作成（セットアップで作成されます）";
-    case "collision":
-      return `「${bucket.existing?.name ?? ""}」が未割当で存在 — 要解決`;
-  }
+/** Selector for plan/enable calls targeting a listed space. */
+function spaceSelectorOf(space: ParaSpaceSummary): ParaSpaceSelector {
+  return space.isDefault ? "default" : { id: space.id };
 }
 
-function BucketStatus({ plan }: { plan: ParaPlan }) {
+function SpaceRow({
+  space,
+  busy,
+  onSetup,
+  onRename,
+  onDelete,
+}: {
+  space: ParaSpaceSummary;
+  busy: boolean;
+  onSetup: () => void;
+  onRename: (name: string) => void;
+  onDelete: () => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(space.name);
+  const missing = PARA_BUCKETS.filter(
+    (def) => !space.buckets.some((bucket) => bucket.key === def.key),
+  );
+  const label = space.isDefault ? "PARA（デフォルト）" : space.name;
   return (
-    <ul className="m-0 list-none p-0">
-      {PARA_BUCKETS.map((def) => {
-        const bucket = plan.buckets.find((entry) => entry.bucket === def.key);
-        return (
-          <li
-            className="flex items-baseline justify-between gap-3 border-b border-border py-1.5 text-[0.9rem] last:border-b-0"
-            key={def.key}
-          >
-            <span>{BUCKET_LABELS[def.key]}</span>
+    <li className="border-b border-border py-2 last:border-b-0">
+      <div className="flex flex-wrap items-baseline gap-2">
+        {renaming ? (
+          <>
+            <Input
+              className="w-40 px-1 py-0.5 text-[0.9rem]"
+              disabled={busy}
+              onChange={(event) => setDraft(event.target.value)}
+              type="text"
+              value={draft}
+            />
+            <Button
+              disabled={busy || !draft.trim()}
+              onClick={() => {
+                onRename(draft.trim());
+                setRenaming(false);
+              }}
+              variant="outline"
+            >
+              保存
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setDraft(space.name);
+                setRenaming(false);
+              }}
+              variant="ghost"
+            >
+              キャンセル
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">{label}</span>
             <MutedText className="text-[0.8rem]">
-              {bucket ? bucketStatusText(bucket) : "未作成"}
+              {space.isDefault ? "ルート直下" : space.rootPath}・
+              {space.buckets.length}/4 バケツ
+              {missing.length > 0 &&
+                `（未作成: ${missing.map((def) => BUCKET_LABELS[def.key]).join(", ")}）`}
             </MutedText>
-          </li>
-        );
-      })}
-    </ul>
+          </>
+        )}
+      </div>
+      {!renaming && (
+        <div className="mt-1 flex flex-wrap gap-2">
+          {missing.length > 0 && (
+            <Button disabled={busy} onClick={onSetup} variant="outline">
+              不足バケツをセットアップ
+            </Button>
+          )}
+          <Button
+            disabled={busy}
+            onClick={() => setRenaming(true)}
+            variant="ghost"
+          >
+            改名
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `スペース「${space.name}」の割当を解除します。フォルダ自体は残ります。`,
+                )
+              ) {
+                onDelete();
+              }
+            }}
+            variant="ghost"
+          >
+            解除
+          </Button>
+        </div>
+      )}
+    </li>
   );
 }
 
 export function KnowledgeParaPage() {
   const { enabled, error, saving, setEnabled } =
     useKnowledgeFeatureToggle("para");
-  const [plan, setPlan] = useState<ParaPlan | null>(null);
+  const [spaces, setSpaces] = useState<ParaSpaceSummary[]>([]);
   const [conflictPlan, setConflictPlan] = useState<ParaPlan | null>(null);
+  const [conflictSpace, setConflictSpace] = useState<
+    ParaSpaceSelector | undefined
+  >(undefined);
   const [setupBusy, setSetupBusy] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [addName, setAddName] = useState("");
 
-  const refreshPlan = useCallback(async () => {
-    const result = await fetchParaPlan();
+  const refreshSpaces = useCallback(async () => {
+    const result = await fetchPara();
     if (result.ok) {
-      setPlan(result.data);
+      setSpaces(result.data.spaces);
     }
   }, []);
 
-  // バケツ充足状況は有効時のみ表示。ミラーではなくサーバーの実在を見る。
+  // スペース一覧は有効時のみ表示。ミラーではなくサーバーの実在を見る。
   useEffect(() => {
     if (enabled) {
-      void refreshPlan();
+      void refreshSpaces();
     } else {
-      setPlan(null);
+      setSpaces([]);
     }
-  }, [enabled, refreshPlan]);
+  }, [enabled, refreshSpaces]);
 
   /**
    * POST /api/para/enable。残り衝突があればモーダルを開き直してループ。
-   * 全バケツが assigned か skip 済みになったら true。
+   * スペースルートと全バケツが assigned か skip 済みになったら true。
    */
   const runEnable = useCallback(
     async (
-      resolutions?: Partial<Record<ParaBucketKey, ParaBucketResolution>>,
+      space: ParaSpaceSelector | undefined,
+      resolutions?: Partial<
+        Record<ParaResolutionKey, ParaBucketResolution>
+      >,
     ): Promise<boolean> => {
       setSetupBusy(true);
       setSetupError(null);
-      const result = await enablePara({ resolutions });
+      const result = await enablePara({ resolutions, space });
       setSetupBusy(false);
       if (!result.ok) {
         setSetupError(result.error);
         return false;
       }
-      setPlan(result.data.plan);
       if (result.data.pending.length > 0) {
+        setConflictSpace(space);
         setConflictPlan(result.data.plan);
+        void refreshSpaces();
         return false;
       }
       setConflictPlan(null);
+      void refreshSpaces();
       return true;
     },
-    [],
+    [refreshSpaces],
+  );
+
+  /**
+   * plan → 衝突があればモーダル、なければ enable まで一気に進める。
+   * スペース追加と「不足バケツをセットアップ」の両方から使う。
+   */
+  const runSetup = useCallback(
+    async (space: ParaSpaceSelector | undefined): Promise<boolean> => {
+      setSetupBusy(true);
+      setSetupError(null);
+      const planResult = await fetchParaPlan({
+        space:
+          space === undefined || space === null
+            ? undefined
+            : space === "default"
+              ? "default"
+              : typeof space === "string"
+                ? space
+                : "id" in space
+                  ? space.id
+                  : space.name,
+      });
+      setSetupBusy(false);
+      if (!planResult.ok) {
+        setSetupError(planResult.error);
+        return false;
+      }
+      if (paraPlanHasConflicts(planResult.data)) {
+        setConflictSpace(space);
+        setConflictPlan(planResult.data);
+        return false;
+      }
+      return runEnable(space);
+    },
+    [runEnable],
   );
 
   const onToggle = useCallback(
@@ -115,29 +241,25 @@ export function KnowledgeParaPage() {
         await setEnabled(false);
         return;
       }
-      // ON: まず副作用のない plan で衝突を検査する。
-      setSetupBusy(true);
-      const planResult = await fetchParaPlan();
-      setSetupBusy(false);
-      if (!planResult.ok) {
-        setSetupError(planResult.error);
-        return;
-      }
-      setPlan(planResult.data);
-      if (paraPlanConflicts(planResult.data).length > 0) {
-        setConflictPlan(planResult.data);
-        return;
-      }
-      if (await runEnable()) {
+      // ON: まず副作用のない plan で default スペースの衝突を検査する。
+      if ((await runSetup(undefined)) === true) {
         await setEnabled(true);
       }
     },
-    [runEnable, setEnabled],
+    [runSetup, setEnabled],
   );
 
+  const onAddSpace = useCallback(async () => {
+    const name = addName.trim();
+    if (!name) {
+      return;
+    }
+    if (await runSetup({ name })) {
+      setAddName("");
+    }
+  }, [addName, runSetup]);
+
   const busy = saving || setupBusy;
-  const needsSetup =
-    enabled === true && plan?.buckets.some((b) => b.status !== "assigned");
 
   return (
     <section>
@@ -157,22 +279,67 @@ export function KnowledgeParaPage() {
 
       {enabled && (
         <>
-          <h3 className="mt-6 text-[1.1em] font-bold">バケツ充足状況</h3>
-          {plan ? (
-            <BucketStatus plan={plan} />
+          <h3 className="mt-6 text-[1.1em] font-bold">スペース</h3>
+          {spaces.length > 0 ? (
+            <ul className="m-0 list-none p-0">
+              {spaces.map((space) => (
+                <SpaceRow
+                  busy={busy}
+                  key={space.id}
+                  onDelete={() => {
+                    void deleteParaSpace(space.id).then((result) => {
+                      if (!result.ok) {
+                        setSetupError(result.error);
+                      }
+                      void refreshSpaces();
+                    });
+                  }}
+                  onRename={(name) => {
+                    void renameParaSpace(space.id, name).then((result) => {
+                      if (!result.ok) {
+                        setSetupError(result.error);
+                      }
+                      void refreshSpaces();
+                    });
+                  }}
+                  onSetup={() => void runSetup(spaceSelectorOf(space))}
+                  space={space}
+                />
+              ))}
+            </ul>
           ) : (
-            <MutedText>読み込み中…</MutedText>
+            <MutedText>スペースはまだありません。</MutedText>
           )}
-          {needsSetup && (
-            <Button
-              className="mt-3"
+
+          <h3 className="mt-6 text-[1.1em] font-bold">スペースを追加</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="w-56"
               disabled={busy}
-              onClick={() => void onToggle(true)}
+              onChange={(event) => setAddName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void onAddSpace();
+                }
+              }}
+              placeholder="スペース名（例: 仕事）"
+              type="text"
+              value={addName}
+            />
+            <Button
+              disabled={busy || !addName.trim()}
+              onClick={() => void onAddSpace()}
               variant="outline"
             >
-              不足バケツをセットアップ
+              検査して作成
             </Button>
-          )}
+          </div>
+          <MutedText className="mt-2">
+            同名のトップレベルフォルダをスペースルートとして作成します。
+            名前が衝突した場合は rename / adopt / skip を選べます。
+          </MutedText>
+
           <MutedText className="mt-4">
             無効化してもフォルダや割当は残り、ホームの PARA
             セクションとアーカイブメニューが隠れるだけです。
@@ -187,8 +354,10 @@ export function KnowledgeParaPage() {
           onClose={() => setConflictPlan(null)}
           onSubmit={(resolutions) => {
             void (async () => {
-              if (await runEnable(resolutions)) {
-                await setEnabled(true);
+              if (await runEnable(conflictSpace, resolutions)) {
+                if (conflictSpace === undefined) {
+                  await setEnabled(true);
+                }
               }
             })();
           }}

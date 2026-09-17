@@ -6,6 +6,7 @@ import {
   paraConflictResolutions,
   paraConflictsReady,
   paraPlanConflicts,
+  paraPlanHasConflicts,
   setParaConflictChoice,
   setParaConflictNewName,
 } from "./para-conflict.ts";
@@ -39,10 +40,56 @@ test("paraPlanConflicts picks only collision buckets", () => {
 test("initParaConflicts defaults to rename with a suffixed name", () => {
   const items = initParaConflicts(collidingPlan);
   assert.equal(items.length, 2);
-  assert.equal(items[0]?.bucket, "projects");
+  assert.equal(items[0]?.key, "projects");
+  assert.equal(items[0]?.kind, "bucket");
   assert.equal(items[0]?.choice, "rename");
   assert.equal(items[0]?.newName, "Projects (old)");
   assert.equal(items[0]?.existingId, "f-projects");
+});
+
+test("initParaConflicts includes the space root row first when it collides", () => {
+  const plan: ParaPlan = {
+    buckets: [
+      {
+        bucket: "projects",
+        existing: { id: "f-projects", name: "Projects" },
+        status: "collision",
+      },
+      { bucket: "areas", status: "vacant" },
+      { bucket: "resources", status: "vacant" },
+      { bucket: "archives", status: "vacant" },
+    ],
+    space: {
+      existing: { id: "f-root", name: "個人" },
+      name: "個人",
+      status: "collision",
+    },
+  };
+  assert.equal(paraPlanHasConflicts(plan), true);
+  const items = initParaConflicts(plan);
+  assert.equal(items.length, 2);
+  assert.equal(items[0]?.key, "space");
+  assert.equal(items[0]?.kind, "space");
+  assert.equal(items[0]?.defaultName, "個人");
+  assert.equal(items[0]?.existingId, "f-root");
+
+  const resolutions = paraConflictResolutions(
+    setParaConflictChoice(items, "space", "adopt"),
+  );
+  assert.deepEqual(resolutions.space, {
+    action: "adopt",
+    folderId: "f-root",
+  });
+});
+
+test("paraPlanHasConflicts is false for a settled plan", () => {
+  assert.equal(paraPlanHasConflicts(collidingPlan), true);
+  assert.equal(
+    paraPlanHasConflicts(
+      planWith([{ bucket: "projects", status: "assigned" }]),
+    ),
+    false,
+  );
 });
 
 test("paraConflictsReady requires a non-empty rename target", () => {

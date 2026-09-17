@@ -4,21 +4,24 @@ import {
   type ParaBucketResolution,
   type ParaPlan,
   type ParaPlanBucket,
+  type ParaResolutionKey,
 } from "@miyulabmd/shared";
 
 /**
- * §2.4 競合モーダルの純粋な状態遷移。衝突バケツごとに
- * rename（既存を改名してバケツ新設）/ adopt（既存をバケツ化）/ skip を選ぶ。
- * キャンセルは副作用なし（呼び出し側が閉じるだけ）。
+ * §2.4/§2.5 競合モーダルの純粋な状態遷移。衝突項目（スペースルート +
+ * バケツ）ごとに rename（既存を改名して新設）/ adopt（既存を割当）/ skip
+ * を選ぶ。キャンセルは副作用なし（呼び出し側が閉じるだけ）。
  */
 
 export type ParaResolutionChoice = "rename" | "adopt" | "skip";
 
 export type ParaConflictItem = {
-  bucket: ParaBucketKey;
-  /** Default folder name the bucket wants (e.g. "Projects"). */
+  /** "space" = the space root row; otherwise a bucket key. */
+  key: ParaResolutionKey;
+  kind: "space" | "bucket";
+  /** Default folder name the entry wants (e.g. "Projects" or the space name). */
   defaultName: string;
-  /** The unassigned top-level folder currently occupying the default name. */
+  /** The unassigned folder currently occupying the default name. */
   existingId: string;
   existingName: string;
   choice: ParaResolutionChoice;
@@ -31,40 +34,60 @@ export function paraPlanConflicts(plan: ParaPlan): ParaPlanBucket[] {
   return plan.buckets.filter((bucket) => bucket.status === "collision");
 }
 
-/** Initial modal state: one row per collision, rename pre-selected. */
+/** Any unresolved row — space root or bucket — that needs the modal. */
+export function paraPlanHasConflicts(plan: ParaPlan): boolean {
+  return (
+    plan.space.status === "collision" || paraPlanConflicts(plan).length > 0
+  );
+}
+
+/** Initial modal state: space-root row first (if colliding), then buckets. */
 export function initParaConflicts(plan: ParaPlan): ParaConflictItem[] {
-  return paraPlanConflicts(plan).map((bucket) => {
+  const items: ParaConflictItem[] = [];
+  if (plan.space.status === "collision") {
+    const existingName = plan.space.existing?.name ?? "";
+    items.push({
+      choice: "rename",
+      defaultName: plan.space.name ?? existingName,
+      existingId: plan.space.existing?.id ?? "",
+      existingName,
+      key: "space",
+      kind: "space",
+      newName: existingName ? `${existingName} (old)` : "",
+    });
+  }
+  for (const bucket of paraPlanConflicts(plan)) {
     const existingName = bucket.existing?.name ?? "";
-    return {
-      bucket: bucket.bucket,
+    items.push({
       choice: "rename",
       defaultName:
         PARA_BUCKETS.find((def) => def.key === bucket.bucket)?.name ??
         bucket.bucket,
       existingId: bucket.existing?.id ?? "",
       existingName,
+      key: bucket.bucket,
+      kind: "bucket",
       newName: existingName ? `${existingName} (old)` : "",
-    };
-  });
+    });
+  }
+  return items;
 }
 
 export function setParaConflictChoice(
   items: ParaConflictItem[],
-  bucket: ParaBucketKey,
+  key: ParaResolutionKey,
   choice: ParaResolutionChoice,
 ): ParaConflictItem[] {
-  return items.map((item) =>
-    item.bucket === bucket ? { ...item, choice } : item,
-  );
+  return items.map((item) => (item.key === key ? { ...item, choice } : item));
 }
 
 export function setParaConflictNewName(
   items: ParaConflictItem[],
-  bucket: ParaBucketKey,
+  key: ParaResolutionKey,
   newName: string,
 ): ParaConflictItem[] {
   return items.map((item) =>
-    item.bucket === bucket ? { ...item, newName } : item,
+    item.key === key ? { ...item, newName } : item,
   );
 }
 
@@ -78,22 +101,22 @@ export function paraConflictsReady(items: ParaConflictItem[]): boolean {
 /** Build the `resolutions` map for POST /api/para/enable. */
 export function paraConflictResolutions(
   items: ParaConflictItem[],
-): Partial<Record<ParaBucketKey, ParaBucketResolution>> {
-  const out: Partial<Record<ParaBucketKey, ParaBucketResolution>> = {};
+): Partial<Record<ParaResolutionKey, ParaBucketResolution>> {
+  const out: Partial<Record<ParaResolutionKey, ParaBucketResolution>> = {};
   for (const item of items) {
     switch (item.choice) {
       case "rename":
-        out[item.bucket] = {
+        out[item.key] = {
           action: "rename",
           folderId: item.existingId,
           newName: item.newName.trim(),
         };
         break;
       case "adopt":
-        out[item.bucket] = { action: "adopt", folderId: item.existingId };
+        out[item.key] = { action: "adopt", folderId: item.existingId };
         break;
       case "skip":
-        out[item.bucket] = { action: "skip" };
+        out[item.key] = { action: "skip" };
         break;
     }
   }

@@ -22,6 +22,7 @@ const MIGRATIONS = [
   "0012_naming_schemes.sql",
   "0013_medallion_layers.sql",
   "0014_notes_fts.sql",
+  "0016_para_spaces.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
