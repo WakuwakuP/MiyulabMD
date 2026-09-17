@@ -582,6 +582,8 @@ export async function moveNotes(
 export async function fetchPara(
   options: {
     bucket?: ParaBucketKey;
+    /** §2.5: space name, id, or "default". Omit = all spaces. */
+    space?: string;
     signal?: AbortSignal;
     viewerId?: string | null;
   } = {},
@@ -589,6 +591,9 @@ export async function fetchPara(
   const params = new URLSearchParams();
   if (options.bucket) {
     params.set("bucket", options.bucket);
+  }
+  if (options.space) {
+    params.set("space", options.space);
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(
@@ -602,12 +607,20 @@ export async function fetchPara(
   return { data: (await res.json()) as ParaListResult, ok: true };
 }
 
-/** §2.4: side-effect-free PARA setup inspection (default space). */
+/** §2.4/§2.5: side-effect-free setup inspection of one PARA space. */
 export async function fetchParaPlan(
-  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+  options: {
+    /** Space name, id, or "default" (omit = default space). */
+    space?: string;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
 ): Promise<ApiResult<ParaPlan>> {
+  const suffix = options.space
+    ? `?space=${encodeURIComponent(options.space)}`
+    : "";
   const res = await fetch(
-    "/api/para/plan",
+    `/api/para/plan${suffix}`,
     { ...fetchOpts, signal: options.signal },
     options,
   );
@@ -651,6 +664,37 @@ export async function archiveParaProject(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as MoveFolderResult, ok: true };
+}
+
+/** §2.5: rename a PARA space (owner-unique name; the root folder is untouched). */
+export async function renameParaSpace(
+  spaceId: string,
+  name: string,
+): Promise<ApiResult<{ ok: true }>> {
+  const res = await fetch(`/api/para/spaces/${spaceId}`, {
+    ...fetchOpts,
+    body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: { ok: true }, ok: true };
+}
+
+/** §2.5: delete = unassign only. Bucket folders and the root folder remain. */
+export async function deleteParaSpace(
+  spaceId: string,
+): Promise<ApiResult<{ ok: true }>> {
+  const res = await fetch(`/api/para/spaces/${spaceId}`, {
+    ...fetchOpts,
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: { ok: true }, ok: true };
 }
 
 export type SchemeSuggestResponse = {

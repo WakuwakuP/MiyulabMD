@@ -1366,20 +1366,26 @@ export function createMcpServerFactory() {
     "para_list",
     {
       description:
-        "List the caller's PARA buckets (Projects/Areas/Resources/Archives). Buckets keep stable keys across renames. With bucket, also returns the direct children (e.g. active projects).",
+        "List the caller's PARA spaces with their buckets (Projects/Areas/Resources/Archives). Buckets keep stable keys across renames. With bucket, also returns the direct children (e.g. active projects).",
       inputSchema: {
         bucket: z
           .enum(["projects", "areas", "resources", "archives"])
           .optional()
           .describe("Return direct children of this bucket too"),
+        space: z
+          .string()
+          .optional()
+          .describe(
+            "PARA space name or id; 'default' = the rootless space. Omit = all spaces; bucket children resolve in the default space unless space is given.",
+          ),
       },
     },
-    async ({ bucket }) => {
+    async ({ bucket, space }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
       }
-      const result = await paraList(env, user, bucket);
+      const result = await paraList(env, user, bucket, space);
       if (result.kind === "denied") {
         return textError("Unauthorized");
       }

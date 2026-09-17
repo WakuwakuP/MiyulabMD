@@ -99,10 +99,18 @@ export type {
   ParaPlanBucket,
   ParaPlanExisting,
   ParaPlanStatus,
+  ParaResolutionKey,
   ParaSpacePlan,
   ParaSpaceRef,
+  ParaSpaceSelector,
+  ParaSpaceSummary,
 } from "./move.ts";
-export { isParaBucketKey, MOVE_MAX_ITEMS, PARA_BUCKETS } from "./move.ts";
+export {
+  DEFAULT_PARA_SPACE_NAME,
+  isParaBucketKey,
+  MOVE_MAX_ITEMS,
+  PARA_BUCKETS,
+} from "./move.ts";
 export type {
   AccessGrantInput,
   CreateNoteInput,
@@ -202,6 +210,7 @@ export {
   zettelStamp,
 } from "./schemes.ts";
 export type {
+  ParaFilterValue,
   SearchDslFilter,
   SearchDslOperator,
   SearchQuery,

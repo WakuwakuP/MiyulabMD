@@ -95,8 +95,23 @@ test("layerFilterValue validates against note layers", () => {
 });
 
 test("paraFilterValue validates against PARA bucket keys", () => {
-  assert.equal(paraFilterValue("Projects"), "projects");
+  assert.deepEqual(paraFilterValue("Projects"), { bucket: "projects" });
   assert.equal(paraFilterValue("random"), null);
+});
+
+test("paraFilterValue splits a space qualifier at the last dot", () => {
+  assert.deepEqual(paraFilterValue("work.projects"), {
+    bucket: "projects",
+    space: "work",
+  });
+  // Space names may contain dots — the bucket is always the last segment.
+  assert.deepEqual(paraFilterValue("my.work.Resources"), {
+    bucket: "resources",
+    space: "my.work",
+  });
+  // Dotted value without a valid bucket tail is not a para filter.
+  assert.equal(paraFilterValue("work.random"), null);
+  assert.equal(paraFilterValue(".projects"), null);
 });
 
 test("schemeFilterValue strips an explicit scheme prefix", () => {

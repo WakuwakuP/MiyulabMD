@@ -1,7 +1,7 @@
 import type {
-  ParaBucketKey,
   ParaBucketResolution,
   ParaPlan,
+  ParaResolutionKey,
 } from "@miyulabmd/shared";
 import { useEffect, useState } from "react";
 import {
@@ -9,7 +9,6 @@ import {
   type ParaConflictItem,
   paraConflictResolutions,
   paraConflictsReady,
-  paraPlanConflicts,
   setParaConflictChoice,
   setParaConflictNewName,
 } from "../../lib/para-conflict.ts";
@@ -24,9 +23,9 @@ type Props = {
   busy?: boolean;
   error?: string | null;
   onSubmit: (
-    resolutions: Partial<Record<ParaBucketKey, ParaBucketResolution>>,
+    resolutions: Partial<Record<ParaResolutionKey, ParaBucketResolution>>,
   ) => void;
-  /** Cancel = back to OFF; nothing is created or renamed. */
+  /** Cancel = back to OFF / no space created; nothing is created or renamed. */
   onClose: () => void;
 };
 
@@ -41,11 +40,14 @@ function ConflictRow({
   onChoice: (choice: ParaConflictItem["choice"]) => void;
   onNewName: (name: string) => void;
 }) {
-  const group = `para-conflict-${item.bucket}`;
+  const group = `para-conflict-${item.key}`;
+  const isSpace = item.kind === "space";
   return (
     <div className="mb-3">
       <div className="flex items-baseline gap-2">
-        <span className="font-semibold">{item.defaultName}</span>
+        <span className="font-semibold">
+          {isSpace ? `スペースルート「${item.defaultName}」` : item.defaultName}
+        </span>
         <span className="text-xs text-muted">
           既存フォルダ「{item.existingName}」と同名
         </span>
@@ -80,7 +82,9 @@ function ConflictRow({
             onChange={() => onChoice("adopt")}
             type="radio"
           />
-          既存「{item.existingName}」を {item.defaultName} バケツとして使う
+          {isSpace
+            ? `既存「${item.existingName}」をスペースルートとして使う`
+            : `既存「${item.existingName}」を ${item.defaultName} バケツとして使う`}
         </label>
         <label className="flex items-baseline gap-2">
           <input
@@ -90,7 +94,9 @@ function ConflictRow({
             onChange={() => onChoice("skip")}
             type="radio"
           />
-          {item.defaultName} バケツは作成しない
+          {isSpace
+            ? "このスペースは作成しない"
+            : `${item.defaultName} バケツは作成しない`}
         </label>
       </div>
     </div>
@@ -98,9 +104,10 @@ function ConflictRow({
 }
 
 /**
- * §2.4 conflict-resolution modal. Submit sends resolutions to
- * POST /api/para/enable; if the response still has `pending` buckets the
- * caller re-opens this modal with the refreshed plan (loop).
+ * §2.4/§2.5 conflict-resolution modal. Rows mix the space root (§2.5) with
+ * bucket collisions — the mechanism is identical (rename/adopt/skip →
+ * resolutions → POST /api/para/enable). If the response still has `pending`
+ * entries the caller re-opens this modal with the refreshed plan (loop).
  */
 export function ParaConflictModal({
   plan,
@@ -121,7 +128,7 @@ export function ParaConflictModal({
   const settled = plan.buckets.filter(
     (bucket) => bucket.status !== "collision",
   );
-  const collisions = paraPlanConflicts(plan);
+  const spaceSettled = plan.space.name && plan.space.status !== "collision";
 
   function close() {
     if (!busy) {
@@ -151,6 +158,12 @@ export function ParaConflictModal({
         既存のフォルダと名前が重複しています。各項目の対処を選んでください。
       </MutedText>
 
+      {spaceSettled && (
+        <p className="m-0 text-[0.8rem] text-muted">
+          ✓ スペース「{plan.space.name}」 —{" "}
+          {plan.space.status === "exists" ? "既存" : "ルートを新規作成できます"}
+        </p>
+      )}
       {settled.map((bucket) => (
         <p className="m-0 text-[0.8rem] text-muted" key={bucket.bucket}>
           ✓ {bucket.existing?.name ?? bucket.bucket} —{" "}
@@ -158,22 +171,19 @@ export function ParaConflictModal({
         </p>
       ))}
 
-      {collisions.map((bucket) => {
-        const item = items.find((entry) => entry.bucket === bucket.bucket);
-        return item ? (
-          <ConflictRow
-            busy={busy}
-            item={item}
-            key={item.bucket}
-            onChoice={(choice) =>
-              setItems(setParaConflictChoice(items, item.bucket, choice))
-            }
-            onNewName={(name) =>
-              setItems(setParaConflictNewName(items, item.bucket, name))
-            }
-          />
-        ) : null;
-      })}
+      {items.map((item) => (
+        <ConflictRow
+          busy={busy}
+          item={item}
+          key={item.key}
+          onChoice={(choice) =>
+            setItems(setParaConflictChoice(items, item.key, choice))
+          }
+          onNewName={(name) =>
+            setItems(setParaConflictNewName(items, item.key, name))
+          }
+        />
+      ))}
 
       {error && <ErrorText>{error}</ErrorText>}
       <ModalFooter>

@@ -42,19 +42,36 @@ CREATE TABLE folders (
   owner_id TEXT NOT NULL,
   folder TEXT NOT NULL,
   para_bucket TEXT,
+  para_space_id TEXT,
   scheme TEXT,
   scheme_id TEXT,
   scheme_title TEXT,
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE para_spaces (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  root_folder_id TEXT,
+  created_at INTEGER NOT NULL
+);
+
 CREATE UNIQUE INDEX folders_owner_folder_idx ON folders (owner_id, folder);
+-- Bucket uniqueness is per space; NULL para_space_id = default space.
 CREATE UNIQUE INDEX folders_owner_para_bucket_idx
-  ON folders (owner_id, para_bucket)
+  ON folders (owner_id, COALESCE(para_space_id, ''), para_bucket)
   WHERE para_bucket IS NOT NULL;
 CREATE UNIQUE INDEX folders_owner_scheme_id_idx
   ON folders (owner_id, scheme_id)
   WHERE scheme_id IS NOT NULL;
+CREATE UNIQUE INDEX para_spaces_owner_name_idx ON para_spaces (owner_id, name);
+CREATE UNIQUE INDEX para_spaces_root_folder_idx
+  ON para_spaces (root_folder_id)
+  WHERE root_folder_id IS NOT NULL;
+CREATE UNIQUE INDEX para_spaces_owner_rootless_idx
+  ON para_spaces (owner_id)
+  WHERE root_folder_id IS NULL;
 
 CREATE TABLE id_counters (
   owner_id TEXT NOT NULL,

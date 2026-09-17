@@ -2,7 +2,7 @@ import type {
   FolderAccess,
   FolderRecord,
   NoteSummary,
-  ParaBucket,
+  ParaSpaceSummary,
   SchemeSuggestion,
 } from "@miyulabmd/shared";
 import {
@@ -58,7 +58,7 @@ import {
   headerFolderFor,
   homeListFlags,
   inheritLabelFor,
-  loadParaBuckets,
+  loadParaSpaces,
   type MenuState,
   openFolderShare,
   openNoteShare,
@@ -285,7 +285,7 @@ function HomePageDialogs({
 }
 
 const EMPTY_CHILDREN: FolderRecord[] = [];
-const EMPTY_PARA: ParaBucket[] = [];
+const EMPTY_PARA: ParaSpaceSummary[] = [];
 
 function HomePageView({
   user,
@@ -300,7 +300,7 @@ function HomePageView({
   menu,
   onItemMenu,
   onMove,
-  paraBuckets,
+  paraSpaces,
   dialogs,
 }: {
   user: AppShellContext["user"];
@@ -317,7 +317,7 @@ function HomePageView({
   onMove:
     | ((source: TreeDragItem, destFolderId: string | null) => void)
     | undefined;
-  paraBuckets: ParaBucket[];
+  paraSpaces: ParaSpaceSummary[];
   dialogs: ReactNode;
 }) {
   const showGuestTitle = !(user || folderId || userLoading);
@@ -355,7 +355,7 @@ function HomePageView({
           onItemMenu={onItemMenu}
           onMove={onMove}
           openMenuId={menu?.id}
-          paraBuckets={paraBuckets}
+          paraSpaces={paraSpaces}
           parentId={visibleFolder?.parentId ?? null}
           pending={flags.listPending}
           placeholder={flags.showPlaceholder}
@@ -411,7 +411,7 @@ function NetworkHomePage() {
   const [folderRenameError, setFolderRenameError] = useState<string | null>(
     null,
   );
-  const [paraBuckets, setParaBuckets] = useState<ParaBucket[]>([]);
+  const [paraSpaces, setParaSpaces] = useState<ParaSpaceSummary[]>([]);
   const [schemeDialog, setSchemeDialog] = useState<{
     id: string;
     name: string;
@@ -432,12 +432,20 @@ function NetworkHomePage() {
   });
   const headerFolder = headerFolderFor(visibleFolder, folderId);
   const shareLink = shareLinkFor(share);
-  const paraProjectsPath =
-    paraBuckets.find((bucket) => bucket.key === "projects")?.path ?? null;
+  // §2.5: the archive menu applies inside any space's Projects bucket.
+  const paraProjectsPaths = useMemo(
+    () =>
+      paraSpaces.flatMap((space) =>
+        space.buckets
+          .filter((bucket) => bucket.key === "projects")
+          .map((bucket) => bucket.path),
+      ),
+    [paraSpaces],
+  );
 
   const reloadPara = useCallback(() => {
-    void loadParaBuckets(user, paraEnabled)
-      .then(setParaBuckets)
+    void loadParaSpaces(user, paraEnabled)
+      .then(setParaSpaces)
       .catch(() => {
         // PARA section is optional chrome; ignore transient failures.
       });
@@ -448,7 +456,7 @@ function NetworkHomePage() {
       reloadPara();
       return;
     }
-    setParaBuckets([]);
+    setParaSpaces([]);
   }, [user, paraEnabled, reloadPara]);
 
   // 作成ダイアログを開いたら親フォルダの命名規則から「次の番号」ヒントを引く。
@@ -851,13 +859,13 @@ function NetworkHomePage() {
               setSchemeError(null);
             },
             // The archive menu item only exists while PARA is enabled —
-            // a null projectsPath keeps it out of folderMenuItems.
-            projectsPath: paraEnabled ? paraProjectsPath : null,
+            // an empty projectsPaths keeps it out of folderMenuItems.
+            projectsPaths: paraEnabled ? paraProjectsPaths : [],
           },
         );
       }}
       onMove={flags.canAdmin ? onTreeMove : undefined}
-      paraBuckets={paraEnabled && flags.isDriveRoot ? paraBuckets : EMPTY_PARA}
+      paraSpaces={paraEnabled && flags.isDriveRoot ? paraSpaces : EMPTY_PARA}
       publicFolders={publicFolders}
       user={user}
       userLoading={userLoading}
