@@ -412,6 +412,10 @@ export const noteRoutes = new Elysia({ prefix: "/api/notes" })
       actorFromSessionUser(user ?? null),
     );
     if (!applied.ok) {
+      if (applied.error === "locked") {
+        set.status = 403;
+        return { error: "gold_locked" };
+      }
       set.status = 409;
       return {
         error:

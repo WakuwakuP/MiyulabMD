@@ -68,6 +68,39 @@ test("concurrent locked() calls share a single read", async () => {
   assert.equal(state.reads, 1);
 });
 
+test("a slower in-flight read cannot overwrite a fresher lockedNow() verdict", async () => {
+  // Each readRow captures the row at call time (like a D1 snapshot) but
+  // resolves only when released.
+  const rows: (GoldLockRow | null)[] = [
+    { gold_unlocked_until: null, layer: "gold" },
+    { gold_unlocked_until: 61_000, layer: "gold" },
+  ];
+  const releases: Array<() => void> = [];
+  let calls = 0;
+  const lock = new GoldLockRecheck(
+    () => {
+      const row = rows[calls++] ?? null;
+      return new Promise<GoldLockRow | null>((resolve) => {
+        releases.push(() => resolve(row));
+      });
+    },
+    5_000,
+    () => 1_000,
+  );
+
+  const slow = lock.locked();
+  const fresh = lock.lockedNow();
+  // The newer read resolves first and caches the unlocked verdict.
+  releases[1]?.();
+  assert.equal(await fresh, false);
+  // The stale read resolves late: its verdict still reaches its own caller,
+  // but must not be published into the throttle cache.
+  releases[0]?.();
+  assert.equal(await slow, true);
+  assert.equal(await lock.locked(), false);
+  assert.equal(calls, 2);
+});
+
 test("read failure fails open and is not cached", async () => {
   let fail = true;
   let reads = 0;

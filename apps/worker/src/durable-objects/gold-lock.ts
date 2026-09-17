@@ -31,6 +31,7 @@ export class GoldLockRecheck {
   private readonly now: () => number;
   private cached: { locked: boolean; checkedAt: number } | null = null;
   private inflight: Promise<boolean> | null = null;
+  private refreshSeq = 0;
 
   constructor(
     readRow: () => Promise<GoldLockRow | null>,
@@ -53,7 +54,14 @@ export class GoldLockRecheck {
       return Promise.resolve(this.cached.locked);
     }
     if (!this.inflight) {
-      this.inflight = this.refresh();
+      const task = this.refresh().finally(() => {
+        // Only the tracked task clears itself; a detached lockedNow()
+        // refresh must not unlock this slot early or late.
+        if (this.inflight === task) {
+          this.inflight = null;
+        }
+      });
+      this.inflight = task;
     }
     return this.inflight;
   }
@@ -68,6 +76,7 @@ export class GoldLockRecheck {
   }
 
   private async refresh(): Promise<boolean> {
+    const seq = ++this.refreshSeq;
     try {
       const row = await this.readRow();
       const locked = isGoldLockedAt(
@@ -75,13 +84,15 @@ export class GoldLockRecheck {
         row?.gold_unlocked_until,
         this.now(),
       );
-      this.cached = { checkedAt: this.now(), locked };
+      // Only the newest refresh may publish: a slower in-flight read must
+      // not overwrite a fresher lockedNow() verdict with its stale row.
+      if (seq === this.refreshSeq) {
+        this.cached = { checkedAt: this.now(), locked };
+      }
       return locked;
     } catch {
       // Fail open — persistMarkdownSnapshot is the authoritative gate.
       return false;
-    } finally {
-      this.inflight = null;
     }
   }
 }

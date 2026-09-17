@@ -147,8 +147,13 @@ test("persistMarkdownSnapshot writes for a non-gold note", async () => {
   const { env, owner, sqlite } = await createEnv();
   const created = await createNote(env, owner);
 
-  await persistMarkdownSnapshot(env, created.id, "# 新タイトル\n\n変更。");
+  const result = await persistMarkdownSnapshot(
+    env,
+    created.id,
+    "# 新タイトル\n\n変更。",
+  );
 
+  assert.equal(result, "persisted");
   const row = snapshotRow(sqlite, created.id);
   assert.equal(row.markdown_snapshot, "# 新タイトル\n\n変更。");
   assert.equal(row.title, "新タイトル");
@@ -161,9 +166,16 @@ test("persistMarkdownSnapshot skips the write while the note is gold-locked", as
   assert.equal(gold.kind, "ok");
 
   // Live session was connected before the promote: the durable boundary
-  // must refuse the snapshot write even though the DO accepted the edit.
-  await persistMarkdownSnapshot(env, created.id, "# 書き換え\n\ngold 越し。");
+  // must refuse the snapshot write even though the DO accepted the edit,
+  // and the skip must be visible so the outbox drops the pending snapshot
+  // instead of reporting a saved snapshot.
+  const result = await persistMarkdownSnapshot(
+    env,
+    created.id,
+    "# 書き換え\n\ngold 越し。",
+  );
 
+  assert.equal(result, "rejected");
   const row = snapshotRow(sqlite, created.id);
   assert.equal(row.markdown_snapshot, "# 元タイトル\n\n本文。");
   assert.equal(row.title, "元タイトル");

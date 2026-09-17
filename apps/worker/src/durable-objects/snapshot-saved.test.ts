@@ -10,7 +10,10 @@ test("only completed D1 writes notify current subscribers, including the editor"
   const frames: Uint8Array[] = [];
   let subscribers: { send(frame: Uint8Array): void }[] = [];
   const saved = writeSnapshotAndNotify(
-    () => write,
+    async () => {
+      await write;
+      return "persisted" as const;
+    },
     "room",
     () => subscribers,
   );
@@ -51,5 +54,22 @@ test("a failed/uncommitted D1 write never emits a saved notification", async () 
     ),
     /D1 failed/,
   );
+  assert.equal(sent, 0);
+});
+
+test("a rejected write (gold lock) resolves without notifying subscribers", async () => {
+  let sent = 0;
+  const result = await writeSnapshotAndNotify(
+    () => Promise.resolve("rejected" as const),
+    "room",
+    () => [
+      {
+        send() {
+          sent++;
+        },
+      },
+    ],
+  );
+  assert.equal(result, "rejected");
   assert.equal(sent, 0);
 });

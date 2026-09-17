@@ -52,6 +52,8 @@ export type {
   PromoteGateFailure,
 } from "./layers.ts";
 export {
+  GOLD_LOCK_WS_CLOSE_CODE,
+  GOLD_LOCK_WS_CLOSE_REASON,
   GOLD_UNLOCK_DEFAULT_MINUTES,
   GOLD_UNLOCK_MAX_MINUTES,
   isGoldLockedAt,

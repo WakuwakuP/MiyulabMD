@@ -33,6 +33,7 @@ import {
 
 import { db } from "../db/client.ts";
 import { upsertUserByEmail } from "../db/users.ts";
+import type { SnapshotWriteResult } from "../durable-objects/snapshot-saved.ts";
 import { instanceFlags } from "../env.ts";
 import {
   canDiscoverAccess,
@@ -189,18 +190,25 @@ async function generateUniqueShortId(env: Env): Promise<string> {
   throw new Error("failed to generate unique short_id");
 }
 
-/** DocumentRoom から D1 へ markdown_snapshot をデバウンス書き込みする。 */
+/**
+ * DocumentRoom から D1 へ markdown_snapshot をデバウンス書き込みする。
+ * "rejected" は確定的な拒否（gold ロック・ノート削除済み）を意味し、
+ * outbox は pending を捨ててリトライも保存通知もしない。
+ */
 export async function persistMarkdownSnapshot(
   env: Env,
   noteId: string,
   markdown: string,
-): Promise<void> {
+): Promise<SnapshotWriteResult> {
   const before = await findNoteRow(env, noteId);
+  if (!before) {
+    return "rejected";
+  }
   // Durable boundary for the gold edit lock: X-Can-Edit is frozen at WS
   // connect time, so a note promoted to gold (or whose unlock expired)
   // must not accept snapshot writes from an already-connected session.
-  if (isGoldLockedAt(before?.layer, before?.gold_unlocked_until)) {
-    return;
+  if (isGoldLockedAt(before.layer, before.gold_unlocked_until)) {
+    return "rejected";
   }
   const now = Date.now();
   const title = titleFromMarkdown(markdown);
@@ -212,8 +220,9 @@ export async function persistMarkdownSnapshot(
     .run();
   const after = await findNoteRow(env, noteId);
   if (after) {
-    await syncNoteLinks(env, after, before ?? undefined);
+    await syncNoteLinks(env, after, before);
   }
+  return "persisted";
 }
 
 /**

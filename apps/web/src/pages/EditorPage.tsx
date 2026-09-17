@@ -757,6 +757,13 @@ export function EditorPage() {
     bindEditorCollab({
       hydrated: hydratedRef.current,
       noteId: canEdit ? noteId : undefined,
+      onGoldLocked: () => {
+        // The server closed the writable session: reflect the lock so the
+        // body flips to read-only and the gold-lock banner appears.
+        setNote((current) =>
+          current ? { ...current, goldLocked: true } : current,
+        );
+      },
       sessionRef,
       setCollab,
       setCollabReady,

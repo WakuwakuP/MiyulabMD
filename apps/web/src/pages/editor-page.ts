@@ -1,4 +1,8 @@
-import type { Note, SessionUser } from "@miyulabmd/shared";
+import {
+  GOLD_LOCK_WS_CLOSE_CODE,
+  type Note,
+  type SessionUser,
+} from "@miyulabmd/shared";
 import type { MutableRefObject } from "react";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import {
@@ -181,6 +185,8 @@ export function bindEditorCollab(input: {
   setCollabReady: (ready: boolean) => void;
   setMarkdown: (markdown: string) => void;
   setCollabWritable: (writable: boolean) => void;
+  /** Server revoked edit access mid-session (gold lock engaged). */
+  onGoldLocked?: () => void;
 }) {
   if (!(input.noteId && input.hydrated) || input.userLoading) {
     return;
@@ -210,9 +216,17 @@ export function bindEditorCollab(input: {
   const onStatus = () => {
     input.setCollabWritable(editorSessionWritable(session));
   };
+  const onClosed = (event: { code: number; reason: string }) => {
+    // A 4400-4499 close is terminal: the server will not accept writes on a
+    // reconnection either, so flip the note into its locked read-only state.
+    if (event.code === GOLD_LOCK_WS_CLOSE_CODE) {
+      input.onGoldLocked?.();
+    }
+  };
 
   session.provider.on("sync", onSynced);
   session.provider.on("status", onStatus);
+  session.provider.on("closed", onClosed);
   if (session.provider.synced) {
     onSynced(true);
   }
@@ -224,6 +238,7 @@ export function bindEditorCollab(input: {
   input.unbindRef.current = () => {
     session.provider.off("sync", onSynced);
     session.provider.off("status", onStatus);
+    session.provider.off("closed", onClosed);
     session.yMarkdown.unobserve(onMarkdownChange);
   };
 }

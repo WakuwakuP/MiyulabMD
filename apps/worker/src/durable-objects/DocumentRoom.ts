@@ -1,6 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import type { TaskCheckboxUpdate } from "@miyulabmd/markdown";
-import type { NoteHistoryActor } from "@miyulabmd/shared";
+import {
+  GOLD_LOCK_WS_CLOSE_CODE,
+  GOLD_LOCK_WS_CLOSE_REASON,
+  type NoteHistoryActor,
+} from "@miyulabmd/shared";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
 import * as awarenessProtocol from "y-protocols/awareness";
@@ -112,6 +116,11 @@ export type ApplyEditResult =
 const GOLD_LOCKED_MESSAGE =
   "gold_locked: this note is in the gold layer. Call unlock_gold_for_edit first.";
 
+export type TaskCheckboxResult =
+  | { checked: boolean; ok: true }
+  | { error: "conflict"; ok: false }
+  | { error: "locked"; message: string; ok: false };
+
 /**
  * ノート 1 件につき 1 Durable Object。
  * Yjs 同期・awareness・SQLite 永続化・MCP からの差分編集を担う。
@@ -127,11 +136,14 @@ export class DocumentRoom extends DurableObject<Env> {
       if (!noteId) {
         throw new Error("Cannot persist snapshot without note ID");
       }
-      await writeSnapshotAndNotify(
+      const result = await writeSnapshotAndNotify(
         () => persistMarkdownSnapshot(this.env, noteId, markdown),
         noteId,
         () => this.ctx.getWebSockets(),
       );
+      if (result === "rejected") {
+        console.warn(`markdown snapshot rejected for note ${noteId}`);
+      }
     },
   );
   // X-Can-Edit is fixed at connect time; this re-checks the gold edit
@@ -221,8 +233,17 @@ export class DocumentRoom extends DurableObject<Env> {
         const isWrite =
           syncMessageType === syncProtocol.messageYjsSyncStep2 ||
           syncMessageType === syncProtocol.messageYjsUpdate;
-        if (isWrite && (!canEdit || (await this.goldLock.locked()))) {
-          break;
+        if (isWrite) {
+          if (!canEdit) {
+            break;
+          }
+          if (await this.goldLock.locked()) {
+            // X-Can-Edit is frozen at connect time, so the client still
+            // believes it can edit. Close writable sockets with a permanent
+            // app-level code instead of silently dropping the update.
+            this.closeLockedWriters();
+            break;
+          }
         }
 
         const encoder = encoding.createEncoder();
@@ -307,6 +328,28 @@ export class DocumentRoom extends DurableObject<Env> {
     // 接続エラーは webSocketClose で後処理する。
   }
 
+  /**
+   * The gold lock engaged mid-session. Every socket accepted with
+   * X-Can-Edit=true is revoked and closed with a permanent code so clients
+   * flip to read-only; read-only sockets keep syncing/awareness.
+   */
+  private closeLockedWriters(): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        const attachment =
+          socket.deserializeAttachment() as WsAttachment | null;
+        if (!attachment?.canEdit) {
+          continue;
+        }
+        attachment.canEdit = false;
+        socket.serializeAttachment(attachment);
+        socket.close(GOLD_LOCK_WS_CLOSE_CODE, GOLD_LOCK_WS_CLOSE_REASON);
+      } catch {
+        // A socket already tearing down needs no revocation.
+      }
+    }
+  }
+
   async applyMarkdown(markdown: string, noteId?: string): Promise<void> {
     await this.ensureInitialized(noteId);
     const ytext = this.requireDoc().getText("markdown");
@@ -323,15 +366,15 @@ export class DocumentRoom extends DurableObject<Env> {
     noteId: string,
     input: TaskCheckboxUpdate,
     actor: NoteHistoryActor,
-  ) {
+  ): Promise<TaskCheckboxResult> {
     await this.ensureInitialized(noteId);
     if (await this.goldLock.lockedNow()) {
-      return { ok: false as const };
+      return { error: "locked", message: GOLD_LOCKED_MESSAGE, ok: false };
     }
     const doc = this.requireDoc();
     const result = await applyTaskCheckbox(doc.getText("markdown"), input);
     if (!result.ok) {
-      return result;
+      return { error: "conflict", ok: false };
     }
     const markdown = doc.getText("markdown").toString();
     // Acknowledge only after durable storage; the normal Yjs update broadcasts to editors.

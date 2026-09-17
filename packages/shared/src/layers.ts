@@ -48,6 +48,14 @@ export function isGoldLockedAt(
   return goldUnlockedUntil == null || goldUnlockedUntil <= now;
 }
 
+/**
+ * WebSocket close code DocumentRoom uses when the gold lock engages
+ * mid-session. The 4400-4499 range is the app-level "permanent" convention:
+ * clients must treat the note as read-only instead of retrying the write.
+ */
+export const GOLD_LOCK_WS_CLOSE_CODE = 4403;
+export const GOLD_LOCK_WS_CLOSE_REASON = "gold_locked";
+
 // --- promote gates ----------------------------------------------------------
 
 export const PROMOTE_GATE_CODES = [
