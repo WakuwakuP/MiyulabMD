@@ -537,11 +537,14 @@ function NetworkHomePage() {
     setFolderPending(true);
     ++reloadOwnerRef.current;
     // A mid-read invalidation aborts once; the next read captures a fresh
-    // scope. The retry is bounded to a single automatic reload.
+    // scope. The flag is consumed by whichever run follows, so a failed retry
+    // or a folder/viewer change cannot leave stale state behind.
+    const isInvalidationRetry = invalidationRetryRef.current;
+    invalidationRetryRef.current = false;
     const shouldRetryInvalidation = (error: unknown): boolean =>
       error instanceof DOMException &&
       error.name === "AbortError" &&
-      !invalidationRetryRef.current;
+      !isInvalidationRetry;
     const showReadError = (error: unknown): void => {
       setFolderPending(false);
       notesRef.current = [];
@@ -572,7 +575,6 @@ function NetworkHomePage() {
         }
         notesRef.current = snapshot.notes;
         visibleFolderRef.current = snapshot.visibleFolder;
-        invalidationRetryRef.current = false;
         setNotes(snapshot.notes);
         setVisibleFolder(snapshot.visibleFolder);
         setPublicFolders(snapshot.publicFolders);
