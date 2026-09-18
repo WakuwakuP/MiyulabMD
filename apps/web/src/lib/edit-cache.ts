@@ -299,9 +299,17 @@ export function trackUnsentEdits(input: {
   doc: Pick<Y.Doc, "on" | "off">;
   provider: SyncProviderLike;
   persistence?: unknown;
+  /** persistence が遅延アタッチされる場合の動的 origin 判定。 */
+  isPersistenceOrigin?: (origin: unknown) => boolean;
 }): () => void {
   const onUpdate = (_update: Uint8Array, origin: unknown) => {
-    if (origin === input.provider || origin === input.persistence) {
+    if (origin === input.provider) {
+      return;
+    }
+    if (input.persistence !== undefined && origin === input.persistence) {
+      return;
+    }
+    if (input.isPersistenceOrigin?.(origin) === true) {
       return;
     }
     if (!input.provider.synced) {

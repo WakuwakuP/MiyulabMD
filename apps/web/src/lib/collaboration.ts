@@ -10,6 +10,7 @@ import * as Y from "yjs";
 import { notifyDriveChanged } from "./drive-changed.ts";
 import {
   attachEditCache,
+  hasSyncedOnce,
   hasUnsentEdits,
   isEditCacheEligible,
   markYjsSynced,
@@ -29,7 +30,8 @@ export type AwarenessUserState = {
 
 /** 編集キャッシュ（y-indexeddb）が接続されたセッションの露出部。 */
 export type EditCacheSession = {
-  persistence: IndexeddbPersistence;
+  /** 未同期ノートでは provider の初回 sync まで null のまま遅延アタッチされる。 */
+  readonly persistence: IndexeddbPersistence | null;
   /** 未送信のローカル編集が残っているか（バッジ表示用）。 */
   hasUnsentEdits: () => boolean;
   subscribeUnsent: (listener: () => void) => () => void;
@@ -150,29 +152,44 @@ export function createYjsSession(
   // 資格は直近メタデータで判定し、stale は許容する（再接続時の Yjs マージが吸収）。
   const userId = user?.id ?? null;
   let editCacheSession: EditCacheSession | null = null;
+  let editCachePersistence: IndexeddbPersistence | null = null;
   let disposeUnsentTracking: (() => void) | null = null;
   let onSyncMark: ((synced: boolean) => void) | null = null;
   const note = editCache?.note ?? null;
   if (note && userId && isEditCacheEligible(note, userId)) {
-    const persistence = attachEditCache(doc, noteId, userId);
-    disposeUnsentTracking = trackUnsentEdits({
-      doc,
-      noteId,
-      persistence,
-      provider,
-    });
+    // 永続化は「オンラインで1回同期済み」のノートに限る。未同期ノートは
+    // provider の初回 sync でサーバー履歴が揃ってから遅延アタッチする。
+    const attach = () => {
+      if (editCachePersistence === null) {
+        editCachePersistence = attachEditCache(doc, noteId, userId);
+      }
+    };
+    if (hasSyncedOnce(userId, noteId)) {
+      attach();
+    }
     onSyncMark = (synced) => {
       if (synced) {
         markYjsSynced(userId, noteId);
+        attach();
       }
     };
     provider.on("sync", onSyncMark);
     if (provider.synced) {
       markYjsSynced(userId, noteId);
+      attach();
     }
+    disposeUnsentTracking = trackUnsentEdits({
+      doc,
+      isPersistenceOrigin: (origin) =>
+        origin !== null && origin === editCachePersistence,
+      noteId,
+      provider,
+    });
     editCacheSession = {
       hasUnsentEdits: () => hasUnsentEdits(noteId),
-      persistence,
+      get persistence() {
+        return editCachePersistence;
+      },
       subscribeUnsent: (listener: () => void) =>
         subscribeUnsentEdits(noteId, listener),
     };
@@ -188,6 +205,9 @@ export function createYjsSession(
         provider.off("sync", onSyncMark);
       }
       provider.destroy();
+      // persistence を先に閉じる: doc.destroy 後も update 由来の
+      // IndexedDB 書き込みが走らないようにする（purge 後の再作成防止）。
+      void editCachePersistence?.destroy();
       doc.destroy();
     },
     leave: () => {

@@ -296,12 +296,16 @@ export async function readHomeMetadata(
     }
   });
   // A folder denial committed while the network fetch is still pending
-  // invalidates this snapshot: a held response must not publish stale
-  // access. Once the fetches settle the read may still publish — the
-  // durable denial corrects the view through the page's subscription.
+  // invalidates this snapshot — but only when the denied folder is the
+  // one being read (denials of other folders must not cancel a healthy
+  // read; their rows are corrected through the page's subscription).
   // Clear events carry a null generation and never invalidate.
   const unsubscribeFolder = subscribeOfflineCacheFolderDenial((event) => {
-    if (event.userId === userId && event.resource.generation !== null) {
+    if (
+      event.userId === userId &&
+      event.resource.generation !== null &&
+      event.resource.aliases.includes(options.folderId ?? null)
+    ) {
       controller.abort(new DOMException("Home read invalidated", "AbortError"));
     }
   });
