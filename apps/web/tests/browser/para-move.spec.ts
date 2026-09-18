@@ -1,6 +1,7 @@
 import type {
   FolderAccess,
   NoteSummary,
+  ParaBucket,
   ParaListResult,
 } from "@miyulabmd/shared";
 import { expect, type Page, test } from "@playwright/test";
@@ -42,8 +43,7 @@ const looseNote: NoteSummary = {
   title: "loose note",
 };
 
-const paraList: ParaListResult = {
-  buckets: [
+const paraBuckets: ParaBucket[] = [
     {
       folderId: "f-projects",
       key: "projects",
@@ -71,6 +71,20 @@ const paraList: ParaListResult = {
       name: "Archives",
       noteCount: 0,
       path: "Archives",
+    },
+];
+
+// §2.5: /api/para returns spaces; buckets on the root for the default space.
+const paraList: ParaListResult = {
+  buckets: paraBuckets,
+  spaces: [
+    {
+      buckets: paraBuckets,
+      id: "default",
+      isDefault: true,
+      name: "Personal",
+      rootFolderId: null,
+      rootPath: "",
     },
   ],
 };

@@ -80,7 +80,7 @@ test("編集ロック中は preview 強制・ロック表示・解除で編集�
   // 「⋯ ノート」→「編集ロック」サブビューから解除。
   await page.getByRole("button", { name: "ノートメニュー" }).click();
   await page.getByRole("menuitem", { name: "編集ロック" }).click();
-  await expect(page.getByText("ロック中")).toBeVisible();
+  await expect(page.getByText("ロック中", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "ロックを解除" }).click();
 
   await expect(page.getByText("編集ロックされています")).toHaveCount(0);
