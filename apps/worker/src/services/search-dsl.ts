@@ -48,16 +48,19 @@ export type ResolvedSearchDsl = {
   empty: boolean;
 };
 
-async function folderPathForSchemeId(
+/** scheme_id は採番スコープ（ディレクトリ）単位で一意なので複数ヒットし得る。 */
+async function folderPathsForSchemeId(
   env: Env,
   ownerId: string,
   schemeId: string,
-): Promise<string | null> {
-  const row = await db(env)
-    .prepare("SELECT folder FROM folders WHERE owner_id = ? AND scheme_id = ?")
+): Promise<string[]> {
+  const rows = await db(env)
+    .prepare(
+      "SELECT folder FROM folders WHERE owner_id = ? AND scheme_id = ? ORDER BY folder",
+    )
     .bind(ownerId, schemeId)
-    .first<{ folder: string }>();
-  return row?.folder ?? null;
+    .all<{ folder: string }>();
+  return (rows.results ?? []).map((row) => row.folder);
 }
 
 /**
@@ -137,10 +140,10 @@ async function folderPathForFilter(
     return paths.length > 0 ? { kind: "folder-set", values: paths } : null;
   }
   const schemeId = schemeFilterValue(filter.value);
-  const path = schemeId
-    ? await folderPathForSchemeId(env, user.id, schemeId)
-    : null;
-  return path === null ? null : { kind: "folder", value: path };
+  const paths = schemeId
+    ? await folderPathsForSchemeId(env, user.id, schemeId)
+    : [];
+  return paths.length > 0 ? { kind: "folder-set", values: paths } : null;
 }
 
 /**

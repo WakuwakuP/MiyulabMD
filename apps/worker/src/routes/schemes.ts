@@ -6,6 +6,7 @@ import {
   createSchemeChild,
   jdAllocateId,
   jdListCategory,
+  listSchemeRoots,
   type SchemeError,
   schemeGet,
   suggestSchemeChild,
@@ -37,6 +38,14 @@ function schemeErrorResponse(
 }
 
 export const schemeRoutes = new Elysia({ prefix: "/api/schemes" })
+  .get("/", async ({ request, set }) => {
+    const user = await readSession(request, env);
+    const result = await listSchemeRoots(env, user ?? undefined);
+    if (result.kind !== "ok") {
+      return schemeErrorResponse(set, result);
+    }
+    return result.result;
+  })
   .get("/suggest", async ({ request, set }) => {
     const user = await readSession(request, env);
     const folderId = new URL(request.url).searchParams.get("folderId") ?? "";

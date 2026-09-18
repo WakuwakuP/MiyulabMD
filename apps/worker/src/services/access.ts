@@ -78,6 +78,7 @@ export type FolderRow = {
   scheme?: string | null;
   scheme_id?: string | null;
   scheme_title?: string | null;
+  scheme_root?: string | null;
 };
 
 function parseScope(value: string | null | undefined): AccessScope | null {
@@ -186,7 +187,7 @@ export async function buildAccessSnapshot(
     runChunked<FolderRow>((owners) =>
       db(env)
         .prepare(
-          `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at
+          `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at
            FROM folders WHERE owner_id IN (${inClause(owners)})`,
         )
         .bind(...owners)
@@ -598,7 +599,7 @@ export async function getFolderById(
   return (
     (await db(env)
       .prepare(
-        "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE id = ?",
+        "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at FROM folders WHERE id = ?",
       )
       .bind(id)
       .first<FolderRow>()) ?? null
@@ -613,7 +614,7 @@ export async function getFolderByPath(
   return (
     (await db(env)
       .prepare(
-        "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? AND folder = ?",
+        "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at FROM folders WHERE owner_id = ? AND folder = ?",
       )
       .bind(ownerId, folder)
       .first<FolderRow>()) ?? null
@@ -853,7 +854,7 @@ async function listVisibleChildren(
     : ((
         await db(env)
           .prepare(
-            "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+            "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
           )
           .bind(ownerId)
           .all<FolderRow>()
@@ -1155,7 +1156,7 @@ async function loadFolderEntryData(
       ? Promise.resolve(null)
       : db(env)
           .prepare(
-            "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+            "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
           )
           .bind(ownerId)
           .all<FolderRow>(),
@@ -1292,7 +1293,7 @@ export async function listOwnedFolders(
 ): Promise<FolderRecord[]> {
   const rows = await db(env)
     .prepare(
-      "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+      "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
     )
     .bind(ownerId)
     .all<FolderRow>();

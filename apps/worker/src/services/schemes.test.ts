@@ -11,6 +11,7 @@ import {
   folderIdForSchemeId,
   jdAllocateId,
   jdListCategory,
+  listSchemeRoots,
   schemeGet,
   schemeNoteTitlePrefix,
   setFolderScheme,
@@ -37,10 +38,14 @@ const MIGRATIONS = [
   "0015_user_settings.sql",
   "0016_para_spaces.sql",
   "0017_medallion_sets_edit_lock.sql",
+  "0018_scheme_root.sql",
 ];
 
-function applyMigrations(db: DatabaseSync): void {
-  for (const migration of MIGRATIONS) {
+function applyMigrations(
+  db: DatabaseSync,
+  list: readonly string[] = MIGRATIONS,
+): void {
+  for (const migration of list) {
     const sql = readFileSync(
       new URL(`../db/migrations/${migration}`, import.meta.url),
       "utf8",
@@ -259,13 +264,14 @@ test("カテゴリの ID 上限（.99）に達したらエラー", async () => {
   const { env, owner, sqlite } = await createEnv();
   const { category } = await buildJdPath(env, owner, sqlite);
   const categoryId = category.folder.id ?? "";
+  const rootId = rootIdOf(sqlite);
 
   // カウンタを上限直前に進める。
   sqlite
     .prepare(
       "INSERT INTO id_counters (owner_id, scope, next_value) VALUES (?, ?, ?)",
     )
-    .run(owner.id, "jd:id:10", 99);
+    .run(owner.id, `jd:id:${rootId}:10`, 99);
   const okAlloc = await jdAllocateId(env, categoryId, owner);
   assert.equal(okAlloc.kind, "ok");
   if (okAlloc.kind !== "ok") {
@@ -291,7 +297,7 @@ test("エリアは 10 件・カテゴリはエリアあたり 10 件で上限", 
     .prepare(
       "INSERT INTO id_counters (owner_id, scope, next_value) VALUES (?, ?, ?)",
     )
-    .run(owner.id, "jd:area", 9);
+    .run(owner.id, `jd:area:${rootId}`, 9);
   const last = await jdAllocateId(env, rootId, owner);
   assert.equal(last.kind, "ok");
   if (last.kind !== "ok") {
@@ -542,6 +548,289 @@ test("ノートの get/create は所属フォルダの scheme_id を返す", asy
     return;
   }
   assert.equal(plain.folderSchemeId, null);
+});
+
+test("JD は設定したディレクトリ単位で独立して採番される", async () => {
+  const { env, owner, sqlite } = await createEnv();
+  await ensureFolderRow(env, owner.id, "a");
+  await ensureFolderRow(env, owner.id, "b");
+  const aId = folderIdOf(sqlite, "a") ?? "";
+  const bId = folderIdOf(sqlite, "b") ?? "";
+  assert.equal((await setFolderScheme(env, aId, "jd", owner)).kind, "ok");
+  assert.equal((await setFolderScheme(env, bId, "jd", owner)).kind, "ok");
+
+  // 両ツリーとも最初のエリアは 10-19（グローバル連番にならない）。
+  const areaA = await createSchemeChild(env, aId, { title: "仕事" }, owner);
+  const areaB = await createSchemeChild(env, bId, { title: "私事" }, owner);
+  assert.equal(areaA.kind, "ok");
+  assert.equal(areaB.kind, "ok");
+  if (areaA.kind !== "ok" || areaB.kind !== "ok") {
+    return;
+  }
+  assert.equal(areaA.result.schemeId, "10-19");
+  assert.equal(areaB.result.schemeId, "10-19");
+  assert.equal(areaA.result.name, "10-19 仕事");
+  assert.equal(areaB.result.name, "10-19 私事");
+
+  // カテゴリもツリーごとに 10 から採番される。
+  const catA = await createSchemeChild(
+    env,
+    areaA.result.folder.id ?? "",
+    {},
+    owner,
+  );
+  const catB = await createSchemeChild(
+    env,
+    areaB.result.folder.id ?? "",
+    {},
+    owner,
+  );
+  assert.equal(catA.kind, "ok");
+  assert.equal(catB.kind, "ok");
+  if (catA.kind !== "ok" || catB.kind !== "ok") {
+    return;
+  }
+  assert.equal(catA.result.schemeId, "10");
+  assert.equal(catB.result.schemeId, "10");
+
+  // 同じ ID を別ツリーに作っても重複エラーにならない。
+  const idA = await createSchemeChild(
+    env,
+    catA.result.folder.id ?? "",
+    { schemeId: "10.42" },
+    owner,
+  );
+  const idB = await createSchemeChild(
+    env,
+    catB.result.folder.id ?? "",
+    { schemeId: "10.42" },
+    owner,
+  );
+  assert.equal(idA.kind, "ok");
+  assert.equal(idB.kind, "ok");
+
+  // 同一ツリー内での重複は従来通り 409。
+  const dup = await createSchemeChild(
+    env,
+    catA.result.folder.id ?? "",
+    { schemeId: "10.42" },
+    owner,
+  );
+  assert.equal(dup.kind, "invalid");
+
+  // 別ツリー同士の同一 ID は重複違反として報告しない。
+  const validation = await validateSchemeTree(env, owner);
+  assert.equal(validation.kind, "ok");
+  if (validation.kind !== "ok") {
+    return;
+  }
+  assert.equal(
+    validation.result.issues.filter((entry) => entry.code === "duplicate_id")
+      .length,
+    0,
+  );
+
+  // 裸の ID 解決は複数ヒットで 409 になる。
+  const resolved = await schemeGet(env, "10.42", owner);
+  assert.equal(resolved.kind, "invalid");
+});
+
+test("scheme_root 未設定の既存ノードは祖先の規則宣言フォルダをスコープにする", async () => {
+  const { env, owner, sqlite } = await createEnv();
+  await ensureFolderRow(env, owner.id, "legacy");
+  const legacyId = folderIdOf(sqlite, "legacy") ?? "";
+  await setFolderScheme(env, legacyId, "jd", owner);
+
+  // 旧形式（scheme_root なし）のエリア行を直接挿入。
+  sqlite
+    .prepare(
+      `INSERT INTO folders (id, owner_id, folder, scheme, scheme_id, scheme_title, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      "area-legacy",
+      owner.id,
+      "legacy/10-19 仕事",
+      "jd",
+      "10-19",
+      "仕事",
+      Date.now(),
+    );
+
+  const created = await createSchemeChild(env, "area-legacy", {}, owner);
+  assert.equal(created.kind, "ok");
+  if (created.kind !== "ok") {
+    return;
+  }
+  assert.equal(created.result.schemeId, "10");
+
+  // 採番された子にはスコープルートが記録される。
+  const row = sqlite
+    .prepare("SELECT scheme_root FROM folders WHERE id = ?")
+    .get(created.result.folder.id ?? "") as
+    | { scheme_root: string | null }
+    | undefined;
+  assert.equal(row?.scheme_root, legacyId);
+});
+
+test("0018 backfill: 既存の採番ノードに scheme_root が設定される", async (t) => {
+  const sqlite = new DatabaseSync(":memory:");
+  t.after(() => sqlite.close());
+  applyMigrations(
+    sqlite,
+    MIGRATIONS.slice(0, MIGRATIONS.indexOf("0018_scheme_root.sql")),
+  );
+
+  const env = {
+    ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com",
+    DB: new D1DatabaseAdapter(sqlite),
+    DEV_AUTH: "false",
+  } as unknown as Env;
+  const owner = await upsertUserByEmail(env, "owner@example.com", "Owner");
+
+  // 旧形式（scheme_root 列なし）の JD ツリーと zettel ツリーを構築。
+  // ensureFolderRow は新スキーマの列を読むため直接 INSERT する。
+  const rootId = "jd-root";
+  sqlite
+    .prepare(
+      "INSERT INTO folders (id, owner_id, folder, scheme, created_at) VALUES (?, ?, '', 'jd', ?)",
+    )
+    .run(rootId, owner.id, Date.now());
+  sqlite
+    .prepare(
+      "INSERT INTO folders (id, owner_id, folder, scheme, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run("inbox", owner.id, "inbox", "zettel", Date.now());
+  const insert = sqlite.prepare(
+    `INSERT INTO folders (id, owner_id, folder, scheme, scheme_id, scheme_title, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  insert.run("a1", owner.id, "10-19 仕事", "jd", "10-19", "仕事", Date.now());
+  insert.run(
+    "c1",
+    owner.id,
+    "10-19 仕事/10 経費",
+    "jd",
+    "10",
+    "経費",
+    Date.now(),
+  );
+  insert.run(
+    "i1",
+    owner.id,
+    "10-19 仕事/10 経費/10.11 領収書",
+    null,
+    "10.11",
+    "領収書",
+    Date.now(),
+  );
+  insert.run(
+    "z1",
+    owner.id,
+    "inbox/202609171230 メモ",
+    null,
+    "202609171230",
+    "メモ",
+    Date.now(),
+  );
+
+  sqlite.exec(
+    readFileSync(
+      new URL("../db/migrations/0018_scheme_root.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+
+  const roots = sqlite
+    .prepare(
+      "SELECT id, scheme_root FROM folders WHERE scheme_id IS NOT NULL ORDER BY id",
+    )
+    .all() as { id: string; scheme_root: string | null }[];
+  const byId = new Map(roots.map((row) => [row.id, row.scheme_root]));
+  assert.equal(byId.get("a1"), rootId);
+  assert.equal(byId.get("c1"), rootId);
+  assert.equal(byId.get("i1"), rootId);
+  assert.equal(byId.get("z1"), "inbox");
+
+  // 一意制約が (owner_id, scheme_root, scheme_id) になり、
+  // 別スコープでは同じ scheme_id を登録できる。
+  sqlite
+    .prepare(
+      `INSERT INTO folders (id, owner_id, folder, scheme, scheme_id, scheme_root, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      "a2",
+      owner.id,
+      "inbox/10-19 私事",
+      "jd",
+      "10-19",
+      "inbox",
+      Date.now(),
+    );
+  // 同一スコープ内の重複は従来通り失敗する。
+  assert.throws(() =>
+    sqlite
+      .prepare(
+        `INSERT INTO folders (id, owner_id, folder, scheme, scheme_id, scheme_root, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("a3", owner.id, "10-19 重複", "jd", "10-19", rootId, Date.now()),
+  );
+});
+
+test("listSchemeRoots は規則宣言フォルダと次番号・採番数を返す", async () => {
+  const { env, owner, sqlite } = await createEnv();
+  const rootId = rootIdOf(sqlite) ?? "";
+  await setFolderScheme(env, rootId, "jd", owner);
+  await ensureFolderRow(env, owner.id, "inbox");
+  const inboxId = folderIdOf(sqlite, "inbox") ?? "";
+  await setFolderScheme(env, inboxId, "zettel", owner);
+
+  // JD ルート配下にエリア→カテゴリ→ID を作成（これらはルートに出ない）。
+  const area = await createSchemeChild(env, rootId, { title: "仕事" }, owner);
+  assert.equal(area.kind, "ok");
+  if (area.kind !== "ok") {
+    return;
+  }
+  const category = await createSchemeChild(
+    env,
+    area.result.folder.id ?? "",
+    {},
+    owner,
+  );
+  assert.equal(category.kind, "ok");
+  if (category.kind !== "ok") {
+    return;
+  }
+  await createSchemeChild(env, category.result.folder.id ?? "", {}, owner);
+
+  const list = await listSchemeRoots(env, owner);
+  assert.equal(list.kind, "ok");
+  if (list.kind !== "ok") {
+    return;
+  }
+  const byFolder = new Map(
+    list.result.schemes.map((entry) => [entry.folder, entry]),
+  );
+  assert.equal(byFolder.size, 2);
+
+  const root = byFolder.get("");
+  assert.equal(root?.scheme, "jd");
+  assert.equal(root?.mintedCount, 3);
+  assert.equal(root?.next?.schemeId, "20-29");
+
+  const inbox = byFolder.get("inbox");
+  assert.equal(inbox?.scheme, "zettel");
+  assert.equal(inbox?.mintedCount, 0);
+  assert.match(inbox?.next?.schemeId ?? "", /^\d{12}$/);
+
+  // エリア/カテゴリなど採番コンテナはルートとして現れない。
+  assert.ok(!byFolder.has("10-19 仕事"));
+  assert.ok(!byFolder.has("10-19 仕事/10 無題"));
+
+  // 未認証は 401。
+  assert.equal((await listSchemeRoots(env, undefined)).kind, "denied");
 });
 
 test("他人のフォルダには規則を設定・採番できない", async () => {
