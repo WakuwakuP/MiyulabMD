@@ -135,6 +135,9 @@ type SnapshotGrantRow = GrantRow & {
   target_key: string;
 };
 
+/** D1 のバインド上限(100)を下回るオーナー単位のチャンク幅。 */
+const SNAPSHOT_OWNER_CHUNK = 50;
+
 export async function buildAccessSnapshot(
   env: Env,
   ownerIds: readonly string[],
@@ -149,35 +152,52 @@ export async function buildAccessSnapshot(
   if (unique.length === 0) {
     return snapshot;
   }
-  const placeholders = unique.map(() => "?").join(", ");
+  // D1 のバインド上限(100)を超えないようオーナーをチャンクに分けて取得する。
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += SNAPSHOT_OWNER_CHUNK) {
+    chunks.push(unique.slice(i, i + SNAPSHOT_OWNER_CHUNK));
+  }
+  const inClause = (owners: string[]) => owners.map(() => "?").join(", ");
+  const runChunked = async <T>(
+    query: (owners: string[]) => Promise<{ results: T[] }>,
+  ): Promise<T[]> => {
+    const results = await Promise.all(chunks.map((owners) => query(owners)));
+    return results.flatMap((result) => result.results ?? []);
+  };
   const [policyRows, grantRows, folderRows] = await Promise.all([
-    db(env)
-      .prepare(
-        `SELECT owner_id, folder, read_scope, write_scope
-         FROM folder_policies WHERE owner_id IN (${placeholders})`,
-      )
-      .bind(...unique)
-      .all<FolderPolicyRow>(),
-    db(env)
-      .prepare(
-        `SELECT owner_id, target_kind, target_key, email, user_id, can_write
-         FROM access_grants WHERE owner_id IN (${placeholders}) ORDER BY email`,
-      )
-      .bind(...unique)
-      .all<SnapshotGrantRow>(),
-    db(env)
-      .prepare(
-        `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at
-         FROM folders WHERE owner_id IN (${placeholders})`,
-      )
-      .bind(...unique)
-      .all<FolderRow>(),
+    runChunked<FolderPolicyRow>((owners) =>
+      db(env)
+        .prepare(
+          `SELECT owner_id, folder, read_scope, write_scope
+           FROM folder_policies WHERE owner_id IN (${inClause(owners)})`,
+        )
+        .bind(...owners)
+        .all<FolderPolicyRow>(),
+    ),
+    runChunked<SnapshotGrantRow>((owners) =>
+      db(env)
+        .prepare(
+          `SELECT owner_id, target_kind, target_key, email, user_id, can_write
+           FROM access_grants WHERE owner_id IN (${inClause(owners)}) ORDER BY email`,
+        )
+        .bind(...owners)
+        .all<SnapshotGrantRow>(),
+    ),
+    runChunked<FolderRow>((owners) =>
+      db(env)
+        .prepare(
+          `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at
+           FROM folders WHERE owner_id IN (${inClause(owners)})`,
+        )
+        .bind(...owners)
+        .all<FolderRow>(),
+    ),
   ]);
 
-  for (const row of policyRows.results ?? []) {
+  for (const row of policyRows) {
     indexPolicyRow(snapshot, row);
   }
-  for (const row of grantRows.results ?? []) {
+  for (const row of grantRows) {
     const list = snapshot.grants.get(row.owner_id);
     if (list) {
       list.push(row);
@@ -185,7 +205,7 @@ export async function buildAccessSnapshot(
       snapshot.grants.set(row.owner_id, [row]);
     }
   }
-  for (const row of folderRows.results ?? []) {
+  for (const row of folderRows) {
     indexFolderRow(snapshot, row);
   }
   return snapshot;

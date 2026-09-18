@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
+import { buildAccessSnapshot } from "./access.ts";
 import { createNoteService } from "./notes.ts";
 
 const MIGRATIONS = [
@@ -152,6 +153,29 @@ test("listForUser query count stays bounded as note count grows", async (t) => {
     `query count grew with notes: ${counts[0]} -> ${counts[1]}`,
   );
   assert.ok(counts[1] <= 20, `too many queries: ${counts[1]}`);
+});
+
+test("buildAccessSnapshot chunks owner ids beyond the D1 bind limit", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  const ownerIds: string[] = [owner.id];
+  // SNAPSHOT_OWNER_CHUNK(50) を超えるオーナー数で IN 句が分割されること。
+  for (let i = 0; i < 55; i += 1) {
+    const user = await upsertUserByEmail(env, `u${i}@example.com`, `u${i}`);
+    ownerIds.push(user.id);
+    await notes.create(user, {
+      folder: `f${i}`,
+      markdown: `# note-${i}`,
+      title: `note-${i}`,
+    });
+  }
+
+  const snapshot = await buildAccessSnapshot(env, ownerIds);
+  // ノート未作成の owner 以外の 55 オーナー分が取れていること。
+  assert.equal(snapshot.foldersByPath.size, 55);
+  assert.equal(snapshot.foldersByPath.get(ownerIds[5])?.has("f4"), true);
 });
 
 test("listForUser returns folder ids and schemes from snapshot path", async (t) => {
