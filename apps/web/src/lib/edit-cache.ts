@@ -156,6 +156,11 @@ export function listEditCacheDocs(userId: string): string[] {
   );
 }
 
+/** 永続化済み doc の noteId 一覧（purge ガードが対象ノートを表示する用）。 */
+export function listEditCacheNoteIds(userId: string): string[] {
+  return readDocRegistry(userId);
+}
+
 async function deleteEditCacheDatabase(name: string): Promise<void> {
   if (typeof indexedDB === "undefined") {
     return;

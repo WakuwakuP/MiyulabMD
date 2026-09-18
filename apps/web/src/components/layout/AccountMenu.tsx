@@ -2,7 +2,10 @@ import type { SessionUser } from "@miyulabmd/shared";
 import { type FormEvent, useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import type { AuthConfig } from "../../lib/api.ts";
-import { logoutAndClearIdentity } from "../../lib/identity-lifecycle.ts";
+import {
+  logoutAndClearIdentity,
+  PurgeCancelledError,
+} from "../../lib/identity-lifecycle.ts";
 import { colorForEmail } from "../../lib/user-style.ts";
 import { Avatar } from "../ui/Avatar.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -81,6 +84,9 @@ export function AccountMenu({ user, authConfig }: Props) {
                   setOpen(false);
                   void logoutAndClearIdentity(user.id).catch(
                     (error: unknown) => {
+                      if (error instanceof PurgeCancelledError) {
+                        return;
+                      }
                       // AppShell owns the warning after this menu's user disappears.
                       console.error("Logout did not complete", error);
                     },

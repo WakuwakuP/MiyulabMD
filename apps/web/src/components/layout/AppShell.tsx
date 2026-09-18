@@ -11,7 +11,11 @@ import { Outlet, useLocation } from "react-router";
 import { type AuthConfig, fetchAuthConfig } from "../../lib/api.ts";
 import { subscribeApiIdentityChange } from "../../lib/api-fetch.ts";
 import { cn } from "../../lib/cn.ts";
-import { subscribeIdentityLifecycle } from "../../lib/identity-lifecycle.ts";
+import {
+  type PurgeGuardInput,
+  setPurgeGuard,
+  subscribeIdentityLifecycle,
+} from "../../lib/identity-lifecycle.ts";
 import { attachMyDrivePrefetchCoordinator } from "../../lib/mydrive-prefetch-coordinator.ts";
 import {
   resolveViewerContext,
@@ -21,6 +25,7 @@ import {
   bindMutationAccess,
   createViewingAccess,
 } from "../../lib/viewing-access.ts";
+import { UnsentEditsGuardModal } from "../notes/UnsentEditsGuardModal.tsx";
 import { SearchPalette } from "../search/SearchPalette.tsx";
 import { AppHeader } from "./AppHeader.tsx";
 import type { AppShellContext } from "./AppShellContext.ts";
@@ -68,6 +73,10 @@ export function AppShell() {
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [purgeRequest, setPurgeRequest] = useState<{
+    input: PurgeGuardInput;
+    resolve: (proceed: boolean) => void;
+  } | null>(null);
   const viewerRef = useRef(viewer);
   const [viewing] = useState(() =>
     createViewingAccess(() => viewerRef.current),
@@ -266,6 +275,18 @@ export function AppShell() {
     return () => coordinator.dispose();
   }, [viewer]);
 
+  // purge ガード: 未送信の編集キャッシュが残ったままログアウト/切替で
+  // キャッシュを消そうとしたとき、モーダルで続行可否を問い合わせる。
+  useEffect(() => {
+    setPurgeGuard(
+      (input) =>
+        new Promise<boolean>((resolve) => {
+          setPurgeRequest({ input, resolve });
+        }),
+    );
+    return () => setPurgeGuard(null);
+  }, []);
+
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -370,6 +391,15 @@ export function AppShell() {
         <SearchPalette
           onClose={() => setSearchOpen(false)}
           viewerId={viewer.user?.id ?? null}
+        />
+      )}
+      {purgeRequest && (
+        <UnsentEditsGuardModal
+          input={purgeRequest.input}
+          onResolve={(proceed) => {
+            setPurgeRequest(null);
+            purgeRequest.resolve(proceed);
+          }}
         />
       )}
     </div>
