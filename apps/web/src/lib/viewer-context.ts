@@ -155,18 +155,29 @@ async function resolveViewerResult(
   return context("unavailable", null);
 }
 
+// Bound the live check: a stalled socket would otherwise hold the
+// single-flight viewer request open and starve every scheduled retry
+// until the OS gives up on it.
+const LIVE_CHECK_TIMEOUT_MS = 15_000;
+
 export async function resolveViewerContext(
   options: ResolveViewerOptions = {},
 ): Promise<ViewerContext> {
   const { signal } = options;
+  const meSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(LIVE_CHECK_TIMEOUT_MS)])
+    : AbortSignal.timeout(LIVE_CHECK_TIMEOUT_MS);
   let result: Awaited<ReturnType<typeof requestJson<MeResponse>>>;
   try {
     result = await requestJson<MeResponse>("/api/me", {
       credentials: "include",
-      signal,
+      signal: meSignal,
     });
   } catch (error) {
-    if (error instanceof ApiCommunicationError) {
+    if (
+      error instanceof ApiCommunicationError ||
+      (error instanceof DOMException && error.name === "TimeoutError")
+    ) {
       return cachedOrUnavailable(signal, true);
     }
     throw error;

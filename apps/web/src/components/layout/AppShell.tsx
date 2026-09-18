@@ -281,6 +281,13 @@ export function AppShell() {
               "ログアウトまたはキャッシュ削除を完了できませんでした。ローカルキャッシュの利用を停止しています。",
             );
           }
+          // The purge did not complete: release the gate and re-resolve, since
+          // the session may still be alive (a failed logout keeps the user
+          // signed in). Leaving the id pending would block every future
+          // viewer request, including live-check retries.
+          if (pendingIdentity.delete(event.id)) {
+            retryCachedViewer();
+          }
         } else if (pendingIdentity.delete(event.id) && peer) {
           requestViewer(false);
         }

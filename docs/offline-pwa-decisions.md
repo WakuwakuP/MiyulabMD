@@ -2501,6 +2501,42 @@ workflow の完了を意味しない。
   `cached-drive-lifecycle`・`mydrive-prefetch-stops` 計23件成功、
   Biome・`tsc --noEmit`・`pnpm test` 198件成功。
 
+## D135：失敗した identity 遷移は pending ゲートを解放して再解決する
+
+- 状態：検証済み。
+- 背景・観測した問題：オフライン中のログアウト失敗（またはユーザー
+  切替 purge の失敗、別タブからの failed 通知）のあと、そのタブでは
+  `/api/me` が二度と発行されずリロードまで viewer が unavailable の
+  まま止まる。原因は AppShell の identity ハンドラで `begin` 時に
+  `pendingIdentity.add()` されるのに `failed` フェーズで削除されず、
+  `requestViewer` の冒頭ガード（`pendingIdentity.size`）が永続的に
+  ブロックされていたこと。D134 のリトライ機構は AppShell レベルで
+  ページ非依存のため、「ある画面だけ再試行が飛ばない」はこのゲートが
+  詰まったタブの症状だった。同様に、ハングした `/api/me` が
+  `viewerRequestRef` を占有し続けるとリトライが無限に遅延する。
+- 検討した選択肢と各案の利点・欠点：
+  - `failed` でも `pendingIdentity.delete()` して即座に再解決する案：
+    失敗したログアウトはセッションが生きている可能性が高く、
+    `/api/me` が応答すれば viewer は認証済みに復帰する。状態が実態に
+    一致し自己修復する。
+  - ゲートだけ解放して次の online/visibilitychange まで待つ案：
+    保守的だが「確認できません」表示が次のイベントまで残り、
+    リロード相当の停滞は残る。
+  - `/api/me` にタイムアウトを付けない案：現状維持だと半開き
+    コネクションで単一リクエスト枠が占有され、リトライが枯渇する。
+- 推奨・採用した案と理由：`failed` で削除＋再解決、かつ `/api/me` に
+  15秒タイムアウト（`AbortSignal.any` で外部 signal と合成）。
+  タイムアウトは通信失敗と同じく `liveCheckFailed` 扱いで cached に
+  落ち、リトライ輪が継続する。
+- 影響範囲・制約・未確認事項：失敗イベント由来の警告は復帰時の
+  `applyViewer` でクリアされる（一過性表示）。`complete` 経路の
+  `&& peer` 条件は従来どおり。実機でのオフライン中ログアウト失敗
+  からの復帰は未確認。
+- テスト／再現手順と実際の結果：`identity-lifecycle.spec.ts` の
+  ログアウト失敗系テストを、「viewer が Alice に復帰し `/api/me`
+  リクエストが再開する」ことを確認する形へ更新（旧アサーションは
+  リーク状態＝unavailable のままを偶然検証していた）。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。
