@@ -99,7 +99,7 @@ for (const verifiedUser of ["alice", "bob"] as const) {
         page.getByText(cached.markdown, { exact: true }),
       ).toBeVisible();
       await expect(
-        page.getByRole("status").filter({ hasText: "キャッシュ" }),
+        page.getByRole("button", { name: "オフライン" }),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { exact: true, name: "Edit" }),

@@ -159,7 +159,7 @@ test("authenticated startup prepares unvisited MyDrive folders and bodies withou
   await expect(
     page.getByText("一度も開かずに準備した本文です。"),
   ).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("キャッシュ");
+  await expect(page.getByRole("button", { name: "オフライン" })).toBeVisible();
   await expect(
     page.getByRole("button", { exact: true, name: "編集" }),
   ).toHaveCount(0);

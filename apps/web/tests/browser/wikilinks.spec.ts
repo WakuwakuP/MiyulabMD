@@ -54,10 +54,20 @@ const srcLinks = {
   ],
 };
 
-function mockCollab(page: Page, markdown: string) {
-  const doc = new Y.Doc();
-  doc.getText("markdown").insert(0, markdown);
+function mockCollab(page: Page, markdownByNoteId: Record<string, string>) {
+  const docs = new Map<string, Y.Doc>();
+  const docFor = (noteId: string) => {
+    let doc = docs.get(noteId);
+    if (!doc) {
+      doc = new Y.Doc();
+      doc.getText("markdown").insert(0, markdownByNoteId[noteId] ?? "");
+      docs.set(noteId, doc);
+    }
+    return doc;
+  };
   return page.routeWebSocket("**/ws/notes/**", (ws) => {
+    const noteId = new URL(ws.url()).pathname.split("/").pop() ?? "";
+    const doc = docFor(noteId);
     ws.onMessage((data) => {
       const bytes =
         data instanceof Buffer ? new Uint8Array(data) : new Uint8Array(data);
@@ -78,7 +88,10 @@ function mockCollab(page: Page, markdown: string) {
 }
 
 async function mockApp(page: Page) {
-  await mockCollab(page, srcNote.markdown);
+  await mockCollab(page, {
+    [srcNote.id]: srcNote.markdown,
+    [targetNote.id]: targetNote.markdown,
+  });
   await page.route("**/api/**", (route) => {
     const pathname = new URL(route.request().url()).pathname;
     switch (pathname) {

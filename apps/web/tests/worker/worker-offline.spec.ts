@@ -35,6 +35,14 @@ async function verifyOfflineNote(
       }),
     )
     .toBe("activated");
+  // Viewing an editable note warms a collaboration session; hold the
+  // handshake open without a sync reply so the synced marker is never set
+  // and the cached note stays read-only offline.
+  await page.routeWebSocket("**/ws/notes/**", (socket) => {
+    socket.onMessage(() => {
+      // Keep the handshake open without a sync reply.
+    });
+  });
   await page.goto(`/n/${note.id}`);
   await expect(
     page.getByText("Stored private body.", { exact: true }),
@@ -65,9 +73,11 @@ async function verifyOfflineNote(
   await expect(
     page.getByText("Stored private body.", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toBeVisible();
+  // オフライン状態はヘッダーのアイコンが示す。タップで最終同期時刻を表示。
+  const offlineButton = page.getByRole("button", { name: "オフライン" });
+  await expect(offlineButton).toBeVisible();
+  await offlineButton.click();
+  await expect(page.getByText(/最終同期/)).toBeVisible();
   await expect(
     page.getByRole("button", { exact: true, name: "Edit" }),
   ).toHaveCount(0);

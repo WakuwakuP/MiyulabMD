@@ -195,13 +195,12 @@ test("real Worker source editor save refreshes offline cache", async ({
   await expect(
     page.getByText("NEW_EDITOR_BODY", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toBeVisible();
+  // オフライン状態はヘッダーのアイコンが示す。
+  await expect(page.getByRole("button", { name: "オフライン" })).toBeVisible();
   // オンライン同期済み・資格ありの本人ノートはオフラインでも本文編集に入れる。
+  // ?mode=edit がリロードをまたぐため、そのままエディタが復元される。
+  await expect(page).toHaveURL(/[?&]mode=edit/);
   await expect(edit).toBeVisible();
-  await expect(page.getByRole("checkbox")).toBeDisabled();
-  await edit.click();
   const offlineSource = page.locator(".cm-content[contenteditable=true]");
   await expect(offlineSource).toContainText("NEW_EDITOR_BODY");
   await offlineSource.click();

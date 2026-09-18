@@ -100,7 +100,7 @@ test("a cached viewer navigates MyDrive without network reads or mutation contro
 
   // Keep the Vite shell reachable: this exercises data navigation, not a SW.
   await page.goto("/");
-  await expect(page.getByRole("status")).toContainText("キャッシュ");
+  await expect(page.getByRole("button", { name: "オフライン" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "全体公開" })).toHaveCount(0);
   await expect(
     page.getByRole("link", { exact: true, name: "資料" }),
@@ -116,7 +116,7 @@ test("a cached viewer navigates MyDrive without network reads or mutation contro
   await expect(page.getByRole("button", { name: /の操作$/ })).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("link", { name: note.title })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("キャッシュ");
+  await expect(page.getByRole("button", { name: "オフライン" })).toBeVisible();
 
   await page.getByRole("link", { exact: true, name: "空のフォルダ" }).click();
   await expect(page).toHaveURL(/\/f\/empty$/);
@@ -507,7 +507,7 @@ test("online Home visits automatically save directory snapshots for readonly rel
   offline = true;
   await page.reload();
   await expect(page.getByRole("link", { name: docNote.title })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("キャッシュ");
+  await expect(page.getByRole("button", { name: "オフライン" })).toBeVisible();
   await expect(page.getByRole("button", { name: "新規ノート" })).toHaveCount(0);
   await page.getByRole("link", { name: "上のフォルダへ" }).click();
   await expect(page).toHaveURL(`/f/${rootId}`);
