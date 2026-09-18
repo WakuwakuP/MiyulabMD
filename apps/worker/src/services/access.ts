@@ -110,6 +110,270 @@ export function normalizeGrantEmail(email: string): string | null {
   return normalized;
 }
 
+/**
+ * 1リクエスト内でノート一覧を組み立てるためのプリロード済みアクセスデータ。
+ * folder_policies / access_grants / folders をオーナー単位で一括取得し、
+ * ノート毎の per-row クエリ(N+1)を避ける。
+ */
+export type AccessSnapshot = {
+  /** owner_id -> folder path -> policy */
+  policies: Map<
+    string,
+    Map<string, { readScope: AccessScope; writeScope: AccessScope }>
+  >;
+  /** owner_id -> raw grant rows (target_kind/target_key 付き) */
+  grants: Map<string, SnapshotGrantRow[]>;
+  /** owner_id -> folder path -> row */
+  foldersByPath: Map<string, Map<string, FolderRow>>;
+  /** folder id -> row */
+  foldersById: Map<string, FolderRow>;
+};
+
+type SnapshotGrantRow = GrantRow & {
+  owner_id: string;
+  target_kind: string;
+  target_key: string;
+};
+
+export async function buildAccessSnapshot(
+  env: Env,
+  ownerIds: readonly string[],
+): Promise<AccessSnapshot> {
+  const snapshot: AccessSnapshot = {
+    foldersById: new Map(),
+    foldersByPath: new Map(),
+    grants: new Map(),
+    policies: new Map(),
+  };
+  const unique = [...new Set(ownerIds)];
+  if (unique.length === 0) {
+    return snapshot;
+  }
+  const placeholders = unique.map(() => "?").join(", ");
+  const [policyRows, grantRows, folderRows] = await Promise.all([
+    db(env)
+      .prepare(
+        `SELECT owner_id, folder, read_scope, write_scope
+         FROM folder_policies WHERE owner_id IN (${placeholders})`,
+      )
+      .bind(...unique)
+      .all<FolderPolicyRow>(),
+    db(env)
+      .prepare(
+        `SELECT owner_id, target_kind, target_key, email, user_id, can_write
+         FROM access_grants WHERE owner_id IN (${placeholders}) ORDER BY email`,
+      )
+      .bind(...unique)
+      .all<SnapshotGrantRow>(),
+    db(env)
+      .prepare(
+        `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at
+         FROM folders WHERE owner_id IN (${placeholders})`,
+      )
+      .bind(...unique)
+      .all<FolderRow>(),
+  ]);
+
+  for (const row of policyRows.results ?? []) {
+    indexPolicyRow(snapshot, row);
+  }
+  for (const row of grantRows.results ?? []) {
+    const list = snapshot.grants.get(row.owner_id);
+    if (list) {
+      list.push(row);
+    } else {
+      snapshot.grants.set(row.owner_id, [row]);
+    }
+  }
+  for (const row of folderRows.results ?? []) {
+    indexFolderRow(snapshot, row);
+  }
+  return snapshot;
+}
+
+function indexPolicyRow(snapshot: AccessSnapshot, row: FolderPolicyRow): void {
+  const readScope = parseScope(row.read_scope);
+  const writeScope = parseScope(row.write_scope);
+  if (!(readScope && writeScope)) {
+    return;
+  }
+  let byFolder = snapshot.policies.get(row.owner_id);
+  if (!byFolder) {
+    byFolder = new Map();
+    snapshot.policies.set(row.owner_id, byFolder);
+  }
+  byFolder.set(row.folder, {
+    readScope,
+    writeScope: clampWriteScope(readScope, writeScope),
+  });
+}
+
+function indexFolderRow(snapshot: AccessSnapshot, row: FolderRow): void {
+  let byPath = snapshot.foldersByPath.get(row.owner_id);
+  if (!byPath) {
+    byPath = new Map();
+    snapshot.foldersByPath.set(row.owner_id, byPath);
+  }
+  byPath.set(row.folder, row);
+  snapshot.foldersById.set(row.id, row);
+}
+
+const EMPTY_POLICY_MAP: Map<
+  string,
+  { readScope: AccessScope; writeScope: AccessScope }
+> = new Map();
+
+/** loadGrants と同じ結果をスナップショットから組み立てる。 */
+function snapshotGrants(
+  snapshot: AccessSnapshot,
+  ownerId: string,
+  noteId: string | null,
+  folders: string[],
+): AccessGrant[] {
+  const rows = snapshot.grants.get(ownerId);
+  if (!rows) {
+    return [];
+  }
+  const folderKeys = folders.length > 0 ? folders : [""];
+  const folderSet = new Set(folderKeys);
+  const seen = new Map<string, AccessGrant>();
+  for (const row of rows) {
+    const matches =
+      row.target_kind === "note"
+        ? noteId !== null && row.target_key === noteId
+        : row.target_kind === "folder" && folderSet.has(row.target_key);
+    if (!matches) {
+      continue;
+    }
+    const grant = rowToGrant(row);
+    const current = seen.get(grant.email);
+    if (!current || (grant.canWrite && !current.canWrite)) {
+      seen.set(grant.email, grant);
+    }
+  }
+  return [...seen.values()].sort((a, b) => (a.email < b.email ? -1 : 1));
+}
+
+/** resolveNoteAccess と同じ結果をスナップショットから同期的に組み立てる。 */
+export function resolveNoteAccessSnapshot(
+  env: Env,
+  note: NoteAccessFields,
+  user: SessionUser | null | undefined,
+  snapshot: AccessSnapshot,
+): NoteAccess {
+  const inherit = note.readScope === null && note.writeScope === null;
+  const ancestors = folderAncestors(note.folder);
+  const policies = snapshot.policies.get(note.ownerId) ?? EMPTY_POLICY_MAP;
+  const grants = snapshotGrants(snapshot, note.ownerId, note.id, ancestors);
+
+  let source: AccessSource = "note";
+  let sourceFolder: string | null = null;
+  let effectiveReadScope: AccessScope;
+  let effectiveWriteScope: AccessScope;
+
+  if (!inherit && note.readScope && note.writeScope) {
+    effectiveReadScope = note.readScope;
+    effectiveWriteScope = clampWriteScope(note.readScope, note.writeScope);
+  } else {
+    const resolved = resolveFromPolicies(note.folder, policies);
+    effectiveReadScope = resolved.effectiveReadScope;
+    effectiveWriteScope = resolved.effectiveWriteScope;
+    source = resolved.source;
+    sourceFolder = resolved.sourceFolder;
+  }
+
+  const actor = actorFromUser(user, note.ownerId);
+  const grant = grantForActor(grants, actor);
+  const flags = applyInstanceFlags(
+    evaluateAccess(effectiveReadScope, effectiveWriteScope, actor, grant),
+    actor,
+    env,
+  );
+
+  return {
+    effectiveReadScope,
+    effectiveWriteScope,
+    flags,
+    grants,
+    inherit,
+    readScope: note.readScope,
+    source,
+    sourceFolder,
+    writeScope: note.writeScope,
+  };
+}
+
+function folderEffectiveSnapshot(
+  ownerId: string,
+  folder: string,
+  snapshot: AccessSnapshot,
+): FolderPolicyResolved {
+  if (folder === "") {
+    return {
+      effectiveReadScope: ROOT_SCOPES.readScope,
+      effectiveWriteScope: ROOT_SCOPES.writeScope,
+      folder: "",
+      grants: [],
+      inherit: false,
+      locked: true,
+      readScope: ROOT_SCOPES.readScope,
+      source: "folder",
+      sourceFolder: "",
+      writeScope: ROOT_SCOPES.writeScope,
+    };
+  }
+  const ancestors = folderAncestors(folder);
+  const policies = snapshot.policies.get(ownerId) ?? EMPTY_POLICY_MAP;
+  const grants = snapshotGrants(snapshot, ownerId, null, ancestors);
+  const stored = policies.get(folder);
+  const inherit = !stored;
+  const resolved = stored
+    ? {
+        effectiveReadScope: stored.readScope,
+        effectiveWriteScope: stored.writeScope,
+        source: "folder" as const,
+        sourceFolder: folder,
+      }
+    : resolveFromPolicies(folderAncestors(folder).at(1) ?? "", policies);
+
+  return {
+    effectiveReadScope: resolved.effectiveReadScope,
+    effectiveWriteScope: resolved.effectiveWriteScope,
+    folder,
+    grants,
+    inherit,
+    locked: false,
+    readScope: stored?.readScope ?? null,
+    source: stored ? "folder" : resolved.source,
+    sourceFolder: stored ? folder : resolved.sourceFolder,
+    writeScope: stored?.writeScope ?? null,
+  };
+}
+
+/** folderDiscoveryAllowed と同じ結果をスナップショットから返す。 */
+export function folderDiscoveryAllowedSnapshot(
+  env: Env,
+  ownerId: string,
+  folder: string,
+  user: SessionUser | null | undefined,
+  snapshot: AccessSnapshot,
+): boolean {
+  const effective = folderEffectiveSnapshot(ownerId, folder, snapshot);
+  const actor = actorFromUser(user, ownerId);
+  const grant = grantForActor(effective.grants, actor);
+  const flags = applyInstanceFlags(
+    evaluateAccess(
+      effective.effectiveReadScope,
+      effective.effectiveWriteScope,
+      actor,
+      grant,
+    ),
+    actor,
+    env,
+  );
+  return canDiscoverAccess({ ...effective, flags }, ownerId, user);
+}
+
 async function loadFolderPolicies(
   env: Env,
   ownerId: string,
