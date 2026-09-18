@@ -1,4 +1,9 @@
-import type { FolderAccess, Note, NoteSummary } from "@miyulabmd/shared";
+import type {
+  FolderAccess,
+  Note,
+  NoteSummary,
+  SessionUser,
+} from "@miyulabmd/shared";
 
 import {
   beginNoteReadOrder,
@@ -23,6 +28,7 @@ const FOLDER_STORE = "folders";
 const NOTE_LIST_STORE = "note-lists";
 const METADATA_STORE = "metadata";
 const VIEWER_ID_METADATA_KEY = "viewer-id";
+const VIEWER_PROFILE_METADATA_KEY = "viewer-profile";
 const GLOBAL_LOCK_NAME = "miyulabmd-offline-cache:global";
 const DRIVE_ROOT_METADATA_PREFIX = "drive-root:";
 const DENIED_NOTE_PREFIX = "denied-note:";
@@ -969,6 +975,16 @@ function clearUserRecords(
           metadata.delete(VIEWER_ID_METADATA_KEY);
         }
       };
+      const profile = metadata.get(VIEWER_PROFILE_METADATA_KEY);
+      profile.onsuccess = () => {
+        if (
+          parseCachedViewerProfile(
+            (profile.result as MetadataRecord | undefined)?.value,
+          )?.id === userId
+        ) {
+          metadata.delete(VIEWER_PROFILE_METADATA_KEY);
+        }
+      };
     } catch (error) {
       reject(error);
       return;
@@ -1016,6 +1032,7 @@ function clearDeviceRecords(database: IDBDatabase): Promise<void> {
         // device-wide clear.
         if (
           key !== VIEWER_ID_METADATA_KEY &&
+          key !== VIEWER_PROFILE_METADATA_KEY &&
           key !== DEVICE_PURGE_GENERATION_KEY &&
           key !== DEVICE_PURGE_TOMBSTONE_KEY &&
           !key.startsWith(USER_PURGE_TOMBSTONE_PREFIX)
@@ -3733,10 +3750,38 @@ export async function openOfflineCache(
   }
 }
 
-/** Remember the signed-in viewer so cold starts can route quickly. */
-export async function persistCachedViewerId(
+function parseCachedViewerProfile(value: unknown): SessionUser | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+    const user = parsed as Record<string, unknown>;
+    if (
+      typeof user.id === "string" &&
+      user.id.length > 0 &&
+      typeof user.email === "string" &&
+      (typeof user.displayName === "string" || user.displayName === null)
+    ) {
+      return {
+        displayName: user.displayName,
+        email: user.email,
+        id: user.id,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeViewerIdentity(
   userId: string,
-  options: CancellationOptions = {},
+  profile: SessionUser | null,
+  options: CancellationOptions,
 ): Promise<void> {
   if (!("indexedDB" in globalThis)) {
     return;
@@ -3781,6 +3826,18 @@ export async function persistCachedViewerId(
           key: VIEWER_ID_METADATA_KEY,
           value: userId,
         } satisfies MetadataRecord);
+        if (profile) {
+          // Display-only copy of the signed-in profile; it is never used as
+          // proof of authentication or server permissions.
+          store.put({
+            key: VIEWER_PROFILE_METADATA_KEY,
+            value: JSON.stringify({
+              displayName: profile.displayName,
+              email: profile.email,
+              id: profile.id,
+            }),
+          } satisfies MetadataRecord);
+        }
       };
       tombstone.onerror = onAbort;
       transaction.oncomplete = () => {
@@ -3814,10 +3871,35 @@ export async function persistCachedViewerId(
   }
 }
 
-/** Best-effort; `null` when storage is unavailable or nothing was saved. */
-export async function readCachedViewerId(
+/** Remember the signed-in viewer so cold starts can route quickly. */
+export function persistCachedViewerId(
+  userId: string,
   options: CancellationOptions = {},
-): Promise<string | null> {
+): Promise<void> {
+  return writeViewerIdentity(userId, null, options);
+}
+
+/**
+ * Remember the signed-in viewer together with a display-only profile
+ * (id/email/displayName) so a cached cold start can show who the data
+ * belongs to. The profile is not an authentication token.
+ */
+export function persistCachedViewer(
+  user: SessionUser,
+  options: CancellationOptions = {},
+): Promise<void> {
+  return writeViewerIdentity(user.id, user, options);
+}
+
+export type CachedViewerIdentity = {
+  id: string;
+  user: SessionUser | null;
+};
+
+/** Best-effort; `null` when storage is unavailable or nothing was saved. */
+export async function readCachedViewer(
+  options: CancellationOptions = {},
+): Promise<CachedViewerIdentity | null> {
   if (!("indexedDB" in globalThis)) {
     return null;
   }
@@ -3826,13 +3908,28 @@ export async function readCachedViewerId(
     const database = await openDatabase(options.signal);
     try {
       const record = await readMetadataRecord(database, VIEWER_ID_METADATA_KEY);
-      return typeof record?.value === "string" && record.value
-        ? record.value
-        : null;
+      const id =
+        typeof record?.value === "string" && record.value ? record.value : null;
+      if (id === null) {
+        return null;
+      }
+      const profile = await readMetadataRecord(
+        database,
+        VIEWER_PROFILE_METADATA_KEY,
+      );
+      const user = parseCachedViewerProfile(profile?.value);
+      return { id, user: user?.id === id ? user : null };
     } finally {
       database.close();
     }
   } catch {
     return null;
   }
+}
+
+/** Best-effort; `null` when storage is unavailable or nothing was saved. */
+export async function readCachedViewerId(
+  options: CancellationOptions = {},
+): Promise<string | null> {
+  return (await readCachedViewer(options))?.id ?? null;
 }
