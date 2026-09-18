@@ -290,6 +290,72 @@ test("a synced marker without the edit cache document stays unwritable offline",
   }
 });
 
+test("a note body cleared offline stays writable after re-entering edit mode", async ({
+  page,
+}) => {
+  // Clearing the body offline persists delete updates, so the restored doc is
+  // empty but has history. Re-entering edit mode must stay writable instead
+  // of being mistaken for a lost edit cache.
+  let apiAvailable = true;
+  await mockApis(page, () => apiAvailable, []);
+  await page.addInitScript(() => {
+    localStorage.setItem("miyulabmd:editor-edit-mode", "source");
+  });
+
+  const serverDoc = new Y.Doc();
+  serverDoc.getText("markdown").insert(0, note.markdown);
+  await page.routeWebSocket("**/ws/notes/**", (socket) => {
+    socket.onMessage(() => {
+      if (apiAvailable) {
+        socket.send(syncFrame(serverDoc));
+      }
+    });
+  });
+
+  try {
+    // Online: sync once so the synced marker and the edit cache both exist.
+    await page.goto(`/n/${note.id}`);
+    await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    await expect(page.locator(".cm-content")).toContainText(
+      "通信なしでも読みたい本文。",
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          localStorage.getItem("miyulabmd:yjs-synced:alice:note-1"),
+        ),
+      )
+      .toBe("1");
+
+    // Offline: clear the whole body and persist the delete update.
+    apiAvailable = false;
+    await page.reload();
+    await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    const editor = page.locator(".cm-content");
+    await expect(editor).toContainText("通信なしでも読みたい本文。");
+    const updatesBeforeClear = await editCacheUpdateCount(page);
+    await editor.click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("Delete");
+    await expect(editor).not.toContainText("通信なしでも読みたい本文。");
+    await expect
+      .poll(() => editCacheUpdateCount(page))
+      .toBeGreaterThan(updatesBeforeClear);
+
+    // Re-enter edit mode: the display cache still holds the old snapshot, but
+    // the restored doc has history and must stay writable.
+    await page.reload();
+    await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    await expect(editor).toBeAttached();
+    await expect(editor).not.toContainText("通信なしでも読みたい本文。");
+    await editor.click();
+    await page.keyboard.insertText("rewritten");
+    await expect(editor).toContainText("rewritten");
+  } finally {
+    serverDoc.destroy();
+  }
+});
+
 test("a synced note that is not self-scoped stays read-only offline", async ({
   page,
 }) => {
