@@ -430,7 +430,7 @@ export async function listBrokenLinks(
   env: Env,
   user: SessionUser,
 ): Promise<BrokenLinkItem[]> {
-  const accessible = await listAccessibleRows(env, user);
+  const { rows: accessible } = await listAccessibleRows(env, user);
   const byId = new Map(accessible.map((row) => [row.id, row]));
   if (byId.size === 0) {
     return [];
