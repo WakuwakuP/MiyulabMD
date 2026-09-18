@@ -85,13 +85,11 @@ test("a confirmed image denial removes only that displayed attachment", async ({
   denied = true;
   expect(
     await page.evaluate(async (url) => {
-      const cacheUrl = "/src/lib/offline-cache.ts";
       const imageUrl = "/src/lib/attached-images.ts";
-      const { captureOfflineCacheScope } = await import(cacheUrl);
       const { acquireAttachedImage, attachedImage } = await import(imageUrl);
       return await acquireAttachedImage(attachedImage(url), {
         cacheOnly: false,
-        scope: await captureOfflineCacheScope("alice"),
+        userId: "alice",
       });
     }, imagePath),
   ).toBeNull();

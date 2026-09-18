@@ -157,7 +157,7 @@ test("failure to persist a denial warns but keeps that user's live cache readabl
       IDBDatabase.prototype.transaction = original;
       reader.dispose();
     }
-    // The failed denial write warns but does not suspend the realm: fresh
+    // The failed denial write warns but does not suspend anything: fresh
     // handles keep reading cached content instead of failing closed.
     const freshAlice = await openOfflineCache({ userId: "alice" });
     const freshBob = await openOfflineCache({ userId: "bob" });
@@ -167,9 +167,6 @@ test("failure to persist a denial warns but keeps that user's live cache readabl
         denied: await freshAlice.getNote(note.id),
         interrupted,
         otherViewer: (await freshBob.getNote(note.id))?.note.id,
-        suspended: (
-          await import(cacheUrl)
-        ).isOfflineCacheUserSuspended("alice"),
         unrelated: await freshAlice.getNote("keep-me"),
       };
     } finally {
@@ -181,7 +178,6 @@ test("failure to persist a denial warns but keeps that user's live cache readabl
   expect(result.denial).toMatchObject({ ok: false, status: 403 });
   expect(result.denial?.cacheWarning).toEqual(expect.any(String));
   expect(result.denial?.cacheWarning).toContain("キャッシュ");
-  expect(result.suspended).toBe(false);
   expect(result.denied?.note.id).toBe(note.id);
   expect(result.unrelated?.note.id).toBe("keep-me");
   expect(result.otherViewer).toBe(note.id);

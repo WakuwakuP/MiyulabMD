@@ -40,15 +40,10 @@ test("image references and binary files stay user scoped and purge fences expire
 }) => {
   const result = await page.evaluate(async () => {
     const moduleUrl = "/src/lib/offline-cache.ts";
-    const {
-      openOfflineCache,
-      clearOfflineCacheUser,
-      captureOfflineCacheScope,
-      assertOfflineCacheScope,
-    } = await import(moduleUrl);
+    const { openOfflineCache, clearOfflineCacheUser } =
+      await import(moduleUrl);
     const alice = await openOfflineCache({ userId: "alice" });
     const bob = await openOfflineCache({ userId: "bob" });
-    const scope = await captureOfflineCacheScope("alice");
     try {
       await alice.putImage(
         "parent",
@@ -63,20 +58,14 @@ test("image references and binary files stay user scoped and purge fences expire
       );
       const aliceBytes = await (await alice.getImage("parent", "image")).text();
       await clearOfflineCacheUser("alice");
-      const staleRead = await alice.getImage("parent", "image").then(
-        () => false,
-        () => true,
-      );
+      // A stale pre-purge handle degrades reads to misses; writes reject.
+      const staleRead = await alice.getImage("parent", "image");
       const staleWrite = await alice
         .putImage("parent", "image", new Blob(["late"], { type: "image/png" }))
         .then(
           () => false,
           () => true,
         );
-      const staleScope = await assertOfflineCacheScope(scope).then(
-        () => false,
-        () => true,
-      );
       const fresh = await openOfflineCache({ userId: "alice" });
       const afterAlice = await fresh.getImage("parent", "image");
       fresh.close();
@@ -110,7 +99,6 @@ test("image references and binary files stay user scoped and purge fences expire
         bobBytes: await (await bob.getImage("parent", "image")).text(),
         imageKeys: keys.filter((key) => String(key).startsWith("image:")),
         staleRead,
-        staleScope,
         staleWrite,
       };
     } finally {
@@ -125,8 +113,7 @@ test("image references and binary files stay user scoped and purge fences expire
     beforeBob: null,
     bobBytes: "bob bytes",
     imageKeys: ["image:Ym9i:cGFyZW50:aW1hZ2U"],
-    staleRead: true,
-    staleScope: true,
+    staleRead: null,
     staleWrite: true,
   });
 });
@@ -202,9 +189,7 @@ for (const status of [403, 404]) {
     const result = await page.evaluate(async (fixture) => {
       const cacheUrl = "/src/lib/offline-cache.ts";
       const imageUrl = "/src/lib/attached-images.ts";
-      const { openOfflineCache, captureOfflineCacheScope } = await import(
-        cacheUrl
-      );
+      const { openOfflineCache } = await import(cacheUrl);
       const { acquireAttachedImage, attachedImage } = await import(imageUrl);
       const cache = await openOfflineCache({ userId: "alice" });
       try {
@@ -216,7 +201,7 @@ for (const status of [403, 404]) {
         );
         const result = await acquireAttachedImage(
           attachedImage("/api/notes/other/images/image"),
-          { cacheOnly: false, scope: await captureOfflineCacheScope("alice") },
+          { cacheOnly: false, userId: "alice" },
         );
         return {
           body: (await cache.getNote(fixture.id)).note.markdown,
@@ -235,11 +220,8 @@ test("overlapping foreground/background acquisitions share bytes, not cancellati
   page,
 }) => {
   const result = await page.evaluate(async () => {
-    const cacheUrl = "/src/lib/offline-cache.ts";
     const imageUrl = "/src/lib/attached-images.ts";
-    const { captureOfflineCacheScope } = await import(cacheUrl);
     const { acquireAttachedImage, attachedImage } = await import(imageUrl);
-    const scope = await captureOfflineCacheScope("alice");
     const image = attachedImage("/api/notes/parent/images/image");
     const originalFetch = globalThis.fetch;
     let calls = 0;
@@ -258,14 +240,22 @@ test("overlapping foreground/background acquisitions share bytes, not cancellati
       const foreground = new AbortController();
       const first = acquireAttachedImage(image, {
         cacheOnly: false,
-        scope,
         signal: foreground.signal,
+        userId: "alice",
       }).then(
         () => false,
         () => true,
       );
-      const second = acquireAttachedImage(image, { cacheOnly: false, scope });
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      const second = acquireAttachedImage(image, {
+        cacheOnly: false,
+        userId: "alice",
+      });
+      // The shared transport issues its fetch after the cache handle's
+      // open and ordering-token read — wait for the fetch itself rather
+      // than a fixed delay.
+      for (let attempts = 0; attempts < 200 && !calls; attempts += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
       foreground.abort();
       release();
       return {

@@ -202,18 +202,14 @@ export function usePreviewImages(
             publish("ready");
           },
         );
-        const scope = await cache.captureOfflineCacheScope(userId as string);
-        if (acquisitionController.signal.aborted) {
-          return;
-        }
         await Promise.all(
           targets.map(async (image) => {
             let bytes: Blob | null = null;
             try {
               bytes = await attached.acquireAttachedImage(image, {
                 cacheOnly,
-                scope,
                 signal: acquisitionController.signal,
+                userId: userId as string,
               });
             } catch {
               // A failed attachment must not replace or fail the note body.

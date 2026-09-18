@@ -8,7 +8,8 @@ test("a request started before denial cannot revive a note, but a new successful
   const result = await page.evaluate(async (note) => {
     const cacheUrl = "/src/lib/offline-cache.ts";
     const readerUrl = "/src/lib/note-read-session.ts";
-    const { openOfflineCache } = await import(cacheUrl);
+    const { openOfflineCache, subscribeOfflineCacheNoteDenial } =
+      await import(cacheUrl);
     const { createNoteReadSession } = await import(readerUrl);
     const barrierUrl = "/tests/browser/fixtures/deferred-cache-open.ts";
     const { deferNextDatabaseOpen } = await import(barrierUrl);
@@ -66,17 +67,39 @@ test("a request started before denial cannot revive a note, but a new successful
       // Pause after the HTTP result, before storage/publication. This allows
       // the next independent validation to observe a real server denial.
       await opening.started;
+      // The durable denial write is detached: wait for the committed-denial
+      // notification (emitted after the marker lands) instead of racing it.
+      const denied = new Promise<unknown>((resolve) => {
+        const unsubscribe = subscribeOfflineCacheNoteDenial(
+          (event: { resource: { aliases: string[] } }) => {
+            if (event.resource.aliases.includes(note.id)) {
+              unsubscribe();
+              resolve(event);
+            }
+          },
+        );
+      });
       const denial = await denyingReader.read(note.id);
+      await denied;
       const afterDenial = await alice.getNote(note.id);
       opening.release();
       const stalePublished = await slow;
       const afterStale = await alice.getNote(note.id);
       // This session already existed, but this request begins after denial.
       const recovered = await freshReader.read(note.id);
-      const afterRecovery = await alice.getNote(note.id);
+      // The display-cache save is detached: poll until the write and the
+      // denial clear have landed.
+      let afterRecovery: string | null = null;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        afterRecovery = (await alice.getNote(note.id))?.note.markdown ?? null;
+        if (afterRecovery === "Access restored") {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
       return {
         afterDenial,
-        afterRecovery: afterRecovery?.note.markdown,
+        afterRecovery,
         afterStale,
         denial,
         otherViewer: (await bob.getNote(note.id))?.note.markdown,

@@ -224,11 +224,8 @@ test("failed user purge degrades opens and stays stopped until a successful retr
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async (note) => {
     const cacheUrl = "/src/lib/offline-cache.ts";
-    const {
-      clearOfflineCacheUser,
-      isOfflineCacheUserSuspended,
-      openOfflineCache,
-    } = await import(cacheUrl);
+    const { clearOfflineCacheUser, openOfflineCache } =
+      await import(cacheUrl);
     const cache = await openOfflineCache({ userId: "alice" });
     await cache.putNote(note);
     const originalRemove = FileSystemDirectoryHandle.prototype.removeEntry;
@@ -274,7 +271,19 @@ test("failed user purge degrades opens and stays stopped until a successful retr
       );
       release.resolve();
       const outcomes = await settled;
-      const stoppedAfterFailure = isOfflineCacheUserSuspended("alice");
+      // The durable tombstone outlives the failed purge: while the fault
+      // persists, opens either self-heal-and-fail again or come back
+      // degraded instead of serving the half-purged data.
+      const stoppedAfterFailure = await openOfflineCache({
+        userId: "alice",
+      }).then(
+        (handle: { close(): void; degraded: boolean }) => {
+          const degraded = handle.degraded;
+          handle.close();
+          return degraded;
+        },
+        () => true,
+      );
       FileSystemDirectoryHandle.prototype.removeEntry = originalRemove;
       await clearOfflineCacheUser("alice");
       const fresh = await openOfflineCache({ userId: "alice" });
@@ -299,13 +308,12 @@ test("failed user purge degrades opens and stays stopped until a successful retr
       cache.close();
     }
   }, note);
-  expect(result).toEqual({
-    blockedDuringPurge: { degraded: true, note: null },
-    failures: [true, true],
-    recovered: note.markdown,
-    removals: 1,
-    stoppedAfterFailure: true,
-  });
+  expect(result.blockedDuringPurge).toEqual({ degraded: true, note: null });
+  expect(result.failures).toEqual([true, true]);
+  expect(result.recovered).toBe(note.markdown);
+  // The failed purge plus any observer self-heal retries hit the fault.
+  expect(result.removals).toBeGreaterThanOrEqual(1);
+  expect(result.stoppedAfterFailure).toBe(true);
 });
 
 test("a pending body write cannot recreate the purged user directory", async ({

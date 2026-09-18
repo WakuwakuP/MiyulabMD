@@ -560,6 +560,14 @@ function NetworkHomePage() {
     void readHomeMetadata({
       folderId,
       isCurrentOwner,
+      onCacheWarning: (warning) => {
+        // Detached cache saves settle after the read finishes, so
+        // homeReadActiveRef is already false here; only require that this
+        // effect has not been superseded or unmounted.
+        if (current && !controller.signal.aborted) {
+          setCacheWarning(warning);
+        }
+      },
       signal: controller.signal,
       viewer,
     })

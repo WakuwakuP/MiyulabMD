@@ -68,9 +68,7 @@ test("a pre-denial image response cannot revive bytes denied by another tab", as
     route.fulfill({ headers, json: { error: "Forbidden" }, status: 403 }),
   );
   const acquire = async (cacheOnly: boolean) => {
-    const cacheUrl = "/src/lib/offline-cache.ts";
     const imageUrl = "/src/lib/attached-images.ts";
-    const { captureOfflineCacheScope } = await import(cacheUrl);
     const { acquireAttachedImage } = await import(imageUrl);
     return await acquireAttachedImage(
       {
@@ -78,7 +76,7 @@ test("a pre-denial image response cannot revive bytes denied by another tab", as
         noteId: "parent",
         url: "/api/notes/parent/images/image",
       },
-      { cacheOnly, scope: await captureOfflineCacheScope("alice") },
+      { cacheOnly, userId: "alice" },
     ).then(
       (blob: Blob | null) => Boolean(blob),
       () => false,

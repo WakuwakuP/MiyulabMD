@@ -96,6 +96,13 @@ async function mockApp(
   });
 }
 
+// 層操作は「⋯ ノート」メニューの「編集ロック」サブビューに集約されている
+// （specs/knowledge-management.html §3.1）。
+async function openLockPanel(page: Page) {
+  await page.getByRole("button", { name: "ノートメニュー" }).click();
+  await page.getByRole("menuitem", { name: /編集ロック/ }).click();
+}
+
 test("gold ロック中は preview 強制・ロック表示・解除で編集可能に戻る", async ({
   page,
 }) => {
@@ -111,10 +118,11 @@ test("gold ロック中は preview 強制・ロック表示・解除で編集可
     page.getByText("Gold（Canonical）としてロックされています"),
   ).toBeVisible();
 
-  // 層メニューから一時解除。
-  await page.getByRole("button", { exact: true, name: "gold" }).click();
-  await expect(page.getByText("ロック中")).toBeVisible();
-  await page.getByRole("button", { name: "解除して編集（30分）" }).click();
+  // 層パネルから一時解除。
+  await openLockPanel(page);
+  const panel = page.getByRole("dialog");
+  await expect(panel.getByText("ロック中")).toBeVisible();
+  await panel.getByRole("button", { name: "解除して編集（30分）" }).click();
 
   await expect(
     page.getByText("Gold（Canonical）としてロックされています"),
@@ -129,11 +137,11 @@ test("bronze から silver へ昇格できる", async ({ page }) => {
   await page.goto(`/n/${bronzeNote.id}`);
   await expect(page.getByText("body")).toBeVisible();
 
-  await page.getByRole("button", { exact: true, name: "bronze" }).click();
-  await page.getByRole("button", { name: "Silver に昇格" }).click();
-  await expect(
-    page.getByRole("button", { exact: true, name: "silver" }),
-  ).toBeVisible();
+  await openLockPanel(page);
+  const panel = page.getByRole("dialog");
+  await expect(panel.getByText("Bronze（Inbox）")).toBeVisible();
+  await panel.getByRole("button", { name: "Silver に昇格" }).click();
+  await expect(panel.getByText("Silver（Refined）")).toBeVisible();
 });
 
 test("昇格ゲート失敗は理由を表示する", async ({ page }) => {
@@ -149,12 +157,11 @@ test("昇格ゲート失敗は理由を表示する", async ({ page }) => {
     }),
   );
   await page.goto(`/n/${bronzeNote.id}`);
-  await page.getByRole("button", { exact: true, name: "bronze" }).click();
-  await page.getByRole("button", { name: "Silver に昇格" }).click();
-  await expect(page.getByText("未解決リンクがあります")).toBeVisible();
-  await expect(
-    page.getByRole("button", { exact: true, name: "bronze" }),
-  ).toBeVisible();
+  await openLockPanel(page);
+  const panel = page.getByRole("dialog");
+  await panel.getByRole("button", { name: "Silver に昇格" }).click();
+  await expect(panel.getByText("未解決リンクがあります")).toBeVisible();
+  await expect(panel.getByText("Bronze（Inbox）")).toBeVisible();
 });
 
 test("降格は理由が必須", async ({ page }) => {
@@ -167,17 +174,16 @@ test("降格は理由が必須", async ({ page }) => {
     });
   });
   await page.goto(`/n/${silverNote.id}`);
-  await page.getByRole("button", { exact: true, name: "silver" }).click();
+  await openLockPanel(page);
+  const panel = page.getByRole("dialog");
 
   // 降格フォームを開き、理由なしでは送れない。
-  await page.getByRole("button", { name: "降格…" }).click();
-  const submit = page.getByRole("button", { name: "Bronze に降格" });
+  await panel.getByRole("button", { name: "降格…" }).click();
+  const submit = panel.getByRole("button", { name: "Bronze に降格" });
   await expect(submit).toBeDisabled();
   await page.getByLabel("降格理由").fill("内容が古い");
   await submit.click();
 
   expect(body).toMatchObject({ reason: "内容が古い", to: "bronze" });
-  await expect(
-    page.getByRole("button", { exact: true, name: "bronze" }),
-  ).toBeVisible();
+  await expect(panel.getByText("Bronze（Inbox）")).toBeVisible();
 });
