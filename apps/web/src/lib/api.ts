@@ -28,6 +28,7 @@ import type {
   ParaListResult,
   ParaPlan,
   PermissionPreset,
+  SchemeRootEntry,
   SchemeSuggestion,
   SessionUser,
   WorkspaceSearchResult,
@@ -708,6 +709,25 @@ export async function deleteParaSpace(
 export type SchemeSuggestResponse = {
   suggestion: SchemeSuggestion | null;
 };
+
+export type SchemeRootsResponse = {
+  schemes: SchemeRootEntry[];
+};
+
+/** 設定ページ向け: 規則を宣言したフォルダ（採番スコープのルート）の一覧。 */
+export async function fetchSchemeRoots(
+  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+): Promise<ApiResult<SchemeRootsResponse>> {
+  const res = await fetch(
+    "/api/schemes",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SchemeRootsResponse, ok: true };
+}
 
 export async function fetchSchemeSuggestion(
   folderId: string,

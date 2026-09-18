@@ -58,6 +58,9 @@ CREATE TABLE folders (
   scheme TEXT,
   scheme_id TEXT,
   scheme_title TEXT,
+  -- 採番スコープのルート = 規則を宣言したフォルダの id（scheme あり・
+  -- scheme_id なしの祖先）。採番カウンタと scheme_id 一意性はこの単位。
+  scheme_root TEXT,
   -- §2.6: at most one medallion assignment per folder; descendants inherit
   -- the nearest ancestor's assignment.
   medallion_set_id TEXT REFERENCES medallion_sets (id) ON DELETE SET NULL,
@@ -79,7 +82,7 @@ CREATE UNIQUE INDEX folders_owner_para_bucket_idx
   ON folders (owner_id, COALESCE(para_space_id, ''), para_bucket)
   WHERE para_bucket IS NOT NULL;
 CREATE UNIQUE INDEX folders_owner_scheme_id_idx
-  ON folders (owner_id, scheme_id)
+  ON folders (owner_id, scheme_root, scheme_id)
   WHERE scheme_id IS NOT NULL;
 CREATE UNIQUE INDEX para_spaces_owner_name_idx ON para_spaces (owner_id, name);
 CREATE UNIQUE INDEX para_spaces_root_folder_idx

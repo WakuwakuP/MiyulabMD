@@ -711,7 +711,7 @@ type SearchRowsResult =
 async function rowsForSearch(
   env: Env,
   user: SessionUser | undefined,
-  folderId: string | undefined,
+  folderIds: readonly string[] | undefined,
   ftsMatch?: string | null,
 ): Promise<SearchRowsResult> {
   let result: AccessibleRowsResult;
@@ -727,26 +727,31 @@ async function rowsForSearch(
       ? await listAccessibleRows(env, user, null)
       : await listGuestRows(env, null);
   }
-  if (!folderId) {
+  if (!folderIds || folderIds.length === 0) {
     return { kind: "ok", rows: result.rows, snapshot: result.snapshot };
   }
-  const rec = await getFolderById(env, folderId);
-  if (!rec) {
-    return { kind: "not_found" };
+  const recs: { folder: string; owner_id: string }[] = [];
+  for (const folderId of folderIds) {
+    const rec = await getFolderById(env, folderId);
+    if (!rec) {
+      return { kind: "not_found" };
+    }
+    const flags = await folderViewFlags(env, rec.owner_id, rec.folder, user);
+    if (!flags.canView) {
+      return { kind: "not_found" };
+    }
+    recs.push(rec);
   }
-  const flags = await folderViewFlags(env, rec.owner_id, rec.folder, user);
-  if (!flags.canView) {
-    return { kind: "not_found" };
-  }
-  const prefix = `${rec.folder}/`;
   return {
     kind: "ok",
-    rows: result.rows.filter(
-      (row) =>
-        row.owner_id === rec.owner_id &&
-        (rec.folder === "" ||
-          row.folder === rec.folder ||
-          row.folder.startsWith(prefix)),
+    rows: result.rows.filter((row) =>
+      recs.some(
+        (rec) =>
+          row.owner_id === rec.owner_id &&
+          (rec.folder === "" ||
+            row.folder === rec.folder ||
+            row.folder.startsWith(`${rec.folder}/`)),
+      ),
     ),
     snapshot: result.snapshot,
   };
@@ -801,7 +806,7 @@ export type GrepNotesOptions = {
   caseSensitive?: boolean;
   /** Defaults to a fixed-string scan; false enables a JS regex pattern. */
   fixedString?: boolean;
-  folderId?: string;
+  folderIds?: string[];
 } & GrepScanOptions;
 
 export type GetNoteResult =
@@ -1342,7 +1347,7 @@ export function createNoteService(env: Env) {
       if (matcher.kind !== "ok") {
         return matcher;
       }
-      const scoped = await rowsForSearch(env, user, options.folderId);
+      const scoped = await rowsForSearch(env, user, options.folderIds);
       if (scoped.kind !== "ok") {
         return scoped;
       }
@@ -1554,7 +1559,7 @@ export function createNoteService(env: Env) {
       options: {
         query: string;
         scope?: SearchScope;
-        folderId?: string;
+        folderIds?: string[];
         /** §2.6 medallion layer filter: `key` or `set.key` (same as layer:). */
         layer?: string;
         limit?: number;
@@ -1571,7 +1576,7 @@ export function createNoteService(env: Env) {
       const scoped = await rowsForSearch(
         env,
         user,
-        options.folderId,
+        options.folderIds,
         ftsMatchQuery(parsed.terms, scope),
       );
       if (scoped.kind !== "ok") {

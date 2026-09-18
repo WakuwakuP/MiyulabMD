@@ -17,6 +17,7 @@ import {
   parseJdArea,
   parseJdCategory,
   parseJdId,
+  type SchemeRootEntry,
   type SchemeSuggestion,
   type SchemeValidateResult,
   type SchemeValidationIssue,
@@ -43,7 +44,6 @@ export type SchemeError =
 export type SchemeOutcome<T> = { kind: "ok"; result: T } | SchemeError;
 
 const UNTITLED = "無題";
-const JD_AREA_SCOPE = "jd:area";
 const MAX_SCHEME_RETRIES = 3;
 
 function denied(status: 401 | 403, error: string): SchemeError {
@@ -97,6 +97,32 @@ async function counterAllocate(
 
 type JdCandidate = { level: JdLevel; schemeId: string };
 
+/**
+ * 採番スコープのルート = 規則を宣言したフォルダの ID。JD のエリア/カテゴリ
+ * （scheme が jd の採番ノード）は宣言ルートのスコープを継続し、それ以外の
+ * フォルダは自身が宣言ルートとなる。scheme_root 未設定の旧データや孤立
+ * ノードは祖先を辿り、最も近い規則宣言フォルダをスコープとみなす。
+ */
+async function schemeRootId(env_: Env, folder: FolderRow): Promise<string> {
+  if (!(folder.scheme === "jd" && folder.scheme_id)) {
+    return folder.id;
+  }
+  if (folder.scheme_root) {
+    return folder.scheme_root;
+  }
+  let path = parentFolderPath(folder.folder);
+  for (;;) {
+    const row = await getFolderByPath(env_, folder.owner_id, path);
+    if (row?.scheme && !row.scheme_id) {
+      return row.id;
+    }
+    if (!path) {
+      return folder.id;
+    }
+    path = parentFolderPath(path);
+  }
+}
+
 function jdCandidateError(level: JdLevel | null): SchemeError {
   if (level === null) {
     return invalid(
@@ -126,9 +152,11 @@ async function jdNextCandidate(
         counterAllocate(env_, ownerId, scope, startAt)
     : (scope: string, startAt: number) =>
         counterPeek(env_, ownerId, scope, startAt);
+  // 採番カウンタは設定したディレクトリ（規則宣言フォルダ）単位で独立。
+  const scope = await schemeRootId(env_, parent);
 
   if (level === "area") {
-    const index = await next(JD_AREA_SCOPE, 1);
+    const index = await next(`jd:area:${scope}`, 1);
     // エリア番号は 10-19..90-99 の最大9件（index 10 は 3 桁になる）。
     if (index >= JD_GROUP_MAX) {
       return invalid(
@@ -141,7 +169,7 @@ async function jdNextCandidate(
   if (level === "category") {
     const area = parseJdArea(parent.scheme_id ?? "");
     const base = area?.start ?? 0;
-    const value = await next(`jd:cat:${base}`, base);
+    const value = await next(`jd:cat:${scope}:${base}`, base);
     if (value > base + JD_GROUP_MAX - 1) {
       return invalid(
         409,
@@ -154,7 +182,7 @@ async function jdNextCandidate(
   if (category === null) {
     return invalid(400, "カテゴリフォルダの ID が不正です");
   }
-  const value = await next(`jd:id:${category}`, JD_RESERVED_MAX + 1);
+  const value = await next(`jd:id:${scope}:${category}`, JD_RESERVED_MAX + 1);
   if (value > JD_ID_MAX) {
     return invalid(
       409,
@@ -233,15 +261,25 @@ async function insertSchemeFolder(
   scheme: NamingScheme | null,
   schemeId: string,
   schemeTitle: string,
+  schemeRoot: string,
 ): Promise<string | null> {
   const id = crypto.randomUUID();
   try {
     await db(env_)
       .prepare(
-        `INSERT INTO folders (id, owner_id, folder, scheme, scheme_id, scheme_title, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO folders (id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, ownerId, path, scheme, schemeId, schemeTitle, Date.now())
+      .bind(
+        id,
+        ownerId,
+        path,
+        scheme,
+        schemeId,
+        schemeTitle,
+        schemeRoot,
+        Date.now(),
+      )
       .run();
     return id;
   } catch {
@@ -378,6 +416,7 @@ async function tryCreateSchemeChild(
     childScheme,
     candidate.schemeId,
     title,
+    await schemeRootId(env_, parent),
   );
   if (!inserted) {
     if (input.schemeId) {
@@ -567,7 +606,7 @@ export async function schemeGet(
   }
   const rows = await db(env_)
     .prepare(
-      `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at
+      `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at
          FROM folders WHERE owner_id = ? AND scheme_id = ? ORDER BY folder`,
     )
     .bind(user.id, id)
@@ -606,21 +645,72 @@ export async function schemeGet(
   };
 }
 
-/** owner 配下で scheme_id に一致するフォルダの UUID を返す（検索フィルタ用）。 */
-export async function folderIdForSchemeId(
+/**
+ * 規則を宣言したフォルダ（採番スコープのルート）の一覧。JD のエリア/
+ * カテゴリは親スコープを継続するコンテナなのでルートには含めない。
+ * 各エントリに採番済みフォルダ数と次番号プレビュー（採番しない）を付ける。
+ */
+export async function listSchemeRoots(
+  env_: Env,
+  user: SessionUser | undefined,
+): Promise<SchemeOutcome<{ schemes: SchemeRootEntry[] }>> {
+  if (!user) {
+    return denied(401, "Unauthorized");
+  }
+  const rows = await db(env_)
+    .prepare(
+      `SELECT f.id, f.owner_id, f.folder, f.scheme, f.scheme_id, f.scheme_title,
+              f.scheme_root, f.created_at,
+              (SELECT COUNT(*) FROM folders m
+                WHERE m.owner_id = f.owner_id AND m.scheme_root = f.id)
+                AS minted_count
+         FROM folders AS f
+        WHERE f.owner_id = ? AND f.scheme IS NOT NULL
+          AND (f.scheme_id IS NULL OR f.scheme <> 'jd')
+        ORDER BY f.folder`,
+    )
+    .bind(user.id)
+    .all<FolderRow & { minted_count: number }>();
+
+  const schemes: SchemeRootEntry[] = [];
+  for (const row of rows.results ?? []) {
+    let next: SchemeRootEntry["next"] = null;
+    if (row.scheme === "jd") {
+      const candidate = await jdNextCandidate(env_, row.owner_id, row, false);
+      next = "kind" in candidate ? null : candidate;
+    } else if (row.scheme === "zettel") {
+      next = { level: "zettel", schemeId: zettelStamp(Date.now()) };
+    }
+    schemes.push({
+      folder: row.folder,
+      id: row.id,
+      mintedCount: row.minted_count,
+      name: folderName(row.folder),
+      next,
+      scheme: row.scheme ?? "",
+    });
+  }
+  return { kind: "ok", result: { schemes } };
+}
+
+/**
+ * owner 配下で scheme_id に一致するフォルダの UUID を全件返す（検索フィルタ
+ * 用）。同一 ID が別スキームツリーに存在し得るため複数件になりうる。
+ */
+export async function folderIdsForSchemeId(
   env_: Env,
   ownerId: string,
   schemeId: string,
-): Promise<string | null> {
+): Promise<string[]> {
   const id = schemeId.trim();
   if (!id) {
-    return null;
+    return [];
   }
-  const row = await db(env_)
+  const rows = await db(env_)
     .prepare("SELECT id FROM folders WHERE owner_id = ? AND scheme_id = ?")
     .bind(ownerId, id)
-    .first<{ id: string }>();
-  return row?.id ?? null;
+    .all<{ id: string }>();
+  return (rows.results ?? []).map((row) => row.id);
 }
 
 export type JdListEntry = {
@@ -673,7 +763,7 @@ export async function jdListCategory(
   const prefix = parent.folder ? `${parent.folder}/` : "";
   const rows = await db(env_)
     .prepare(
-      `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at
+      `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at
          FROM folders
         WHERE owner_id = ? AND folder LIKE ? ESCAPE '\\' AND scheme_id IS NOT NULL`,
     )
@@ -713,6 +803,12 @@ export async function jdListCategory(
   };
 }
 
+/** スコープルートが判明しているノードは、親の属するツリーのルートと一致する。 */
+function jdSameTree(row: FolderRow, parent: FolderRow): boolean {
+  const expectedRoot = parent.scheme_id ? parent.scheme_root : parent.id;
+  return !(row.scheme_root && expectedRoot) || row.scheme_root === expectedRoot;
+}
+
 /** scheme_id 持ちノードが JD 構造上の正しい親の下にあるか。 */
 function jdExpectedParent(
   row: FolderRow,
@@ -723,7 +819,7 @@ function jdExpectedParent(
     return false;
   }
   const parent = byPath.get(parentFolderPath(row.folder));
-  if (!parent) {
+  if (!(parent && jdSameTree(row, parent))) {
     return false;
   }
   if (level === "area") {
@@ -864,7 +960,7 @@ function validateJdSubtree(
   }
 }
 
-/** 規則キー妥当性と scheme_id 重複の検査。 */
+/** 規則キー妥当性と scheme_id 重複（同一採番スコープ内）の検査。 */
 function collectSchemeAndDupIssues(
   all: FolderRow[],
   issues: SchemeValidationIssue[],
@@ -883,17 +979,19 @@ function collectSchemeAndDupIssues(
     if (!row.scheme_id) {
       continue;
     }
-    const prior = seenIds.get(row.scheme_id);
+    // scheme_root 未設定の孤立ノードは共通バケットで重複判定する。
+    const scopeKey = `${row.scheme_root ?? ""}${row.scheme_id}`;
+    const prior = seenIds.get(scopeKey);
     if (prior) {
       issues.push(
         issue(
           "duplicate_id",
           row,
-          `ID \`${row.scheme_id}\` が \`${prior.folder}\` と重複しています`,
+          `ID \`${row.scheme_id}\` が同じ採番スコープ内で \`${prior.folder}\` と重複しています`,
         ),
       );
     } else {
-      seenIds.set(row.scheme_id, row);
+      seenIds.set(scopeKey, row);
     }
   }
 }
@@ -942,7 +1040,7 @@ export async function validateSchemeTree(
   }
   const rows = await db(env_)
     .prepare(
-      `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, created_at
+      `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at
          FROM folders WHERE owner_id = ? ORDER BY folder`,
     )
     .bind(user.id)

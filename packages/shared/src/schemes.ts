@@ -1,7 +1,9 @@
 /**
  * Naming schemes: a folder may declare a rule (`scheme`) that names its direct
  * children, and a folder minted by a parent's scheme carries `scheme_id` +
- * `scheme_title`. `scheme_id` is unique per owner so a bare ID opens a folder.
+ * `scheme_title`. Numbering and `scheme_id` uniqueness are scoped to the
+ * declaring directory (`scheme_root`), so each configured folder is an
+ * independent scheme tree.
  */
 
 export const NAMING_SCHEMES = ["jd", "zettel"] as const;
@@ -153,6 +155,19 @@ export type SchemeSuggestion = {
   scheme: NamingScheme;
   schemeId: string;
   title: string;
+};
+
+/** 規則を宣言したフォルダ（採番スコープのルート）の一覧エントリ。 */
+export type SchemeRootEntry = {
+  /** フォルダパス（'' = マイドライブ直下） */
+  folder: string;
+  id: string;
+  /** 採番スコープ内のフォルダ数 */
+  mintedCount: number;
+  name: string;
+  /** 次に採番される ID（採番できない場合 null） */
+  next: { level: JdLevel | "zettel"; schemeId: string } | null;
+  scheme: string;
 };
 
 export type SchemeValidationIssue = {
