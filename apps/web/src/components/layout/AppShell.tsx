@@ -438,6 +438,12 @@ export function AppShell() {
         end={headerEnd}
         folder={headerFolder}
         loading={loading}
+        offline={
+          !loading &&
+          (viewer.mode === "cached" ||
+            viewer.mode === "unavailable" ||
+            viewer.liveCheckFailed === true)
+        }
         onOpenSearch={() => setSearchOpen(true)}
         user={viewer.user}
       />

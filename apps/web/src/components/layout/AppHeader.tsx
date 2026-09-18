@@ -9,6 +9,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { SearchIcon } from "../ui/icons.tsx";
 import { MutedText } from "../ui/Text.tsx";
 import { AccountMenu } from "./AccountMenu.tsx";
+import { OfflineStatusBadge } from "./OfflineStatusBadge.tsx";
 import { SitePublishButton } from "./SitePublishButton.tsx";
 
 type Props = {
@@ -16,6 +17,8 @@ type Props = {
   cachedUser?: SessionUser | null;
   end?: ReactNode;
   folder?: string | null;
+  /** サーバーと疎通できずローカルキャッシュで表示しているとき true。 */
+  offline?: boolean;
   user: SessionUser | null;
   loading: boolean;
   authConfig: AuthConfig;
@@ -27,6 +30,7 @@ export function AppHeader({
   cachedUser,
   end,
   folder,
+  offline,
   user,
   loading,
   authConfig,
@@ -72,6 +76,7 @@ export function AppHeader({
         >
           MiyulabMD
         </Link>
+        {offline && <OfflineStatusBadge />}
       </div>
       {actions && (
         <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-center">

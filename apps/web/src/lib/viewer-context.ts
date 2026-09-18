@@ -136,6 +136,7 @@ async function resolveViewerResult(
 ): Promise<ViewerContext> {
   const { signal } = options;
   if (result.ok) {
+    markLastLiveSync();
     if (!isMeResponse(result.data)) {
       return context("unavailable", null);
     }
@@ -159,6 +160,30 @@ async function resolveViewerResult(
 // single-flight viewer request open and starve every scheduled retry
 // until the OS gives up on it.
 const LIVE_CHECK_TIMEOUT_MS = 15_000;
+
+const LAST_LIVE_SYNC_KEY = "miyulabmd:last-live-sync";
+
+/**
+ * サーバーと最後に疎通できた時刻。オフライン表示の「最終同期」ポップアップ用。
+ * localStorage なので冷起動のオフラインでも読める。
+ */
+export function readLastLiveSyncAt(): number | null {
+  try {
+    const raw = localStorage.getItem(LAST_LIVE_SYNC_KEY);
+    const at = raw === null ? Number.NaN : Number(raw);
+    return Number.isFinite(at) && at > 0 ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+function markLastLiveSync(): void {
+  try {
+    localStorage.setItem(LAST_LIVE_SYNC_KEY, String(Date.now()));
+  } catch {
+    // 永続化できない環境では最終同期時刻を持たない。
+  }
+}
 
 export async function resolveViewerContext(
   options: ResolveViewerOptions = {},

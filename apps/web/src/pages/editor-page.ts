@@ -194,6 +194,12 @@ export function bindEditorCollab(input: {
   editCacheUserId?: string | null;
   /** 表示キャッシュ由来のオフライン編集。編集キャッシュ復元完了を readiness に使う。 */
   offlineEdit?: boolean;
+  /**
+   * preview 中でもセッションを先行作成し、同期済み Y.Doc を編集キャッシュに
+   * 乗せる。オフライン編集資格のあるノートを開くだけでオフライン編集可能に
+   * なる温め処理。preview でもコネクションを維持する。
+   */
+  warmup?: boolean;
   /** オフライン編集でローカル Y.Doc への書き込みが可能になったことを通知する。 */
   setOfflineWritable?: (writable: boolean) => void;
   /** Server revoked edit access mid-session (edit lock engaged). */
@@ -202,7 +208,9 @@ export function bindEditorCollab(input: {
   if (!(input.noteId && input.hydrated) || input.userLoading) {
     return;
   }
-  if (input.viewMode === "preview") {
+  // preview ではセッションを持たない。ただし warmup 指定時は preview の
+  // まま接続だけ張り、初回 sync で編集キャッシュへ永続化させる。
+  if (input.viewMode === "preview" && input.warmup !== true) {
     teardownCollab(
       input.unbindRef,
       input.sessionRef,

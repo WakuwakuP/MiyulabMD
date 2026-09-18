@@ -79,9 +79,7 @@ test("an app-attached image remains visible with its cached note after reload", 
   // reload is separately exercised by the real Worker acceptance runner.
   offline = true;
   await page.reload();
-  await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "オフライン" })).toBeVisible();
   await expect(
     page.getByText("通信なしでも読みたい本文。", { exact: true }),
   ).toBeVisible();

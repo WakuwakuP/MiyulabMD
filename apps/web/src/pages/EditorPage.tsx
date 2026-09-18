@@ -12,8 +12,10 @@ import {
   titleFromMarkdown,
   validateArticleDocument,
 } from "@miyulabmd/shared";
+import { parseAsString, useQueryState } from "nuqs";
 import {
   type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -51,7 +53,12 @@ import { resolveMedallion } from "../lib/api.ts";
 import { cn } from "../lib/cn.ts";
 import type { YjsSession } from "../lib/collaboration.ts";
 import { hasSyncedOnce, isEditCacheEligible } from "../lib/edit-cache.ts";
-import type { EditorMode } from "../lib/editor-mode.ts";
+import {
+  type EditMode,
+  type EditorMode,
+  isEditMode,
+  readLastEditMode,
+} from "../lib/editor-mode.ts";
 import { useKnowledgeFeature } from "../lib/knowledge-features.ts";
 import {
   dismissStaleSsrPreview,
@@ -389,9 +396,6 @@ function EditorPageView({
   loadError,
   paused,
   unsentEdits,
-  readSource,
-  cachedAt,
-  offlineEditable,
   note,
   accessDraft,
   workspace,
@@ -400,10 +404,6 @@ function EditorPageView({
   loadError: string | null;
   paused: boolean;
   unsentEdits: boolean;
-  readSource: "pending" | "network" | "cache";
-  cachedAt: number | null;
-  /** 資格・同期履歴が揃っていて本文のオフライン編集ができる表示キャッシュ。 */
-  offlineEditable: boolean;
   note: Note | null;
   accessDraft: AccessDraft | null;
   workspace: ReactNode;
@@ -423,15 +423,6 @@ function EditorPageView({
   }
   return (
     <>
-      {readSource === "cache" && cachedAt !== null && (
-        <p className="px-5 py-2" role="status">
-          オフラインキャッシュを表示中（保存日時:{" "}
-          {new Date(cachedAt).toLocaleString("ja-JP")}）。
-          {offlineEditable
-            ? "このノートはオフラインでも本文を編集できます。編集は端末に保持され、再接続・認証後に同期されます。"
-            : "閲覧のみです。"}
-        </p>
-      )}
       {paused && (
         <p className="px-5 py-2" role="status">
           共同編集の接続が切れました。入力済みの内容はこの画面に保持しています。
@@ -601,7 +592,28 @@ export function EditorPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [articleSources, setArticleSources] = useState<ArticleSource[]>([]);
-  const [mode, setMode] = useState<EditorMode>("preview");
+  // エディタモードは URL クエリ (?mode=edit) が正。オンライン復帰や
+  // リロードでビューアが切り替わっても編集モードを維持する。
+  // 編集サブモード（テキスト/分割/リッチ）は端末の最終選択を引き継ぐ。
+  const [modeParam, setModeParam] = useQueryState(
+    "mode",
+    parseAsString.withOptions({ history: "replace" }),
+  );
+  const [editSubMode, setEditSubMode] = useState<EditMode>(() =>
+    readLastEditMode(),
+  );
+  const mode: EditorMode = modeParam === "edit" ? editSubMode : "preview";
+  const setMode = useCallback(
+    (next: EditorMode) => {
+      if (isEditMode(next)) {
+        setEditSubMode(next);
+        void setModeParam("edit");
+      } else {
+        void setModeParam(null);
+      }
+    },
+    [setModeParam],
+  );
   const [splitScroll, setSplitScroll] = useState(0);
   const splitScrollLock = useRef(false);
   const hydratedRef = useRef(false);
@@ -621,10 +633,6 @@ export function EditorPage() {
     currentReadState?.phase === "success"
       ? (currentReadState.result?.source ?? "pending")
       : "pending";
-  const cachedAt =
-    currentReadState?.phase === "success"
-      ? (currentReadState.result?.cachedAt ?? null)
-      : null;
   const flags = ownerFlags(user, note);
   const readReady = currentReadState?.phase === "success" && !loading;
   // §2.6: edit_locked freezes every mutation (body, folder, share, delete)
@@ -646,6 +654,16 @@ export function EditorPage() {
   const canEdit =
     readReady &&
     ((flags.canEdit && readSource === "network") || offlineEditable);
+  // オフライン編集資格のあるノートは preview 中でも共同編集セッションを
+  // 先行接続し、同期済み Y.Doc を編集キャッシュ（y-indexeddb）に乗せる。
+  // 編集モードに一度も入らなくてもオフライン編集できるようにする温め。
+  const warmupEditCache = Boolean(
+    readSource === "network" &&
+      canEdit &&
+      note &&
+      editIdentityId &&
+      isEditCacheEligible(note, editIdentityId),
+  );
   const viewMode: EditorMode = canEdit && !editLocked ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
@@ -669,16 +687,23 @@ export function EditorPage() {
   const bodyWritable = collabWritable || offlineWritable;
   const paused = ready && !bodyWritable;
   // §2.6: edit lock freezes all mutations, not just the body.
-  // 本文以外の REST 変更はネットワーク由来の閲覧と、セッションがない
-  // （preview 等）かオンライン同期済みの場合に限る。表示キャッシュ由来では
-  // ws が後から同期しても REST UI は有効化しない。
+  // 本文以外の REST 変更はネットワーク由来の閲覧に限る。preview 中の
+  // warmup セッションは REST の配送可否に関係しないため、セッション
+  // 同期状態は編集モード時だけ見る。表示キャッシュ由来では ws が後から
+  // 同期しても REST UI は有効化しない。
   const canMutate =
     canEdit &&
     readSource === "network" &&
-    !paused &&
     !editLocked &&
-    (!collab || collabWritable);
-  const bodyEditable = canEdit && !paused && !editLocked;
+    (viewMode === "preview" || (!paused && (!collab || collabWritable)));
+  // preview 中の warmup セッション切断は編集可否に関係しないため、
+  // paused は編集モード時だけ Edit 表示の条件にする。
+  const bodyEditable =
+    canEdit && !editLocked && (viewMode === "preview" || !paused);
+  // REST 変更は preview 中の warmup セッションの同期状態に依存しない。
+  // 編集セッションがあるモードだけ ws 同期を配送可否の条件にする。
+  const canStartMutation = () =>
+    viewMode === "preview" || editorSessionWritable(sessionRef.current);
 
   useLayoutEffect(() => {
     hydratedRef.current = false;
@@ -690,7 +715,6 @@ export function EditorPage() {
     setMarkdown("");
     setFolder("");
     setLinksOpen(false);
-    setMode("preview");
     setViewScope(null);
     setShareOpen(false);
     setHistoryOpen(false);
@@ -896,6 +920,7 @@ export function EditorPage() {
       user: collabUser,
       userLoading,
       viewMode,
+      warmup: warmupEditCache,
     });
   }, [
     noteId,
@@ -906,6 +931,7 @@ export function EditorPage() {
     note,
     offlineEditable,
     editIdentityId,
+    warmupEditCache,
   ]);
 
   useEffect(() => {
@@ -936,7 +962,7 @@ export function EditorPage() {
     bindEditorHeader({
       awareness,
       canEdit: bodyEditable,
-      canStart: () => editorSessionWritable(sessionRef.current),
+      canStart: canStartMutation,
       folder,
       isCurrent: () => viewScope?.isCurrent() === true,
       isOwner: flags.isOwner,
@@ -970,6 +996,7 @@ export function EditorPage() {
     paused,
     readSource,
     setHeader,
+    setMode,
     user,
     viewScope,
   ]);
@@ -977,13 +1004,12 @@ export function EditorPage() {
   return (
     <EditorPageView
       accessDraft={accessDraft}
-      cachedAt={cachedAt}
       loadError={loadError}
       loading={loading}
       note={note}
-      offlineEditable={offlineEditable}
-      paused={paused}
-      readSource={readSource}
+      // preview 中の warmup セッション切断は編集不能を意味しないので
+      // バナーは編集モード時だけ出す。
+      paused={paused && viewMode !== "preview"}
       unsentEdits={unsentEdits}
       workspace={
         currentReadState?.phase === "success" && note && accessDraft ? (
@@ -1015,7 +1041,7 @@ export function EditorPage() {
             onCloseShare={() => setShareOpen(false)}
             onPersistAccess={(next) => {
               void persistEditorAccess(note, next, {
-                canStart: () => editorSessionWritable(sessionRef.current),
+                canStart: canStartMutation,
                 isCurrent: () => viewScope?.isCurrent() === true,
                 setAccessDraft,
                 setNote,
@@ -1094,9 +1120,12 @@ function bindEditorHeader(input: {
       </span>
     ),
     end:
-      input.readSource === "cache" || input.paused ? undefined : (
+      input.readSource === "cache" ||
+      (input.paused && input.viewMode !== "preview") ? undefined : (
         <EditorHeaderEnd
-          awareness={input.awareness}
+          // preview 中の warmup セッションは UI に出さない。presence
+          // アバターは従来どおり編集モード時だけ表示する。
+          awareness={input.viewMode === "preview" ? undefined : input.awareness}
           folder={input.folder}
           folderId={input.note.folderId}
           isOwner={input.isOwner}

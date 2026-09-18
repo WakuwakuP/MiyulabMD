@@ -135,12 +135,12 @@ test("a synced self-owned note edits its local document offline and merges after
   });
 
   try {
-    // Online: sync once so the edit cache and its synced marker exist.
+    // Online: just viewing the note warms the edit cache — the warmup session
+    // syncs the server document into y-indexeddb without entering edit mode.
     await page.goto(`/n/${note.id}`);
-    await page.getByRole("button", { exact: true, name: "Edit" }).click();
-    await expect(page.locator(".cm-content")).toContainText(
-      "通信なしでも読みたい本文。",
-    );
+    await expect(
+      page.getByText("通信なしでも読みたい本文。", { exact: true }),
+    ).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() =>
@@ -158,10 +158,15 @@ test("a synced self-owned note edits its local document offline and merges after
     await expect(
       page.getByText("通信なしでも読みたい本文。", { exact: true }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("status").filter({ hasText: "キャッシュ" }),
-    ).toContainText("オフラインでも本文を編集できます");
+    // オフライン状態はヘッダーのアイコンが示し、タップで最終同期時刻を表示する。
+    const offlineButton = page.getByRole("button", { name: "オフライン" });
+    await expect(offlineButton).toBeVisible();
+    await offlineButton.click();
+    await expect(page.getByText(/最終同期/)).toBeVisible();
     await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    // The edit mode is carried by the URL (?mode=edit) so a reload or a
+    // viewer switch keeps the session instead of falling back to preview.
+    await expect(page).toHaveURL(/[?&]mode=edit/);
 
     const editor = page.locator(".cm-content");
     await expect(editor).toContainText("通信なしでも読みたい本文。");
@@ -187,18 +192,24 @@ test("a synced self-owned note edits its local document offline and merges after
     expect(blocked).toBe("ReadOnlyViewingError");
     expect(mutations).toEqual([]);
 
+    // ?mode=edit persists across reloads: the editor remounts straight into
+    // the locally persisted document without another mode switch.
+    await page.reload();
+    await expect(page.locator(".cm-content")).toContainText("offline draft");
+
     // Reconnect: once sync completes the pending update reaches the server
     // document and the unsent marker clears.
     syncReplies = true;
-    await expect.poll(() => sockets.length).toBe(2);
-    sockets[1].send(syncFrame(serverDoc));
+    const latest = () => sockets.at(-1);
+    await expect.poll(() => latest()).toBeTruthy();
+    latest().send(syncFrame(serverDoc));
     await expect(
       page.getByRole("status").filter({ hasText: "未送信の編集" }),
     ).toHaveCount(0);
     await expect
-      .poll(() => (clientMessages.get(sockets[1]) ?? []).length)
+      .poll(() => (clientMessages.get(latest()) ?? []).length)
       .toBeGreaterThan(1);
-    for (const message of clientMessages.get(sockets[1]) ?? []) {
+    for (const message of clientMessages.get(latest()) ?? []) {
       applyClientMessage(serverDoc, message);
     }
     expect(serverDoc.getText("markdown").toString()).toContain("offline draft");
@@ -231,12 +242,11 @@ test("a synced marker without the edit cache document stays unwritable offline",
   });
 
   try {
-    // Online: sync once so the synced marker and the edit cache both exist.
+    // Online: viewing the note warms the synced marker and the edit cache.
     await page.goto(`/n/${note.id}`);
-    await page.getByRole("button", { exact: true, name: "Edit" }).click();
-    await expect(page.locator(".cm-content")).toContainText(
-      "通信なしでも読みたい本文。",
-    );
+    await expect(
+      page.getByText("通信なしでも読みたい本文。", { exact: true }),
+    ).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() =>
@@ -248,7 +258,7 @@ test("a synced marker without the edit cache document stays unwritable offline",
 
     // Offline: evict only the edit cache, keeping the marker and display cache.
     apiAvailable = false;
-    await page.reload();
+    await page.goto(`/n/${note.id}`);
     await expect(
       page.getByText("通信なしでも読みたい本文。", { exact: true }),
     ).toBeVisible();
@@ -327,10 +337,10 @@ test("a note body cleared offline stays writable after re-entering edit mode", a
       )
       .toBe("1");
 
-    // Offline: clear the whole body and persist the delete update.
+    // Offline: ?mode=edit survives the reload, so the editor restores the
+    // local document directly. Clear the whole body and persist the update.
     apiAvailable = false;
     await page.reload();
-    await page.getByRole("button", { exact: true, name: "Edit" }).click();
     const editor = page.locator(".cm-content");
     await expect(editor).toContainText("通信なしでも読みたい本文。");
     const updatesBeforeClear = await editCacheUpdateCount(page);
@@ -342,10 +352,9 @@ test("a note body cleared offline stays writable after re-entering edit mode", a
       .poll(() => editCacheUpdateCount(page))
       .toBeGreaterThan(updatesBeforeClear);
 
-    // Re-enter edit mode: the display cache still holds the old snapshot, but
-    // the restored doc has history and must stay writable.
+    // Reload again: the display cache still holds the old snapshot, but the
+    // restored doc has history and must stay writable.
     await page.reload();
-    await page.getByRole("button", { exact: true, name: "Edit" }).click();
     await expect(editor).toBeAttached();
     await expect(editor).not.toContainText("通信なしでも読みたい本文。");
     await editor.click();
@@ -442,9 +451,11 @@ test("a synced note that is not self-scoped stays read-only offline", async ({
   await expect(
     page.getByText("通信なしでも読みたい本文。", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toContainText("閲覧のみです。");
+  // オフラインアイコンがロゴ右に出て、タップで最終同期時刻を表示する。
+  const offlineButton = page.getByRole("button", { name: "オフライン" });
+  await expect(offlineButton).toBeVisible();
+  await offlineButton.click();
+  await expect(page.getByText(/最終同期/)).toBeVisible();
   await expect(
     page.getByRole("button", { exact: true, name: "Edit" }),
   ).toHaveCount(0);
