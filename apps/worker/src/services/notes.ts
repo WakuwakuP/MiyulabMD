@@ -34,12 +34,15 @@ import { upsertUserByEmail } from "../db/users.ts";
 import type { SnapshotWriteResult } from "../durable-objects/snapshot-saved.ts";
 import { instanceFlags } from "../env.ts";
 import {
+  type AccessSnapshot,
+  buildAccessSnapshot,
   canDiscoverAccess,
   defaultScopes,
   deleteFolderTree,
   derivedPermission,
   ensureFolderRow,
   folderDiscoveryAllowed,
+  folderDiscoveryAllowedSnapshot,
   folderViewFlags,
   getFolderById,
   getFolderByPath,
@@ -51,6 +54,7 @@ import {
   replaceGrants,
   resolveFolderAccess,
   resolveNoteAccess,
+  resolveNoteAccessSnapshot,
 } from "./access.ts";
 import {
   createArticleService,
@@ -111,31 +115,77 @@ export function accessFields(row: NoteRow): NoteAccessFields {
   };
 }
 
+function noteFolderId(
+  env: Env,
+  row: NoteRow,
+  folder: string,
+  snapshot?: AccessSnapshot,
+): Promise<string | null> {
+  const snapRow = snapshot?.foldersByPath.get(row.owner_id)?.get(folder);
+  return snapRow
+    ? Promise.resolve(snapRow.id)
+    : ensureFolderRow(env, row.owner_id, folder);
+}
+
+function folderVisibleToViewer(
+  env: Env,
+  row: NoteRow,
+  folder: string,
+  user: SessionUser | null | undefined,
+  snapshot?: AccessSnapshot,
+): Promise<boolean> {
+  return snapshot
+    ? Promise.resolve(
+        folderDiscoveryAllowedSnapshot(
+          env,
+          row.owner_id,
+          folder,
+          user,
+          snapshot,
+        ),
+      )
+    : folderDiscoveryAllowed(env, row.owner_id, folder, user);
+}
+
+async function folderSchemeMeta(
+  env: Env,
+  folderId: string,
+  snapshot?: AccessSnapshot,
+): Promise<{
+  folderSchemeId: string | null;
+  folderSchemeTitle: string | null;
+}> {
+  const folderRow = snapshot
+    ? (snapshot.foldersById.get(folderId) ?? null)
+    : await getFolderById(env, folderId);
+  return {
+    folderSchemeId: folderRow?.scheme_id ?? null,
+    folderSchemeTitle: folderRow?.scheme_title ?? null,
+  };
+}
+
 async function toNote(
   env: Env,
   row: NoteRow,
   user?: SessionUser | null,
+  snapshot?: AccessSnapshot,
 ): Promise<Note> {
-  const access = await resolveNoteAccess(env, accessFields(row), user);
+  const access = snapshot
+    ? resolveNoteAccessSnapshot(env, accessFields(row), user, snapshot)
+    : await resolveNoteAccess(env, accessFields(row), user);
   const isOwner = user?.id === row.owner_id;
   const folder = row.folder ?? "";
-  const folderId = await ensureFolderRow(env, row.owner_id, folder);
-  let visibleFolderId = isOwner ? folderId : null;
-  if (
-    !isOwner &&
-    folderId &&
-    (await folderDiscoveryAllowed(env, row.owner_id, folder, user))
-  ) {
-    visibleFolderId = folderId;
-  }
+  const folderId = await noteFolderId(env, row, folder, snapshot);
+  const visibleFolderId =
+    isOwner ||
+    (folderId !== null &&
+      (await folderVisibleToViewer(env, row, folder, user, snapshot)))
+      ? folderId
+      : null;
   // スキームメタは folderId が見える閲覧者にだけ付ける（存在漏洩を folderId と揃える）。
-  let folderSchemeId: string | null = null;
-  let folderSchemeTitle: string | null = null;
-  if (visibleFolderId) {
-    const folderRow = await getFolderById(env, visibleFolderId);
-    folderSchemeId = folderRow?.scheme_id ?? null;
-    folderSchemeTitle = folderRow?.scheme_title ?? null;
-  }
+  const { folderSchemeId, folderSchemeTitle } = visibleFolderId
+    ? await folderSchemeMeta(env, visibleFolderId, snapshot)
+    : { folderSchemeId: null, folderSchemeTitle: null };
   return {
     access: isOwner ? access : { ...access, grants: [], sourceFolder: null },
     alias: row.alias,
@@ -160,8 +210,9 @@ export async function toSummary(
   env: Env,
   row: NoteRow,
   user?: SessionUser | null,
+  snapshot?: AccessSnapshot,
 ): Promise<NoteSummary> {
-  const note = await toNote(env, row, user);
+  const note = await toNote(env, row, user, snapshot);
   const { markdown: _markdown, ...summary } = note;
   return summary;
 }
@@ -513,11 +564,17 @@ async function listGuestInheritedRowsFromPublicFolders(
  * title/body MATCH it are loaded. The FTS set is global — permission
  * filtering below still decides visibility.
  */
+export type AccessibleRowsResult = {
+  rows: NoteRow[];
+  /** フィルタに使ったプリロード済みアクセスデータ。toSummary にそのまま渡せる。 */
+  snapshot: AccessSnapshot;
+};
+
 export async function listAccessibleRows(
   env: Env,
   user: SessionUser,
   ftsMatch?: string | null,
-): Promise<NoteRow[]> {
+): Promise<AccessibleRowsResult> {
   const ftsClause = ftsMatch
     ? " AND n.id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)"
     : "";
@@ -555,23 +612,31 @@ export async function listAccessibleRows(
   }
 
   const candidates = mergeNoteRows([...(owned.results ?? []), ...extra]);
-  // 親の共有設定より狭い範囲を指定したノートは一覧・検索に漏らさない。
-  const visible = await Promise.all(
-    candidates.map(async (row) => {
-      const access = await resolveNoteAccess(env, accessFields(row), user);
-      return canDiscoverAccess(access, row.owner_id, user) ? row : null;
-    }),
+  const snapshot = await buildAccessSnapshot(
+    env,
+    candidates.map((row) => row.owner_id),
   );
-  return visible.filter((row): row is NoteRow => row !== null);
+  // 親の共有設定より狭い範囲を指定したノートは一覧・検索に漏らさない。
+  const visible = candidates.filter((row) => {
+    const access = resolveNoteAccessSnapshot(
+      env,
+      accessFields(row),
+      user,
+      snapshot,
+    );
+    return canDiscoverAccess(access, row.owner_id, user);
+  });
+  return { rows: visible, snapshot };
 }
 
 async function listGuestRows(
   env: Env,
   ftsMatch?: string | null,
-): Promise<NoteRow[]> {
+): Promise<AccessibleRowsResult> {
+  const emptySnapshot = await buildAccessSnapshot(env, []);
   const allowAnonymousViews = instanceFlags(env).allowAnonymousViews;
   if (!allowAnonymousViews) {
-    return [];
+    return { rows: [], snapshot: emptySnapshot };
   }
 
   const ftsClause = ftsMatch
@@ -591,15 +656,21 @@ async function listGuestRows(
     ...(publicDirect.results ?? []),
     ...inheritedFromFolder,
   ]);
-
-  const visible = await Promise.all(
-    candidates.map(async (row) => {
-      const access = await resolveNoteAccess(env, accessFields(row), undefined);
-      return canDiscoverAccess(access, row.owner_id) ? row : null;
-    }),
+  const snapshot = await buildAccessSnapshot(
+    env,
+    candidates.map((row) => row.owner_id),
   );
 
-  return visible.filter((row): row is NoteRow => row !== null);
+  const visible = candidates.filter((row) => {
+    const access = resolveNoteAccessSnapshot(
+      env,
+      accessFields(row),
+      undefined,
+      snapshot,
+    );
+    return canDiscoverAccess(access, row.owner_id);
+  });
+  return { rows: visible, snapshot };
 }
 
 function excerptSnapshot(text: string, start: number, length: number): string {
@@ -627,7 +698,9 @@ function parseSearchCursor(cursor: string | undefined): number {
   return Number.isInteger(offset) && offset >= 0 ? offset : 0;
 }
 
-type SearchRowsResult = { kind: "ok"; rows: NoteRow[] } | { kind: "not_found" };
+type SearchRowsResult =
+  | { kind: "ok"; rows: NoteRow[]; snapshot: AccessSnapshot }
+  | { kind: "not_found" };
 
 /**
  * Permission-filtered candidate rows for search/grep, optionally restricted to
@@ -641,21 +714,21 @@ async function rowsForSearch(
   folderId: string | undefined,
   ftsMatch?: string | null,
 ): Promise<SearchRowsResult> {
-  let rows: NoteRow[];
+  let result: AccessibleRowsResult;
   try {
-    rows = user
+    result = user
       ? await listAccessibleRows(env, user, ftsMatch)
       : await listGuestRows(env, ftsMatch);
   } catch (error) {
     if (!ftsMatch) {
       throw error;
     }
-    rows = user
+    result = user
       ? await listAccessibleRows(env, user, null)
       : await listGuestRows(env, null);
   }
   if (!folderId) {
-    return { kind: "ok", rows };
+    return { kind: "ok", rows: result.rows, snapshot: result.snapshot };
   }
   const rec = await getFolderById(env, folderId);
   if (!rec) {
@@ -668,13 +741,14 @@ async function rowsForSearch(
   const prefix = `${rec.folder}/`;
   return {
     kind: "ok",
-    rows: rows.filter(
+    rows: result.rows.filter(
       (row) =>
         row.owner_id === rec.owner_id &&
         (rec.folder === "" ||
           row.folder === rec.folder ||
           row.folder.startsWith(prefix)),
     ),
+    snapshot: result.snapshot,
   };
 }
 
@@ -703,8 +777,9 @@ async function searchHitForRow(
   row: NoteRow,
   user: SessionUser | undefined,
   needle: string,
+  snapshot?: AccessSnapshot,
 ): Promise<NoteSearchHit> {
-  const summary = await toSummary(env, row, user);
+  const summary = await toSummary(env, row, user, snapshot);
   const markdown = row.markdown_snapshot ?? "";
   const markdownIndex = needle ? markdown.toLowerCase().indexOf(needle) : -1;
   return {
@@ -757,11 +832,14 @@ async function folderNoteVisibleTo(
   row: NoteRow,
   isOwner: boolean,
   user: SessionUser,
+  snapshot?: AccessSnapshot,
 ): Promise<boolean> {
   if (isOwner) {
     return true;
   }
-  const access = await resolveNoteAccess(env, accessFields(row), user);
+  const access = snapshot
+    ? resolveNoteAccessSnapshot(env, accessFields(row), user, snapshot)
+    : await resolveNoteAccess(env, accessFields(row), user);
   if (!access.flags.canView) {
     return false;
   }
@@ -1311,22 +1389,31 @@ export function createNoteService(env: Env) {
             .all<NoteRow>();
 
       const isOwner = user.id === rec.owner_id;
+      const noteRows = rows.results ?? [];
+      const snapshot = await buildAccessSnapshot(
+        env,
+        noteRows.map((row) => row.owner_id),
+      );
       const summaries: NoteSummary[] = [];
-      for (const row of rows.results ?? []) {
-        if (await folderNoteVisibleTo(env, rec, row, isOwner, user)) {
-          summaries.push(await toSummary(env, row, user));
+      for (const row of noteRows) {
+        if (await folderNoteVisibleTo(env, rec, row, isOwner, user, snapshot)) {
+          summaries.push(await toSummary(env, row, user, snapshot));
         }
       }
       return { kind: "ok", notes: summaries };
     },
 
     async listForGuest(): Promise<NoteSummary[]> {
-      const rows = await listGuestRows(env);
-      return Promise.all(rows.map((row) => toSummary(env, row, undefined)));
+      const { rows, snapshot } = await listGuestRows(env);
+      return Promise.all(
+        rows.map((row) => toSummary(env, row, undefined, snapshot)),
+      );
     },
     async listForUser(user: SessionUser): Promise<NoteSummary[]> {
-      const rows = await listAccessibleRows(env, user);
-      return Promise.all(rows.map((row) => toSummary(env, row, user)));
+      const { rows, snapshot } = await listAccessibleRows(env, user);
+      return Promise.all(
+        rows.map((row) => toSummary(env, row, user, snapshot)),
+      );
     },
 
     async remove(
@@ -1453,11 +1540,11 @@ export function createNoteService(env: Env) {
       user: SessionUser,
       query: string,
     ): Promise<NoteSearchHit[]> {
-      const rows = await listAccessibleRows(env, user);
+      const { rows, snapshot } = await listAccessibleRows(env, user);
       const needle = query.trim().toLowerCase();
       return Promise.all(
         filterSearchRows(rows, query, "all").map((row) =>
-          searchHitForRow(env, row, user, needle),
+          searchHitForRow(env, row, user, needle, snapshot),
         ),
       );
     },
@@ -1500,7 +1587,9 @@ export function createNoteService(env: Env) {
       const offset = parseSearchCursor(options.cursor);
       const pageRows = matched.slice(offset, offset + limit);
       const notes = await Promise.all(
-        pageRows.map((row) => searchHitForRow(env, row, user, needle)),
+        pageRows.map((row) =>
+          searchHitForRow(env, row, user, needle, scoped.snapshot),
+        ),
       );
       const nextCursor =
         offset + pageRows.length < matched.length
@@ -1531,6 +1620,7 @@ export function createNoteService(env: Env) {
         ftsMatchQuery(parsed.terms, "all"),
       );
       const rows = scoped.kind === "ok" ? scoped.rows : [];
+      const snapshot = scoped.kind === "ok" ? scoped.snapshot : undefined;
       const filtered = rows.filter((row) =>
         rowMatchesSearchDsl(row, resolved, "all"),
       );
@@ -1540,7 +1630,7 @@ export function createNoteService(env: Env) {
       const notes = await Promise.all(
         filtered
           .slice(0, WORKSPACE_SEARCH_NOTE_LIMIT)
-          .map((row) => searchHitForRow(env, row, user, needle)),
+          .map((row) => searchHitForRow(env, row, user, needle, snapshot)),
       );
       const matcher = needle ? createLineMatcher(needle, {}) : null;
       const grep =
