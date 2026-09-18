@@ -35,8 +35,7 @@ export function AccountMenu({ user, cachedUser, authConfig }: Props) {
   const displayUser = user ?? cachedUser ?? null;
   const label =
     displayUser?.displayName?.trim() || displayUser?.email || GUEST_LABEL;
-  const mockLogin =
-    !(user || cachedUser || authConfig.access) && authConfig.mock;
+  const mockLogin = !(user || authConfig.access) && authConfig.mock;
   useDismiss(open, () => setOpen(false), rootRef);
 
   function handleLoginSubmit(event: FormEvent) {
@@ -128,7 +127,7 @@ export function AccountMenu({ user, cachedUser, authConfig }: Props) {
               </Button>
             </form>
           )}
-          {!(user || cachedUser || mockLogin) && (
+          {!(user || mockLogin) && (
             <MenuItem href="/auth/login">ログイン</MenuItem>
           )}
         </MenuPanel>
