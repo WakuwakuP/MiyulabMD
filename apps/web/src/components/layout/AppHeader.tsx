@@ -68,7 +68,7 @@ export function AppHeader({
       )}
       ref={headerRef}
     >
-      <div className="col-start-1 row-start-1 flex min-w-0 items-center">
+      <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-1">
         <Link
           aria-label="MiyulabMD ホーム"
           className="shrink-0 font-bold text-inherit no-underline"

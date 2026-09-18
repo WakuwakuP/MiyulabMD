@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import { cn } from "../../lib/cn.ts";
 import { readLastLiveSyncAt } from "../../lib/viewer-context.ts";
-import { WifiOffIcon } from "../ui/icons.tsx";
+import { GlobeOffIcon } from "../ui/icons.tsx";
 
 /**
  * ヘッダーのオフライン表示。サーバーと疎通できない状態（表示キャッシュ
@@ -25,7 +25,7 @@ export function OfflineStatusBadge() {
         title="オフライン"
         type="button"
       >
-        <WifiOffIcon />
+        <GlobeOffIcon />
       </button>
       <span
         className={cn(

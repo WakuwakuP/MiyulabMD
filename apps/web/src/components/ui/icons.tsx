@@ -5,6 +5,7 @@ import {
   Eye,
   FileText,
   Folder,
+  GlobeOff,
   History,
   Link2,
   Lock,
@@ -18,7 +19,6 @@ import {
   Search,
   Share2,
   Sun,
-  WifiOff,
   X,
 } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
@@ -110,8 +110,8 @@ export function SearchIcon({ className }: IconProps) {
   return <Search aria-hidden={true} className={cn("size-4", className)} />;
 }
 
-export function WifiOffIcon({ className }: IconProps) {
-  return <WifiOff aria-hidden={true} className={cn("size-4", className)} />;
+export function GlobeOffIcon({ className }: IconProps) {
+  return <GlobeOff aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function ArticleIcon({ className }: IconProps) {
