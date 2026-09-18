@@ -35,6 +35,7 @@ const MIGRATIONS = [
   "0015_user_settings.sql",
   "0016_para_spaces.sql",
   "0017_medallion_sets_edit_lock.sql",
+  "0018_scheme_root.sql",
 ];
 
 function applyMigrations(db: DatabaseSync, list = MIGRATIONS): void {
@@ -456,7 +457,13 @@ test("0017 backfill: gold notes become edit_locked unless unlock window open", a
   // selects edit_locked, which does not exist yet), then apply 0017.
   const sqlite = new DatabaseSync(":memory:");
   t.after(() => sqlite.close());
-  applyMigrations(sqlite, MIGRATIONS.slice(0, -1));
+  applyMigrations(
+    sqlite,
+    MIGRATIONS.slice(
+      0,
+      MIGRATIONS.indexOf("0017_medallion_sets_edit_lock.sql"),
+    ),
+  );
 
   const env = {
     ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com",

@@ -32,6 +32,7 @@ const MIGRATIONS = [
   "0015_user_settings.sql",
   "0016_para_spaces.sql",
   "0017_medallion_sets_edit_lock.sql",
+  "0018_scheme_root.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {

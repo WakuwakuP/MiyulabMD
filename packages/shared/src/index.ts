@@ -185,6 +185,7 @@ export {
 export type {
   JdLevel,
   NamingScheme,
+  SchemeRootEntry,
   SchemeSuggestion,
   SchemeValidateResult,
   SchemeValidationIssue,

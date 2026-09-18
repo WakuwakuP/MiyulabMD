@@ -8,7 +8,7 @@ import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
 import { createNoteService } from "../services/notes.ts";
-import { folderIdForSchemeId } from "../services/schemes.ts";
+import { folderIdsForSchemeId } from "../services/schemes.ts";
 import { GREP_LIMITS } from "../services/search.ts";
 
 const notes = createNoteService(env);
@@ -23,20 +23,24 @@ function emptyResult(query: string): WorkspaceSearchResult {
   };
 }
 
-/** schemeId（`15.22` 等）が指定されたら owner 配下のフォルダ UUID に解決する。 */
+/**
+ * schemeId（`15.22` 等）が指定されたら owner 配下のフォルダ UUID に解決する。
+ * 同一 ID が別スキームツリーに存在し得るため複数件を返しうる。
+ */
 async function folderIdParam(
   url: URL,
   user: { id: string } | null,
-): Promise<{ folderId?: string; notFound?: boolean }> {
+): Promise<{ folderIds?: string[]; notFound?: boolean }> {
   const schemeId = url.searchParams.get("schemeId");
   if (!schemeId) {
-    return { folderId: url.searchParams.get("folderId") ?? undefined };
+    const folderId = url.searchParams.get("folderId");
+    return { folderIds: folderId ? [folderId] : undefined };
   }
   if (!user) {
     return { notFound: true };
   }
-  const folderId = await folderIdForSchemeId(env, user.id, schemeId);
-  return folderId ? { folderId } : { notFound: true };
+  const folderIds = await folderIdsForSchemeId(env, user.id, schemeId);
+  return folderIds.length > 0 ? { folderIds } : { notFound: true };
 }
 
 function intParam(
@@ -95,7 +99,7 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
       }
       const result = await notes.searchNotes(user ?? undefined, {
         cursor: url.searchParams.get("cursor") ?? undefined,
-        folderId: target.folderId,
+        folderIds: target.folderIds,
         layer,
         limit: intParam(url, "limit", 50, 200),
         query,
@@ -129,7 +133,7 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
           GREP_LIMITS.maxContext,
         ),
         fixedString: url.searchParams.get("fixedString") !== "false",
-        folderId: target.folderId,
+        folderIds: target.folderIds,
         globTitle: url.searchParams.get("globTitle") ?? undefined,
         maxMatchesPerNote: intParam(
           url,
