@@ -2537,6 +2537,44 @@ workflow の完了を意味しない。
   リクエストが再開する」ことを確認する形へ更新（旧アサーションは
   リーク状態＝unavailable のままを偶然検証していた）。
 
+## D136：資格ありノートは表示キャッシュ由来でも編集キャッシュ復元を readiness にして本文編集を許可する
+
+- 状態：検証済み。
+- 背景・観測した問題：GitHub Issue #123。Cloudflare Access の認証が
+  通らないと表示キャッシュ由来のノートは常に閲覧のみで、本人の
+  オフライン編集資格ノートでも編集モードに入れなかった。編集キャッシュ
+  （y-indexeddb）基盤は実装済みだったが、エディタ画面側が
+  `readSource === "network"` と `wsconnected && synced` の両方を
+  書き込み条件にしていたため接続されていなかった。
+- 検討した選択肢と各案の利点・欠点：
+  - 表示キャッシュの markdown を直接書き換えて差分同期する案：
+    独自の差分・競合解決が必要になり、表示キャッシュと編集キャッシュの
+    分離（ADR 0001）に反する。棄却。
+  - cached viewer の `cacheViewerId` で編集キャッシュ名空間を選択し、
+    編集キャッシュ復元（`IndexeddbPersistence.whenSynced`）完了を
+    ローカル書き込み readiness にする案：名空間選択はローカル領域の
+    区分に限り、API 書き込み権限の根拠にはしない。実装済みの Yjs
+    同期・未送信追跡・purge ガードをそのまま再利用できる。採用。
+- 推奨・採用した案と理由：`offlineEditable`（表示キャッシュ由来 &&
+  `isEditCacheEligible` && `hasSyncedOnce`）を `canEdit` の別経路として
+  追加し、本文書き込み可否（`collabWritable || offlineWritable`）と
+  REST 変更可否（`canMutate`＝`collabWritable` 必須）を分離した。
+  `hasSyncedOnce` 要求により、オンラインで一度も編集していないノートは
+  閲覧のみのまま（ローカル専用 Y.Doc の誤結合防止）。同期拒否時は
+  update が編集キャッシュに残り「未送信の編集あり」を継続表示する。
+- 影響範囲・制約・未確認事項：オフラインで許可されるのは本文の
+  ローカル編集のみ。作成・削除・移動・共有・履歴復元・画像・タスク
+  チェックは従来どおり `ReadOnlyViewingError`／UI 無効のまま。
+  オフライン編集セッションでも provider は接続を試み続け、認証復帰後の
+  sync で自動的にマージされる。Access 前の ws リダイレクト応答を受ける
+  実環境での挙動は未確認（sync が完了しない限り未送信のまま残る設計）。
+- テスト／再現手順と実際の結果：`offline-note-edit.spec.ts` 新設
+  （資格ありノートのオフライン本文編集→再接続でサーバー doc にマージ・
+  未送信バッジ消去、資格なし＋同期済みマーカーありでも閲覧のみ）。
+  `worker-editor-cache.spec.ts` は実 Worker 環境で Edit ボタン出現・
+  ローカル doc 編集を検証するよう更新。`offline-note-view.spec.ts`・
+  `worker-offline.spec.ts`（未同期ノート）は閲覧のみのまま維持。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

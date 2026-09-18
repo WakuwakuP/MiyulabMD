@@ -4,6 +4,7 @@ import {
   type SessionUser,
 } from "@miyulabmd/shared";
 import type { MutableRefObject } from "react";
+import * as Y from "yjs";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import {
   draftFromNote,
@@ -148,6 +149,7 @@ export function teardownCollab(
   sessionRef: MutableRefObject<YjsSession | null>,
   setCollab: (session: YjsSession | null) => void,
   setCollabReady: (ready: boolean) => void,
+  setOfflineWritable?: (writable: boolean) => void,
 ) {
   unbindRef.current?.();
   unbindRef.current = null;
@@ -155,6 +157,7 @@ export function teardownCollab(
   sessionRef.current = null;
   setCollab(null);
   setCollabReady(false);
+  setOfflineWritable?.(false);
 }
 
 function onCollabSynced(
@@ -187,6 +190,12 @@ export function bindEditorCollab(input: {
   setCollabReady: (ready: boolean) => void;
   setMarkdown: (markdown: string) => void;
   setCollabWritable: (writable: boolean) => void;
+  /** 編集キャッシュ名空間のユーザー ID（オフライン表示では cacheViewerId）。 */
+  editCacheUserId?: string | null;
+  /** 表示キャッシュ由来のオフライン編集。編集キャッシュ復元完了を readiness に使う。 */
+  offlineEdit?: boolean;
+  /** オフライン編集でローカル Y.Doc への書き込みが可能になったことを通知する。 */
+  setOfflineWritable?: (writable: boolean) => void;
   /** Server revoked edit access mid-session (edit lock engaged). */
   onEditLocked?: () => void;
 }) {
@@ -199,6 +208,7 @@ export function bindEditorCollab(input: {
       input.sessionRef,
       input.setCollab,
       input.setCollabReady,
+      input.setOfflineWritable,
     );
     return;
   }
@@ -208,6 +218,7 @@ export function bindEditorCollab(input: {
 
   const session = createYjsSession(input.noteId, input.user, {
     note: input.note,
+    userId: input.editCacheUserId ?? input.user?.id ?? null,
   });
   input.sessionRef.current = session;
   input.setCollab(session);
@@ -233,6 +244,38 @@ export function bindEditorCollab(input: {
   session.provider.on("closed", onClosed);
   if (session.provider.synced) {
     onSynced(true);
+  }
+
+  // オフライン編集では WebSocket 同期を待たず、編集キャッシュ（y-indexeddb）
+  // の復元完了をもってローカル Y.Doc への書き込みを許可する。
+  const editCachePersistence = session.editCache?.persistence;
+  if (input.offlineEdit && editCachePersistence) {
+    void editCachePersistence.whenSynced.then(
+      () => {
+        if (input.sessionRef.current !== session) {
+          return;
+        }
+        const next = session.yMarkdown.toString();
+        // 復元 doc に一切の update が永続化されていない（state vector が空）
+        // のに表示スナップショットに本文があるときは、同期済みマーカーだけ
+        // 残って編集キャッシュが失われた可能性が高い。空 doc への編集は後の
+        // マージで本文を二重化・置換しうるため書き込みを開放せず、オンライン
+        // 再同期を待つ。本文を空にした履歴がある doc は state vector が空で
+        // ないためこのガードにはかからない。
+        if (
+          Y.decodeStateVector(Y.encodeStateVector(session.doc)).size === 0 &&
+          (input.note?.markdown.length ?? 0) > 0
+        ) {
+          return;
+        }
+        input.setCollabReady(true);
+        if (next.length > 0) {
+          input.setMarkdown(next);
+        }
+        input.setOfflineWritable?.(true);
+      },
+      () => undefined,
+    );
   }
 
   const onMarkdownChange = () => {
