@@ -21,7 +21,7 @@ const folder: FolderAccess = {
 };
 
 for (const fault of ["open", "commit"] as const) {
-  test(`user suspension after ${fault} failure stops pending cached reads and all cache kinds`, async ({
+  test(`denial persistence failure during ${fault} fault warns and keeps cached reads working`, async ({
     page,
   }) => {
     await page.goto("/tests/browser/fixtures/storage.html");
@@ -132,16 +132,18 @@ for (const fault of ["open", "commit"] as const) {
         const online = await onlineReader.read(otherNote.id);
         return {
           denial,
-          existingFolder: await alice.getFolder(null),
+          existingFolder: (await alice.getFolder(null))?.folder,
           folderWrite,
-          freshFolder: await fresh.getFolder(null),
-          freshList: await fresh.getNoteList(),
-          freshNote: await fresh.getNote(otherNote.id),
+          freshFolder: (await fresh.getFolder(null))?.folder,
+          freshList: (await fresh.getNoteList())?.notes.map(
+            (entry) => entry.id,
+          ),
+          freshNote: (await fresh.getNote(otherNote.id))?.note.id,
           listWrite,
           online,
           otherViewerFolder: (await bob.getFolder(null))?.folder,
           otherViewerNote: (await bob.getNote(otherNote.id))?.note.id,
-          staleCache,
+          staleCache: staleCache?.note.id,
           stalePublished,
         };
       } finally {
@@ -158,16 +160,18 @@ for (const fault of ["open", "commit"] as const) {
         fresh?.close();
       }
     }, input);
+    // The denial ledger is best effort: its failure warns but does not
+    // suspend the realm, so every cache kind keeps serving stored data.
     expect(result.denial).toMatchObject({ ok: false, status: 403 });
     expect(result.denial.cacheWarning).toContain("キャッシュ");
-    expect(result.staleCache).toBeNull();
-    expect(result.stalePublished).toBe(false);
-    expect(result.existingFolder).toBeNull();
-    expect(result.freshFolder).toBeNull();
-    expect(result.freshList).toBeNull();
-    expect(result.freshNote).toBeNull();
-    expect(result.folderWrite).toBe(false);
-    expect(result.listWrite).toBe(false);
+    expect(result.staleCache).toBe("other-note");
+    expect(result.stalePublished).toBe(true);
+    expect(result.existingFolder).toEqual(folder);
+    expect(result.freshFolder).toEqual(folder);
+    expect(result.freshList).toEqual(["other-note"]);
+    expect(result.freshNote).toBe("other-note");
+    expect(result.folderWrite).toBe(true);
+    expect(result.listWrite).toBe(true);
     expect(result.online).toMatchObject({ ok: true, source: "network" });
     expect(result.otherViewerFolder).toEqual(folder);
     expect(result.otherViewerNote).toBe("other-note");

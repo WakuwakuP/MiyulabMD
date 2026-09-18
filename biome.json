@@ -41,7 +41,8 @@
       "!**/pnpm-lock.yaml",
       "!**/worker-configuration.d.ts",
       "!.github/cursor/render-package-upgrade-table.mjs",
-      "!docs/brand"
+      "!docs/brand",
+      "!specs"
     ]
   },
   "formatter": {

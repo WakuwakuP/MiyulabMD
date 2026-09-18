@@ -105,7 +105,7 @@ test("a durable denial hides cached content after reload even when physical clea
   expect(later).toBe(false);
 });
 
-test("failure to persist a denial suspends that user's live cache and reports a warning", async ({
+test("failure to persist a denial warns but keeps that user's live cache readable", async ({
   page,
 }) => {
   await page.route(`**/api/notes/${note.id}`, (route) =>
@@ -157,8 +157,8 @@ test("failure to persist a denial suspends that user's live cache and reports a 
       IDBDatabase.prototype.transaction = original;
       reader.dispose();
     }
-    // Fresh handles must still honor the live suspension after the I/O fault
-    // has gone away. This test does not claim durability when all writes fail.
+    // The failed denial write warns but does not suspend anything: fresh
+    // handles keep reading cached content instead of failing closed.
     const freshAlice = await openOfflineCache({ userId: "alice" });
     const freshBob = await openOfflineCache({ userId: "bob" });
     try {
@@ -178,12 +178,12 @@ test("failure to persist a denial suspends that user's live cache and reports a 
   expect(result.denial).toMatchObject({ ok: false, status: 403 });
   expect(result.denial?.cacheWarning).toEqual(expect.any(String));
   expect(result.denial?.cacheWarning).toContain("キャッシュ");
-  expect(result.denied).toBeNull();
-  expect(result.unrelated).toBeNull();
+  expect(result.denied?.note.id).toBe(note.id);
+  expect(result.unrelated?.note.id).toBe("keep-me");
   expect(result.otherViewer).toBe(note.id);
 });
 
-test("a denial still suspends the user's cache when the database cannot be opened", async ({
+test("a denial still warns without suspending when the database cannot be opened", async ({
   page,
 }) => {
   await page.route(`**/api/notes/${note.id}`, (route) =>
@@ -231,8 +231,8 @@ test("a denial still suspends the user's cache when the database cannot be opene
       IDBFactory.prototype.open = originalOpen;
       reader.dispose();
     }
-    // A successful subsequent open must not silently restore cache access.
-    // Both existing and fresh handles share the affected user's suspension.
+    // Cache reads are not suspended by the failed denial: both the existing
+    // and a fresh handle keep returning cached content once storage recovers.
     const freshAlice = await openOfflineCache({ userId: "alice" });
     try {
       return {
@@ -253,10 +253,10 @@ test("a denial still suspends the user's cache when the database cannot be opene
   expect(result.openAttempts).toBeGreaterThan(0);
   expect(result.denial).toMatchObject({ ok: false, status: 403 });
   expect(result.denial?.cacheWarning).toContain("キャッシュ");
-  expect(result.existingHandle).toBeNull();
-  expect(result.freshHandle).toBeNull();
-  expect(result.list).toBeNull();
-  expect(result.unrelated).toBeNull();
+  expect(result.existingHandle?.note.id).toBe(note.id);
+  expect(result.freshHandle?.note.id).toBe(note.id);
+  expect(result.list?.notes).toHaveLength(1);
+  expect(result.unrelated?.note.id).toBe("keep-me");
   expect(result.otherViewer).toBe(note.id);
 
   await page.unroute(`**/api/notes/${note.id}`);
@@ -279,5 +279,7 @@ test("a denial still suspends the user's cache when the database cannot be opene
       reader.dispose();
     }
   }, note.id);
-  expect(later).toBe(false);
+  // The denial was never persisted, so the cached copy still answers the
+  // offline read; the earlier warning is the only signal of the uncertainty.
+  expect(later).toBe(true);
 });

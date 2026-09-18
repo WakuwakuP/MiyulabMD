@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
-  isNoteLayer,
   isSearchScope,
+  layerFilterValue,
   type WorkspaceSearchResult,
 } from "@miyulabmd/shared";
 import { Elysia } from "elysia";
@@ -85,8 +85,9 @@ export const searchRoutes = new Elysia({ prefix: "/api/search" })
       const scope =
         scopeParam && isSearchScope(scopeParam) ? scopeParam : undefined;
       const layerParam = url.searchParams.get("layer");
+      // §2.6: medallion layer key or `set.key` (same grammar as `layer:`).
       const layer =
-        layerParam && isNoteLayer(layerParam) ? layerParam : undefined;
+        layerParam && layerFilterValue(layerParam) ? layerParam : undefined;
       const target = await folderIdParam(url, user);
       if (target.notFound) {
         set.status = 404;

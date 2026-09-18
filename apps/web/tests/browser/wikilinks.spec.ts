@@ -149,7 +149,9 @@ test("the links panel lists outgoing links and backlinks", async ({ page }) => {
   await page.goto(`/n/${srcNote.id}`);
   await expect(page.getByText("See")).toBeVisible();
 
-  await page.getByRole("button", { name: "リンク" }).click();
+  // リンクパネルは「⋯ ノート」オーバーフローメニューから開く（§3.1）。
+  await page.getByRole("button", { name: "ノートメニュー" }).click();
+  await page.getByRole("menuitem", { name: "リンク" }).click();
   const panel = page.getByRole("complementary", { name: "リンク" });
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("heading", { name: "Backlinks" })).toBeVisible();

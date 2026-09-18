@@ -218,7 +218,7 @@ test("disposing a read session cancels its pending result and prevents later req
   expect(requests).toEqual([`/api/notes/${note.id}`]);
 });
 
-test("disposing at the storage transaction boundary preserves the previous note", async ({
+test("disposing at the storage transaction boundary does not undo a detached save", async ({
   page,
 }) => {
   const updated = {
@@ -253,9 +253,12 @@ test("disposing at the storage transaction boundary preserves the previous note"
     });
 
     // Interrupt at the real browser storage boundary without naming stores
-    // or mocking our cache implementation.
+    // or mocking our cache implementation. The detached save runs on its own
+    // handle, so the read's transaction boundary is its commit — disposing
+    // there can no longer retract the already published read.
     const original = IDBDatabase.prototype.transaction;
     let interrupted = false;
+    let interruptedAt: Promise<void> = Promise.resolve();
     IDBDatabase.prototype.transaction = function (
       this: IDBDatabase,
       ...args: Parameters<IDBDatabase["transaction"]>
@@ -264,12 +267,26 @@ test("disposing at the storage transaction boundary preserves the previous note"
       if (!interrupted && args[1] === "readwrite") {
         interrupted = true;
         reader.dispose();
+        interruptedAt = new Promise<void>((resolve) => {
+          transaction.addEventListener("complete", () => resolve(), {
+            once: true,
+          });
+          transaction.addEventListener("abort", () => resolve(), {
+            once: true,
+          });
+        });
       }
       return transaction;
     };
     let outcome = "published";
     try {
       await reader.read(previous.id);
+      // The detached save commits after the read resolves; wait for the
+      // interrupted transaction to reach its terminal state before reading.
+      for (let attempt = 0; !interrupted && attempt < 100; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await interruptedAt;
     } catch (error) {
       outcome = error instanceof Error ? error.name : "UnknownError";
     } finally {
@@ -289,9 +306,9 @@ test("disposing at the storage transaction boundary preserves the previous note"
     }
   }, note);
   expect(result.interrupted).toBe(true);
-  expect(result.outcome).toBe("AbortError");
+  expect(result.outcome).toBe("published");
   expect(result.before?.note).toEqual(note);
-  expect(result.after).toEqual(result.before);
+  expect(result.after?.note).toEqual(updated);
 });
 
 test("cached fallback carries the original timestamp and disables mutations for an authenticated viewer", async ({

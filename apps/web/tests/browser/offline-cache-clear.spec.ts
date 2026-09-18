@@ -218,17 +218,13 @@ test("cache clearing prevents an older Home snapshot from being saved or publish
   expect(result).toEqual({ folder: null, list: null, published: false });
 });
 
-test("failed user purge remains stopped until a successful retry", async ({
+test("failed user purge degrades opens and stays stopped until a successful retry", async ({
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async (note) => {
     const cacheUrl = "/src/lib/offline-cache.ts";
-    const {
-      clearOfflineCacheUser,
-      isOfflineCacheUserSuspended,
-      openOfflineCache,
-    } = await import(cacheUrl);
+    const { clearOfflineCacheUser, openOfflineCache } = await import(cacheUrl);
     const cache = await openOfflineCache({ userId: "alice" });
     await cache.putNote(note);
     const originalRemove = FileSystemDirectoryHandle.prototype.removeEntry;
@@ -253,18 +249,40 @@ test("failed user purge remains stopped until a successful retry", async ({
       const second = clearOfflineCacheUser("alice");
       const settled = Promise.allSettled([first, second]);
       await entered.promise;
+      // A live purge owns the realm: the observer gets a degraded empty
+      // handle instead of blocking on the purge's lock.
       const blockedDuringPurge = await openOfflineCache({
         userId: "alice",
       }).then(
-        (handle: { close(): void }) => {
+        async (handle: {
+          close(): void;
+          degraded: boolean;
+          getNote(id: string): Promise<unknown>;
+        }) => {
+          const observed = {
+            degraded: handle.degraded,
+            note: await handle.getNote(note.id),
+          };
           handle.close();
-          return false;
+          return observed;
         },
-        () => true,
+        () => null,
       );
       release.resolve();
       const outcomes = await settled;
-      const stoppedAfterFailure = isOfflineCacheUserSuspended("alice");
+      // The durable tombstone outlives the failed purge: while the fault
+      // persists, opens either self-heal-and-fail again or come back
+      // degraded instead of serving the half-purged data.
+      const stoppedAfterFailure = await openOfflineCache({
+        userId: "alice",
+      }).then(
+        (handle: { close(): void; degraded: boolean }) => {
+          const degraded = handle.degraded;
+          handle.close();
+          return degraded;
+        },
+        () => true,
+      );
       FileSystemDirectoryHandle.prototype.removeEntry = originalRemove;
       await clearOfflineCacheUser("alice");
       const fresh = await openOfflineCache({ userId: "alice" });
@@ -289,13 +307,12 @@ test("failed user purge remains stopped until a successful retry", async ({
       cache.close();
     }
   }, note);
-  expect(result).toEqual({
-    blockedDuringPurge: true,
-    failures: [true, true],
-    recovered: note.markdown,
-    removals: 1,
-    stoppedAfterFailure: true,
-  });
+  expect(result.blockedDuringPurge).toEqual({ degraded: true, note: null });
+  expect(result.failures).toEqual([true, true]);
+  expect(result.recovered).toBe(note.markdown);
+  // The failed purge plus any observer self-heal retries hit the fault.
+  expect(result.removals).toBeGreaterThanOrEqual(1);
+  expect(result.stoppedAfterFailure).toBe(true);
 });
 
 test("a pending body write cannot recreate the purged user directory", async ({

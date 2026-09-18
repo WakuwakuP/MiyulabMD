@@ -99,7 +99,7 @@ test("prefetch acquires images only after all bodies and uses the referenced par
   );
 });
 
-test("an image response arriving after purge cannot repopulate or publish bytes", async ({
+test("an image response arriving after purge resolves empty instead of failing", async ({
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
@@ -107,12 +107,7 @@ test("an image response arriving after purge cannot repopulate or publish bytes"
     const imageUrl = "/src/lib/attached-images.ts";
     const cacheUrl = "/src/lib/offline-cache.ts";
     const { acquireAttachedImage, attachedImage } = await import(imageUrl);
-    const {
-      captureOfflineCacheScope,
-      clearOfflineCacheUser,
-      openOfflineCache,
-    } = await import(cacheUrl);
-    const scope = await captureOfflineCacheScope("alice");
+    const { clearOfflineCacheUser, openOfflineCache } = await import(cacheUrl);
     const originalFetch = globalThis.fetch;
     let release!: () => void;
     let started!: () => void;
@@ -132,18 +127,25 @@ test("an image response arriving after purge cannot repopulate or publish bytes"
     try {
       const pending = acquireAttachedImage(
         attachedImage("/api/notes/parent/images/image"),
-        { cacheOnly: false, scope },
+        { cacheOnly: false, userId: "alice" },
       ).then(
-        () => false,
-        () => true,
+        async (blob: Blob | null) => ({
+          rejected: false,
+          text: blob ? await blob.text() : null,
+        }),
+        () => ({ rejected: true, text: null }),
       );
       await requested;
       await clearOfflineCacheUser("alice");
       release();
-      const rejected = await pending;
+      const { rejected, text } = await pending;
       const fresh = await openOfflineCache({ userId: "alice" });
       try {
-        return { image: await fresh.getImage("parent", "image"), rejected };
+        return {
+          image: await fresh.getImage("parent", "image"),
+          rejected,
+          text,
+        };
       } finally {
         fresh.close();
       }
@@ -151,7 +153,10 @@ test("an image response arriving after purge cannot repopulate or publish bytes"
       globalThis.fetch = originalFetch;
     }
   });
-  expect(result).toEqual({ image: null, rejected: true });
+  // The fenced write drops the late bytes (the purged epoch cannot be
+  // repopulated), and the acquisition resolves empty instead of rejecting
+  // with a cache-internal error.
+  expect(result).toEqual({ image: null, rejected: false, text: null });
 });
 
 test("unsupported image MIME cannot replace a supported cached image", async ({
@@ -160,9 +165,7 @@ test("unsupported image MIME cannot replace a supported cached image", async ({
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async () => {
     const cacheUrl = "/src/lib/offline-cache.ts";
-    const { openOfflineCache, suspendOfflineCacheUser } = await import(
-      cacheUrl
-    );
+    const { clearOfflineCacheUser, openOfflineCache } = await import(cacheUrl);
     const cache = await openOfflineCache({ userId: "alice" });
     try {
       await cache.putImage(
@@ -181,15 +184,28 @@ test("unsupported image MIME cannot replace a supported cached image", async ({
           () => true,
         );
       const prior = await (await cache.getImage("parent", "image")).text();
-      suspendOfflineCacheUser("alice");
-      return {
-        prior,
-        rejected,
-        suspended: await cache.getImage("parent", "image"),
-      };
+      await clearOfflineCacheUser("alice");
+      // A stale pre-purge handle degrades reads to misses.
+      const purged = await cache.getImage("parent", "image");
+      const fresh = await openOfflineCache({ userId: "alice" });
+      try {
+        return {
+          image: await fresh.getImage("parent", "image"),
+          prior,
+          purged,
+          rejected,
+        };
+      } finally {
+        fresh.close();
+      }
     } finally {
       cache.close();
     }
   });
-  expect(result).toEqual({ prior: "prior", rejected: true, suspended: null });
+  expect(result).toEqual({
+    image: null,
+    prior: "prior",
+    purged: null,
+    rejected: true,
+  });
 });

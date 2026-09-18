@@ -17,6 +17,7 @@ import {
 } from "./routes/auth.ts";
 import { folderRoutes } from "./routes/folders.ts";
 import { imageRoutes } from "./routes/images.ts";
+import { medallionRoutes } from "./routes/medallion.ts";
 import { noteRoutes } from "./routes/notes.ts";
 import { ogRoutes } from "./routes/og.ts";
 import { paraRoutes } from "./routes/para.ts";
@@ -25,6 +26,7 @@ import { searchRoutes } from "./routes/search.ts";
 import { tokenRoutes } from "./routes/tokens.ts";
 import { createNoteService } from "./services/notes.ts";
 import { peekOgCards, warmOgCards } from "./services/og.ts";
+import { readUserSettings } from "./services/settings.ts";
 import {
   injectNotePage,
   isPublicGuestCacheable,
@@ -37,7 +39,11 @@ const api = new Elysia({ adapter: CloudflareAdapter })
   .get("/api/health", () => ({ ok: true }))
   .get("/api/me", async ({ request }) => {
     const user = await readSession(request, env);
-    return { user };
+    if (!user) {
+      return { user: null };
+    }
+    const settings = await readUserSettings(env, user.id);
+    return { user: { ...user, settings } };
   })
   .get("/api/auth/config", () => {
     const access = isAccessConfigured(env);
@@ -51,6 +57,7 @@ const api = new Elysia({ adapter: CloudflareAdapter })
   .use(articleRoutes)
   .use(articleSourceRoutes)
   .use(folderRoutes)
+  .use(medallionRoutes)
   .use(ogRoutes)
   .use(paraRoutes)
   .use(schemeRoutes)
@@ -179,7 +186,7 @@ async function handleNoteWebSocket(
   headers.set("X-Note-Id", note.id);
   headers.set(
     "X-Can-Edit",
-    note.access.flags.canEdit && !note.goldLocked ? "true" : "false",
+    note.access.flags.canEdit && !note.editLocked ? "true" : "false",
   );
   if (user) {
     applyWsUserHeaders(headers, user);

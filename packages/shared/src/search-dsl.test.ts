@@ -39,13 +39,13 @@ test("parseSearchQuery lowercases terms but keeps negation", () => {
 
 test("parseSearchQuery parses all supported operators", () => {
   const parsed = parseSearchQuery(
-    "path:Knowledge tag:arch layer:gold scheme:15.22 jd:10.05 para:projects -path:Archives term",
+    "path:Knowledge tag:arch layer:output scheme:15.22 jd:10.05 para:projects -path:Archives term",
   );
   assert.equal(parsed.hasOperators, true);
   assert.deepEqual(parsed.filters, [
     { kind: "path", negated: false, value: "Knowledge" },
     { kind: "tag", negated: false, value: "arch" },
-    { kind: "layer", negated: false, value: "gold" },
+    { kind: "layer", negated: false, value: "output" },
     { kind: "scheme", negated: false, value: "15.22" },
     { kind: "jd", negated: false, value: "10.05" },
     { kind: "para", negated: false, value: "projects" },
@@ -89,14 +89,41 @@ test("tagFilterValue normalizes the leading #", () => {
   assert.equal(tagFilterValue("#arch"), "#arch");
 });
 
-test("layerFilterValue validates against note layers", () => {
-  assert.equal(layerFilterValue("GOLD"), "gold");
-  assert.equal(layerFilterValue("platinum"), null);
+test("layerFilterValue accepts layer keys and set-qualified keys", () => {
+  assert.deepEqual(layerFilterValue("OUTPUT"), { layer: "output" });
+  assert.deepEqual(layerFilterValue("精緻度.output"), {
+    layer: "output",
+    set: "精緻度",
+  });
+  // set names may contain dots — split at the LAST dot
+  assert.deepEqual(layerFilterValue("my.set.knowledge"), {
+    layer: "knowledge",
+    set: "my.set",
+  });
+  assert.equal(layerFilterValue(""), null);
+  assert.equal(layerFilterValue("set."), null);
+  assert.equal(layerFilterValue(".key"), null);
+  assert.equal(layerFilterValue("bad key!"), null);
 });
 
 test("paraFilterValue validates against PARA bucket keys", () => {
-  assert.equal(paraFilterValue("Projects"), "projects");
+  assert.deepEqual(paraFilterValue("Projects"), { bucket: "projects" });
   assert.equal(paraFilterValue("random"), null);
+});
+
+test("paraFilterValue splits a space qualifier at the last dot", () => {
+  assert.deepEqual(paraFilterValue("work.projects"), {
+    bucket: "projects",
+    space: "work",
+  });
+  // Space names may contain dots — the bucket is always the last segment.
+  assert.deepEqual(paraFilterValue("my.work.Resources"), {
+    bucket: "resources",
+    space: "my.work",
+  });
+  // Dotted value without a valid bucket tail is not a para filter.
+  assert.equal(paraFilterValue("work.random"), null);
+  assert.equal(paraFilterValue(".projects"), null);
 });
 
 test("schemeFilterValue strips an explicit scheme prefix", () => {

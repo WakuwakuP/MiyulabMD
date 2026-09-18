@@ -32,11 +32,10 @@ export const MCP_TOOLS = [
   "jd_get",
   "jd_list_category",
   "jd_validate_tree",
-  "set_note_layer",
-  "promote_note",
-  "demote_note",
-  "unlock_gold_for_edit",
-  "list_notes_by_layer",
+  "set_edit_lock",
+  "medallion_list_sets",
+  "medallion_assign_folder",
+  "medallion_unassign_folder",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOLS)[number];

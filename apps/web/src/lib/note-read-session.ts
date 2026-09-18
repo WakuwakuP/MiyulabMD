@@ -2,23 +2,18 @@ import type { Note } from "@miyulabmd/shared";
 
 import { ApiCommunicationError, type ApiResult, fetchNote } from "./api.ts";
 import {
-  assertOfflineCacheScope,
-  assertOfflineNoteAuthority,
   beginOfflineNoteRead,
-  captureOfflineCacheScope,
-  captureOfflineNoteAuthority,
+  captureOfflineNoteDenialSequence,
+  captureOfflinePurgeFence,
   enterOfflineNoteDenial,
-  isOfflineCacheUserSuspended,
   isOfflineNoteReadCurrent,
+  isOfflinePurgeFenceCurrent,
   type NoteDenialEvent,
-  type OfflineCacheScope,
-  type OfflineNoteAuthority,
   openOfflineCache,
   readOfflineNoteDenial,
   reportOfflineNoteDenial,
   subscribeOfflineCacheInvalidation,
   subscribeOfflineCacheNoteDenial,
-  suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
@@ -51,17 +46,27 @@ type NoteReadSessionOptions = {
 
 type ReadOwner = {
   identities: Set<string>;
-  authority: OfflineNoteAuthority | null;
+  /**
+   * The durable denial sequence captured when the read started. A denial
+   * event whose generation is not newer than this watermark predates the
+   * published network data and must not hide it.
+   */
+  denialSequence: number | null;
   publishedNetwork: boolean;
+  /**
+   * This read itself confirmed a 403/404 and is publishing the error — its
+   * own ledger write echoes back through the denial subscription and must
+   * not overwrite that result with the generic denial message.
+   */
+  deniedLocally: boolean;
 };
 
 function revalidatedAfter(owner: ReadOwner, event: NoteDenialEvent): boolean {
   return Boolean(
     owner.publishedNetwork &&
-      owner.authority &&
+      owner.denialSequence !== null &&
       event.resource.generation !== null &&
-      owner.authority.epoch === event.resource.epoch &&
-      owner.authority.generation >= event.resource.generation,
+      event.resource.generation <= owner.denialSequence,
   );
 }
 
@@ -140,22 +145,39 @@ function failedReadResult(
   };
 }
 
-async function persistNote(
-  cache: Awaited<ReturnType<typeof openOfflineCache>>,
+/**
+ * Fully detached display-cache save on its own handle: it outlives the
+ * read (and session disposal) because a cancelled navigation must not
+ * undo a committed write. `denialSequence` is the ledger watermark
+ * captured when the read began: a denial committed since then makes the
+ * put (and the denial clear) lose — a stale 200 never resurrects a denied
+ * note. Failures warn only; valid online data must not depend on storage.
+ */
+function persistNoteDetached(
+  userId: string,
   note: Note,
-  signal: AbortSignal,
   orderingToken: number,
-  authorityGeneration: number,
-): Promise<void> {
-  try {
-    await cache.putNote(note, { authorityGeneration, orderingToken, signal });
-    await cache.clearNoteDenial(note.id, orderingToken, authorityGeneration);
-  } catch {
-    if (signal.aborted) {
-      throw signal.reason;
+  denialSequence: number | null,
+): void {
+  void (async () => {
+    const cache = await openOfflineCache({ userId });
+    try {
+      if (cache.degraded) {
+        return;
+      }
+      await cache.putNote(note, {
+        denialSequence: denialSequence ?? undefined,
+        orderingToken,
+      });
+      if (denialSequence !== null) {
+        await cache.clearNoteDenial(note.id, orderingToken, denialSequence);
+      }
+    } finally {
+      cache.close();
     }
-    // Valid online data must not depend on offline storage.
-  }
+  })().catch((error) => {
+    console.warn("Offline note cache save failed", error);
+  });
 }
 
 export function createNoteReadSession(
@@ -179,7 +201,11 @@ export function createNoteReadSession(
   let disposed = false;
   const unsubscribeDenial = subscribeOfflineCacheNoteDenial((event) => {
     const owner = currentRead;
-    if (!(onDenied && owner) || actorId !== event.userId) {
+    if (
+      !(onDenied && owner) ||
+      actorId !== event.userId ||
+      owner.deniedLocally
+    ) {
       return;
     }
     const identities = event.resource.aliases.filter((id) =>
@@ -205,7 +231,6 @@ export function createNoteReadSession(
       });
   });
   let cache: Awaited<ReturnType<typeof openOfflineCache>> | null = null;
-  let cacheOpenFailed = false;
 
   const ensurePublishable = (
     result: NoteReadResult,
@@ -217,14 +242,6 @@ export function createNoteReadSession(
     }
     if (
       result.ok &&
-      result.source === "cache" &&
-      capturedViewer.cacheViewerId &&
-      isOfflineCacheUserSuspended(capturedViewer.cacheViewerId)
-    ) {
-      throw new DOMException("Offline cache is suspended");
-    }
-    if (
-      result.ok &&
       capturedViewer.cacheViewerId &&
       !isOfflineNoteReadCurrent(capturedViewer.cacheViewerId, id, orderingToken)
     ) {
@@ -232,11 +249,10 @@ export function createNoteReadSession(
     }
   };
 
-  const getCache = async (scope?: OfflineCacheScope) => {
+  const getCache = async () => {
     if (!cachePromise) {
       cachePromise = capturedViewer.cacheViewerId
         ? openOfflineCache({
-            scope,
             signal,
             userId: capturedViewer.cacheViewerId,
           }).then(
@@ -251,7 +267,6 @@ export function createNoteReadSession(
               if (signal.aborted) {
                 throw signal.reason;
               }
-              cacheOpenFailed = true;
               return null;
             },
           )
@@ -332,58 +347,15 @@ export function createNoteReadSession(
     return cached ? cachedReadResult(cached, capturedViewer) : null;
   };
 
-  const readNetworkNote = async (
-    note: Note,
-    orderingToken: number,
-    scope: OfflineCacheScope | null,
-    authority: Awaited<ReturnType<typeof captureOfflineNoteAuthority>> | null,
-  ): Promise<NoteReadResult> => {
-    if (signal.aborted) {
-      throw signal.reason;
-    }
-    const openedCache =
-      scope?.epoch === null ? null : await getCache(scope ?? undefined);
-    if (openedCache && authority) {
-      await persistNote(
-        openedCache,
-        note,
-        signal,
-        orderingToken,
-        authority.generation,
-      );
-    }
-    if (signal.aborted) {
-      throw signal.reason;
-    }
-    if (
-      capturedViewer.cacheViewerId &&
-      !isOfflineNoteReadCurrent(
-        capturedViewer.cacheViewerId,
-        note.id,
-        orderingToken,
-      )
-    ) {
-      throw new DOMException("Note read superseded by denial");
-    }
-    return {
-      cachedAt: null,
-      data: note,
-      ok: true,
-      source: "network",
-      viewer: snapshotViewer(capturedViewer),
-    };
-  };
-
   const fetchWithFallback = async (
     id: string,
     orderingToken: number,
-    authority: Awaited<ReturnType<typeof captureOfflineNoteAuthority>> | null,
+    purgeFence: Promise<{ device: number; user: number } | null>,
   ): Promise<ApiResult<Note> | NoteReadResult> => {
     let result: ApiResult<Note>;
     try {
       result = await fetchNote(id, {
-        noteAuthorityEpoch: authority?.epoch,
-        noteAuthorityGeneration: authority?.generation,
+        purgeFence,
         signal,
         viewerId: capturedViewer.user?.id ?? null,
       });
@@ -405,6 +377,114 @@ export function createNoteReadSession(
     return cachedReadResult(cached, capturedViewer);
   };
 
+  /**
+   * Record a confirmed 403/404. The in-memory read generation bumps first —
+   * that alone already fences the stale in-flight read. The durable marker
+   * is then awaited but best-effort: a denied note has nothing to render,
+   * so the local ledger write cannot delay real display, and its failure
+   * surfaces as the result's cacheWarning instead of throwing.
+   */
+  const persistDenial = async (id: string): Promise<boolean> => {
+    const userId = capturedViewer.cacheViewerId;
+    if (!userId) {
+      return false;
+    }
+    const denialToken = enterOfflineNoteDenial(userId, id);
+    try {
+      const openedCache = await getCache();
+      if (!openedCache || openedCache.degraded) {
+        throw new Error("Offline cache is unavailable");
+      }
+      await openedCache.denyNote(id, denialToken);
+      return true;
+    } catch {
+      // The ledger could not record the denial — report it without a
+      // generation so observers hide the note and show the warning.
+      reportOfflineNoteDenial(userId, id, null);
+      return false;
+    }
+  };
+
+  /** 成功したネットワーク結果を即座に publish し、キャッシュ保存は切り離す。 */
+  const publishNetworkResult = async (
+    result: ApiResult<Note> & { ok: true },
+    orderingToken: number,
+    owner: ReadOwner,
+    denialSequencePromise: Promise<number | null>,
+    purgeFencePromise: Promise<{ device: number; user: number } | null>,
+  ): Promise<NoteReadResult> => {
+    const cacheViewerId = capturedViewer.cacheViewerId;
+    owner.denialSequence = await denialSequencePromise;
+    const purgeFence = await purgeFencePromise;
+    if (
+      cacheViewerId &&
+      purgeFence &&
+      !(await isOfflinePurgeFenceCurrent(cacheViewerId, purgeFence))
+    ) {
+      throw new DOMException("Note read invalidated by purge", "AbortError");
+    }
+    const published: NoteReadResult = {
+      cachedAt: null,
+      data: result.data,
+      ok: true,
+      source: "network",
+      viewer: snapshotViewer(capturedViewer),
+    };
+    if (cacheViewerId) {
+      persistNoteDetached(
+        cacheViewerId,
+        result.data,
+        orderingToken,
+        owner.denialSequence,
+      );
+    }
+    return published;
+  };
+
+  /** 失敗結果を publish 用の形に整える。denial は台帳へ best-effort 記録。 */
+  const publishFailedResult = async (
+    result: ApiResult<Note> & { ok: false },
+    id: string,
+    owner: ReadOwner,
+  ): Promise<NoteReadResult> => {
+    if (signal.aborted) {
+      throw signal.reason;
+    }
+    let cacheWarning: string | undefined;
+    if (isDenial(result) && capturedViewer.cacheViewerId) {
+      owner.deniedLocally = true;
+      const persisted = await persistDenial(id);
+      if (!persisted) {
+        cacheWarning =
+          "キャッシュを無効化できませんでした。安全のためキャッシュをクリアしてください。";
+      }
+    }
+    return failedReadResult(result, capturedViewer, cacheWarning);
+  };
+
+  const publishResult = (
+    result: ApiResult<Note> | NoteReadResult,
+    id: string,
+    orderingToken: number,
+    owner: ReadOwner,
+    denialSequencePromise: Promise<number | null>,
+    purgeFencePromise: Promise<{ device: number; user: number } | null>,
+  ): Promise<NoteReadResult> => {
+    if (isPublishedReadResult(result)) {
+      return Promise.resolve(result);
+    }
+    if (result.ok) {
+      return publishNetworkResult(
+        result,
+        orderingToken,
+        owner,
+        denialSequencePromise,
+        purgeFencePromise,
+      );
+    }
+    return publishFailedResult(result, id, owner);
+  };
+
   return {
     dispose() {
       if (disposed) {
@@ -418,10 +498,10 @@ export function createNoteReadSession(
       cache = null;
     },
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: terminal publication and denial guards are intentionally explicit.
     async read(id) {
       const owner: ReadOwner = {
-        authority: null,
+        denialSequence: null,
+        deniedLocally: false,
         identities: new Set([id]),
         publishedNetwork: false,
       };
@@ -429,118 +509,34 @@ export function createNoteReadSession(
       if (signal.aborted) {
         throw signal.reason;
       }
-      const orderingToken = capturedViewer.cacheViewerId
-        ? beginOfflineNoteRead(capturedViewer.cacheViewerId, id)
+      const cacheViewerId = capturedViewer.cacheViewerId;
+      const orderingToken = cacheViewerId
+        ? beginOfflineNoteRead(cacheViewerId, id)
         : 0;
-      const scope = capturedViewer.cacheViewerId
-        ? await captureOfflineCacheScope(capturedViewer.cacheViewerId)
-        : null;
-      let noteAuthority: Awaited<
-        ReturnType<typeof captureOfflineNoteAuthority>
-      > | null = null;
-      if (capturedViewer.cacheViewerId) {
-        try {
-          noteAuthority = await captureOfflineNoteAuthority(
-            capturedViewer.cacheViewerId,
-            id,
-          );
-        } catch {
-          // Cache storage is optional for online display.
-        }
-      }
-      if (signal.aborted) {
-        throw signal.reason;
-      }
-      owner.authority = noteAuthority;
-      if (
-        scope?.epoch &&
-        noteAuthority &&
-        scope.epoch !== noteAuthority.epoch
-      ) {
-        throw new DOMException(
-          "Note scope changed before acquisition",
-          "AbortError",
-        );
-      }
+      // The ledger read runs alongside the fetch; it doubles as the CAS
+      // watermark for the detached save and the denial-event watermark.
+      const denialSequencePromise = cacheViewerId
+        ? captureOfflineNoteDenialSequence(cacheViewerId)
+        : Promise.resolve(null);
+      // Durable purge fence captured at read start; re-checked before a
+      // network publish so a cross-tab purge invalidates this response even
+      // when the BroadcastChannel message was missed.
+      const purgeFencePromise = cacheViewerId
+        ? captureOfflinePurgeFence(cacheViewerId)
+        : Promise.resolve(null);
       const result =
         capturedViewer.mode === "cached"
           ? await readCachedOnly(id)
-          : await fetchWithFallback(id, orderingToken, noteAuthority);
-      if (scope) {
-        await assertOfflineCacheScope(scope);
-      }
-      let published: NoteReadResult;
-      if (isPublishedReadResult(result)) {
-        published = result;
-      } else if (result.ok) {
-        if (noteAuthority && capturedViewer.cacheViewerId) {
-          await assertOfflineNoteAuthority(
-            noteAuthority,
-            capturedViewer.cacheViewerId,
-            id,
-          );
-        }
-        published = await readNetworkNote(
-          result.data,
-          orderingToken,
-          scope,
-          noteAuthority,
-        );
-      } else {
-        if (signal.aborted) {
-          throw signal.reason;
-        }
-        let cacheWarning: string | undefined;
-        if (isDenial(result) && capturedViewer.cacheViewerId) {
-          const denialToken = enterOfflineNoteDenial(
-            capturedViewer.cacheViewerId,
-            id,
-          );
-          try {
-            const openedCache = await getCache();
-            if (openedCache) {
-              await openedCache.denyNote(id, denialToken);
-            } else if (cacheOpenFailed) {
-              suspendOfflineCacheUser(capturedViewer.cacheViewerId);
-              reportOfflineNoteDenial(
-                capturedViewer.cacheViewerId,
-                id,
-                scope?.epoch ?? null,
-                null,
-              );
-              cacheWarning =
-                "キャッシュを無効化できませんでした。安全のためキャッシュをクリアしてください。";
-            }
-          } catch {
-            suspendOfflineCacheUser(capturedViewer.cacheViewerId);
-            reportOfflineNoteDenial(
-              capturedViewer.cacheViewerId,
-              id,
-              scope?.epoch ?? null,
-              null,
-            );
-            cacheWarning =
-              "キャッシュの無効化を保存できませんでした。安全のためキャッシュをクリアしてください。";
-          }
-        }
-        published = failedReadResult(result, capturedViewer, cacheWarning);
-      }
+          : await fetchWithFallback(id, orderingToken, purgeFencePromise);
+      const published = await publishResult(
+        result,
+        id,
+        orderingToken,
+        owner,
+        denialSequencePromise,
+        purgeFencePromise,
+      );
       ensurePublishable(published, id, orderingToken);
-      try {
-        if (scope) {
-          await assertOfflineCacheScope(scope);
-          if (published.ok && noteAuthority) {
-            await assertOfflineNoteAuthority(
-              noteAuthority,
-              scope.userId,
-              [id, published.data.id],
-              scope,
-            );
-          }
-        }
-      } finally {
-        ensurePublishable(published, id, orderingToken);
-      }
       if (published.ok) {
         owner.identities.add(published.data.id);
         owner.identities.add(published.data.shortId);

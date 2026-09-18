@@ -5,7 +5,7 @@
  * keep spaces; a leading `-` negates a term, phrase, or operator.
  * Operators map to structured filters resolved by the worker.
  */
-import { isNoteLayer, type NoteLayer } from "./layers.ts";
+import { isMedallionLayerKey } from "./medallion.ts";
 import { isParaBucketKey, type ParaBucketKey } from "./move.ts";
 import { isNamingScheme } from "./schemes.ts";
 
@@ -141,14 +141,66 @@ export function pathFilterMatches(folder: string, value: string): boolean {
   return folder === normalized || folder.startsWith(`${normalized}/`);
 }
 
-export function layerFilterValue(value: string): NoteLayer | null {
-  const normalized = value.toLowerCase();
-  return isNoteLayer(normalized) ? normalized : null;
+export type LayerFilterValue = {
+  /** Layer key inside a medallion set (e.g. `output`). */
+  layer: string;
+  /**
+   * §2.6: optional set-name qualifier (`layer:精緻度.output`). The split is
+   * at the LAST dot so set names may contain dots themselves.
+   */
+  set?: string;
+};
+
+/**
+ * `layer:output` matches the layer key across every medallion set;
+ * `layer:<set>.<key>` pins one set. Effective layers resolve through
+ * folder assignment (nearest ancestor wins) on the worker.
+ */
+export function layerFilterValue(value: string): LayerFilterValue | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const dot = trimmed.lastIndexOf(".");
+  if (dot < 0) {
+    const layer = trimmed.toLowerCase();
+    return isMedallionLayerKey(layer) ? { layer } : null;
+  }
+  const set = trimmed.slice(0, dot).trim();
+  const layer = trimmed.slice(dot + 1).toLowerCase();
+  if (!(set && isMedallionLayerKey(layer))) {
+    return null;
+  }
+  return { layer, set };
 }
 
-export function paraFilterValue(value: string): ParaBucketKey | null {
-  const normalized = value.toLowerCase();
-  return isParaBucketKey(normalized) ? normalized : null;
+export type ParaFilterValue = {
+  bucket: ParaBucketKey;
+  /** §2.5: space name qualifier (`para:work.projects`); omitted = all spaces. */
+  space?: string;
+};
+
+/**
+ * `para:projects` targets the bucket across all spaces; `para:work.projects`
+ * pins one space. The split is at the LAST dot so space names may contain
+ * dots themselves.
+ */
+export function paraFilterValue(value: string): ParaFilterValue | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const dot = trimmed.lastIndexOf(".");
+  if (dot < 0) {
+    const bucket = trimmed.toLowerCase();
+    return isParaBucketKey(bucket) ? { bucket } : null;
+  }
+  const space = trimmed.slice(0, dot).trim();
+  const bucket = trimmed.slice(dot + 1).toLowerCase();
+  if (!(space && isParaBucketKey(bucket))) {
+    return null;
+  }
+  return { bucket, space };
 }
 
 /** `scheme:`/`jd:` filter values must look like a scheme ID. */

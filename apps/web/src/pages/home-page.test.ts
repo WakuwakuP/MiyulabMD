@@ -10,6 +10,7 @@ import {
 } from "../lib/list-cache.ts";
 import {
   homeListFlags,
+  loadParaSpaces,
   subscribeHomeFolder,
   subscribeHomeNotes,
 } from "./home-page.ts";
@@ -30,6 +31,7 @@ function note(id: string, folderId: string | null = "folder-1"): NoteSummary {
     alias: null,
     articleMeta: {},
     createdAt: 1,
+    editLocked: false,
     folder: "docs",
     folderId,
     id,
@@ -167,4 +169,92 @@ test("subscribeHomeFolder shows the cached folder immediately and refreshes it",
     () => setVisibleFolder.mock.calls.at(-1)?.arguments[0]?.name === "updated",
   );
   unsubscribe?.();
+});
+
+test("loadParaSpaces never calls /api/para while the para flag is off", async () => {
+  const spy = mock.method(globalThis, "fetch", () =>
+    Promise.resolve(new Response("{}", { status: 200 })),
+  );
+  assert.deepEqual(await loadParaSpaces(user, false), []);
+  assert.equal(spy.mock.callCount(), 0);
+  // Guests never fetch either, even with the flag on.
+  assert.deepEqual(await loadParaSpaces(null, true), []);
+  assert.equal(spy.mock.callCount(), 0);
+});
+
+test("loadParaSpaces fetches spaces when para is enabled", async () => {
+  const spy = mock.method(globalThis, "fetch", () =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          buckets: [
+            {
+              folderId: "f-projects",
+              key: "projects",
+              name: "Projects",
+              noteCount: 0,
+              path: "Projects",
+            },
+          ],
+          spaces: [
+            {
+              buckets: [
+                {
+                  folderId: "f-projects",
+                  key: "projects",
+                  name: "Projects",
+                  noteCount: 0,
+                  path: "Projects",
+                },
+              ],
+              id: "space-default",
+              isDefault: true,
+              name: "default",
+              rootFolderId: null,
+              rootPath: "",
+            },
+            {
+              buckets: [
+                {
+                  folderId: "f-work-projects",
+                  key: "projects",
+                  name: "Projects",
+                  noteCount: 0,
+                  path: "work/Projects",
+                },
+              ],
+              id: "space-work",
+              isDefault: false,
+              name: "work",
+              rootFolderId: "f-work",
+              rootPath: "work",
+            },
+          ],
+        }),
+        {
+          headers: { "X-MiyulabMD-Session-User": "user:me" },
+          status: 200,
+        },
+      ),
+    ),
+  );
+  const spaces = await loadParaSpaces(user, true);
+  assert.equal(spy.mock.callCount(), 1);
+  assert.equal(spaces.length, 2);
+  assert.equal(spaces[0]?.isDefault, true);
+  assert.equal(spaces[0]?.buckets[0]?.key, "projects");
+  assert.equal(spaces[1]?.name, "work");
+  assert.equal(spaces[1]?.buckets[0]?.path, "work/Projects");
+});
+
+test("loadParaSpaces swallows API errors into an empty list", async () => {
+  mock.method(globalThis, "fetch", () =>
+    Promise.resolve(
+      new Response(JSON.stringify({ error: "Unauthorized" }), {
+        headers: { "X-MiyulabMD-Session-User": "user:me" },
+        status: 401,
+      }),
+    ),
+  );
+  assert.deepEqual(await loadParaSpaces(user, true), []);
 });

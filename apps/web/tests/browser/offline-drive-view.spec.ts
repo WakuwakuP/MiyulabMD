@@ -211,7 +211,7 @@ for (const mode of ["authenticated", "guest"] as const) {
   });
 }
 
-test("a pending drive snapshot cannot publish a completed folder after user suspension", async ({
+test("a pending drive snapshot degrades to an empty view after user suspension", async ({
   page,
 }) => {
   await page.goto("/tests/browser/fixtures/storage.html");
@@ -294,7 +294,7 @@ test("a pending drive snapshot cannot publish a completed folder after user susp
       );
       await listReady;
       // A parallel reader already has a folder request; a folder-last reader
-      // must also reject suspension without being forced to start it early.
+      // degrades to an empty view rather than being forced to fail.
       if (folderStarted) {
         await folderReady;
       }
@@ -307,7 +307,15 @@ test("a pending drive snapshot cannot publish a completed folder after user susp
       IDBObjectStore.prototype.get = originalGet;
     }
   }, root);
-  expect(result.rejected).toBe(true);
+  // Suspension turns the read into a cache miss — it never rejects the
+  // display path with a cache-internal error.
+  expect(result.rejected).toBe(false);
+  expect(result.value).toMatchObject({
+    folder: null,
+    folderMissing: true,
+    notes: [],
+    notesMissing: true,
+  });
 });
 
 test("MyDrive root keeps its canonical server ID across cached routes and updates", async ({

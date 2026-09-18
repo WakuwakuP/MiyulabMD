@@ -173,8 +173,18 @@ test("a metadata read saves under the viewer captured before awaiting the networ
       const alice = await openOfflineCache({ userId: "alice" });
       const bob = await openOfflineCache({ userId: "bob" });
       try {
+        // The cache save is detached: the read resolves before it commits.
+        let aliceFolder: { folder: unknown } | null = null;
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          aliceFolder = await alice.getFolder(null);
+          if (aliceFolder) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
         return {
-          aliceFolder: (await alice.getFolder(null))?.folder,
+          aliceFolder: aliceFolder?.folder,
           aliceNotes: (await alice.getNoteList())?.notes,
           bobFolder: await bob.getFolder(null),
           bobNotes: await bob.getNoteList(),
@@ -416,7 +426,7 @@ for (const kind of ["folder", "note-list"] as const) {
   });
 }
 
-test("cancellation after metadata commit prevents publication without deleting committed snapshots", async ({
+test("a cancelled home read keeps the detached committed snapshot", async ({
   page,
 }) => {
   const { markdown: _markdown, ...summary } = note;
@@ -428,9 +438,8 @@ test("cancellation after metadata commit prevents publication without deleting c
       const { readHomeMetadata } = await import(readerUrl);
       const { openOfflineCache } = await import(storageUrl);
       const controller = new AbortController();
-      const reason = new Error("View left after the cache commit");
+      const reason = new Error("View left after publication");
       const originalFetch = globalThis.fetch;
-      const originalClose = IDBDatabase.prototype.close;
       globalThis.fetch = (input) => {
         const pathname = new URL(
           input instanceof Request ? input.url : String(input),
@@ -445,13 +454,9 @@ test("cancellation after metadata commit prevents publication without deleting c
           ),
         );
       };
-      IDBDatabase.prototype.close = function (this: IDBDatabase) {
-        originalClose.call(this);
-        controller.abort(reason);
-      };
-      let reasonPreserved: boolean;
+      let published: boolean;
       try {
-        reasonPreserved = await readHomeMetadata({
+        published = await readHomeMetadata({
           folderId: undefined,
           isCurrentOwner: () => true,
           signal: controller.signal,
@@ -465,20 +470,31 @@ test("cancellation after metadata commit prevents publication without deleting c
             },
           },
         }).then(
+          () => true,
           () => false,
-          (error: unknown) => error === reason,
         );
       } finally {
         globalThis.fetch = originalFetch;
-        IDBDatabase.prototype.close = originalClose;
       }
+      // The view leaves while the detached cache save is still settling.
+      // The caller's abort must not undo a write that outlives the read.
+      controller.abort(reason);
       const cache = await openOfflineCache({ userId: "alice" });
       try {
+        const deadline = Date.now() + 5000;
+        let committed: Awaited<ReturnType<typeof cache.getFolder>> = null;
+        while (Date.now() < deadline) {
+          committed = await cache.getFolder(null);
+          if (committed) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
         return {
           aborted: controller.signal.aborted,
-          folder: (await cache.getFolder(null))?.folder,
+          folder: committed?.folder,
           notes: (await cache.getNoteList())?.notes,
-          reasonPreserved,
+          published,
         };
       } finally {
         cache.close();
@@ -486,8 +502,8 @@ test("cancellation after metadata commit prevents publication without deleting c
     },
     { folder, summary },
   );
+  expect(result.published).toBe(true);
   expect(result.aborted).toBe(true);
   expect(result.folder).toEqual(folder);
   expect(result.notes).toEqual([summary]);
-  expect(result.reasonPreserved).toBe(true);
 });

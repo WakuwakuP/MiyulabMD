@@ -2,13 +2,20 @@ import type { Note } from "@miyulabmd/shared";
 
 import { type ApiResult, requestJson } from "./api-transport.ts";
 import { currentNoteReadGeneration } from "./note-access-order.ts";
-import { captureOfflineNoteAuthority } from "./offline-cache.ts";
+import { captureOfflinePurgeFence } from "./offline-cache.ts";
+
+export type NotePurgeFence = { device: number; user: number };
 
 type NoteRequestOptions = {
   signal?: AbortSignal;
   viewerId?: string | null;
-  noteAuthorityGeneration?: number;
-  noteAuthorityEpoch?: string;
+  /**
+   * Durable purge fence the caller already captured. When omitted the fence
+   * is read lazily alongside the transport, so a read started after a
+   * cross-tab purge can never settle on a pre-purge response — even when
+   * the BroadcastChannel invalidation was missed.
+   */
+  purgeFence?: Promise<NotePurgeFence | null> | NotePurgeFence | null;
 };
 
 type Subscriber = {
@@ -20,14 +27,22 @@ type Subscriber = {
 
 type Entry = {
   controller: AbortController;
+  /**
+   * The creating subscriber's durable fence. `undefined` while the ledger
+   * read is still in flight; `null` means the ledger was unreadable and the
+   * entry degrades to unfenced sharing.
+   */
+  fence: NotePurgeFence | null | undefined;
+  fencePromise: Promise<NotePurgeFence | null>;
   generation: number;
-  authorityGeneration?: number;
-  authorityEpoch?: string;
   promise: Promise<ApiResult<Note>>;
   subscribers: Set<Subscriber>;
 };
 
 const inFlightByViewer = new Map<string, Map<string, Entry>>();
+
+/** Internal retry signal: the joined transport predates the caller's purge fence. */
+const STALE_FENCE = Symbol("note-request-stale-fence");
 
 function copyResult(result: ApiResult<Note>): ApiResult<Note> {
   return result.ok
@@ -52,13 +67,30 @@ function removeEntry(viewerId: string, id: string, entry: Entry): void {
   }
 }
 
+function fenceMatches(
+  mine: NotePurgeFence | null,
+  theirs: NotePurgeFence | null,
+): boolean {
+  // An unreadable ledger cannot prove staleness; degrade to shared.
+  if (!(mine && theirs)) {
+    return true;
+  }
+  return mine.device === theirs.device && mine.user === theirs.user;
+}
+
+// In-flight requests are shared per (viewer, note, read generation). The
+// transport is issued immediately — first paint must not wait on the durable
+// fence read. A purge committed between two reads changes the durable fence:
+// the entry's fence is compared against each subscriber's as soon as both
+// are known (and again at delivery), so a post-purge read never settles on a
+// pre-purge response even when BroadcastChannel was unavailable.
 function shareNoteRequest(
   id: string,
   viewerId: string,
-  signal?: AbortSignal,
-  authorityGeneration?: number,
-  entryGeneration = currentNoteReadGeneration(viewerId, id),
-  authorityEpoch?: string,
+  signal: AbortSignal | undefined,
+  generation: number,
+  fencePromise: Promise<NotePurgeFence | null>,
+  resolvedFence: NotePurgeFence | null | undefined,
 ): Promise<ApiResult<Note>> {
   if (signal?.aborted) {
     return Promise.reject(signal.reason);
@@ -69,7 +101,6 @@ function shareNoteRequest(
     byNote = new Map();
     inFlightByViewer.set(viewerId, byNote);
   }
-  const generation = entryGeneration;
   if (generation !== currentNoteReadGeneration(viewerId, id)) {
     return Promise.reject(
       new DOMException("Note read superseded by denial", "AbortError"),
@@ -79,28 +110,51 @@ function shareNoteRequest(
   if (
     !entry ||
     entry.generation !== generation ||
-    entry.authorityGeneration !== authorityGeneration ||
-    entry.authorityEpoch !== authorityEpoch
+    entry.controller.signal.aborted ||
+    // A resolved mismatch evicts the stale transport so this read opens a
+    // current one instead of settling on a pre-purge response.
+    (entry.fence !== undefined &&
+      resolvedFence !== undefined &&
+      !fenceMatches(resolvedFence, entry.fence))
   ) {
     const controller = new AbortController();
-    entry = {
-      authorityEpoch,
-      authorityGeneration,
+    const created: Entry = {
       controller,
+      fence: undefined,
+      fencePromise: fencePromise.then((fence) => {
+        created.fence = fence;
+        return fence;
+      }),
       generation,
-      promise: requestJson<Note>(
-        `/api/notes/${id}`,
-        { credentials: "include", signal: controller.signal },
-        { viewerId },
-      ),
+      // Defer the wire request one microtask: a caller cancelled during the
+      // same synchronous turn (StrictMode remount, navigation racing a read)
+      // must not spend a real request whose only subscriber is already gone.
+      promise: new Promise<ApiResult<Note>>((resolve, reject) => {
+        queueMicrotask(() => {
+          if (controller.signal.aborted || created.subscribers.size === 0) {
+            reject(
+              controller.signal.aborted
+                ? controller.signal.reason
+                : new DOMException("Note request abandoned", "AbortError"),
+            );
+            return;
+          }
+          requestJson<Note>(
+            `/api/notes/${id}`,
+            { credentials: "include", signal: controller.signal },
+            { viewerId },
+          ).then(resolve, reject);
+        });
+      }),
       subscribers: new Set(),
     };
+    entry = created;
     byNote.set(id, entry);
     const currentEntry = entry;
     currentEntry.promise.then(
       (result) => {
         removeEntry(viewerId, id, currentEntry);
-        for (const subscriber of currentEntry.subscribers) {
+        for (const subscriber of [...currentEntry.subscribers]) {
           cleanupSubscriber(subscriber);
           try {
             subscriber.resolve(copyResult(result));
@@ -112,7 +166,7 @@ function shareNoteRequest(
       },
       (error) => {
         removeEntry(viewerId, id, currentEntry);
-        for (const subscriber of currentEntry.subscribers) {
+        for (const subscriber of [...currentEntry.subscribers]) {
           cleanupSubscriber(subscriber);
           subscriber.reject(error);
         }
@@ -123,16 +177,60 @@ function shareNoteRequest(
 
   const currentEntry = entry;
   return new Promise<ApiResult<Note>>((resolve, reject) => {
-    const subscriber: Subscriber = { reject, resolve, signal };
-    subscriber.onAbort = () => {
+    let settled = false;
+    const settle = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupSubscriber(subscriber);
       currentEntry.subscribers.delete(subscriber);
-      signal?.removeEventListener("abort", subscriber.onAbort as () => void);
-      reject(signal?.reason);
+      callback();
+    };
+    const releaseEntryIfIdle = () => {
       if (currentEntry.subscribers.size === 0) {
         removeEntry(viewerId, id, currentEntry);
         currentEntry.controller.abort();
       }
     };
+    const subscriber: Subscriber = { reject, resolve, signal };
+    subscriber.resolve = (result) => {
+      void Promise.all([fencePromise, currentEntry.fencePromise]).then(
+        ([mine, theirs]) => {
+          if (!fenceMatches(mine, theirs)) {
+            settle(() => {
+              reject(STALE_FENCE);
+              releaseEntryIfIdle();
+            });
+            return;
+          }
+          settle(() => resolve(result));
+        },
+        () => settle(() => resolve(result)),
+      );
+    };
+    subscriber.reject = (reason) => {
+      settle(() => reject(reason));
+    };
+    subscriber.onAbort = () => {
+      settle(() => {
+        reject(signal?.reason);
+        releaseEntryIfIdle();
+      });
+    };
+    // Bail as soon as both fences are known to disagree — no need to wait
+    // for the stale transport to settle.
+    void Promise.all([fencePromise, currentEntry.fencePromise]).then(
+      ([mine, theirs]) => {
+        if (!fenceMatches(mine, theirs)) {
+          settle(() => {
+            reject(STALE_FENCE);
+            releaseEntryIfIdle();
+          });
+        }
+      },
+      () => undefined,
+    );
     currentEntry.subscribers.add(subscriber);
     signal?.addEventListener("abort", subscriber.onAbort, { once: true });
     if (signal?.aborted) {
@@ -141,45 +239,11 @@ function shareNoteRequest(
   });
 }
 
-function shareAfterAuthority(
-  id: string,
-  viewerId: string,
-  signal: AbortSignal | undefined,
-  generation: number,
-): Promise<ApiResult<Note>> {
-  return new Promise((resolve, reject) => {
-    const abort = () => {
-      signal?.removeEventListener("abort", abort);
-      reject(signal?.reason);
-    };
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
-    void captureOfflineNoteAuthority(viewerId, id)
-      .catch(() => null)
-      .then((authority) => {
-        signal?.removeEventListener("abort", abort);
-        return shareNoteRequest(
-          id,
-          viewerId,
-          signal,
-          authority?.generation,
-          generation,
-          authority?.epoch,
-        );
-      })
-      .then(resolve, reject);
-  });
-}
-
-export function fetchNoteRequest(
+export async function fetchNoteRequest(
   id: string,
   options: NoteRequestOptions = {},
 ): Promise<ApiResult<Note>> {
-  const { viewerId, signal, noteAuthorityGeneration, noteAuthorityEpoch } =
-    options;
+  const { viewerId, signal, purgeFence } = options;
   if (signal?.aborted) {
     return Promise.reject(signal.reason);
   }
@@ -190,19 +254,43 @@ export function fetchNoteRequest(
       { viewerId },
     );
   }
-  const generation = currentNoteReadGeneration(viewerId, id);
-  if (
-    noteAuthorityGeneration !== undefined &&
-    noteAuthorityEpoch !== undefined
-  ) {
-    return shareNoteRequest(
-      id,
-      viewerId,
-      signal,
-      noteAuthorityGeneration,
-      generation,
-      noteAuthorityEpoch,
-    );
+  let resolvedFence: NotePurgeFence | null | undefined;
+  let fencePromise = (
+    purgeFence === undefined
+      ? captureOfflinePurgeFence(viewerId).catch(() => null)
+      : Promise.resolve(purgeFence).catch(() => null)
+  ).then((fence) => {
+    resolvedFence = fence;
+    return fence;
+  });
+  for (;;) {
+    if (signal?.aborted) {
+      throw signal.reason;
+    }
+    const generation = currentNoteReadGeneration(viewerId, id);
+    try {
+      return await shareNoteRequest(
+        id,
+        viewerId,
+        signal,
+        generation,
+        fencePromise,
+        resolvedFence,
+      );
+    } catch (error) {
+      if (error !== STALE_FENCE || signal?.aborted) {
+        throw error;
+      }
+      // The joined transport predates this read's durable fence — capture
+      // the post-purge fence and join (or open) a current entry instead.
+      resolvedFence = undefined;
+      fencePromise = captureOfflinePurgeFence(viewerId)
+        .catch(() => null)
+        .then((fence) => {
+          resolvedFence = fence;
+          return fence;
+        });
+      resolvedFence = await fencePromise;
+    }
   }
-  return shareAfterAuthority(id, viewerId, signal, generation);
 }
