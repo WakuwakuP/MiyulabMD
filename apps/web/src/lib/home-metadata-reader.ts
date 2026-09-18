@@ -5,17 +5,12 @@ import type {
 } from "@miyulabmd/shared";
 import { fetchFolder, fetchNotes, fetchPublicFolders } from "./api.ts";
 import {
-  assertOfflineCacheScope,
-  assertOfflineFolderRead,
-  captureOfflineCacheScope,
-  captureOfflineCacheUserClearLifetime,
-  captureOfflineFolderRead,
-  isOfflineCacheScopeInvalidated,
-  isOfflineCacheUserClearLifetimeCurrent,
-  type OfflineCacheScope,
+  type OfflineDenialSnapshot,
   openOfflineCache,
+  projectDeniedFolder,
+  readOfflineDenialSnapshot,
+  subscribeOfflineCacheFolderDenial,
   subscribeOfflineCacheInvalidation,
-  suspendOfflineCacheUser,
 } from "./offline-cache.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
@@ -42,6 +37,12 @@ type ReadHomeMetadataOptions = {
   folderId: string | undefined;
   signal: AbortSignal;
   isCurrentOwner: () => boolean;
+  /** Detached cache writes finish after the snapshot resolves; failures are
+   * reported through this callback instead of blocking first paint. */
+  onCacheWarning?: (warning: string) => void;
+  /** Internal: invoked once the network fetches settle so the caller can
+   * stop invalidating this read for mid-flight denials. */
+  onNetworkSettled?: () => void;
 };
 
 function requireResult<T>(
@@ -94,16 +95,48 @@ function throwIfCancelled(
   }
 }
 
-async function saveHomeMetadata(
+/**
+ * Project the durable denial ledger over freshly fetched network data.
+ * A `null` snapshot means the ledger could not be read — the display keeps
+ * the unprojected network data (the ledger is best-effort, never a gate).
+ */
+function projectNetworkSnapshot(
+  snapshot: HomeMetadataSnapshot,
+  denial: OfflineDenialSnapshot | null,
+): void {
+  if (!denial) {
+    return;
+  }
+  snapshot.notes = snapshot.notes.filter(
+    (note) =>
+      !(
+        (denial.deniedFolderIds.has(note.folderId) &&
+          note.access?.inherit !== false) ||
+        denial.deniedNoteIds.has(note.id) ||
+        denial.deniedNoteIds.has(note.shortId)
+      ),
+  );
+  if (snapshot.visibleFolder) {
+    snapshot.visibleFolder = denial.deniedFolderIds.has(
+      snapshot.visibleFolder.id,
+    )
+      ? null
+      : projectDeniedFolder(snapshot.visibleFolder, denial.deniedFolderIds);
+  }
+}
+
+/**
+ * Detached cache write: the display never waits for it. The purge-generation
+ * and denial-sequence fences inside the cache make the write lose to any
+ * purge or denial that landed after this read started.
+ */
+function saveHomeMetadataDetached(
   snapshot: HomeMetadataSnapshot,
   viewer: ViewerContext,
   folderId: string | undefined,
-  signal: AbortSignal,
-  isCurrentOwner: () => boolean,
-  clearLifetime: number,
-  scope: OfflineCacheScope | null,
   orderingToken: number | undefined,
-): Promise<void> {
+  onCacheWarning?: (warning: string) => void,
+): void {
   if (viewer.mode !== "authenticated" || !viewer.user) {
     return;
   }
@@ -111,46 +144,30 @@ async function saveHomeMetadata(
     snapshot.cacheWarning = "オフラインキャッシュを利用できません。";
     return;
   }
-  if (orderingToken === undefined) {
-    snapshot.cacheWarning = "オフラインキャッシュを利用できません。";
+  const folder = snapshot.visibleFolder;
+  if (!folder) {
     return;
   }
-  if (!isOfflineCacheUserClearLifetimeCurrent(viewer.user.id, clearLifetime)) {
-    throw new DOMException("Home read is no longer current", "AbortError");
-  }
-  let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
-  try {
-    cache = await openOfflineCache({
-      scope: scope ?? undefined,
-      signal,
-      userId: viewer.user.id,
-    });
-    throwIfCancelled(signal, isCurrentOwner);
-    if (!snapshot.visibleFolder) {
-      throw new Error("Authenticated Home response did not include a folder");
+  const userId = viewer.user.id;
+  void (async () => {
+    const cache = await openOfflineCache({ userId });
+    try {
+      if (cache.degraded) {
+        return;
+      }
+      await cache.putFolder(folder, {
+        asDriveRoot: folderId == null,
+        orderingToken,
+      });
+      await cache.putNoteList(snapshot.notes);
+    } finally {
+      cache.close();
     }
-    await cache.putFolder(snapshot.visibleFolder, {
-      asDriveRoot: folderId == null,
-      orderingToken,
-      signal,
-    });
-    throwIfCancelled(signal, isCurrentOwner);
-    await cache.putNoteList(snapshot.notes, { signal });
-    throwIfCancelled(signal, isCurrentOwner);
-  } catch (error) {
-    if (
-      signal.aborted ||
-      !isCurrentOwner() ||
-      (error instanceof DOMException &&
-        error.name === "AbortError" &&
-        !isOfflineCacheScopeInvalidated(error))
-    ) {
-      throw error;
-    }
-    snapshot.cacheWarning = "オフラインキャッシュを保存できませんでした。";
-  } finally {
-    cache?.close();
-  }
+  })().catch((error) => {
+    console.warn("Offline home metadata save failed", error);
+    snapshot.cacheWarning ??= "オフラインキャッシュを保存できませんでした。";
+    onCacheWarning?.("オフラインキャッシュを保存できませんでした。");
+  });
 }
 
 function deniedFolderError(result: {
@@ -163,184 +180,36 @@ function deniedFolderError(result: {
   );
 }
 
-async function persistDeniedFolder(
+/**
+ * A confirmed 403/404 becomes a durable denial marker — detached and
+ * best-effort, so it never delays or fails the error the caller renders.
+ * The write intentionally outlives the read's own signal: a cancelled
+ * navigation must not undo a confirmed denial.
+ */
+function persistDeniedFolderDetached(
   error: HomeMetadataError,
   viewer: ViewerContext,
   folderId: string | undefined,
-  scope: OfflineCacheScope | null,
-  signal: AbortSignal,
-  isCurrentOwner: () => boolean,
-  orderingToken: number | undefined,
-): Promise<void> {
+): void {
   if (!viewer.user || (error.status !== 403 && error.status !== 404)) {
     return;
   }
-  let cache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
-  try {
-    cache = await openOfflineCache({
-      scope: scope ?? undefined,
-      signal,
-      userId: viewer.user.id,
-    });
-    const committed = await cache.denyFolder(
-      folderId ?? null,
-      orderingToken,
-      signal,
-    );
-    if (!committed) {
-      throw new DOMException("Home read is no longer current", "AbortError");
+  const userId = viewer.user.id;
+  void (async () => {
+    const cache = await openOfflineCache({ userId });
+    try {
+      if (cache.degraded) {
+        return;
+      }
+      await cache.denyFolder(folderId ?? null);
+    } finally {
+      cache.close();
     }
-  } catch (cause) {
-    if (
-      signal.aborted ||
-      !isCurrentOwner() ||
-      (cause instanceof DOMException &&
-        cause.name === "AbortError" &&
-        !isOfflineCacheScopeInvalidated(cause))
-    ) {
-      throw cause;
-    }
-    if (!isOfflineCacheScopeInvalidated(cause)) {
-      // An invalidated scope means a purge is already deleting the denial.
-      suspendOfflineCacheUser(viewer.user.id);
-    }
+  })().catch((cause) => {
+    console.warn("Offline folder denial could not be persisted", cause);
     error.cacheWarning =
       "拒否されたフォルダのキャッシュを削除できませんでした。端末キャッシュを削除してください。";
-  } finally {
-    cache?.close();
-  }
-}
-
-async function rejectDeniedFolder(
-  result: { ok: false; error: string; status: number },
-  viewer: ViewerContext,
-  folderId: string | undefined,
-  scope: OfflineCacheScope | null,
-  signal: AbortSignal,
-  isCurrentOwner: () => boolean,
-  orderingToken: number | undefined,
-): Promise<never> {
-  const error = deniedFolderError(result);
-  await persistDeniedFolder(
-    error,
-    viewer,
-    folderId,
-    scope,
-    signal,
-    isCurrentOwner,
-    orderingToken,
-  );
-  throwIfCancelled(signal, isCurrentOwner);
-  throw error;
-}
-
-async function validateHomePublication(
-  snapshot: HomeMetadataSnapshot,
-  scope: OfflineCacheScope | null,
-  folderId: string | undefined,
-  orderingToken: number | undefined,
-): Promise<void> {
-  if (!scope) {
-    return;
-  }
-  await assertOfflineCacheScope(scope);
-  if (orderingToken === undefined) {
-    return;
-  }
-  try {
-    await assertOfflineFolderRead(scope, folderId ?? null, orderingToken);
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
-    }
-    snapshot.cacheWarning = "オフラインキャッシュを確認できませんでした。";
-  }
-}
-
-function handleProjectionFailure(
-  snapshot: HomeMetadataSnapshot,
-  folderId: string | undefined,
-  scope: OfflineCacheScope | null,
-  error: unknown,
-): void {
-  const scopeInvalidated = isOfflineCacheScopeInvalidated(error);
-  if (
-    error instanceof DOMException &&
-    error.name === "AbortError" &&
-    !scopeInvalidated
-  ) {
-    throw error;
-  }
-  snapshot.cacheWarning ??= "オフラインキャッシュを確認できませんでした。";
-  // A scope invalidation means a purge is deleting the cached denial state;
-  // only an unverifiable projection with captured authority must hide data.
-  if (scope?.epoch && !scopeInvalidated) {
-    snapshot.notes = [];
-    if (folderId !== undefined) {
-      snapshot.visibleFolder = null;
-    }
-  }
-}
-
-async function projectCachedHomeMetadata(
-  snapshot: HomeMetadataSnapshot,
-  folderId: string | undefined,
-  viewer: ViewerContext,
-  scope: OfflineCacheScope | null,
-  signal: AbortSignal,
-  isCurrentOwner: () => boolean,
-): Promise<void> {
-  if (!viewer.user) {
-    return;
-  }
-  let projectionCache: Awaited<ReturnType<typeof openOfflineCache>> | undefined;
-  try {
-    projectionCache = await openOfflineCache({
-      scope: scope ?? undefined,
-      signal,
-      userId: viewer.user.id,
-    });
-    const [projectedList, projectedFolder, listState, folderState] =
-      await Promise.all([
-        projectionCache.getNoteList(),
-        projectionCache.getFolder(folderId ?? null),
-        projectionCache.getNoteListState(),
-        projectionCache.getFolderState(folderId ?? null),
-      ]);
-    applyCachedHomeMetadataProjection(
-      snapshot,
-      projectedList,
-      projectedFolder,
-      listState,
-      folderState,
-    );
-  } catch (error) {
-    if (signal.aborted || !isCurrentOwner()) {
-      throw error;
-    }
-    handleProjectionFailure(snapshot, folderId, scope, error);
-  } finally {
-    projectionCache?.close();
-  }
-}
-
-function applyCachedHomeMetadataProjection(
-  snapshot: HomeMetadataSnapshot,
-  projectedList: { notes: NoteSummary[]; cachedAt: number } | null,
-  projectedFolder: { folder: FolderAccess; cachedAt: number } | null,
-  listState: "available" | "denied" | "missing",
-  folderState: "available" | "denied" | "missing",
-): void {
-  if (listState === "denied") {
-    snapshot.notes = [];
-  } else if (projectedList) {
-    snapshot.notes = projectedList.notes;
-  }
-  if (folderState === "denied") {
-    snapshot.visibleFolder = null;
-  } else if (projectedFolder) {
-    snapshot.visibleFolder = projectedFolder.folder;
-  }
+  });
 }
 
 async function readHomeMetadataSnapshot({
@@ -348,6 +217,8 @@ async function readHomeMetadataSnapshot({
   folderId,
   signal,
   isCurrentOwner,
+  onCacheWarning,
+  onNetworkSettled,
 }: ReadHomeMetadataOptions): Promise<HomeMetadataSnapshot> {
   const viewer: ViewerContext = {
     ...inputViewer,
@@ -357,18 +228,12 @@ async function readHomeMetadataSnapshot({
   if (viewer.mode !== "authenticated" && viewer.mode !== "guest") {
     throw new HomeMetadataError("ネットワークのホーム情報を利用できません。");
   }
-  const clearLifetime = viewer.user
-    ? captureOfflineCacheUserClearLifetime(viewer.user.id)
-    : 0;
-  const scope = viewer.user
-    ? await captureOfflineCacheScope(viewer.user.id)
-    : null;
-  throwIfCancelled(signal, isCurrentOwner);
   const viewerId = viewer.user?.id ?? null;
-  const folderReadGeneration = scope
-    ? await captureOfflineFolderRead(scope)
-    : undefined;
-  throwIfCancelled(signal, isCurrentOwner);
+  // The denial ledger read runs in parallel with the network fetches; it is
+  // local, best-effort (`null` on failure) and adds no time to first paint.
+  const denialPromise = viewer.user
+    ? readOfflineDenialSnapshot(viewer.user.id)
+    : Promise.resolve(null);
   const notesPromise = fetchNotes({ signal, viewerId });
   const folderPromise = (
     viewer.user || folderId
@@ -377,64 +242,41 @@ async function readHomeMetadataSnapshot({
   ).then((result) => {
     throwIfCancelled(signal, isCurrentOwner);
     if (!result.ok) {
-      return rejectDeniedFolder(
-        result,
-        viewer,
-        folderId,
-        scope,
-        signal,
-        isCurrentOwner,
-        folderReadGeneration,
-      );
+      const error = deniedFolderError(result);
+      persistDeniedFolderDetached(error, viewer, folderId);
+      throw error;
     }
     return result;
   });
-  const [notes, folderResult] = await Promise.all([
-    notesPromise,
-    folderPromise,
-  ]);
-  throwIfCancelled(signal, isCurrentOwner);
-  if (scope) {
-    await assertOfflineCacheScope(scope);
+  let notes: NoteSummary[];
+  let folderResult: Awaited<typeof folderPromise>;
+  try {
+    [notes, folderResult] = await Promise.all([notesPromise, folderPromise]);
+  } finally {
+    // Once the fetches settle a late denial no longer aborts: the denial
+    // snapshot and the page's folder-denial subscription project it.
+    onNetworkSettled?.();
   }
+  throwIfCancelled(signal, isCurrentOwner);
 
   const snapshot = buildHomeSnapshot(viewer, folderId, notes, folderResult);
 
-  await saveHomeMetadata(
+  const denial = await denialPromise;
+  // Persist the *fetched* folder before projecting denials: a confirmed 200
+  // revalidates, and the watermark authorizes lifting an older denial while
+  // still losing to one committed after the read began.
+  saveHomeMetadataDetached(
     snapshot,
     viewer,
     folderId,
-    signal,
-    isCurrentOwner,
-    clearLifetime,
-    scope,
-    folderReadGeneration,
+    denial?.folderSequence,
+    onCacheWarning,
   );
-  await projectCachedHomeMetadata(
-    snapshot,
-    folderId,
-    viewer,
-    scope,
-    signal,
-    isCurrentOwner,
-  );
+
+  // Denials committed before this read hide their resources; a denial that
+  // lands later reaches the page through the denial subscriptions.
+  projectNetworkSnapshot(snapshot, denial);
   throwIfCancelled(signal, isCurrentOwner);
-  try {
-    await validateHomePublication(
-      snapshot,
-      scope,
-      folderId,
-      folderReadGeneration,
-    );
-  } finally {
-    throwIfCancelled(signal, isCurrentOwner);
-  }
-  if (
-    viewer.user &&
-    !isOfflineCacheUserClearLifetimeCurrent(viewer.user.id, clearLifetime)
-  ) {
-    throw new DOMException("Home read is no longer current", "AbortError");
-  }
   return snapshot;
 }
 
@@ -453,15 +295,34 @@ export async function readHomeMetadata(
       controller.abort(new DOMException("Home read invalidated", "AbortError"));
     }
   });
+  // A folder denial committed while the network fetch is still pending
+  // invalidates this snapshot — but only when the denied folder is the
+  // one being read (denials of other folders must not cancel a healthy
+  // read; their rows are corrected through the page's subscription).
+  // Clear events carry a null generation and never invalidate.
+  const unsubscribeFolder = subscribeOfflineCacheFolderDenial((event) => {
+    if (
+      event.userId === userId &&
+      event.resource.generation !== null &&
+      event.resource.aliases.includes(options.folderId ?? null)
+    ) {
+      controller.abort(new DOMException("Home read invalidated", "AbortError"));
+    }
+  });
   try {
     const snapshot = await readHomeMetadataSnapshot({
       ...options,
+      onNetworkSettled: () => {
+        unsubscribeFolder();
+        options.onNetworkSettled?.();
+      },
       signal: controller.signal,
     });
     throwIfCancelled(controller.signal, options.isCurrentOwner);
     return snapshot;
   } finally {
     options.signal.removeEventListener("abort", cancel);
+    unsubscribeFolder();
     unsubscribe();
   }
 }

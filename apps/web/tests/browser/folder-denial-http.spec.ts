@@ -211,9 +211,13 @@ test("Home rejects a held HTTP 200 after another tab observes HTTP 403", async (
     expect(await peer.evaluate(stored)).toBeNull();
     denied = false;
     expect(await peer.evaluate(read)).toEqual({ ok: true });
-    expect(await peer.evaluate(stored)).toMatchObject({
-      folder: { id: "folder-a" },
-    });
+    // The cache write is detached: the read resolves before it commits, so
+    // poll until the revalidated folder lands in storage.
+    await expect
+      .poll(() => peer.evaluate(stored))
+      .toMatchObject({
+        folder: { id: "folder-a" },
+      });
   } finally {
     release.resolve();
     await peer.close();

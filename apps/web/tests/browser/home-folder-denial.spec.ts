@@ -74,9 +74,16 @@ test("a confirmed Home folder denial removes stale navigation without denying in
         () => 200,
         (error: { status?: number }) => error.status,
       );
+      // The denial persists detached from the rejected read: poll until the
+      // marker lands before asserting the projected cache contents.
+      let denied: unknown = await cache.getFolder("denied");
+      for (let attempt = 0; denied !== null && attempt < 100; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        denied = await cache.getFolder("denied");
+      }
       return {
         children: (await cache.getFolder(null))?.folder.children,
-        denied: await cache.getFolder("denied"),
+        denied,
         independent: (await cache.getFolder("independent"))?.folder,
         notes: (await cache.getNoteList())?.notes.map(
           (entry: { id: string }) => entry.id,

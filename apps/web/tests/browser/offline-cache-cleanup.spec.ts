@@ -238,28 +238,53 @@ test("committed data survives late cancellation while disposed readers do not pu
           return transaction;
         };
 
-        let outcome = "committed";
-        try {
+        let sessionCommitted: Awaited<ReturnType<typeof cache.getNote>> = null;
+        const waitForSessionCommit = async () => {
+          const deadline = Date.now() + 5000;
+          while (Date.now() < deadline) {
+            sessionCommitted = await cache.getNote(previous.id);
+            if (sessionCommitted?.note.markdown === updated.markdown) {
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+        };
+        const runKind = async () => {
           if (kind === "note") {
             await cache.putNote(updated, { signal: controller.signal });
-          } else if (kind === "viewer") {
-            await persistCachedViewerId("bob", { signal: controller.signal });
-          } else {
-            await reader.read(updated.id);
+            return;
           }
+          if (kind === "viewer") {
+            await persistCachedViewerId("bob", { signal: controller.signal });
+            return;
+          }
+          await reader.read(updated.id);
+          // The cache save is detached and outlives the reader: disposing
+          // the session here must not undo the write, and the published
+          // result stays published.
+          reader.dispose();
+          await waitForSessionCommit();
+        };
+        let outcome = "committed";
+        try {
+          await runKind();
         } catch (error) {
           outcome = error instanceof Error ? error.name : "UnknownError";
         } finally {
           IDBDatabase.prototype.transaction = original;
           reader.dispose();
         }
+        const collect = async () => ({
+          cached:
+            kind === "session"
+              ? (sessionCommitted?.note ?? null)
+              : ((await cache.getNote(previous.id))?.note ?? null),
+          completed: kind === "session" ? sessionCommitted !== null : completed,
+          outcome,
+          viewerId: await readCachedViewerId(),
+        });
         try {
-          return {
-            cached: (await cache.getNote(previous.id))?.note ?? null,
-            completed,
-            outcome,
-            viewerId: await readCachedViewerId(),
-          };
+          return await collect();
         } finally {
           cache.close();
         }
@@ -267,9 +292,9 @@ test("committed data survives late cancellation while disposed readers do not pu
       { kind, previous: note, updated },
     );
     expect(result.completed, kind).toBe(true);
-    expect(result.outcome, kind).toBe(
-      kind === "session" ? "AbortError" : "committed",
-    );
+    // For a disposed reader the detached commit still lands; the read
+    // itself already published before disposal could interpose.
+    expect(result.outcome, kind).toBe("committed");
     expect(result.cached, kind).toEqual(kind === "viewer" ? note : updated);
     expect(result.viewerId, kind).toBe(kind === "viewer" ? "bob" : "alice");
   }

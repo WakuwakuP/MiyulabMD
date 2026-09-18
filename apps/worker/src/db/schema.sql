@@ -6,7 +6,8 @@ CREATE TABLE users (
   email TEXT NOT NULL UNIQUE,
   display_name TEXT,
   created_at INTEGER NOT NULL,
-  last_login_at INTEGER
+  last_login_at INTEGER,
+  settings TEXT
 );
 
 CREATE TABLE notes (
@@ -24,6 +25,9 @@ CREATE TABLE notes (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   article_meta TEXT,
+  -- §2.6 permanent edit lock (1 = read-only until explicit unlock).
+  edit_locked INTEGER NOT NULL DEFAULT 0,
+  -- Deprecated KM-C columns kept for history; not read by active code.
   layer TEXT NOT NULL DEFAULT 'bronze',
   gold_unlocked_until INTEGER
 );
@@ -36,24 +40,54 @@ CREATE TABLE note_collaborators (
   PRIMARY KEY (note_id, user_id)
 );
 
+CREATE TABLE medallion_sets (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  -- JSON array of [{key, label}] ordered top→bottom. Keys immutable.
+  layers TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE folders (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
   folder TEXT NOT NULL,
   para_bucket TEXT,
+  para_space_id TEXT,
   scheme TEXT,
   scheme_id TEXT,
   scheme_title TEXT,
+  -- §2.6: at most one medallion assignment per folder; descendants inherit
+  -- the nearest ancestor's assignment.
+  medallion_set_id TEXT REFERENCES medallion_sets (id) ON DELETE SET NULL,
+  medallion_layer TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE para_spaces (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  root_folder_id TEXT,
   created_at INTEGER NOT NULL
 );
 
 CREATE UNIQUE INDEX folders_owner_folder_idx ON folders (owner_id, folder);
+-- Bucket uniqueness is per space; NULL para_space_id = default space.
 CREATE UNIQUE INDEX folders_owner_para_bucket_idx
-  ON folders (owner_id, para_bucket)
+  ON folders (owner_id, COALESCE(para_space_id, ''), para_bucket)
   WHERE para_bucket IS NOT NULL;
 CREATE UNIQUE INDEX folders_owner_scheme_id_idx
   ON folders (owner_id, scheme_id)
   WHERE scheme_id IS NOT NULL;
+CREATE UNIQUE INDEX para_spaces_owner_name_idx ON para_spaces (owner_id, name);
+CREATE UNIQUE INDEX para_spaces_root_folder_idx
+  ON para_spaces (root_folder_id)
+  WHERE root_folder_id IS NOT NULL;
+CREATE UNIQUE INDEX para_spaces_owner_rootless_idx
+  ON para_spaces (owner_id)
+  WHERE root_folder_id IS NULL;
 
 CREATE TABLE id_counters (
   owner_id TEXT NOT NULL,
@@ -185,6 +219,9 @@ CREATE INDEX note_links_dest_idx ON note_links (dest_note_id);
 CREATE INDEX note_links_src_status_idx ON note_links (src_note_id, dest_status);
 CREATE INDEX notes_owner_layer_idx ON notes (owner_id, layer);
 CREATE INDEX note_layer_events_note_idx ON note_layer_events (note_id, created_at);
+CREATE INDEX medallion_sets_owner_idx ON medallion_sets (owner_user_id);
+CREATE INDEX folders_medallion_set_idx ON folders (medallion_set_id);
+CREATE INDEX notes_owner_edit_locked_idx ON notes (owner_id) WHERE edit_locked = 1;
 
 CREATE VIRTUAL TABLE notes_fts USING fts5(
   note_id UNINDEXED,

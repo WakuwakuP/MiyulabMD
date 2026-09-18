@@ -8,21 +8,26 @@ import type {
   FolderAccess,
   FolderChildrenResult,
   FolderRecord,
+  KnowledgeSettings,
+  MedallionAssignment,
+  MedallionLayer,
+  MedallionResolution,
+  MedallionSet,
   MoveFolderContentsResult,
   MoveFolderResult,
   MoveNotesResult,
   Note,
   NoteHistoryPage,
-  NoteLayer,
-  NoteLayerEvent,
   NoteLinksResult,
   NoteRevisionBody,
   NoteRevisionRestore,
   NoteSummary,
   ParaBucketKey,
+  ParaEnableInput,
+  ParaEnableResult,
   ParaListResult,
+  ParaPlan,
   PermissionPreset,
-  PromoteGateFailure,
   SchemeSuggestion,
   SessionUser,
   WorkspaceSearchResult,
@@ -55,8 +60,15 @@ export type ApiResult<T> =
 export type ReadOptions = {
   signal?: AbortSignal;
   viewerId?: string | null;
-  noteAuthorityGeneration?: number;
-  noteAuthorityEpoch?: string;
+  /**
+   * Durable purge fence captured when the read started. Forwarded to the
+   * shared note transport so a post-purge read never joins a pre-purge
+   * in-flight request.
+   */
+  purgeFence?:
+    | Promise<{ device: number; user: number } | null>
+    | { device: number; user: number }
+    | null;
 };
 
 export {
@@ -226,6 +238,23 @@ export async function updateProfile(
   const res = await fetch("/api/me", {
     ...fetchOpts,
     body: JSON.stringify({ displayName }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { user: SessionUser };
+  return { data: body.user, ok: true };
+}
+
+/** settings.knowledge の部分更新（PATCH /api/me）。 */
+export async function updateKnowledgeSettings(
+  knowledge: Partial<KnowledgeSettings>,
+): Promise<ApiResult<SessionUser>> {
+  const res = await fetch("/api/me", {
+    ...fetchOpts,
+    body: JSON.stringify({ settings: { knowledge } }),
     headers: { "Content-Type": "application/json" },
     method: "PATCH",
   });
@@ -561,6 +590,8 @@ export async function moveNotes(
 export async function fetchPara(
   options: {
     bucket?: ParaBucketKey;
+    /** §2.5: space name, id, or "default". Omit = all spaces. */
+    space?: string;
     signal?: AbortSignal;
     viewerId?: string | null;
   } = {},
@@ -568,6 +599,9 @@ export async function fetchPara(
   const params = new URLSearchParams();
   if (options.bucket) {
     params.set("bucket", options.bucket);
+  }
+  if (options.space) {
+    params.set("space", options.space);
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(
@@ -579,6 +613,49 @@ export async function fetchPara(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as ParaListResult, ok: true };
+}
+
+/** §2.4/§2.5: side-effect-free setup inspection of one PARA space. */
+export async function fetchParaPlan(
+  options: {
+    /** Space name, id, or "default" (omit = default space). */
+    space?: string;
+    signal?: AbortSignal;
+    viewerId?: string | null;
+  } = {},
+): Promise<ApiResult<ParaPlan>> {
+  const suffix = options.space
+    ? `?space=${encodeURIComponent(options.space)}`
+    : "";
+  const res = await fetch(
+    `/api/para/plan${suffix}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as ParaPlan, ok: true };
+}
+
+/**
+ * §2.4: idempotent PARA enable. Vacant buckets are created; collisions need a
+ * resolution (create/adopt/rename/skip). The response `pending` lists bucket
+ * keys still blocked by unresolved collisions — re-run after resolving them.
+ */
+export async function enablePara(
+  input: ParaEnableInput = {},
+): Promise<ApiResult<ParaEnableResult>> {
+  const res = await fetch("/api/para/enable", {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as ParaEnableResult, ok: true };
 }
 
 export async function archiveParaProject(
@@ -595,6 +672,37 @@ export async function archiveParaProject(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: (await res.json()) as MoveFolderResult, ok: true };
+}
+
+/** §2.5: rename a PARA space (owner-unique name; the root folder is untouched). */
+export async function renameParaSpace(
+  spaceId: string,
+  name: string,
+): Promise<ApiResult<{ ok: true }>> {
+  const res = await fetch(`/api/para/spaces/${spaceId}`, {
+    ...fetchOpts,
+    body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: { ok: true }, ok: true };
+}
+
+/** §2.5: delete = unassign only. Bucket folders and the root folder remain. */
+export async function deleteParaSpace(
+  spaceId: string,
+): Promise<ApiResult<{ ok: true }>> {
+  const res = await fetch(`/api/para/spaces/${spaceId}`, {
+    ...fetchOpts,
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: { ok: true }, ok: true };
 }
 
 export type SchemeSuggestResponse = {
@@ -667,82 +775,130 @@ export async function resolveSchemeId(
 
 // --- medallion layers -------------------------------------------------------
 
-export type LayerChangeResult =
-  | {
-      ok: true;
-      note: NoteSummary;
-      unlockedUntil?: number;
-    }
-  | {
-      ok: false;
-      status: number;
-      error?: string;
-      /** 422 promote gate failures (machine-readable). */
-      failures?: PromoteGateFailure[];
-      to?: NoteLayer;
-    };
+export type EditLockResult =
+  | { ok: true; note: NoteSummary }
+  | { ok: false; status: number; error?: string };
 
-/** 層を1段階 promote（ゲート評価）または demote（reason 必須）する。 */
-export async function changeNoteLayer(
+/**
+ * §2.6 permanent edit lock. `locked=false` is the only mutation allowed on a
+ * locked note — there is no timed unlock.
+ */
+export async function setNoteEditLock(
   noteId: string,
-  input: { confirm?: boolean; reason?: string; to: NoteLayer },
-): Promise<LayerChangeResult> {
-  const res = await fetch(`/api/notes/${noteId}/layer`, {
+  locked: boolean,
+): Promise<EditLockResult> {
+  const res = await fetch(`/api/notes/${noteId}/lock`, {
+    ...fetchOpts,
+    body: JSON.stringify({ locked }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    note?: NoteSummary;
+  };
+  if (!res.ok) {
+    return { error: body.error, ok: false, status: res.status };
+  }
+  // The lock route returns the note itself (not wrapped).
+  const note = (body.note ?? body) as NoteSummary;
+  return { note, ok: true };
+}
+
+// --- medallion layer sets (§2.6) ---------------------------------------------
+
+export async function fetchMedallionSets(
+  options: ReadOptions = {},
+): Promise<ApiResult<{ sets: MedallionSet[] }>> {
+  const res = await fetch(
+    "/api/medallion/sets",
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as { sets: MedallionSet[] }, ok: true };
+}
+
+/** Seed the built-in 精緻度 set (idempotent — call when enabling the feature). */
+export async function ensureDefaultMedallionSet(): Promise<
+  ApiResult<{ set: MedallionSet }>
+> {
+  const res = await fetch("/api/medallion/sets/default", {
+    ...fetchOpts,
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as { set: MedallionSet }, ok: true };
+}
+
+export async function createMedallionSet(input: {
+  name: string;
+  layers?: MedallionLayer[];
+}): Promise<ApiResult<{ set: MedallionSet }>> {
+  const res = await fetch("/api/medallion/sets", {
     ...fetchOpts,
     body: JSON.stringify(input),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   });
-  const body = (await res.json().catch(() => ({}))) as {
-    error?: string;
-    failures?: PromoteGateFailure[];
-    note?: NoteSummary;
-    to?: NoteLayer;
-    unlockedUntil?: number;
-  };
   if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as { set: MedallionSet }, ok: true };
+}
+
+export async function updateMedallionSet(
+  id: string,
+  input: { name?: string; layers?: MedallionLayer[] },
+): Promise<ApiResult<{ set: MedallionSet }>> {
+  const res = await fetch(`/api/medallion/sets/${id}`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as { set: MedallionSet }, ok: true };
+}
+
+export type DeleteMedallionSetResult =
+  | { ok: true }
+  | { ok: false; status: number; error: string; assignedFolders?: number };
+
+export async function deleteMedallionSet(
+  id: string,
+  confirm: boolean,
+): Promise<DeleteMedallionSetResult> {
+  const res = await fetch(
+    `/api/medallion/sets/${id}${confirm ? "?confirm=1" : ""}`,
+    { ...fetchOpts, method: "DELETE" },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      assignedFolders?: number;
+    };
     return {
-      error: body.error,
-      failures: body.failures,
+      assignedFolders: body.assignedFolders,
+      error: body.error ?? res.statusText,
       ok: false,
       status: res.status,
-      to: body.to,
     };
   }
-  return { note: body.note as NoteSummary, ok: true };
+  return { ok: true };
 }
 
-export async function unlockNoteForEdit(
-  noteId: string,
-  minutes?: number,
-): Promise<LayerChangeResult> {
-  const res = await fetch(`/api/notes/${noteId}/unlock`, {
-    ...fetchOpts,
-    body: JSON.stringify({ minutes }),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  const body = (await res.json().catch(() => ({}))) as {
-    error?: string;
-    note?: NoteSummary;
-    unlockedUntil?: number;
-  };
-  if (!res.ok) {
-    return { error: body.error, ok: false, status: res.status };
-  }
-  return {
-    note: body.note as NoteSummary,
-    ok: true,
-    unlockedUntil: body.unlockedUntil,
-  };
-}
-
-export async function fetchLayerEvents(
-  noteId: string,
-  options: { signal?: AbortSignal; viewerId?: string | null } = {},
-): Promise<ApiResult<{ events: NoteLayerEvent[] }>> {
+export async function fetchMedallionAssignments(
+  options: ReadOptions = {},
+): Promise<ApiResult<{ assignments: MedallionAssignment[] }>> {
   const res = await fetch(
-    `/api/notes/${noteId}/layer-events`,
+    "/api/medallion/assignments",
     { ...fetchOpts, signal: options.signal },
     options,
   );
@@ -750,9 +906,59 @@ export async function fetchLayerEvents(
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return {
-    data: (await res.json()) as { events: NoteLayerEvent[] },
+    data: (await res.json()) as { assignments: MedallionAssignment[] },
     ok: true,
   };
+}
+
+export async function resolveMedallion(
+  path: string,
+  options: ReadOptions = {},
+): Promise<ApiResult<{ medallion: MedallionResolution | null }>> {
+  const res = await fetch(
+    `/api/medallion/resolve?path=${encodeURIComponent(path)}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return {
+    data: (await res.json()) as { medallion: MedallionResolution | null },
+    ok: true,
+  };
+}
+
+export async function assignFolderMedallion(
+  folderId: string,
+  input: { setId: string; layer: string },
+): Promise<ApiResult<{ assignment: MedallionAssignment }>> {
+  const res = await fetch(`/api/medallion/folders/${folderId}`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "PUT",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return {
+    data: (await res.json()) as { assignment: MedallionAssignment },
+    ok: true,
+  };
+}
+
+export async function clearFolderMedallion(
+  folderId: string,
+): Promise<ApiResult<void>> {
+  const res = await fetch(`/api/medallion/folders/${folderId}`, {
+    ...fetchOpts,
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: undefined, ok: true };
 }
 
 export async function deleteFolder(id: string): Promise<ApiResult<void>> {

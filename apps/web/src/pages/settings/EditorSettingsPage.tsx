@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useOutletContext } from "react-router";
+import type { AppShellContext } from "../../components/layout/AppShellContext.ts";
 import { Field } from "../../components/ui/Field.tsx";
 import { Select } from "../../components/ui/Select.tsx";
 import { MutedText } from "../../components/ui/Text.tsx";
+import {
+  clearEditCache,
+  isEditCacheOptedOut,
+  listEditCacheDocs,
+  setEditCacheOptOut,
+} from "../../lib/edit-cache.ts";
 import {
   INDENT_UNIT_LABELS,
   INDENT_UNITS,
@@ -16,10 +24,38 @@ import {
 } from "../../lib/editor-tab.ts";
 
 export function EditorSettingsPage() {
+  const { user } = useOutletContext<AppShellContext>();
+  const userId = user?.id ?? null;
   const [tabKey, setTabKey] = useState<TabKeyMode>(() => readTabKeyMode());
   const [indentUnit, setIndentUnit] = useState<IndentUnit>(() =>
     readIndentUnit(),
   );
+  const [offlineEdit, setOfflineEdit] = useState(
+    () => userId !== null && !isEditCacheOptedOut(userId),
+  );
+
+  useEffect(() => {
+    setOfflineEdit(userId !== null && !isEditCacheOptedOut(userId));
+  }, [userId]);
+
+  const onOfflineEditChange = (enabled: boolean) => {
+    if (userId === null) {
+      return;
+    }
+    setEditCacheOptOut(userId, !enabled);
+    setOfflineEdit(enabled);
+    if (!enabled) {
+      const docs = listEditCacheDocs(userId);
+      if (
+        docs.length > 0 &&
+        window.confirm(
+          `この端末に保存されたオフライン編集データ（${docs.length} 件）を削除しますか？未送信の編集は失われます。`,
+        )
+      ) {
+        void clearEditCache(userId);
+      }
+    }
+  };
 
   return (
     <section>
@@ -79,6 +115,24 @@ export function EditorSettingsPage() {
         <MutedText className="mt-3">
           Tab キーはブラウザ標準どおり次の要素へフォーカスを移動します。
         </MutedText>
+      )}
+
+      {userId !== null && (
+        <Field className="mt-6" label="オフライン編集（この端末）">
+          <span className="flex items-center gap-[0.45rem]">
+            <input
+              aria-label="この端末でオフライン編集を使う"
+              checked={offlineEdit}
+              onChange={(event) => onOfflineEditChange(event.target.checked)}
+              type="checkbox"
+            />
+            この端末でオフライン編集を使う
+          </span>
+          <MutedText>
+            自分だけが編集できるノートの本文をこの端末に保存し、オフラインでも編集できます。
+            オフにするとオンライン編集のみに戻ります。
+          </MutedText>
+        </Field>
       )}
     </section>
   );

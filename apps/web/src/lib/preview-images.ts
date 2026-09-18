@@ -129,7 +129,6 @@ export function usePreviewImages(
     let unsubscribeNote: (() => void) | undefined;
     let unsubscribeRealm: (() => void) | undefined;
     const usesCache = mode !== "network-only";
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: cache subscriptions and network-only acquisition have intentionally separate lifecycles.
     const initialize = async () => {
       if (usesCache) {
         const cache = await import("./offline-cache.ts");
@@ -202,18 +201,14 @@ export function usePreviewImages(
             publish("ready");
           },
         );
-        const scope = await cache.captureOfflineCacheScope(userId as string);
-        if (acquisitionController.signal.aborted) {
-          return;
-        }
         await Promise.all(
           targets.map(async (image) => {
             let bytes: Blob | null = null;
             try {
               bytes = await attached.acquireAttachedImage(image, {
                 cacheOnly,
-                scope,
                 signal: acquisitionController.signal,
+                userId: userId as string,
               });
             } catch {
               // A failed attachment must not replace or fail the note body.

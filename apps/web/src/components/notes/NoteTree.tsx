@@ -5,7 +5,7 @@ import type {
   FolderEntryNote,
   FolderRecord,
   NoteSummary,
-  ParaBucket,
+  ParaSpaceSummary,
 } from "@miyulabmd/shared";
 import { folderUrl, MY_DRIVE_NAME, SHARED_PATH } from "@miyulabmd/shared";
 import type { MouseEvent, ReactNode } from "react";
@@ -57,8 +57,15 @@ type Props = {
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
   /** Enables drag & drop moves between rows when set. */
   onMove?: (source: TreeDragItem, destFolderId: string | null) => void;
-  /** Pinned PARA bucket folders rendered above the regular tree. */
-  paraBuckets?: ParaBucket[];
+  /** Pinned PARA spaces (with their bucket folders) rendered above the regular tree. */
+  paraSpaces?: ParaSpaceSummary[];
+  /**
+   * §2.6 medallion badge lookup by folder path (nearest-ancestor resolution
+   * happens in the caller). Absent = no badges rendered.
+   */
+  medallionForPath?: (
+    path: string | undefined,
+  ) => { medal: string; label: string } | null;
 };
 
 export type MenuTarget =
@@ -253,6 +260,7 @@ type TreeContext = {
   expandable: boolean;
   expansions: ReadonlyMap<string, FolderExpansion>;
   loadMore: (id: string) => void;
+  medallionForPath?: Props["medallionForPath"];
   notes: NoteSummary[];
   onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
   onMove?: (source: TreeDragItem, destFolderId: string | null) => void;
@@ -419,6 +427,8 @@ function folderRow(
   },
 ) {
   const expansion = ctx.expansions.get(row.id);
+  const medallion = ctx.medallionForPath?.(row.path) ?? null;
+  const meta = folderMeta(row);
   return (
     <Fragment key={`folder:${row.id}`}>
       <DriveRow
@@ -426,7 +436,21 @@ function folderRow(
         href={folderUrl(row.id)}
         icon={<FolderIcon />}
         menuOpen={ctx.openMenuId === row.id}
-        meta={folderMeta(row)}
+        meta={
+          medallion || meta ? (
+            <>
+              {medallion && (
+                <span
+                  className="mr-2 text-xs"
+                  title={`${medallion.label}（メダリオン層）`}
+                >
+                  {medallion.medal}
+                </span>
+              )}
+              {meta}
+            </>
+          ) : undefined
+        }
         name={row.name}
         onMenu={
           ctx.readonly
@@ -603,16 +627,19 @@ function FolderCrumbs({
 
 function ParaSection({
   ctx,
-  buckets,
+  space,
 }: {
   ctx: TreeContext;
-  buckets: ParaBucket[];
+  space: ParaSpaceSummary;
 }) {
+  // §2.5: the default (rootless) space stays labeled "PARA"; named spaces
+  // get their own heading so multiple trees are distinguishable.
+  const label = space.isDefault ? "PARA" : `PARA — ${space.name}`;
   return (
-    <section aria-label="PARA" className="mb-4">
-      <h2 className="mb-1 text-xs font-semibold text-muted">PARA</h2>
+    <section aria-label={label} className="mb-4">
+      <h2 className="mb-1 text-xs font-semibold text-muted">{label}</h2>
       <DriveList>
-        {buckets.map((bucket) =>
+        {space.buckets.map((bucket) =>
           folderRow(ctx, {
             depth: 0,
             id: bucket.folderId,
@@ -638,9 +665,13 @@ function noteCountsByFolder(notes: NoteSummary[]) {
 
 function sortedFolders(
   childrenFolders: FolderRecord[],
-  buckets?: ParaBucket[],
+  spaces?: ParaSpaceSummary[],
 ) {
-  const bucketIds = new Set((buckets ?? []).map((bucket) => bucket.folderId));
+  const bucketIds = new Set(
+    (spaces ?? []).flatMap((space) =>
+      space.buckets.map((bucket) => bucket.folderId),
+    ),
+  );
   return [...childrenFolders]
     .filter((folder) => !bucketIds.has(folder.id))
     .sort(compareSchemeFolders);
@@ -719,7 +750,8 @@ export function NoteTree({
   loadChildren,
   onItemMenu,
   onMove,
-  paraBuckets,
+  paraSpaces,
+  medallionForPath,
 }: Props) {
   const expandable = Boolean(loadChildren) && !readonly;
   const { expansions, loadMore, retry, toggle } = useFolderExpansions(
@@ -731,13 +763,14 @@ export function NoteTree({
   const items = showAllNotes
     ? [...notes].sort((a, b) => b.updatedAt - a.updatedAt)
     : notesInFolder(notes, currentFolderId);
-  const folders = sortedFolders(childrenFolders, paraBuckets);
+  const folders = sortedFolders(childrenFolders, paraSpaces);
   const noteCounts = noteCountsByFolder(notes);
 
   const ctx: TreeContext = {
     expandable,
     expansions,
     loadMore,
+    medallionForPath,
     notes,
     onItemMenu,
     onMove,
@@ -771,8 +804,11 @@ export function NoteTree({
         </Link>
       )}
 
-      {paraBuckets && paraBuckets.length > 0 && (
-        <ParaSection buckets={paraBuckets} ctx={ctx} />
+      {paraSpaces?.map(
+        (space) =>
+          space.buckets.length > 0 && (
+            <ParaSection ctx={ctx} key={space.id} space={space} />
+          ),
       )}
 
       <TreeBody

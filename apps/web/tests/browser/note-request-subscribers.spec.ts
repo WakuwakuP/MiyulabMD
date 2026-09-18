@@ -10,16 +10,7 @@ for (const status of [200, 403]) {
       async ({ note, status }) => {
         const apiUrl = "/src/lib/api.ts";
         const { fetchNote } = await import(apiUrl);
-        const cacheUrl = "/src/lib/offline-cache.ts";
-        const { captureOfflineNoteAuthority } = await import(cacheUrl);
-        const aliceAuthority = await captureOfflineNoteAuthority(
-          "alice",
-          note.id,
-        );
-        const bobAuthority = await captureOfflineNoteAuthority("bob", note.id);
         const aliceOptions = {
-          noteAuthorityEpoch: aliceAuthority.epoch,
-          noteAuthorityGeneration: aliceAuthority.generation,
           viewerId: "alice",
         };
         const originalFetch = globalThis.fetch;
@@ -44,8 +35,6 @@ for (const status of [200, 403]) {
           const first = fetchNote(note.id, aliceOptions);
           const second = fetchNote(note.id, aliceOptions);
           const otherViewer = fetchNote(note.id, {
-            noteAuthorityEpoch: bobAuthority.epoch,
-            noteAuthorityGeneration: bobAuthority.generation,
             viewerId: "bob",
           });
           await new Promise<void>((resolve) =>
@@ -137,14 +126,9 @@ test("last cancellation releases a group without letting old cleanup remove its 
   const result = await page.evaluate(async (note) => {
     const apiUrl = "/src/lib/api.ts";
     const { fetchNote } = await import(apiUrl);
-    const cacheUrl = "/src/lib/offline-cache.ts";
-    const { captureOfflineNoteAuthority } = await import(cacheUrl);
-    // This case exercises transport subscription lifetime, not IDB scheduling.
-    // Capture the same public authority supplied by the foreground/prefetch callers.
-    const authority = await captureOfflineNoteAuthority("alice", note.id);
+    // This case exercises transport subscription lifetime, not IDB
+    // scheduling — the dedup group keys on the viewer plus read generation.
     const readOptions = {
-      noteAuthorityEpoch: authority.epoch,
-      noteAuthorityGeneration: authority.generation,
       viewerId: "alice",
     };
     const originalFetch = globalThis.fetch;
@@ -248,12 +232,7 @@ test("one result-copy failure settles that subscriber without abandoning the oth
   const result = await page.evaluate(async (note) => {
     const apiUrl = "/src/lib/api.ts";
     const { fetchNote } = await import(apiUrl);
-    const cacheUrl = "/src/lib/offline-cache.ts";
-    const { captureOfflineNoteAuthority } = await import(cacheUrl);
-    const authority = await captureOfflineNoteAuthority("alice", note.id);
     const readOptions = {
-      noteAuthorityEpoch: authority.epoch,
-      noteAuthorityGeneration: authority.generation,
       viewerId: "alice",
     };
     const originalFetch = globalThis.fetch;
@@ -312,9 +291,18 @@ test("one result-copy failure settles that subscriber without abandoning the oth
           outcome.second = "rejected";
         },
       );
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
+      // Delivery waits on the durable purge-fence read alongside the
+      // transport — poll rather than assuming a fixed frame budget.
+      for (
+        let attempts = 0;
+        attempts < 200 &&
+        (outcome.first === "pending" || outcome.second === "pending");
+        attempts += 1
+      ) {
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
+      }
       return { ...outcome, unhandled: [...unhandled] };
     } finally {
       first.abort();

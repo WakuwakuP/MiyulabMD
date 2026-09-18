@@ -46,26 +46,36 @@ export {
   withClosedFrontmatter,
 } from "./frontmatter.ts";
 export type {
-  NoteLayer,
-  NoteLayerEvent,
-  PromoteGateCode,
-  PromoteGateFailure,
-} from "./layers.ts";
+  KnowledgeFeatureKey,
+  KnowledgeSettings,
+  UserSettings,
+} from "./knowledge.ts";
 export {
-  GOLD_LOCK_WS_CLOSE_CODE,
-  GOLD_LOCK_WS_CLOSE_REASON,
-  GOLD_UNLOCK_DEFAULT_MINUTES,
-  GOLD_UNLOCK_MAX_MINUTES,
-  isGoldLockedAt,
-  isNoteLayer,
-  LAYER_RANK,
-  NOTE_LAYER_LABELS,
-  NOTE_LAYERS,
-  nextLayer,
-  PROMOTE_GATE_CODES,
-} from "./layers.ts";
+  DEFAULT_KNOWLEDGE_SETTINGS,
+  DEFAULT_USER_SETTINGS,
+  isKnowledgeFeatureKey,
+  KNOWLEDGE_FEATURE_KEYS,
+  normalizeKnowledgeSettings,
+  parseUserSettingsObject,
+  userSettingsFromObject,
+} from "./knowledge.ts";
 export type { McpToolName } from "./mcp.ts";
 export { MCP_NOTE_URL_HINT, MCP_TOOLS } from "./mcp.ts";
+export type {
+  MedallionAssignment,
+  MedallionLayer,
+  MedallionResolution,
+  MedallionSet,
+} from "./medallion.ts";
+export {
+  DEFAULT_MEDALLION_LAYERS,
+  DEFAULT_MEDALLION_SET_NAME,
+  isMedallionLayerKey,
+  medalForLayerIndex,
+  medalForLayerKey,
+  parseMedallionLayers,
+  resolveMedallionAssignment,
+} from "./medallion.ts";
 export type {
   MoveFolderContentsResult,
   MoveFolderItem,
@@ -77,9 +87,26 @@ export type {
   MovePlan,
   ParaBucket,
   ParaBucketKey,
+  ParaBucketResolution,
+  ParaEnableInput,
+  ParaEnableResult,
   ParaListResult,
+  ParaPlan,
+  ParaPlanBucket,
+  ParaPlanExisting,
+  ParaPlanStatus,
+  ParaResolutionKey,
+  ParaSpacePlan,
+  ParaSpaceRef,
+  ParaSpaceSelector,
+  ParaSpaceSummary,
 } from "./move.ts";
-export { isParaBucketKey, MOVE_MAX_ITEMS, PARA_BUCKETS } from "./move.ts";
+export {
+  DEFAULT_PARA_SPACE_NAME,
+  isParaBucketKey,
+  MOVE_MAX_ITEMS,
+  PARA_BUCKETS,
+} from "./move.ts";
 export type {
   AccessGrantInput,
   CreateNoteInput,
@@ -113,6 +140,9 @@ export type {
   WorkspaceSearchResult,
 } from "./note.ts";
 export {
+  EDIT_LOCK_WS_CLOSE_CODE,
+  EDIT_LOCK_WS_CLOSE_REASON,
+  EDIT_LOCKED_CODE,
   isNoteEditOp,
   isNoteHistoryActorKind,
   isSearchScope,
@@ -179,6 +209,8 @@ export {
   zettelStamp,
 } from "./schemes.ts";
 export type {
+  LayerFilterValue,
+  ParaFilterValue,
   SearchDslFilter,
   SearchDslOperator,
   SearchQuery,

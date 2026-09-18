@@ -24,6 +24,7 @@ function note(id: string): NoteSummary {
     alias: null,
     articleMeta: {},
     createdAt: 1,
+    editLocked: false,
     folder: "",
     folderId: null,
     id,

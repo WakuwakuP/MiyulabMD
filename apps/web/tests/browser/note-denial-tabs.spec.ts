@@ -73,9 +73,12 @@ test("another tab's note denial fences an old response and allows fresh revalida
     });
     denied = false;
     expect((await peer.evaluate(read, note.id)).ok).toBe(true);
-    expect(await peer.evaluate(cachedBody, note.id)).toBe(
-      "Fresh authorized body",
-    );
+    // The display read publishes the network note immediately; persisting
+    // it (and lifting the denial marker) is detached, so wait for the
+    // best-effort write to land before inspecting the cache.
+    await expect
+      .poll(() => peer.evaluate(cachedBody, note.id))
+      .toBe("Fresh authorized body");
   } finally {
     release.resolve();
     await peer.close();

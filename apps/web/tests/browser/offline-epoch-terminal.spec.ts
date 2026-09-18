@@ -24,7 +24,7 @@ for (const failure of ["abort", "metadata", "abort-and-metadata"] as const) {
         return originalClose.call(this);
       };
       IDBObjectStore.prototype.get = function (key) {
-        if (!gated && String(key).startsWith("user-epoch:")) {
+        if (!gated && String(key).startsWith("purge-generation:")) {
           gated = true;
           if (failure !== "abort") {
             if (failure === "abort-and-metadata") {
@@ -50,20 +50,23 @@ for (const failure of ["abort", "metadata", "abort-and-metadata"] as const) {
           signal: controller.signal,
           userId: "alice",
         }).then(
-          (cache: { close(): void }) => {
+          (cache: { close(): void; degraded: boolean }) => {
             opened = cache;
-            return false;
+            return { degraded: cache.degraded, rejected: false };
           },
-          (error: unknown) =>
-            error === (failure === "metadata" ? metadataError : reason),
+          (error: unknown) => ({
+            degraded: null,
+            rejected:
+              error === (failure === "metadata" ? metadataError : reason),
+          }),
         );
         if (failure === "abort") {
           await entered.promise;
           controller.abort(reason);
           release.resolve();
         }
-        const rejected = await pending;
-        return { closedBeforeReturn: closes, rejected };
+        const outcome = await pending;
+        return { closedBeforeReturn: closes, ...outcome };
       } finally {
         release.resolve();
         opened?.close();
@@ -71,8 +74,19 @@ for (const failure of ["abort", "metadata", "abort-and-metadata"] as const) {
         IDBDatabase.prototype.close = originalClose;
       }
     }, failure);
-    expect(result.rejected).toBe(true);
-    expect(result.closedBeforeReturn).toBe(1);
+    if (failure === "metadata") {
+      // A transient metadata read failure is absorbed by the tombstone
+      // scan; the open still resolves a usable cache instead of rejecting.
+      expect(result.rejected).toBe(false);
+      expect(result.degraded).toBe(false);
+    } else {
+      // The caller's own abort still propagates the exact reason.
+      expect(result.rejected).toBe(true);
+      expect(result.degraded).toBeNull();
+    }
+    // An open that never reached storage owns nothing to close; the
+    // tombstone scan's connection is released before returning.
+    expect(result.closedBeforeReturn).toBeLessThanOrEqual(1);
   });
 }
 
@@ -93,14 +107,11 @@ for (const scenario of [
       const cacheUrl = "/src/lib/offline-cache.ts";
       const sessionUrl = "/src/lib/note-read-session.ts";
       const homeUrl = "/src/lib/home-metadata-reader.ts";
-      const {
-        captureOfflineCacheScope,
-        enterOfflineNoteDenial,
-        openOfflineCache,
-      } = await import(cacheUrl);
+      const { enterOfflineNoteDenial, openOfflineCache } = await import(
+        cacheUrl
+      );
       const { createNoteReadSession } = await import(sessionUrl);
       const { readHomeMetadata } = await import(homeUrl);
-      await captureOfflineCacheScope("alice");
       const viewer = {
         cacheViewerId: "alice",
         mode: "authenticated",
@@ -116,53 +127,44 @@ for (const scenario of [
       const release = Promise.withResolvers<void>();
       const home = scenario.startsWith("home");
       const originalGet = IDBObjectStore.prototype.get;
-      const originalPut = IDBObjectStore.prototype.put;
-      const originalClose = IDBDatabase.prototype.close;
+      const originalGetAll = IDBObjectStore.prototype.getAll;
       const originalFetch = globalThis.fetch;
       let owner = true;
-      let armed = false;
-      let reads = 0;
-      const shortSuffix = `:${btoa(note.shortId).replace(/[=]+$/, "")}`;
-      IDBDatabase.prototype.close = function () {
-        if (home) {
-          armed = true;
-        }
-        return originalClose.call(this);
+      let gated = false;
+      const delay = (request: IDBRequest) => {
+        gated = true;
+        Object.defineProperty(request, "onsuccess", {
+          set(handler: (event: Event) => void) {
+            request.addEventListener("success", (event) => {
+              entered.resolve();
+              void release.promise.then(() => handler.call(request, event));
+            });
+          },
+        });
       };
-      IDBObjectStore.prototype.put = function (value, ...args) {
-        const record = value as { key?: string; value?: string };
-        if (
-          !home &&
-          record.key?.startsWith("denied-note:") &&
-          record.key.endsWith(shortSuffix) &&
-          record.value?.includes('"denied":false')
-        ) {
-          armed = true;
-        }
-        return originalPut.call(this, value, ...args);
-      };
+      // The post-fetch awaited steps in v5: the note read awaits the
+      // durable note-denial sequence (its CAS watermark), and the home
+      // read awaits the parallel denial snapshot's metadata range scan.
       IDBObjectStore.prototype.get = function (key) {
         const request = originalGet.call(this, key);
-        if (
-          armed &&
-          String(key).startsWith("user-epoch:") &&
-          ++reads === (home ? 1 : 2)
-        ) {
+        if (!(home || gated) && String(key).startsWith("note-order:")) {
+          delay(request);
+        }
+        return request;
+      };
+      IDBObjectStore.prototype.getAll = function (query, count) {
+        if (home && !gated && this.name === "metadata") {
           if (scenario === "home-abort-failure") {
+            gated = true;
             entered.resolve();
             controller.abort(reason);
             throw new Error("Final authority read failed too");
           }
-          Object.defineProperty(request, "onsuccess", {
-            set(handler: (event: Event) => void) {
-              request.addEventListener("success", (event) => {
-                entered.resolve();
-                void release.promise.then(() => handler.call(request, event));
-              });
-            },
-          });
+          const request = originalGetAll.call(this, query, count);
+          delay(request);
+          return request;
         }
-        return request;
+        return originalGetAll.call(this, query, count);
       };
       globalThis.fetch = (input) => {
         const path = input instanceof Request ? input.url : String(input);
@@ -225,12 +227,17 @@ for (const scenario of [
         session.dispose();
         globalThis.fetch = originalFetch;
         IDBObjectStore.prototype.get = originalGet;
-        IDBObjectStore.prototype.put = originalPut;
-        IDBDatabase.prototype.close = originalClose;
+        IDBObjectStore.prototype.getAll = originalGetAll;
       }
     };
     const result = await page.evaluate(exercise, { note, scenario });
-    expect(result.published).toBe(false);
+    if (scenario === "home-folder-denial") {
+      // A denial landing mid-read publishes the fetched data; the durable
+      // denial corrects the view through the folder-denial subscription.
+      expect(result.published).toBe(true);
+    } else {
+      expect(result.published).toBe(false);
+    }
     if (scenario.startsWith("home-abort")) {
       expect(result.exactAbort).toBe(true);
     }

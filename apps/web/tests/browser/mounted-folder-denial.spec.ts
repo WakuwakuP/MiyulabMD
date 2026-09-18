@@ -80,15 +80,14 @@ test("current deny commits receipt authority and generation", async ({
       const stop = module.subscribeOfflineCacheFolderDenial((event) => receipts.push(event));
       const committed = await cache.denyFolder(folder.id, token);
       stop();
-      return { committed, receipt: receipts[0] };
+      return { committed, receipt: receipts[0], token };
     }`,
   );
   expect(result.committed).toBe(true);
   expect(result.receipt.resource).toMatchObject({
     aliases: ["mounted-folder"],
-    generation: 2,
+    generation: result.token + 1,
   });
-  expect(result.receipt.resource.epoch).toBe("0");
 });
 
 test("null and canonical root aliases are denied together", async ({
@@ -128,12 +127,15 @@ test("authority reads every alias when only alias one is missing", async ({
     page,
     `async (cache, folder) => {
       const module = await import("/src/lib/offline-cache.ts");
-      const scope = await module.captureOfflineCacheScope("mounted-race");
+      const receipts = [];
+      const stop = module.subscribeOfflineCacheFolderDenial((event) => receipts.push(event));
       const token = await cache.beginFolderRead(folder.id);
       await cache.denyFolder(folder.id, token);
+      stop();
+      const committed = receipts[0];
       return module.readOfflineFolderDenial({
-        type: "invalidate", userId: "mounted-race",
-        resource: { type: "folder", aliases: ["missing", folder.id], epoch: scope.epoch, generation: 2 },
+        ...committed,
+        resource: { ...committed.resource, aliases: ["missing", folder.id] },
       });
     }`,
   );
@@ -668,12 +670,14 @@ test("note list read is invalidated when folder denial sequence changes", async 
       throw new Error("IDB request success hook is unavailable");
     }
     let gateNext = false;
-    const originalGet = IDBObjectStore.prototype.get;
-    IDBObjectStore.prototype.get = function (key) {
-      if (String(key).includes("denied-note:")) {
+    const originalGetAll = IDBObjectStore.prototype.getAll;
+    IDBObjectStore.prototype.getAll = function (query, count) {
+      // Gate the folder-denial snapshot inside getNoteList so a peer denial
+      // can commit while the read is still in flight.
+      if (this.name === "metadata") {
         gateNext = true;
       }
-      return originalGet.call(this, key);
+      return originalGetAll.call(this, query, count);
     };
     Object.defineProperty(IDBRequest.prototype, "onsuccess", {
       ...descriptor,
@@ -699,7 +703,7 @@ test("note list read is invalidated when folder denial sequence changes", async 
       globalThis as typeof globalThis & { __releaseListRace?: () => void }
     ).__releaseListRace = release.resolve;
     return cache.getNoteList().finally(() => {
-      IDBObjectStore.prototype.get = originalGet;
+      IDBObjectStore.prototype.getAll = originalGetAll;
       Object.defineProperty(IDBRequest.prototype, "onsuccess", descriptor);
       cache.close();
     });
@@ -760,28 +764,21 @@ test("stale note denial receipt is false after a newer clear generation", async 
     const id = "stale-note-receipt-note";
     try {
       await cache.denyNote(id);
-      const authority = await module.captureOfflineNoteAuthority(
-        "stale-note-receipt",
-        id,
-      );
-      if (authority.epoch === null) {
-        throw new Error("note authority epoch is unavailable");
+      const generation =
+        await module.captureOfflineNoteDenialSequence("stale-note-receipt");
+      if (generation === null) {
+        throw new Error("note denial sequence is unavailable");
       }
       const oldEvent = {
         resource: {
           aliases: [id],
-          epoch: authority.epoch,
-          generation: authority.generation,
+          generation,
           type: "note",
         },
         type: "invalidate",
         userId: "stale-note-receipt",
       } as const;
-      await cache.clearNoteDenial(
-        id,
-        cache.beginNoteRead(id),
-        authority.generation,
-      );
+      await cache.clearNoteDenial(id, cache.beginNoteRead(id), generation);
       return module.readOfflineNoteDenial(oldEvent, [id]);
     } finally {
       cache.close();

@@ -315,15 +315,8 @@ test("persistent quota stops after one recovery while a shared network reader su
   await bodyStart;
   const foreground = page.evaluate(async (noteId) => {
     const apiUrl = "/src/lib/api.ts";
-    const cacheUrl = "/src/lib/offline-cache.ts";
     const { fetchNote } = await import(apiUrl);
-    const { captureOfflineNoteAuthority } = await import(cacheUrl);
-    const authority = await captureOfflineNoteAuthority("alice", noteId);
-    const request = fetchNote(noteId, {
-      noteAuthorityEpoch: authority.epoch ?? undefined,
-      noteAuthorityGeneration: authority.generation,
-      viewerId: "alice",
-    });
+    const request = fetchNote(noteId, { viewerId: "alice" });
     (
       window as typeof window & { foregroundRequestStarted?: boolean }
     ).foregroundRequestStarted = true;
@@ -498,13 +491,11 @@ test("image quota recovery shares one response with a healthy foreground reader"
 
   await imageStart;
   const foreground = page.evaluate(async (imagePath) => {
-    const cacheUrl = "/src/lib/offline-cache.ts";
     const imageUrl = "/src/lib/attached-images.ts";
-    const { captureOfflineCacheScope } = await import(cacheUrl);
     const { acquireAttachedImage, attachedImage } = await import(imageUrl);
     const request = acquireAttachedImage(attachedImage(imagePath), {
       cacheOnly: false,
-      scope: await captureOfflineCacheScope("alice"),
+      userId: "alice",
     });
     (
       window as typeof window & { foregroundImageStarted?: boolean }
@@ -590,13 +581,11 @@ test("persistent image quota stops prefetch without poisoning shared foreground 
 
   await imageStart;
   const foreground = page.evaluate(async (imagePath) => {
-    const cacheUrl = "/src/lib/offline-cache.ts";
     const imageUrl = "/src/lib/attached-images.ts";
-    const { captureOfflineCacheScope } = await import(cacheUrl);
     const { acquireAttachedImage, attachedImage } = await import(imageUrl);
     const request = acquireAttachedImage(attachedImage(imagePath), {
       cacheOnly: false,
-      scope: await captureOfflineCacheScope("alice"),
+      userId: "alice",
     });
     (
       window as typeof window & { foregroundImageStarted?: boolean }

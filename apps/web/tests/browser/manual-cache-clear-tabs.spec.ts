@@ -16,9 +16,7 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
   await other.goto("/tests/browser/fixtures/storage.html");
   try {
     await other.evaluate(async (source) => {
-      const { captureOfflineCacheScope, openOfflineCache } = await import(
-        "/src/lib/offline-cache.ts"
-      );
+      const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
       const alice = await openOfflineCache({ userId: "manual-tab-alice-7" });
       const bob = await openOfflineCache({ userId: "manual-tab-bob-7" });
       await alice.putNote({
@@ -31,12 +29,7 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
         id: "manual-tab-note-b-7",
         ownerId: "manual-tab-bob-7",
       });
-      Object.assign(window, {
-        alice,
-        aliceScope: await captureOfflineCacheScope("manual-tab-alice-7"),
-        bob,
-        bobScope: await captureOfflineCacheScope("manual-tab-bob-7"),
-      });
+      Object.assign(window, { alice, bob });
     }, note);
     await page.evaluate(async () => {
       const { clearOfflineCacheDevice } = await import(
@@ -46,11 +39,18 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
     });
     const stale = await other.evaluate(async (source) => {
       const fixture = window as typeof window & {
-        alice: { putNote(n: unknown): Promise<void>; close(): void };
-        bob: { putNote(n: unknown): Promise<void>; close(): void };
-        aliceScope: unknown;
-        bobScope: unknown;
+        alice: {
+          getNote(id: string): Promise<unknown>;
+          putNote(n: unknown): Promise<void>;
+          close(): void;
+        };
+        bob: {
+          putNote(n: unknown): Promise<void>;
+          close(): void;
+        };
       };
+      // The durable purge generation fences writes even when the
+      // BroadcastChannel lifecycle message was missed.
       const alice = await fixture.alice
         .putNote({ ...source, id: "manual-tab-late-a-7" })
         .then(
@@ -63,18 +63,10 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
           () => false,
           () => true,
         );
-      const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
-      const scoped = await openOfflineCache({
-        scope: fixture.aliceScope as never,
-        userId: "manual-tab-alice-7",
-      }).then(
-        (v) => {
-          v.close();
-          return false;
-        },
-        () => true,
-      );
-      return { alice, bob, scoped };
+      // The pre-purge handle cannot resurrect purged data: the record was
+      // deleted, so the stale handle's read is a miss.
+      const reopened = await fixture.alice.getNote("manual-tab-note-a-7");
+      return { alice, bob, reopened };
     }, note);
     const fresh = await page.evaluate(async (source) => {
       const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
@@ -86,7 +78,11 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
         cache.close();
       }
     }, note);
-    expect(stale).toEqual({ alice: true, bob: true, scoped: true });
+    expect(stale).toEqual({
+      alice: true,
+      bob: true,
+      reopened: null,
+    });
     expect(fresh).toBe("manual-tab-fresh-7");
   } finally {
     await other.close();

@@ -1,9 +1,9 @@
 import {
-  isNoteLayer,
+  type LayerFilterValue,
   layerFilterValue,
-  type NoteLayer,
   paraFilterValue,
   pathFilterMatches,
+  resolveMedallionAssignment,
   type SearchQuery,
   schemeFilterValue,
   tagFilterValue,
@@ -14,18 +14,36 @@ import { db } from "../db/client.ts";
  * Worker-side resolution of parsed DSL operators into row-matchable filters.
  * `scheme:`/`jd:`/`para:` resolve to folder-path prefixes under the caller's
  * own drive (a user's scheme metadata is private — non-owner lookups fail
- * closed to "no match").
+ * closed to "no match"). `layer:` resolves against the caller's folder
+ * medallion assignments (nearest ancestor wins).
  */
 
-export type LayerFilter = { value: NoteLayer; negated: boolean };
+export type LayerFilter = { value: LayerFilterValue; negated: boolean };
+/** One folder assignment row used for effective-layer resolution. */
+export type MedallionSearchAssignment = {
+  path: string;
+  layerKey: string;
+  setName: string;
+};
 export type TagFilter = { value: string; negated: boolean };
 export type FolderPrefixFilter = { value: string; negated: boolean };
+/**
+ * OR-ed set of folder prefixes (e.g. `para:projects` across every space).
+ * Positive filters need one matching prefix; negated ones need none to match.
+ */
+export type FolderPrefixSetFilter = { values: string[]; negated: boolean };
 
 export type ResolvedSearchDsl = {
   parsed: SearchQuery;
   folderPrefixes: FolderPrefixFilter[];
+  folderPrefixSets: FolderPrefixSetFilter[];
   layers: LayerFilter[];
   tags: TagFilter[];
+  /**
+   * The caller's folder medallion assignments, fetched once when any
+   * `layer:` filter is present. Empty for guests and unconfigured users.
+   */
+  medallionAssignments: MedallionSearchAssignment[];
   /** A non-negated filter resolved to nothing — the result set is empty. */
   empty: boolean;
 };
@@ -42,46 +60,87 @@ async function folderPathForSchemeId(
   return row?.folder ?? null;
 }
 
-async function folderPathForParaBucket(
+/**
+ * `para:projects` → every space's Projects path; `para:work.projects` → the
+ * bucket inside that space only. The default space resolves via its materialized
+ * rootless row (`para_space_id IS NULL` on its bucket folders).
+ */
+async function folderPathsForParaBucket(
   env: Env,
   ownerId: string,
   bucket: string,
-): Promise<string | null> {
-  const row = await db(env)
+  spaceName?: string,
+): Promise<string[]> {
+  if (spaceName === undefined) {
+    const rows = await db(env)
+      .prepare(
+        "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ?",
+      )
+      .bind(ownerId, bucket)
+      .all<{ folder: string }>();
+    return (rows.results ?? []).map((row) => row.folder);
+  }
+  const space = await db(env)
     .prepare(
-      "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ?",
+      "SELECT id, root_folder_id FROM para_spaces WHERE owner_id = ? AND name = ?",
     )
-    .bind(ownerId, bucket)
-    .first<{ folder: string }>();
-  return row?.folder ?? null;
+    .bind(ownerId, spaceName)
+    .first<{ id: string; root_folder_id: string | null }>();
+  if (!space) {
+    return [];
+  }
+  const rows =
+    space.root_folder_id === null
+      ? await db(env)
+          .prepare(
+            "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ? AND para_space_id IS NULL",
+          )
+          .bind(ownerId, bucket)
+          .all<{ folder: string }>()
+      : await db(env)
+          .prepare(
+            "SELECT folder FROM folders WHERE owner_id = ? AND para_bucket = ? AND para_space_id = ?",
+          )
+          .bind(ownerId, bucket, space.id)
+          .all<{ folder: string }>();
+  return (rows.results ?? []).map((row) => row.folder);
 }
 
 type ResolvedFilter =
   | { kind: "folder"; value: string }
-  | { kind: "layer"; value: NoteLayer }
+  | { kind: "folder-set"; values: string[] }
+  | { kind: "layer"; value: LayerFilterValue }
   | { kind: "tag"; value: string }
   | "drop"
   | "empty";
 
-/** scheme:/jd:/para: all resolve to a folder path under the caller's drive. */
-function folderPathForFilter(
+/** scheme:/jd: resolve to a folder path; para: to a per-space path set. */
+async function folderPathForFilter(
   env: Env,
   user: { id: string } | undefined,
   filter: { kind: string; value: string },
-): Promise<string | null> {
+): Promise<ResolvedFilter | null> {
   if (!user) {
-    return Promise.resolve(null);
+    return null;
   }
   if (filter.kind === "para") {
-    const bucket = paraFilterValue(filter.value);
-    return bucket
-      ? folderPathForParaBucket(env, user.id, bucket)
-      : Promise.resolve(null);
+    const parsed = paraFilterValue(filter.value);
+    if (!parsed) {
+      return null;
+    }
+    const paths = await folderPathsForParaBucket(
+      env,
+      user.id,
+      parsed.bucket,
+      parsed.space,
+    );
+    return paths.length > 0 ? { kind: "folder-set", values: paths } : null;
   }
   const schemeId = schemeFilterValue(filter.value);
-  return schemeId
-    ? folderPathForSchemeId(env, user.id, schemeId)
-    : Promise.resolve(null);
+  const path = schemeId
+    ? await folderPathForSchemeId(env, user.id, schemeId)
+    : null;
+  return path === null ? null : { kind: "folder", value: path };
 }
 
 /**
@@ -110,12 +169,81 @@ async function resolveFilter(
     case "scheme":
     case "jd":
     case "para": {
-      const path = await folderPathForFilter(env, user, filter);
-      return path === null ? miss : { kind: "folder", value: path };
+      const resolved = await folderPathForFilter(env, user, filter);
+      return resolved === null ? miss : resolved;
     }
     default:
       return "drop";
   }
+}
+
+export async function loadMedallionAssignments(
+  env: Env,
+  userId: string,
+): Promise<MedallionSearchAssignment[]> {
+  const { results } = await db(env)
+    .prepare(
+      `SELECT f.folder AS path, f.medallion_layer AS layer_key,
+              s.name AS set_name
+         FROM folders f JOIN medallion_sets s ON s.id = f.medallion_set_id
+        WHERE f.owner_id = ? AND f.medallion_set_id IS NOT NULL`,
+    )
+    .bind(userId)
+    .all<{ path: string; layer_key: string | null; set_name: string }>();
+  return (results ?? []).map((row) => ({
+    layerKey: row.layer_key ?? "",
+    path: row.path,
+    setName: row.set_name,
+  }));
+}
+
+type CollectedFilters = {
+  empty: boolean;
+  folderPrefixes: FolderPrefixFilter[];
+  folderPrefixSets: FolderPrefixSetFilter[];
+  layers: LayerFilter[];
+  tags: TagFilter[];
+};
+
+/** Resolves each parsed DSL filter into its row-matchable bucket. */
+async function collectFilters(
+  env: Env,
+  user: { id: string } | undefined,
+  parsed: SearchQuery,
+): Promise<CollectedFilters> {
+  const collected: CollectedFilters = {
+    empty: false,
+    folderPrefixes: [],
+    folderPrefixSets: [],
+    layers: [],
+    tags: [],
+  };
+  for (const filter of parsed.filters) {
+    const resolved = await resolveFilter(env, user, filter);
+    if (resolved === "empty") {
+      collected.empty = true;
+      continue;
+    }
+    if (resolved === "drop") {
+      continue;
+    }
+    if (resolved.kind === "folder") {
+      collected.folderPrefixes.push({
+        negated: filter.negated,
+        value: resolved.value,
+      });
+    } else if (resolved.kind === "folder-set") {
+      collected.folderPrefixSets.push({
+        negated: filter.negated,
+        values: resolved.values,
+      });
+    } else if (resolved.kind === "layer") {
+      collected.layers.push({ negated: filter.negated, value: resolved.value });
+    } else {
+      collected.tags.push({ negated: filter.negated, value: resolved.value });
+    }
+  }
+  return collected;
 }
 
 export async function resolveSearchDsl(
@@ -123,33 +251,49 @@ export async function resolveSearchDsl(
   user: { id: string } | undefined,
   parsed: SearchQuery,
 ): Promise<ResolvedSearchDsl> {
-  const folderPrefixes: FolderPrefixFilter[] = [];
-  const layers: LayerFilter[] = [];
-  const tags: TagFilter[] = [];
-  let empty = false;
-
-  for (const filter of parsed.filters) {
-    const resolved = await resolveFilter(env, user, filter);
-    if (resolved === "empty") {
-      empty = true;
-      continue;
-    }
-    if (resolved === "drop") {
-      continue;
-    }
-    if (resolved.kind === "folder") {
-      folderPrefixes.push({ negated: filter.negated, value: resolved.value });
-    } else if (resolved.kind === "layer") {
-      layers.push({ negated: filter.negated, value: resolved.value });
-    } else {
-      tags.push({ negated: filter.negated, value: resolved.value });
-    }
-  }
-  return { empty, folderPrefixes, layers, parsed, tags };
+  const collected = await collectFilters(env, user, parsed);
+  // Fetch folder assignments once when a layer filter needs them. Guests have
+  // no medallion config, so the empty list below also covers that case:
+  // positive layer filters match nothing, negated ones just pass.
+  const medallionAssignments =
+    collected.layers.length > 0 && user
+      ? await loadMedallionAssignments(env, user.id)
+      : [];
+  const empty =
+    collected.empty ||
+    (collected.layers.length > 0 &&
+      medallionAssignments.length === 0 &&
+      collected.layers.some((layer) => !layer.negated));
+  return {
+    ...collected,
+    empty,
+    medallionAssignments,
+    parsed,
+  };
 }
 
-function rowLayer(row: { layer: string | null }): NoteLayer {
-  return isNoteLayer(row.layer ?? "") ? (row.layer as NoteLayer) : "bronze";
+/**
+ * Appends the `searchNotes` `layer` option (`key` or `set.key`, same value
+ * shape as the `layer:` DSL term) as a positive filter, lazily loading the
+ * caller's folder medallion assignments when the DSL didn't already need them.
+ */
+export async function applyLayerOption(
+  env: Env,
+  user: { id: string } | undefined,
+  resolved: ResolvedSearchDsl,
+  layer: string | undefined,
+): Promise<void> {
+  const layerValue = layer ? layerFilterValue(layer) : null;
+  if (!layerValue) {
+    return;
+  }
+  resolved.layers.push({ negated: false, value: layerValue });
+  if (user && resolved.medallionAssignments.length === 0) {
+    resolved.medallionAssignments = await loadMedallionAssignments(
+      env,
+      user.id,
+    );
+  }
 }
 
 /**
@@ -191,12 +335,38 @@ function termFound(
   return title.includes(term.value) || body.includes(term.value);
 }
 
+/**
+ * Every resolved `layer:` filter must hold against the note's effective
+ * (nearest-ancestor) folder medallion assignment, resolved lazily once.
+ */
+function layerFiltersMatch(
+  resolved: ResolvedSearchDsl,
+  folder: string,
+): boolean {
+  let effective: MedallionSearchAssignment | null | undefined;
+  for (const layer of resolved.layers) {
+    if (effective === undefined) {
+      effective = resolveMedallionAssignment(
+        resolved.medallionAssignments,
+        folder,
+      );
+    }
+    const matches =
+      effective !== null &&
+      effective.layerKey === layer.value.layer &&
+      (layer.value.set === undefined || effective.setName === layer.value.set);
+    if (matches === layer.negated) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function rowMatchesSearchDsl(
   row: {
     title: string;
     folder: string;
     markdown_snapshot: string | null;
-    layer: string | null;
   },
   resolved: ResolvedSearchDsl,
   scope: "all" | "body" | "title",
@@ -213,15 +383,21 @@ export function rowMatchesSearchDsl(
       return false;
     }
   }
+  for (const set of resolved.folderPrefixSets) {
+    const any = set.values.some((value) =>
+      pathFilterMatches(row.folder, value),
+    );
+    if (any === set.negated) {
+      return false;
+    }
+  }
   for (const tag of resolved.tags) {
     if (bodyHasTag(body, tag.value) === tag.negated) {
       return false;
     }
   }
-  for (const layer of resolved.layers) {
-    if ((rowLayer(row) === layer.value) === layer.negated) {
-      return false;
-    }
+  if (!layerFiltersMatch(resolved, row.folder)) {
+    return false;
   }
   return true;
 }

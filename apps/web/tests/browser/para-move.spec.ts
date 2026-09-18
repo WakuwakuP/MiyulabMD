@@ -1,6 +1,7 @@
 import type {
   FolderAccess,
   NoteSummary,
+  ParaBucket,
   ParaListResult,
 } from "@miyulabmd/shared";
 import { expect, type Page, test } from "@playwright/test";
@@ -42,35 +43,48 @@ const looseNote: NoteSummary = {
   title: "loose note",
 };
 
+const paraBuckets: ParaBucket[] = [
+  {
+    folderId: "f-projects",
+    key: "projects",
+    name: "Projects",
+    noteCount: 1,
+    path: "Projects",
+  },
+  {
+    folderId: "f-areas",
+    key: "areas",
+    name: "Areas",
+    noteCount: 0,
+    path: "Areas",
+  },
+  {
+    folderId: "f-resources",
+    key: "resources",
+    name: "Resources",
+    noteCount: 3,
+    path: "Resources",
+  },
+  {
+    folderId: "f-archives",
+    key: "archives",
+    name: "Archives",
+    noteCount: 0,
+    path: "Archives",
+  },
+];
+
+// §2.5: /api/para returns spaces; buckets on the root for the default space.
 const paraList: ParaListResult = {
-  buckets: [
+  buckets: paraBuckets,
+  spaces: [
     {
-      folderId: "f-projects",
-      key: "projects",
-      name: "Projects",
-      noteCount: 1,
-      path: "Projects",
-    },
-    {
-      folderId: "f-areas",
-      key: "areas",
-      name: "Areas",
-      noteCount: 0,
-      path: "Areas",
-    },
-    {
-      folderId: "f-resources",
-      key: "resources",
-      name: "Resources",
-      noteCount: 3,
-      path: "Resources",
-    },
-    {
-      folderId: "f-archives",
-      key: "archives",
-      name: "Archives",
-      noteCount: 0,
-      path: "Archives",
+      buckets: paraBuckets,
+      id: "default",
+      isDefault: true,
+      name: "Personal",
+      rootFolderId: null,
+      rootPath: "",
     },
   ],
 };
@@ -86,6 +100,10 @@ async function mockHome(page: Page) {
               displayName: "Alice",
               email: "alice@example.test",
               id: "alice",
+              // PARA is opt-in (§2.1): the fixture user has it enabled.
+              settings: {
+                knowledge: { layers: true, para: true, schemes: true },
+              },
             },
           },
         });

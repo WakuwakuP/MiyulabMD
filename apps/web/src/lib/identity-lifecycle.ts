@@ -1,3 +1,4 @@
+import { clearEditCache, listEditCacheNoteIds } from "./edit-cache.ts";
 import { invalidateFolderCache, invalidateNotesCache } from "./list-cache.ts";
 import { invalidateNoteCache } from "./note-cache.ts";
 import {
@@ -69,7 +70,56 @@ function clearMemory(): void {
 }
 subscribeOfflineCacheInvalidation(clearMemory);
 
+/**
+ * purge ガード（specs/offline-mode.html §4.x 未送信編集の保護）。
+ * 編集キャッシュ（y-indexeddb）に未送信の可能性がある doc が残っていると、
+ * キャッシュ削除でオフライン編集が静かに失われる。purge 前にガードを呼び、
+ * false が返れば中止する。UI（AppShell）がモーダルを登録する。
+ */
+export type PurgeGuardInput = {
+  noteIds: string[];
+  reason: "logout" | "switch";
+  userId: string;
+};
+export type PurgeGuard = (input: PurgeGuardInput) => Promise<boolean>;
+let purgeGuard: PurgeGuard | null = null;
+export function setPurgeGuard(guard: PurgeGuard | null): void {
+  purgeGuard = guard;
+}
+
+/** purge をユーザーがキャンセルした。呼び出し側は静かに中止してよい。 */
+export class PurgeCancelledError extends Error {
+  constructor() {
+    super("Purge cancelled: unsent offline edits remain");
+    this.name = "PurgeCancelledError";
+  }
+}
+
+/**
+ * 未送信編集がある場合はガードを呼び、続行なら編集キャッシュも削除する。
+ * ガード未登録（UI が無い文脈）でも doc があれば中止する — 消えて困る
+ * データを黙って消さないため。
+ */
+export async function guardEditCachePurge(
+  userId: string,
+  reason: "logout" | "switch",
+): Promise<void> {
+  const noteIds = listEditCacheNoteIds(userId);
+  if (noteIds.length === 0) {
+    return;
+  }
+  const proceed = purgeGuard
+    ? await purgeGuard({ noteIds, reason, userId })
+    : false;
+  if (!proceed) {
+    throw new PurgeCancelledError();
+  }
+  await clearEditCache(userId);
+}
+
 export async function clearIdentityCache(userId: string): Promise<void> {
+  // ガードは begin イベントより前に: キャンセル時に viewer を巻き込まない。
+  await guardEditCachePurge(userId, "switch");
   const event: IdentityEvent = {
     id: crypto.randomUUID(),
     phase: "begin",
@@ -106,6 +156,8 @@ async function performLogout(capturedUserId: string): Promise<void> {
     if (events.some((event) => event.userId === userId)) {
       return;
     }
+    // ガードは begin イベントより前に: キャンセル時に viewer を巻き込まない。
+    await guardEditCachePurge(userId, "logout");
     const event: IdentityEvent = {
       id: crypto.randomUUID(),
       phase: "begin",
