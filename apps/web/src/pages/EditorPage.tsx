@@ -50,6 +50,7 @@ import { ErrorText } from "../components/ui/Text.tsx";
 import { resolveMedallion } from "../lib/api.ts";
 import { cn } from "../lib/cn.ts";
 import type { YjsSession } from "../lib/collaboration.ts";
+import { hasSyncedOnce, isEditCacheEligible } from "../lib/edit-cache.ts";
 import type { EditorMode } from "../lib/editor-mode.ts";
 import { useKnowledgeFeature } from "../lib/knowledge-features.ts";
 import {
@@ -343,7 +344,7 @@ function EditorWorkspace({
             markdown={markdown}
             onSplitScroll={onSplitScroll}
             splitScroll={splitScroll}
-            taskNoteId={canEdit ? note.id : undefined}
+            taskNoteId={canManage ? note.id : undefined}
             viewMode={viewMode}
             wikiLinks={wikiLinks}
           />
@@ -373,7 +374,7 @@ function EditorWorkspace({
       {linksPanel}
       {historyOpen && (
         <HistoryPanel
-          canEdit={canEdit}
+          canEdit={canManage}
           noteId={note.id}
           onClose={onCloseHistory}
           user={user}
@@ -390,6 +391,7 @@ function EditorPageView({
   unsentEdits,
   readSource,
   cachedAt,
+  offlineEditable,
   note,
   accessDraft,
   workspace,
@@ -400,6 +402,8 @@ function EditorPageView({
   unsentEdits: boolean;
   readSource: "pending" | "network" | "cache";
   cachedAt: number | null;
+  /** 資格・同期履歴が揃っていて本文のオフライン編集ができる表示キャッシュ。 */
+  offlineEditable: boolean;
   note: Note | null;
   accessDraft: AccessDraft | null;
   workspace: ReactNode;
@@ -422,7 +426,10 @@ function EditorPageView({
       {readSource === "cache" && cachedAt !== null && (
         <p className="px-5 py-2" role="status">
           オフラインキャッシュを表示中（保存日時:{" "}
-          {new Date(cachedAt).toLocaleString("ja-JP")})。閲覧のみです。
+          {new Date(cachedAt).toLocaleString("ja-JP")}）。
+          {offlineEditable
+            ? "このノートはオフラインでも本文を編集できます。編集は端末に保持され、再接続・認証後に同期されます。"
+            : "閲覧のみです。"}
         </p>
       )}
       {paused && (
@@ -588,6 +595,7 @@ export function EditorPage() {
   const [collab, setCollab] = useState<YjsSession | null>(null);
   const [collabReady, setCollabReady] = useState(false);
   const [collabWritable, setCollabWritable] = useState(false);
+  const [offlineWritable, setOfflineWritable] = useState(false);
   const [unsentEdits, setUnsentEdits] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -622,7 +630,22 @@ export function EditorPage() {
   // §2.6: edit_locked freezes every mutation (body, folder, share, delete)
   // until explicitly unlocked — including for the owner.
   const editLocked = Boolean(note?.editLocked);
-  const canEdit = flags.canEdit && readSource === "network" && readReady;
+  // 編集キャッシュ名空間の本人判定。cacheViewerId は認証ではなくローカル
+  // 領域の選択にだけ使い、API 書き込みの権限根拠にはしない。
+  const editIdentityId = user?.id ?? viewer.cacheViewerId ?? null;
+  const collabUser = user ?? viewer.cachedUser ?? null;
+  // 表示キャッシュ由来でも「オンライン同期履歴あり・オフライン編集資格あり」
+  // のノートは本文のローカル編集を許可する（それ以外の操作は閲覧のみ）。
+  const offlineEditable = Boolean(
+    readSource === "cache" &&
+      note &&
+      editIdentityId &&
+      isEditCacheEligible(note, editIdentityId) &&
+      hasSyncedOnce(editIdentityId, note.id),
+  );
+  const canEdit =
+    readReady &&
+    ((flags.canEdit && readSource === "network") || offlineEditable);
   const viewMode: EditorMode = canEdit && !editLocked ? mode : "preview";
   const usesInternalScroll = viewMode !== "preview";
   const headingTitle = titleFromMarkdown(markdown);
@@ -642,10 +665,13 @@ export function EditorPage() {
   const ready = Boolean(yMarkdown && awareness && collabReady);
   // Read readiness is sticky for this session: a disconnect must not unmount
   // the editor or replace its local document with the network/cache snapshot.
-  const paused = ready && !collabWritable;
+  // オフライン編集では編集キャッシュ復元（offlineWritable）だけで本文を書ける。
+  const bodyWritable = collabWritable || offlineWritable;
+  const paused = ready && !bodyWritable;
   // §2.6: edit lock freezes all mutations, not just the body.
-  const canMutate = canEdit && !paused && !editLocked;
-  const bodyEditable = canMutate;
+  // 本文以外の REST 変更はオンライン同期（collabWritable）まで常に不可。
+  const canMutate = canEdit && !paused && !editLocked && collabWritable;
+  const bodyEditable = canEdit && !paused && !editLocked;
 
   useLayoutEffect(() => {
     hydratedRef.current = false;
@@ -662,6 +688,7 @@ export function EditorPage() {
     setShareOpen(false);
     setHistoryOpen(false);
     setSaveError(null);
+    setOfflineWritable(false);
   }, [id, viewer]);
 
   useEffect(() => {
@@ -694,7 +721,13 @@ export function EditorPage() {
           scope.dispose();
           setViewScope(null);
         }
-        teardownCollab(unbindCollabRef, sessionRef, setCollab, setCollabReady);
+        teardownCollab(
+          unbindCollabRef,
+          sessionRef,
+          setCollab,
+          setCollabReady,
+          setOfflineWritable,
+        );
         hydratedRef.current = false;
         setReadState({ id, ownerViewer: viewer, phase: "error" });
         setLinksOpen(false);
@@ -822,15 +855,23 @@ export function EditorPage() {
     void noteId;
     void userId;
     return () => {
-      teardownCollab(unbindCollabRef, sessionRef, setCollab, setCollabReady);
+      teardownCollab(
+        unbindCollabRef,
+        sessionRef,
+        setCollab,
+        setCollabReady,
+        setOfflineWritable,
+      );
     };
   }, [noteId, userId]);
 
   useEffect(() => {
     bindEditorCollab({
-      hydrated: hydratedRef.current,
+      editCacheUserId: editIdentityId,
+      hydrated: hydratedRef.current || offlineEditable,
       note: canEdit ? note : null,
       noteId: canEdit ? noteId : undefined,
+      offlineEdit: offlineEditable,
       onEditLocked: () => {
         // The server closed the writable session: reflect the lock so the
         // body flips to read-only and the lock banner appears.
@@ -843,16 +884,26 @@ export function EditorPage() {
       setCollabReady,
       setCollabWritable,
       setMarkdown,
+      setOfflineWritable,
       unbindRef: unbindCollabRef,
-      user,
+      user: collabUser,
       userLoading,
       viewMode,
     });
-  }, [noteId, userLoading, viewMode, user, canEdit, note]);
+  }, [
+    noteId,
+    userLoading,
+    viewMode,
+    collabUser,
+    canEdit,
+    note,
+    offlineEditable,
+    editIdentityId,
+  ]);
 
   useEffect(() => {
-    syncCollabUser(collab, user);
-  }, [collab, user]);
+    syncCollabUser(collab, collabUser);
+  }, [collab, collabUser]);
 
   useEffect(() => {
     const editCache = collab?.editCache;
@@ -923,6 +974,7 @@ export function EditorPage() {
       loadError={loadError}
       loading={loading}
       note={note}
+      offlineEditable={offlineEditable}
       paused={paused}
       readSource={readSource}
       unsentEdits={unsentEdits}
