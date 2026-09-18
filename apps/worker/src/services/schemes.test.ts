@@ -831,8 +831,8 @@ test("0018 backfill: 既存の採番ノードに scheme_root が設定される"
       .run("a3", owner.id, "10-19 重複", "jd", "10-19", rootId, Date.now()),
   );
 
-  // カウンタは採番済みフォルダから各スコープの次番号へ導出され、
-  // 旧グローバルキーは消える（エリア 10-19・カテゴリ 10・ID 10.11 が既存）。
+  // カウンタは MAX(採番済み最大+1, 旧グローバル値) でルート単位に移され、
+  // 旧グローバルキーは消える（既存: エリア 10-19・カテゴリ 10・ID 10.11）。
   const counters = sqlite
     .prepare(
       "SELECT scope, next_value FROM id_counters WHERE owner_id = ? ORDER BY scope",
@@ -841,9 +841,9 @@ test("0018 backfill: 既存の採番ノードに scheme_root が設定される"
   assert.deepEqual(
     counters.map((row) => [row.scope, row.next_value]),
     [
-      [`jd:area:${rootId}`, 2],
-      [`jd:cat:${rootId}:10`, 11],
-      [`jd:id:${rootId}:10`, 12],
+      [`jd:area:${rootId}`, 3],
+      [`jd:cat:${rootId}:10`, 15],
+      [`jd:id:${rootId}:10`, 20],
     ],
   );
 });

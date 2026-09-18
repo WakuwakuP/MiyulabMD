@@ -41,20 +41,18 @@ CREATE UNIQUE INDEX folders_owner_scheme_id_idx
   ON folders (owner_id, scheme_root, scheme_id)
   WHERE scheme_id IS NOT NULL;
 
--- Counter scopes: `jd:area`, `jd:cat:NN`, `jd:id:NN` were owner-global. They
--- cannot be reused per root (empty roots would inherit the high-water mark and
--- skip IDs), so derive each scoped counter from the folders actually minted
--- under that root: next_value = max existing sibling number + 1. The allocator
--- clamps to its own startAt, so a lower derived value is safe.
-DELETE FROM id_counters
- WHERE scope = 'jd:area'
-    OR scope GLOB 'jd:cat:[0-9][0-9]'
-    OR scope GLOB 'jd:id:[0-9][0-9]';
-
+-- Counter scopes: `jd:area`, `jd:cat:NN`, `jd:id:NN` were owner-global. Roots
+-- that minted nodes at a level keep a per-root counter at
+-- MAX(highest minted sibling + 1, old global high-water) so deleted IDs are
+-- not reissued. Roots without minted nodes get no counter and start fresh.
 INSERT OR IGNORE INTO id_counters (owner_id, scope, next_value)
 SELECT f.owner_id,
        'jd:area:' || f.scheme_root,
-       MAX(CAST(substr(f.scheme_id, 1, 2) AS INTEGER)) / 10 + 1
+       MAX(MAX(CAST(substr(f.scheme_id, 1, 2) AS INTEGER)) / 10 + 1,
+           COALESCE((
+             SELECT c.next_value FROM id_counters AS c
+              WHERE c.owner_id = f.owner_id AND c.scope = 'jd:area'
+           ), 0))
   FROM folders AS f
  WHERE f.scheme_root IS NOT NULL
    AND f.scheme_id GLOB '[0-9][0-9]-[0-9][0-9]'
@@ -64,7 +62,13 @@ INSERT OR IGNORE INTO id_counters (owner_id, scope, next_value)
 SELECT f.owner_id,
        'jd:cat:' || f.scheme_root || ':' ||
          CAST(CAST(f.scheme_id AS INTEGER) / 10 * 10 AS TEXT),
-       MAX(CAST(f.scheme_id AS INTEGER)) + 1
+       MAX(MAX(CAST(f.scheme_id AS INTEGER)) + 1,
+           COALESCE((
+             SELECT c.next_value FROM id_counters AS c
+              WHERE c.owner_id = f.owner_id
+                AND c.scope = 'jd:cat:' ||
+                      CAST(CAST(f.scheme_id AS INTEGER) / 10 * 10 AS TEXT)
+           ), 0))
   FROM folders AS f
  WHERE f.scheme_root IS NOT NULL
    AND f.scheme_id GLOB '[0-9][0-9]'
@@ -73,8 +77,18 @@ SELECT f.owner_id,
 INSERT OR IGNORE INTO id_counters (owner_id, scope, next_value)
 SELECT f.owner_id,
        'jd:id:' || f.scheme_root || ':' || substr(f.scheme_id, 1, 2),
-       MAX(CAST(substr(f.scheme_id, 4, 2) AS INTEGER)) + 1
+       MAX(MAX(CAST(substr(f.scheme_id, 4, 2) AS INTEGER)) + 1,
+           COALESCE((
+             SELECT c.next_value FROM id_counters AS c
+              WHERE c.owner_id = f.owner_id
+                AND c.scope = 'jd:id:' || substr(f.scheme_id, 1, 2)
+           ), 0))
   FROM folders AS f
  WHERE f.scheme_root IS NOT NULL
    AND f.scheme_id GLOB '[0-9][0-9].[0-9][0-9]'
  GROUP BY f.owner_id, f.scheme_root, substr(f.scheme_id, 1, 2);
+
+DELETE FROM id_counters
+ WHERE scope = 'jd:area'
+    OR scope GLOB 'jd:cat:[0-9][0-9]'
+    OR scope GLOB 'jd:id:[0-9][0-9]';
