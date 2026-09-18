@@ -172,12 +172,6 @@ export function CachedDriveView() {
     !userLoading && (viewer.mode !== "cached" || viewer.cacheViewerId === null);
   return (
     <section>
-      <p aria-live="polite" role="status">
-        キャッシュから閲覧中
-        {view.folderCachedAt === null
-          ? ""
-          : `（保存日時: ${new Date(view.folderCachedAt).toLocaleString("ja-JP")}）`}
-      </p>
       {error && <p>{error}</p>}
       {unavailable || (view.folderMissing && !pending) ? (
         <p>

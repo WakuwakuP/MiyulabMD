@@ -76,7 +76,7 @@ async function mockEditorApis(
   };
 }
 
-test("online Edit starts collaboration and a new note begins in preview", async ({
+test("viewing an editable note warms collaboration and edit mode keeps the session", async ({
   page,
 }) => {
   const { second } = await mockEditorApis(page);
@@ -84,19 +84,24 @@ test("online Edit starts collaboration and a new note begins in preview", async 
   await page.routeWebSocket("**/ws/notes/**", () => {
     connections += 1;
   });
+  // Preview warms the edit cache session so the note is offline-editable.
   await page.goto(`/n/${note.id}`);
   await expect(page.getByText("通信なしでも読みたい本文。")).toBeVisible();
-  await page.getByRole("button", { exact: true, name: "Edit" }).click();
   await expect.poll(() => connections).toBe(1);
+  // Entering edit mode reuses the warmed session instead of reconnecting.
+  await page.getByRole("button", { exact: true, name: "Edit" }).click();
+  await expect(page).toHaveURL(/[?&]mode=edit/);
+  expect(connections).toBe(1);
 
   await page.evaluate((id) => {
     history.pushState(history.state, "", `/n/${id}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, second.id);
   await expect(page.getByText("Second body", { exact: true })).toBeVisible();
-  expect(connections).toBe(1);
-  await page.getByRole("button", { exact: true, name: "Edit" }).click();
   await expect.poll(() => connections).toBe(2);
+  await page.getByRole("button", { exact: true, name: "Edit" }).click();
+  await expect(page).toHaveURL(/[?&]mode=edit/);
+  expect(connections).toBe(2);
 });
 
 test("a failed note read never grants mutation access", async ({ page }) => {
@@ -236,8 +241,9 @@ test("an open share dialog is not carried into another cached note", async ({
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, second.id);
   await expect(page.getByText("Second body", { exact: true })).toBeVisible();
+  // 表示キャッシュ由来かつ未同期のノートは閲覧のみ（Edit は出ない）。
   await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toBeVisible();
+    page.getByRole("button", { exact: true, name: "Edit" }),
+  ).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });

@@ -18,6 +18,14 @@ async function verifyCachedNoteView(
       collaborationConnections.push(socket.url());
     }
   });
+  // Viewing an editable note warms a collaboration session in preview; keep
+  // the handshake open without a sync reply so the synced marker is never
+  // set and the cached note stays read-only.
+  await page.routeWebSocket("**/ws/notes/**", (socket) => {
+    socket.onMessage(() => {
+      // Keep the handshake open without a sync reply.
+    });
+  });
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -80,6 +88,8 @@ async function verifyCachedNoteView(
   await expect(
     page.getByText("通信なしでも読みたい本文。", { exact: true }),
   ).toBeVisible();
+  // オンラインではオフラインアイコンは出ない。
+  await expect(page.getByRole("button", { name: "オフライン" })).toHaveCount(0);
   await expect(
     page.getByRole("button", { exact: true, name: "Edit" }),
   ).toBeVisible();
@@ -112,18 +122,22 @@ async function verifyCachedNoteView(
   // Keep the Vite-served shell available to isolate data-layer recovery.
   // Full offline navigation through the service worker is a separate test.
   apiUnavailable = true;
+  // The online warmup session legitimately opened a socket; only the offline
+  // phase must not start collaboration.
+  collaborationConnections.length = 0;
   await page.clock.setFixedTime(new Date("2025-06-07T08:09:10Z"));
   await page.reload();
 
   await expect(
     page.getByText("通信なしでも読みたい本文。", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toContainText("2024");
+  if (failure === "offline") {
+    // オフラインアイコンがロゴ右に出て、タップで最終同期時刻を表示する。
+    const offlineButton = page.getByRole("button", { name: "オフライン" });
+    await expect(offlineButton).toBeVisible();
+    await offlineButton.click();
+    await expect(page.getByText(/最終同期 2024/)).toBeVisible();
+  }
   await expect(
     page.getByRole("button", { exact: true, name: "Edit" }),
   ).toHaveCount(0);

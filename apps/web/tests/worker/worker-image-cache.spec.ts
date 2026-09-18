@@ -12,6 +12,14 @@ test("a real private attachment survives offline production reload from OPFS", a
       ? route.continue()
       : route.abort(),
   );
+  // The online view warms a collaboration session in preview; hold the
+  // handshake open without a sync reply so the note stays unsynced and the
+  // offline reload exercises the read-only path this test covers.
+  await page.routeWebSocket("**/ws/notes/**", (socket) => {
+    socket.onMessage(() => {
+      // Keep the handshake open without a sync reply.
+    });
+  });
   await page.addInitScript(() => {
     Object.assign(window, { committedImages: 0 });
     const originalPut = IDBObjectStore.prototype.put;
@@ -114,9 +122,7 @@ test("a real private attachment survives offline production reload from OPFS", a
   await expect(
     page.getByText("Private image body.", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("status").filter({ hasText: "キャッシュ" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "オフライン" })).toBeVisible();
   await expect(image).toHaveAttribute("src", /^blob:/);
   await expect.poll(imageWidth).toBe(1);
   await expect(

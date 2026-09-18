@@ -1,3 +1,4 @@
+import { NuqsAdapter } from "nuqs/adapters/react-router/v7";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { AppShell } from "../../../src/components/layout/AppShell.tsx";
@@ -15,12 +16,14 @@ if (!root) {
 createRoot(root).render(
   <ThemeProvider>
     <MemoryRouter>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route element={<HomeStub />} path="/" />
-          <Route element={<EditorPage />} path="/n/:id" />
-        </Route>
-      </Routes>
+      <NuqsAdapter>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route element={<HomeStub />} path="/" />
+            <Route element={<EditorPage />} path="/n/:id" />
+          </Route>
+        </Routes>
+      </NuqsAdapter>
     </MemoryRouter>
   </ThemeProvider>,
 );
