@@ -10,7 +10,7 @@ import type * as Y from "yjs";
  * 永続化は y-indexeddb（ノートごとに 1 つの IndexedDB DB）に任せる。
  */
 
-export const EDIT_CACHE_COMPACT_THRESHOLD = 500;
+const EDIT_CACHE_COMPACT_THRESHOLD = 500;
 
 const OPT_OUT_PREFIX = "miyulabmd:offline-edit-enabled:";
 const SYNCED_PREFIX = "miyulabmd:yjs-synced:";
@@ -55,7 +55,7 @@ export type EditCacheNote = Pick<Note, "ownerId" | "access" | "editLocked">;
  * §2.6 編集ロック: `editLocked` = サーバーの永続的なロックフラグ。
  * ロック中は本文・メタ・移動・削除すべてが拒否される（解除のみ可）。
  */
-export function isNoteEditLocked(note: EditCacheNote): boolean {
+function isNoteEditLocked(note: EditCacheNote): boolean {
   return note.editLocked === true;
 }
 

@@ -44,34 +44,34 @@ const looseNote: NoteSummary = {
 };
 
 const paraBuckets: ParaBucket[] = [
-    {
-      folderId: "f-projects",
-      key: "projects",
-      name: "Projects",
-      noteCount: 1,
-      path: "Projects",
-    },
-    {
-      folderId: "f-areas",
-      key: "areas",
-      name: "Areas",
-      noteCount: 0,
-      path: "Areas",
-    },
-    {
-      folderId: "f-resources",
-      key: "resources",
-      name: "Resources",
-      noteCount: 3,
-      path: "Resources",
-    },
-    {
-      folderId: "f-archives",
-      key: "archives",
-      name: "Archives",
-      noteCount: 0,
-      path: "Archives",
-    },
+  {
+    folderId: "f-projects",
+    key: "projects",
+    name: "Projects",
+    noteCount: 1,
+    path: "Projects",
+  },
+  {
+    folderId: "f-areas",
+    key: "areas",
+    name: "Areas",
+    noteCount: 0,
+    path: "Areas",
+  },
+  {
+    folderId: "f-resources",
+    key: "resources",
+    name: "Resources",
+    noteCount: 3,
+    path: "Resources",
+  },
+  {
+    folderId: "f-archives",
+    key: "archives",
+    name: "Archives",
+    noteCount: 0,
+    path: "Archives",
+  },
 ];
 
 // §2.5: /api/para returns spaces; buckets on the root for the default space.

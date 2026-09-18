@@ -374,7 +374,7 @@ export function reportOfflineNoteDenial(
   }
 }
 
-export function reportOfflineFolderDenial(
+function reportOfflineFolderDenial(
   userId: string,
   id: string | null,
   generation: number | null,
@@ -397,7 +397,7 @@ export function reportOfflineFolderDenial(
   }
 }
 
-export function subscribeOfflineCacheLifecycle(
+function subscribeOfflineCacheLifecycle(
   listener: (event: OfflineCacheLifecycleEvent) => void,
 ): () => void {
   lifecycleListeners.add(listener);
@@ -1516,25 +1516,6 @@ export async function captureOfflineNoteDenialSequence(
   } catch {
     // The ledger is best-effort; an unreadable sequence is no authority.
     return null;
-  }
-}
-
-/** The durable per-user folder denial sequence — ordering token for folders. */
-export async function captureOfflineFolderDenialSequence(
-  userId: string,
-): Promise<number | undefined> {
-  try {
-    const database = await openDatabase();
-    try {
-      return folderSequence(
-        await readMetadataRecord(database, folderSequenceKey(userId)),
-      );
-    } finally {
-      database.close();
-    }
-  } catch {
-    // Unknown ordering cannot authorize a cache write; display survives.
-    return undefined;
   }
 }
 
