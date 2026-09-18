@@ -2430,6 +2430,77 @@ workflow の完了を意味しない。
   `viewer-context.spec.ts` に cached 復元時の `cachedUser` 期待値を追加済み、
   browser suite の実行は未実施。
 
+## D133：auth config 取得失敗時はモックログインを無効のままにする
+
+- 状態：検証済み。
+- 背景・観測した問題：本番をオフラインで開くとアカウントメニューに
+  モックログインのメール入力が出る。`fetchAuthConfig` は `/api/auth/config`
+  の失敗時に `{access:false, mock:true}` を返し、AppShell の初期値も
+  `mock:true` だったため、到達不能＝開発モック有効とみなされていた。
+  モックログインはサーバー側では `DEV_AUTH` 環境変数かつ Access 未設定の
+  場合だけ有効で、失敗した設定取得は何も証明しない。
+- 検討した選択肢と各案の利点・欠点：
+  - 失敗時・初期値とも `mock:false` にする案：モック UI はサーバー応答で
+    `mock:true` が確認できたときだけ出る。開発環境で Worker 未起動の場合
+    フォームが出ないが、`/auth/login` 自体も Worker 前提なので実害はない。
+  - `import.meta.env` 等のビルド時フラグで判定する案：本番と開発の
+    切り替えをクライアント側で二重管理になり、サーバーの DEV_AUTH と
+    食い違う状態を作れる。
+- 推奨・採用した案と理由：失敗時・初期値とも `mock:false`。
+  「モックログインは環境変数で有効化されたときだけ出す」という要求と
+  一致し、権限の根拠がサーバー応答に一元化される。
+- 影響範囲・制約・未確認事項：オフライン時は `mock:false` となり
+  メニューは「ログイン」項目のみ出す（cached モードの再ログイン導線は
+  D132 の方針どおり維持）。開発環境では `/api/auth/config` 成功時に
+  従来どおりフォームが出る。
+- テスト／再現手順と実際の結果：Biome・`tsc --noEmit`・`pnpm test`
+  198件・`app-shell-viewer.spec`（config 失敗時も viewer は独立解決）
+  成功。実機でのオフライン時メニュー表示は未確認。
+
+## D134：live チェックが取れない間はバックオフで viewer を再解決する
+
+- 状態：検証済み。
+- 背景・観測した問題：オフライン起動で cached モードに入った後、
+  オンラインへ復帰してもリロードするまで cached のままだった。
+  `online` イベントのハンドラはあったが、(a) 実行中のリクエストがある
+  とイベントが捨てられ再試行が予約されない、(b) 復帰直後の不安定な
+  タイミングで `/api/me` が失敗すると以後の再試行がない、
+  (c) ブラウザがオフラインと認識していない経路（サーバー到達不能・
+  VPN・プロキシ）では `online` 自体が発火しない、の3経路で復帰し損なう。
+- 検討した選択肢と各案の利点・欠点：
+  - `ViewerContext.liveCheckFailed` フラグを追加し、通信エラーと5xxで
+    立て、AppShell が立っている間だけ指数バックオフで再解決する案：
+    サーバーが実応答を返した状態（401・`{user:null}`・ゲスト・認証済み）
+    では再試行しないため、ログアウト済み閲覧者への無駄なポーリングを
+    避けられる。「サーバーに届かなかった」場合だけ粘るので意味が明確。
+  - cached モードの間は無条件に定期ポーリングする案：実装は単純だが、
+    オンラインのログアウト済み閲覧者（401/`{user:null}` で cached）にも
+    無限に /api/me を打ち続ける。
+  - `online` イベントの再キューだけ直す案：経路 (a) は直るが (b)(c) 残る。
+- 推奨・採用した案と理由：`liveCheckFailed` + バックオフ案。
+  `retryCachedViewer`（online/visibilitychange 起動）は実行中に
+  `reverifyRequested` を立てて完了後に1回だけ再実行する方式へ変更し、
+  イベント取りこぼし (a) も解消する。`navigator.onLine === false` の間は
+  タイマーを張らず `online` イベント待ちとし、実オフライン中の無駄な
+  wake を省く。失敗解決の catch 経路も `settleLiveCheck(true)` で
+  自己復帰の輪に含める。復帰時（失敗→成功の遷移）には auth config を
+  1回だけ再取得し、フォールバック値が残らないようにする。
+- 影響範囲・制約・未確認事項：リトライ間隔は 5秒開始・2倍・60秒上限。
+  `liveCheckFailed` はスケジュール用の付帯情報であり、
+  `shouldPreserveViewerIdentity`・`snapshotViewer`・mutation ゲート・
+  `sameAssociation` の比較対象には含めない。復帰で viewer が
+  cached→authenticated に変わると各ページは既存の context 依存で
+  再描画される（HomePage の `networkViewerKey` に mode を含む等）。
+  ブラウザがオフラインと誤認する環境（onLine 偽陰性）では
+  visibilitychange が最後の復帰経路になる。
+- テスト／再現手順と実際の結果：`viewer-recovery.spec.ts` に
+  イベントなしで復帰するケースを追加。既存3件は `navigator.onLine` を
+  false に固定してタイマー非発火にし、従来どおりイベント駆動のみを
+  決定的に検証する。`viewer-recovery`・`app-shell-viewer`・
+  `viewer-context`・`offline-drive-view`・`cached-viewer-note-read`・
+  `cached-drive-lifecycle`・`mydrive-prefetch-stops` 計23件成功、
+  Biome・`tsc --noEmit`・`pnpm test` 198件成功。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

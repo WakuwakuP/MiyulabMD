@@ -50,6 +50,9 @@ const unavailableViewer: ViewerContext = {
   user: null,
 };
 
+const LIVE_RETRY_INITIAL_MS = 5000;
+const LIVE_RETRY_MAX_MS = 60000;
+
 function shouldPreserveViewerIdentity(
   previousViewer: ViewerContext,
   nextViewer: ViewerContext,
@@ -67,7 +70,7 @@ export function AppShell() {
   const [viewer, setViewer] = useState<ViewerContext>(unavailableViewer);
   const [authConfig, setAuthConfig] = useState<AuthConfig>({
     access: false,
-    mock: true,
+    mock: false,
   });
   const [loading, setLoading] = useState(true);
   const [identityWarning, setIdentityWarning] = useState<string | null>(null);
@@ -96,6 +99,9 @@ export function AppShell() {
     let active = true;
     const pendingIdentity = new Set<string>();
     let reverifyRequested = false;
+    let liveRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let liveRetryDelay = LIVE_RETRY_INITIAL_MS;
+    let liveCheckWasFailing = false;
     const requestViewer = (initial: boolean) => {
       if (!active || viewerRequestRef.current || pendingIdentity.size) {
         return;
@@ -150,6 +156,7 @@ export function AppShell() {
             return;
           }
           applyViewer(nextViewer);
+          settleLiveCheck(nextViewer.liveCheckFailed === true);
         })
         .catch((error: unknown) => {
           if (!active || controller.signal.aborted) {
@@ -163,6 +170,7 @@ export function AppShell() {
             setIdentityWarning(
               "本人確認またはキャッシュ削除を完了できませんでした。ローカルキャッシュの利用を停止しています。",
             );
+            settleLiveCheck(true);
           }
           console.error("Failed to resolve viewer context", error);
         })
@@ -182,7 +190,55 @@ export function AppShell() {
         });
     };
 
-    const retryCachedViewer = () => requestViewer(false);
+    const clearLiveRetry = () => {
+      if (liveRetryTimer !== null) {
+        clearTimeout(liveRetryTimer);
+        liveRetryTimer = null;
+      }
+    };
+    const retryCachedViewer = () => {
+      reverifyRequested = true;
+      if (!(viewerRequestRef.current || pendingIdentity.size)) {
+        reverifyRequested = false;
+        requestViewer(false);
+      }
+    };
+    const scheduleLiveRetry = () => {
+      clearLiveRetry();
+      // While the browser reports itself offline, the online event is the
+      // recovery path. Polling only helps when connectivity is nominally up
+      // but the server is unreachable (flaky link, worker down, VPN changes).
+      if (navigator.onLine === false) {
+        return;
+      }
+      liveRetryTimer = setTimeout(() => {
+        liveRetryTimer = null;
+        retryCachedViewer();
+      }, liveRetryDelay);
+      liveRetryDelay = Math.min(liveRetryDelay * 2, LIVE_RETRY_MAX_MS);
+    };
+    const settleLiveCheck = (failed: boolean) => {
+      if (failed) {
+        liveCheckWasFailing = true;
+        scheduleLiveRetry();
+        return;
+      }
+      liveRetryDelay = LIVE_RETRY_INITIAL_MS;
+      clearLiveRetry();
+      if (liveCheckWasFailing) {
+        liveCheckWasFailing = false;
+        // A failed earlier check may have left the config at its fallback.
+        void fetchAuthConfig()
+          .then((config) => {
+            if (active) {
+              setAuthConfig(config);
+            }
+          })
+          .catch(() => {
+            // The fallback config stays until the next successful check.
+          });
+      }
+    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         retryCachedViewer();
@@ -262,6 +318,7 @@ export function AppShell() {
       active = false;
       unsubscribe();
       unsubscribeApiIdentity();
+      clearLiveRetry();
       window.removeEventListener("online", retryCachedViewer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       const request = viewerRequestRef.current;
@@ -309,7 +366,7 @@ export function AppShell() {
         }
       })
       .catch(() => {
-        // Keep the existing mock-friendly default when optional config is unavailable.
+        // Mock login stays disabled until the server confirms DEV_AUTH.
       });
     return () => {
       active = false;

@@ -18,6 +18,13 @@ export type ViewerContext = {
    * and permission checks must keep relying on `mode`/`user`.
    */
   cachedUser?: SessionUser | null;
+  /**
+   * The live /api/me check could not be answered (connection failure or 5xx),
+   * so this context was resolved from local state alone. Callers should keep
+   * retrying rather than treat it as a stable answer. Absent/false whenever
+   * the server produced a definitive response.
+   */
+  liveCheckFailed?: boolean;
 };
 
 type MeResponse = { user: SessionUser | null };
@@ -54,16 +61,17 @@ function context(
 }
 
 async function cachedOrUnavailable(
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  liveCheckFailed = false,
 ): Promise<ViewerContext> {
   try {
     const cached = await readCachedViewer({ signal });
     return cached
-      ? context("cached", cached.id, null, cached.user)
-      : context("unavailable", null);
+      ? { ...context("cached", cached.id, null, cached.user), liveCheckFailed }
+      : { ...context("unavailable", null), liveCheckFailed };
   } catch {
     signal?.throwIfAborted();
-    return context("unavailable", null);
+    return { ...context("unavailable", null), liveCheckFailed };
   }
 }
 
@@ -142,7 +150,7 @@ async function resolveViewerResult(
     return cached.mode === "cached" ? cached : context("guest", null);
   }
   if (result.status >= 500 && result.status <= 599) {
-    return cachedOrUnavailable(signal);
+    return cachedOrUnavailable(signal, true);
   }
   return context("unavailable", null);
 }
@@ -159,7 +167,7 @@ export async function resolveViewerContext(
     });
   } catch (error) {
     if (error instanceof ApiCommunicationError) {
-      return cachedOrUnavailable(signal);
+      return cachedOrUnavailable(signal, true);
     }
     throw error;
   }

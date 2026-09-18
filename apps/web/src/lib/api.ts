@@ -94,7 +94,7 @@ export type AuthConfig = {
 export async function fetchAuthConfig(): Promise<AuthConfig> {
   const result = await requestJson<AuthConfig>("/api/auth/config", fetchOpts);
   if (!result.ok) {
-    return { access: false, mock: true };
+    return { access: false, mock: false };
   }
   return result.data;
 }
