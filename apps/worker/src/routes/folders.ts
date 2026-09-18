@@ -11,6 +11,7 @@ import { Elysia } from "elysia";
 import { readSession } from "../auth/session.ts";
 import { instanceFlags } from "../env.ts";
 import {
+  buildAccessSnapshot,
   createOwnedFolder,
   deleteFolderPolicy,
   ensureFolderRow,
@@ -232,16 +233,31 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       set.status = 404;
       return { error: "Not found" };
     }
-    const flags = await folderViewFlags(env, rec.owner_id, rec.folder, user);
+    const snapshot = await buildAccessSnapshot(env, [rec.owner_id]);
+    const flags = await folderViewFlags(
+      env,
+      rec.owner_id,
+      rec.folder,
+      user,
+      snapshot,
+    );
     if (!flags.canView) {
       set.status = 404;
       return { error: "Not found" };
     }
     const url = new URL(request.url);
-    return listFolderChildren(env, rec.owner_id, rec.folder, rec.id, user, {
-      cursor: url.searchParams.get("cursor") ?? undefined,
-      limit: Number(url.searchParams.get("limit") ?? "") || undefined,
-    });
+    return listFolderChildren(
+      env,
+      rec.owner_id,
+      rec.folder,
+      rec.id,
+      user,
+      {
+        cursor: url.searchParams.get("cursor") ?? undefined,
+        limit: Number(url.searchParams.get("limit") ?? "") || undefined,
+      },
+      snapshot,
+    );
   })
   .get("/:id", async ({ params, request, set }) => {
     const user = await readSession(request, env);
@@ -256,6 +272,7 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       rec.owner_id,
       rec.folder,
       user,
+      await buildAccessSnapshot(env, [rec.owner_id]),
     );
     if (!access.flags.canView) {
       set.status = 404;
@@ -273,7 +290,13 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
     const path = normalizeFolder(
       new URL(request.url).searchParams.get("path") ?? "",
     );
-    const access = await resolveFolderAccess(env, user.id, path, user);
+    const access = await resolveFolderAccess(
+      env,
+      user.id,
+      path,
+      user,
+      await buildAccessSnapshot(env, [user.id]),
+    );
     return access;
   })
   .post("/", async ({ request, set }) => {
