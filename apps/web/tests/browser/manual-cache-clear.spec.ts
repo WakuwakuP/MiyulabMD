@@ -16,7 +16,6 @@ test("clears every user's private device cache while retaining viewer and shell"
   }) => {
     const {
       clearOfflineCacheDevice,
-      captureOfflineCacheScope,
       openOfflineCache,
       persistCachedViewerId,
       readCachedViewerId,
@@ -59,8 +58,6 @@ test("clears every user's private device cache while retaining viewer and shell"
     await persistCachedViewerId("manual-alice-1");
     const shell = await caches.open("manual-device-shell-1");
     await shell.put("/manual-shell", new Response("retained"));
-    const aliceScope = await captureOfflineCacheScope("manual-alice-1");
-    const bobScope = await captureOfflineCacheScope("manual-bob-1");
     try {
       await clearOfflineCacheDevice();
       const root = await navigator.storage.getDirectory();
@@ -74,20 +71,11 @@ test("clears every user's private device cache while retaining viewer and shell"
         () => false,
         () => true,
       );
-      // A pre-purge scope must not resurrect access to post-purge data: the
-      // open resolves to a degraded handle whose reads are all misses.
-      const scoped = await openOfflineCache({
-        scope: aliceScope,
-        userId: aliceScope.userId,
-      }).then(
-        async (value) => {
-          const reopened = await value.getNote(aliceNote.id);
-          const degraded = value.degraded;
-          value.close();
-          return { degraded, reopened };
-        },
-        () => null,
-      );
+      // A handle opened before the purge must not resurrect access to
+      // post-purge data: every read degrades to a miss.
+      const scoped = {
+        reopened: await alice.getNote(aliceNote.id),
+      };
       const fresh = await openOfflineCache({ userId: "manual-alice-1" });
       const freshBob = await openOfflineCache({ userId: "manual-bob-1" });
       try {
@@ -102,18 +90,9 @@ test("clears every user's private device cache while retaining viewer and shell"
           afterClear,
           alice: await exists("manual-alice-1"),
           bob: await exists("manual-bob-1"),
-          bobScope: await openOfflineCache({
-            scope: bobScope,
-            userId: bobScope.userId,
-          }).then(
-            async (value) => {
-              const reopened = await value.getNote(bobNote.id);
-              const degraded = value.degraded;
-              value.close();
-              return { degraded, reopened };
-            },
-            () => null,
-          ),
+          bobScope: {
+            reopened: await bob.getNote(bobNote.id),
+          },
           note: (await fresh.getNote(aliceNote.id))?.note.markdown,
           remembered: await readCachedViewerId(),
           scoped,
@@ -134,10 +113,10 @@ test("clears every user's private device cache while retaining viewer and shell"
     afterClear: { bobNote: null, folder: null, list: null, note: null },
     alice: true,
     bob: false,
-    bobScope: { degraded: true, reopened: null },
+    bobScope: { reopened: null },
     note: "fresh device recache",
     remembered: "manual-alice-1",
-    scoped: { degraded: true, reopened: null },
+    scoped: { reopened: null },
     shell: "retained",
     stale: true,
   });
@@ -303,7 +282,7 @@ test("device purge tombstone degrades opens and self-heals after the fault clear
       return original.call(this, name, options);
     };
     const readState = async () =>
-      new Promise<string | null>((resolve, reject) => {
+      new Promise<string>((resolve, reject) => {
         const request = indexedDB.open("miyulabmd-offline-cache");
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
@@ -311,12 +290,10 @@ test("device purge tombstone degrades opens and self-heals after the fault clear
           const get = db
             .transaction("metadata")
             .objectStore("metadata")
-            .get("device-clear-state");
+            .get("purge-tombstone:device");
           get.onsuccess = () => {
             db.close();
-            resolve(
-              (get.result as { value?: string } | undefined)?.value ?? null,
-            );
+            resolve(get.result === undefined ? "active" : "purging");
           };
           get.onerror = () => {
             db.close();
@@ -393,7 +370,7 @@ test("records durable purging before an IDB failure and retries device clear", a
       return remove.call(this, name, options);
     };
     const readState = async () =>
-      new Promise<string | null>((resolve, reject) => {
+      new Promise<string>((resolve, reject) => {
         const request = indexedDB.open("miyulabmd-offline-cache");
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
@@ -401,12 +378,10 @@ test("records durable purging before an IDB failure and retries device clear", a
           const get = db
             .transaction("metadata")
             .objectStore("metadata")
-            .get("device-clear-state");
+            .get("purge-tombstone:device");
           get.onsuccess = () => {
             db.close();
-            resolve(
-              (get.result as { value?: string } | undefined)?.value ?? null,
-            );
+            resolve(get.result === undefined ? "active" : "purging");
           };
           get.onerror = () => {
             db.close();

@@ -1,9 +1,7 @@
 import { apiFetch } from "./api-fetch.ts";
 import { type AttachedImage, attachedImage } from "./attached-image-target.ts";
 import {
-  assertOfflineCacheScope,
   isSupportedCachedImageMime,
-  type OfflineCacheScope,
   openOfflineCache,
 } from "./offline-cache.ts";
 import type { StorageWriteRecovery } from "./storage-write-recovery.ts";
@@ -15,7 +13,7 @@ export {
 } from "./attached-image-target.ts";
 
 type Options = {
-  scope: OfflineCacheScope;
+  userId: string;
   cacheOnly: boolean;
   requireCache?: boolean;
   signal?: AbortSignal;
@@ -52,32 +50,14 @@ function checkAbort(signal?: AbortSignal): void {
   }
 }
 
-// The scope fence exists to keep writes ordered; it must never veto bytes
-// that are already on the wire. Any abort raised by the cache scope check
-// is cache-internal (no caller signal is passed in), so it degrades to
-// "proceed without cache authority" instead of failing the display.
-async function assertScopeOrDegrade(scope: OfflineCacheScope): Promise<void> {
-  try {
-    await assertOfflineCacheScope(scope);
-  } catch (error) {
-    if (!(error instanceof DOMException && error.name === "AbortError")) {
-      throw error;
-    }
-  }
-}
-
 async function writeImageToFreshCache(
   image: AttachedImage,
   bytes: Blob,
-  scope: OfflineCacheScope,
+  userId: string,
   orderingToken: number | undefined,
   signal: AbortSignal,
 ): Promise<void> {
-  const cache = await openOfflineCache({
-    scope,
-    signal,
-    userId: scope.userId,
-  });
+  const cache = await openOfflineCache({ signal, userId });
   try {
     const token =
       orderingToken ??
@@ -96,7 +76,7 @@ async function readNetworkImage(
   image: AttachedImage,
   cache: ImageCache | null,
   cacheOpenError: unknown,
-  scope: OfflineCacheScope,
+  userId: string,
   signal?: AbortSignal,
 ): Promise<LoadedImage> {
   const orderingToken = cache
@@ -110,7 +90,7 @@ async function readNetworkImage(
       redirect: "error",
       signal,
     },
-    { viewerId: scope.userId },
+    { viewerId: userId },
   );
   checkAbort(signal);
   if ([401, 403, 404].includes(response.status)) {
@@ -142,9 +122,8 @@ async function readNetworkImage(
   }
   const bytes = new Blob([await response.blob()], { type: mime });
   checkAbort(signal);
-  await assertScopeOrDegrade(scope);
   const retry = (retrySignal: AbortSignal) =>
-    writeImageToFreshCache(image, bytes, scope, orderingToken, retrySignal);
+    writeImageToFreshCache(image, bytes, userId, orderingToken, retrySignal);
   if (!cache) {
     return {
       bytes,
@@ -174,14 +153,13 @@ async function loadImage(
   image: AttachedImage,
   options: Options,
 ): Promise<LoadedImage> {
-  const { scope, signal, cacheOnly } = options;
+  const { userId, signal, cacheOnly } = options;
   checkAbort(signal);
-  await assertScopeOrDegrade(scope);
   let cache: ImageCache | null = null;
   let cacheOpenError: unknown;
   try {
     try {
-      cache = await openOfflineCache({ scope, signal, userId: scope.userId });
+      cache = await openOfflineCache({ signal, userId });
     } catch (error) {
       checkAbort(signal);
       cacheOpenError = error;
@@ -197,7 +175,7 @@ async function loadImage(
         image,
         cache,
         cacheOpenError,
-        scope,
+        userId,
         signal,
       );
     } catch (error) {
@@ -220,7 +198,7 @@ export async function acquireAttachedImage(
   options: Options,
 ): Promise<Blob | null> {
   const {
-    scope,
+    userId,
     signal = new AbortController().signal,
     cacheOnly,
     requireCache,
@@ -235,15 +213,7 @@ export async function acquireAttachedImage(
   ) {
     return null;
   }
-  await assertScopeOrDegrade(scope);
-  checkAbort(signal);
-  const key = JSON.stringify([
-    scope.userId,
-    scope.epoch,
-    scope.lifetime,
-    cacheOnly,
-    image.url,
-  ]);
+  const key = JSON.stringify([userId, cacheOnly, image.url]);
   let entry = inFlight.get(key);
   if (!entry) {
     const controller = new AbortController();
@@ -251,8 +221,8 @@ export async function acquireAttachedImage(
       controller,
       promise: loadImage(image, {
         cacheOnly,
-        scope,
         signal: controller.signal,
+        userId,
       }),
       users: 0,
     };
@@ -306,8 +276,6 @@ export async function acquireAttachedImage(
       abort();
     }
   });
-  checkAbort(signal);
-  await assertScopeOrDegrade(scope);
   checkAbort(signal);
   if (requireCache && loaded.cacheFailure) {
     try {

@@ -60,8 +60,15 @@ export type ApiResult<T> =
 export type ReadOptions = {
   signal?: AbortSignal;
   viewerId?: string | null;
-  noteAuthorityGeneration?: number;
-  noteAuthorityEpoch?: string;
+  /**
+   * Durable purge fence captured when the read started. Forwarded to the
+   * shared note transport so a post-purge read never joins a pre-purge
+   * in-flight request.
+   */
+  purgeFence?:
+    | Promise<{ device: number; user: number } | null>
+    | { device: number; user: number }
+    | null;
 };
 
 export {
