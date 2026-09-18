@@ -44,6 +44,7 @@ function isCurrentViewerRequest(
 }
 
 const unavailableViewer: ViewerContext = {
+  cachedUser: null,
   cacheViewerId: null,
   mode: "unavailable",
   user: null,
@@ -56,7 +57,8 @@ function shouldPreserveViewerIdentity(
   return (
     previousViewer.user?.id === nextViewer.user?.id &&
     previousViewer.mode === nextViewer.mode &&
-    previousViewer.cacheViewerId === nextViewer.cacheViewerId
+    previousViewer.cacheViewerId === nextViewer.cacheViewerId &&
+    previousViewer.cachedUser?.id === nextViewer.cachedUser?.id
   );
 }
 
@@ -368,6 +370,7 @@ export function AppShell() {
       <AppHeader
         actions={headerActions}
         authConfig={authConfig}
+        cachedUser={viewer.cachedUser ?? null}
         end={headerEnd}
         folder={headerFolder}
         loading={loading}

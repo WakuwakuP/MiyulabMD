@@ -5,6 +5,7 @@ type ViewerContext = {
   mode: "authenticated" | "guest" | "cached" | "unavailable";
   user: SessionUser | null;
   cacheViewerId: string | null;
+  cachedUser?: SessionUser | null;
 };
 type ContextFixture = Window & {
   resolveViewerContext(): Promise<ViewerContext>;
@@ -53,6 +54,11 @@ test("restoring the last cached viewer after reload does not authenticate that v
     (window as ContextFixture).resolveViewerContext(),
   );
   expect(cached).toMatchObject({
+    cachedUser: {
+      displayName: user.displayName,
+      email: user.email,
+      id: user.id,
+    },
     cacheViewerId: user.id,
     mode: "cached",
     user: null,
@@ -179,6 +185,11 @@ test("a cancelled old viewer request cannot replace the newer viewer restored af
     (window as ContextFixture).resolveViewerContext(),
   );
   expect(restored).toMatchObject({
+    cachedUser: {
+      displayName: bob.displayName,
+      email: bob.email,
+      id: bob.id,
+    },
     cacheViewerId: bob.id,
     mode: "cached",
     user: null,

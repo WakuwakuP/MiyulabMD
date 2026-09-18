@@ -13,6 +13,7 @@ import { SitePublishButton } from "./SitePublishButton.tsx";
 
 type Props = {
   actions?: ReactNode;
+  cachedUser?: SessionUser | null;
   end?: ReactNode;
   folder?: string | null;
   user: SessionUser | null;
@@ -23,6 +24,7 @@ type Props = {
 
 export function AppHeader({
   actions,
+  cachedUser,
   end,
   folder,
   user,
@@ -98,7 +100,11 @@ export function AppHeader({
         {loading ? (
           <MutedText className="m-0">…</MutedText>
         ) : (
-          <AccountMenu authConfig={authConfig} user={user} />
+          <AccountMenu
+            authConfig={authConfig}
+            cachedUser={cachedUser}
+            user={user}
+          />
         )}
       </nav>
     </header>
