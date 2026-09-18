@@ -52,7 +52,7 @@ import {
 import { paraArchiveProject, paraList } from "../services/para.ts";
 import {
   createSchemeChild,
-  folderIdForSchemeId,
+  folderIdsForSchemeId,
   jdAllocateId,
   jdListCategory,
   type SchemeError,
@@ -149,8 +149,17 @@ async function folderIdArg(
   if (folderId) {
     return { error: "Specify either folder_id or scheme_id, not both" };
   }
-  const resolved = await folderIdForSchemeId(env, user.id, schemeId);
-  return resolved ? { folderId: resolved } : { error: "Not found" };
+  const resolved = await folderIdsForSchemeId(env, user.id, schemeId);
+  if (resolved.length === 0) {
+    return { error: "Not found" };
+  }
+  if (resolved.length > 1) {
+    return {
+      error:
+        "scheme_id is ambiguous across multiple scheme roots; specify folder_id instead",
+    };
+  }
+  return { folderId: resolved[0] };
 }
 
 function moveToolError(result: MoveError | SchemeError) {
@@ -950,7 +959,7 @@ export async function createMcpServerFactory() {
 
       const result = await notes.searchNotes(user, {
         cursor,
-        folderId: target.folderId,
+        folderIds: target.folderId ? [target.folderId] : undefined,
         layer,
         limit,
         query: trimmedQuery,
@@ -1057,7 +1066,7 @@ export async function createMcpServerFactory() {
         contextAfter: context_after,
         contextBefore: context_before,
         fixedString: fixed_string,
-        folderId: target.folderId,
+        folderIds: target.folderId ? [target.folderId] : undefined,
         globTitle: glob_title,
         maxMatchesPerNote: max_matches_per_note,
         maxNotes: max_notes,

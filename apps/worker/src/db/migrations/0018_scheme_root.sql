@@ -40,3 +40,35 @@ DROP INDEX IF EXISTS folders_owner_scheme_id_idx;
 CREATE UNIQUE INDEX folders_owner_scheme_id_idx
   ON folders (owner_id, scheme_root, scheme_id)
   WHERE scheme_id IS NOT NULL;
+
+-- Counter scopes: `jd:area`, `jd:cat:NN`, `jd:id:NN` were owner-global. Copy
+-- each to every JD root as `jd:*:{root_id}:...` so allocation continues instead
+-- of restarting at the first ID (which would collide with minted folders).
+INSERT OR IGNORE INTO id_counters (owner_id, scope, next_value)
+SELECT c.owner_id, 'jd:area:' || r.id, c.next_value
+  FROM id_counters AS c
+  JOIN folders AS r ON r.owner_id = c.owner_id
+ WHERE c.scope = 'jd:area' AND r.scheme = 'jd' AND r.scheme_id IS NULL;
+
+INSERT OR IGNORE INTO id_counters (owner_id, scope, next_value)
+SELECT c.owner_id,
+       'jd:cat:' || r.id || ':' || substr(c.scope, 8),
+       c.next_value
+  FROM id_counters AS c
+  JOIN folders AS r ON r.owner_id = c.owner_id
+ WHERE c.scope GLOB 'jd:cat:[0-9][0-9]'
+   AND r.scheme = 'jd' AND r.scheme_id IS NULL;
+
+INSERT OR IGNORE INTO id_counters (owner_id, scope, next_value)
+SELECT c.owner_id,
+       'jd:id:' || r.id || ':' || substr(c.scope, 7),
+       c.next_value
+  FROM id_counters AS c
+  JOIN folders AS r ON r.owner_id = c.owner_id
+ WHERE c.scope GLOB 'jd:id:[0-9][0-9]'
+   AND r.scheme = 'jd' AND r.scheme_id IS NULL;
+
+DELETE FROM id_counters
+ WHERE scope = 'jd:area'
+    OR scope GLOB 'jd:cat:[0-9][0-9]'
+    OR scope GLOB 'jd:id:[0-9][0-9]';

@@ -693,21 +693,24 @@ export async function listSchemeRoots(
   return { kind: "ok", result: { schemes } };
 }
 
-/** owner 配下で scheme_id に一致するフォルダの UUID を返す（検索フィルタ用）。 */
-export async function folderIdForSchemeId(
+/**
+ * owner 配下で scheme_id に一致するフォルダの UUID を全件返す（検索フィルタ
+ * 用）。同一 ID が別スキームツリーに存在し得るため複数件になりうる。
+ */
+export async function folderIdsForSchemeId(
   env_: Env,
   ownerId: string,
   schemeId: string,
-): Promise<string | null> {
+): Promise<string[]> {
   const id = schemeId.trim();
   if (!id) {
-    return null;
+    return [];
   }
-  const row = await db(env_)
+  const rows = await db(env_)
     .prepare("SELECT id FROM folders WHERE owner_id = ? AND scheme_id = ?")
     .bind(ownerId, id)
-    .first<{ id: string }>();
-  return row?.id ?? null;
+    .all<{ id: string }>();
+  return (rows.results ?? []).map((row) => row.id);
 }
 
 export type JdListEntry = {

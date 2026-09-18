@@ -8,7 +8,7 @@ import { ensureFolderRow } from "./access.ts";
 import { createNoteService } from "./notes.ts";
 import {
   createSchemeChild,
-  folderIdForSchemeId,
+  folderIdsForSchemeId,
   jdAllocateId,
   jdListCategory,
   listSchemeRoots,
@@ -486,7 +486,7 @@ test("zettel フォルダではノートタイトルにタイムスタンプが�
   assert.equal(jdPrefix, null);
 });
 
-test("folderIdForSchemeId は scheme_id をフォルダ UUID に解決する", async () => {
+test("folderIdsForSchemeId は scheme_id をフォルダ UUID に全件解決する", async () => {
   const { env, other, owner, sqlite } = await createEnv();
   const { category } = await buildJdPath(env, owner, sqlite);
   const item = await createSchemeChild(
@@ -500,12 +500,56 @@ test("folderIdForSchemeId は scheme_id をフォルダ UUID に解決する", a
     return;
   }
 
-  const resolved = await folderIdForSchemeId(env, owner.id, "10.11");
-  assert.equal(resolved, item.result.folder.id);
-  // 未存在 ID・他人スコープは null。
-  assert.equal(await folderIdForSchemeId(env, owner.id, "99.99"), null);
-  assert.equal(await folderIdForSchemeId(env, other.id, "10.11"), null);
-  assert.equal(await folderIdForSchemeId(env, owner.id, "  "), null);
+  assert.deepEqual(await folderIdsForSchemeId(env, owner.id, "10.11"), [
+    item.result.folder.id,
+  ]);
+  // 未存在 ID・他人スコープは空配列。
+  assert.deepEqual(await folderIdsForSchemeId(env, owner.id, "99.99"), []);
+  assert.deepEqual(await folderIdsForSchemeId(env, other.id, "10.11"), []);
+  assert.deepEqual(await folderIdsForSchemeId(env, owner.id, "  "), []);
+});
+
+test("folderIdsForSchemeId は別ツリーの同一 ID を全件返す", async () => {
+  const { env, owner, sqlite } = await createEnv();
+  const rootId = rootIdOf(sqlite) ?? "";
+  await setFolderScheme(env, rootId, "jd", owner);
+  await ensureFolderRow(env, owner.id, "work");
+  const workId = folderIdOf(sqlite, "work") ?? "";
+  await setFolderScheme(env, workId, "jd", owner);
+
+  // 両方のルートに 10-19 → 10 → 10.11 を作る。
+  const ids: string[] = [];
+  for (const parentId of [rootId, workId]) {
+    const area = await createSchemeChild(env, parentId, {}, owner);
+    assert.equal(area.kind, "ok");
+    if (area.kind !== "ok") {
+      return;
+    }
+    const category = await createSchemeChild(
+      env,
+      area.result.folder.id ?? "",
+      {},
+      owner,
+    );
+    assert.equal(category.kind, "ok");
+    if (category.kind !== "ok") {
+      return;
+    }
+    const item = await createSchemeChild(
+      env,
+      category.result.folder.id ?? "",
+      {},
+      owner,
+    );
+    assert.equal(item.kind, "ok");
+    if (item.kind !== "ok") {
+      return;
+    }
+    ids.push(item.result.folder.id ?? "");
+  }
+
+  const resolved = await folderIdsForSchemeId(env, owner.id, "10.11");
+  assert.deepEqual(new Set(resolved), new Set(ids));
 });
 
 test("ノートの get/create は所属フォルダの scheme_id を返す", async () => {
@@ -734,6 +778,14 @@ test("0018 backfill: 既存の採番ノードに scheme_root が設定される"
     Date.now(),
   );
 
+  // 旧グローバル採番カウンタ（ルートを含まないスコープ）。
+  const counter = sqlite.prepare(
+    "INSERT INTO id_counters (owner_id, scope, next_value) VALUES (?, ?, ?)",
+  );
+  counter.run(owner.id, "jd:area", 3);
+  counter.run(owner.id, "jd:cat:10", 15);
+  counter.run(owner.id, "jd:id:10", 20);
+
   sqlite.exec(
     readFileSync(
       new URL("../db/migrations/0018_scheme_root.sql", import.meta.url),
@@ -776,6 +828,21 @@ test("0018 backfill: 既存の採番ノードに scheme_root が設定される"
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run("a3", owner.id, "10-19 重複", "jd", "10-19", rootId, Date.now()),
+  );
+
+  // 旧グローバルカウンタは JD ルート単位のスコープへ移され、旧キーは消える。
+  const counters = sqlite
+    .prepare(
+      "SELECT scope, next_value FROM id_counters WHERE owner_id = ? ORDER BY scope",
+    )
+    .all(owner.id) as { next_value: number; scope: string }[];
+  assert.deepEqual(
+    counters.map((row) => [row.scope, row.next_value]),
+    [
+      [`jd:area:${rootId}`, 3],
+      [`jd:cat:${rootId}:10`, 15],
+      [`jd:id:${rootId}:10`, 20],
+    ],
   );
 });
 

@@ -224,7 +224,7 @@ test("grep folder_id restricts the scan to that folder subtree", async (t) => {
   const docs = await getFolderByPath(env, owner.id, "docs");
   assert.ok(docs);
   const result = await notes.grep(owner, {
-    folderId: docs.id,
+    folderIds: [docs.id],
     pattern: "needle",
   });
   assert.equal(result.kind, "ok");
@@ -237,7 +237,7 @@ test("grep folder_id restricts the scan to that folder subtree", async (t) => {
   ]);
 
   const missing = await notes.grep(owner, {
-    folderId: "00000000-0000-0000-0000-000000000000",
+    folderIds: ["00000000-0000-0000-0000-000000000000"],
     pattern: "needle",
   });
   assert.equal(missing.kind, "not_found");
