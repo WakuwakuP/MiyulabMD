@@ -18,6 +18,13 @@ export type ViewerContext = {
    * and permission checks must keep relying on `mode`/`user`.
    */
   cachedUser?: SessionUser | null;
+  /**
+   * The live /api/me check could not be answered (connection failure or 5xx),
+   * so this context was resolved from local state alone. Callers should keep
+   * retrying rather than treat it as a stable answer. Absent/false whenever
+   * the server produced a definitive response.
+   */
+  liveCheckFailed?: boolean;
 };
 
 type MeResponse = { user: SessionUser | null };
@@ -54,16 +61,17 @@ function context(
 }
 
 async function cachedOrUnavailable(
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  liveCheckFailed = false,
 ): Promise<ViewerContext> {
   try {
     const cached = await readCachedViewer({ signal });
     return cached
-      ? context("cached", cached.id, null, cached.user)
-      : context("unavailable", null);
+      ? { ...context("cached", cached.id, null, cached.user), liveCheckFailed }
+      : { ...context("unavailable", null), liveCheckFailed };
   } catch {
     signal?.throwIfAborted();
-    return context("unavailable", null);
+    return { ...context("unavailable", null), liveCheckFailed };
   }
 }
 
@@ -142,24 +150,35 @@ async function resolveViewerResult(
     return cached.mode === "cached" ? cached : context("guest", null);
   }
   if (result.status >= 500 && result.status <= 599) {
-    return cachedOrUnavailable(signal);
+    return cachedOrUnavailable(signal, true);
   }
   return context("unavailable", null);
 }
+
+// Bound the live check: a stalled socket would otherwise hold the
+// single-flight viewer request open and starve every scheduled retry
+// until the OS gives up on it.
+const LIVE_CHECK_TIMEOUT_MS = 15_000;
 
 export async function resolveViewerContext(
   options: ResolveViewerOptions = {},
 ): Promise<ViewerContext> {
   const { signal } = options;
+  const meSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(LIVE_CHECK_TIMEOUT_MS)])
+    : AbortSignal.timeout(LIVE_CHECK_TIMEOUT_MS);
   let result: Awaited<ReturnType<typeof requestJson<MeResponse>>>;
   try {
     result = await requestJson<MeResponse>("/api/me", {
       credentials: "include",
-      signal,
+      signal: meSignal,
     });
   } catch (error) {
-    if (error instanceof ApiCommunicationError) {
-      return cachedOrUnavailable(signal);
+    if (
+      error instanceof ApiCommunicationError ||
+      (error instanceof DOMException && error.name === "TimeoutError")
+    ) {
+      return cachedOrUnavailable(signal, true);
     }
     throw error;
   }

@@ -14,6 +14,11 @@ for (const verifiedUser of ["alice", "bob"] as const) {
   test(`cached viewing waits for authoritative recovery as ${verifiedUser} without reloading`, async ({
     page,
   }) => {
+    // Browser-reported offline: the online event is the only recovery path,
+    // so no scheduled retries interfere with the request assertions below.
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, "onLine", { get: () => false });
+    });
     const cached = { ...note, markdown: "本人確認を待つキャッシュ本文。" };
     const fresh = {
       ...note,
@@ -168,6 +173,9 @@ for (const verifiedUser of ["alice", "bob"] as const) {
 test("failed verification preserves cached reading state and permits a later retry", async ({
   page,
 }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, "onLine", { get: () => false });
+  });
   const text = "選択しているキャッシュ本文を維持します。";
   await page.goto("/tests/browser/fixtures/storage.html");
   await page.evaluate(
@@ -285,6 +293,7 @@ test("a late recovery response cannot replace a newer explicitly set viewer", as
   page,
 }) => {
   await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, "onLine", { get: () => false });
     const originalFetch = globalThis.fetch;
     const probe: RecoveryProbe["recoveryProbe"] = {
       enabled: false,
@@ -367,6 +376,58 @@ test("a late recovery response cannot replace a newer explicitly set viewer", as
       cacheViewerId: null,
       mode: "authenticated",
       user: { id: "bob" },
+    },
+  });
+});
+
+test("a cached viewer retries on a timer and recovers without connectivity events", async ({
+  page,
+}) => {
+  await page.goto("/tests/browser/fixtures/storage.html");
+  await page.evaluate(async () => {
+    const storageUrl = "/src/lib/offline-cache.ts";
+    const { persistCachedViewerId } = await import(storageUrl);
+    await persistCachedViewerId("alice");
+  });
+  let reachable = false;
+  const headers = { "X-MiyulabMD-Session-User": "user:alice" };
+  await page.route("**/api/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/me") {
+      return reachable
+        ? route.fulfill({
+            headers,
+            json: {
+              user: {
+                displayName: "Alice",
+                email: "alice@example.test",
+                id: "alice",
+              },
+            },
+          })
+        : route.abort("internetdisconnected");
+    }
+    return route.fulfill({
+      headers,
+      json: { error: "No fixture" },
+      status: 404,
+    });
+  });
+  await page.goto("/tests/browser/fixtures/app-shell.html");
+  const readViewer = async () =>
+    JSON.parse((await page.getByLabel("Viewer context").textContent()) ?? "{}");
+  await expect.poll(readViewer).toMatchObject({
+    viewer: { cacheViewerId: "alice", mode: "cached", user: null },
+  });
+
+  reachable = true;
+  // No online/visibilitychange events are dispatched: the retry scheduled
+  // after the failed live check must re-resolve the viewer on its own.
+  await expect.poll(readViewer, { timeout: 20_000 }).toMatchObject({
+    viewer: {
+      cacheViewerId: "alice",
+      mode: "authenticated",
+      user: { id: "alice" },
     },
   });
 });

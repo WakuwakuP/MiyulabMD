@@ -313,14 +313,18 @@ for (const failure of [
   "server unreachable",
   "storage deletion fails",
 ] as const) {
-  test(`logout ${failure} stops local use and warns without claiming completion`, async ({
+  test(`logout ${failure} releases the identity gate and recovers the still-valid session`, async ({
     page,
     context,
   }) => {
     let preparations = 0;
     let navigations = 0;
-    await context.route("**/api/**", (route) =>
-      route.fulfill({
+    let meRequests = 0;
+    await context.route("**/api/**", (route) => {
+      if (new URL(route.request().url()).pathname === "/api/me") {
+        meRequests += 1;
+      }
+      return route.fulfill({
         headers: { "X-MiyulabMD-Session-User": "user:alice" },
         json:
           new URL(route.request().url()).pathname === "/api/me"
@@ -332,8 +336,8 @@ for (const failure of [
                 },
               }
             : [],
-      }),
-    );
+      });
+    });
     await context.route("**/auth/logout", (route) => {
       if (route.request().method() === "GET") {
         navigations += 1;
@@ -354,22 +358,20 @@ for (const failure of [
           Promise.reject(new DOMException("Denied", "NotAllowedError"));
       });
     }
+    const checksBefore = meRequests;
     await page.getByRole("button", { exact: true, name: "Alice" }).click();
     await page
       .getByRole("menuitem", { exact: true, name: "ログアウト" })
       .click();
+    // A failed logout leaves the session valid: the identity gate must be
+    // released so /api/me flies again and both tabs return to Alice instead
+    // of staying blocked until a reload.
     for (const target of [page, peer]) {
-      await expect(target.getByRole("alert")).toContainText(
-        "完了できませんでした",
-      );
-      await expect(target.getByLabel("Viewer context")).not.toContainText(
+      await expect(target.getByLabel("Viewer context")).toContainText(
         '"id":"alice"',
       );
-      await target.evaluate(() => window.dispatchEvent(new Event("online")));
-      await expect(target.getByLabel("Viewer context")).toContainText(
-        '"cacheViewerId":null',
-      );
     }
+    await expect.poll(() => meRequests).toBeGreaterThan(checksBefore);
     expect(preparations).toBe(failure === "server unreachable" ? 1 : 0);
     expect(navigations).toBe(0);
   });
