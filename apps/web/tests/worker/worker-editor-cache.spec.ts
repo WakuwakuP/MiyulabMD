@@ -185,7 +185,9 @@ test("real Worker source editor save refreshes offline cache", async ({
   expect(
     sockets.some((url) => new URL(url).pathname === `/ws/notes/${note.id}`),
   ).toBe(true);
-  const socketCount = sockets.length;
+  // Chromium's offline emulation does not block WebSocket upgrades; abort the
+  // collaboration handshake explicitly so the offline phase is deterministic.
+  await context.route("**/ws/notes/**", (route) => route.abort());
   await context.setOffline(true);
   const response = await page.reload({ waitUntil: "domcontentloaded" });
   expect(response?.fromServiceWorker()).toBe(true);
@@ -196,11 +198,18 @@ test("real Worker source editor save refreshes offline cache", async ({
   await expect(
     page.getByRole("status").filter({ hasText: "キャッシュ" }),
   ).toBeVisible();
-  await expect(edit).toHaveCount(0);
-  await expect(page.locator(".cm-content[contenteditable=true]")).toHaveCount(
-    0,
-  );
+  // オンライン同期済み・資格ありの本人ノートはオフラインでも本文編集に入れる。
+  await expect(edit).toBeVisible();
   await expect(page.getByRole("checkbox")).toBeDisabled();
-  expect(sockets).toHaveLength(socketCount);
+  await edit.click();
+  const offlineSource = page.locator(".cm-content[contenteditable=true]");
+  await expect(offlineSource).toContainText("NEW_EDITOR_BODY");
+  await offlineSource.click();
+  await offlineSource.press("ControlOrMeta+End");
+  await offlineSource.pressSequentially("\nOFFLINE_DRAFT");
+  await expect(offlineSource).toContainText("OFFLINE_DRAFT");
+  await expect(
+    page.getByRole("status").filter({ hasText: "未送信の編集" }),
+  ).toBeVisible();
   expect(patches).toEqual([]);
 });

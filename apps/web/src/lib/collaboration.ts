@@ -121,7 +121,7 @@ export function applyAwarenessUser(
 export function createYjsSession(
   noteId: string,
   user: SessionUser | null,
-  editCache?: { note?: Note | null },
+  editCache?: { note?: Note | null; userId?: string | null },
 ): YjsSession {
   const doc = new Y.Doc();
   const yMarkdown = doc.getText(MARKDOWN_FIELD);
@@ -150,7 +150,9 @@ export function createYjsSession(
 
   // オフライン編集資格があるノートだけ編集キャッシュ（y-indexeddb）に乗せる。
   // 資格は直近メタデータで判定し、stale は許容する（再接続時の Yjs マージが吸収）。
-  const userId = user?.id ?? null;
+  // 名空間のユーザー ID はオフライン表示では記憶された cacheViewerId を使う。
+  // ローカル領域の選択に限り、認証・API 書き込みの権限根拠にはしない。
+  const userId = editCache?.userId ?? user?.id ?? null;
   let editCacheSession: EditCacheSession | null = null;
   let editCachePersistence: IndexeddbPersistence | null = null;
   let disposeUnsentTracking: (() => void) | null = null;
