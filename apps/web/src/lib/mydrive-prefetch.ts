@@ -340,6 +340,71 @@ async function acquireDrive(
     : { ...counts, status: "success" };
 }
 
+/** 1 ノート分の取得。「auth」は即中断、「cached」は新規保存、null はスキップ。 */
+async function acquireOneNote(
+  cache: PrefetchCache,
+  signal: AbortSignal,
+  userId: string,
+  summary: NoteSummary,
+  acquisition: Acquisition,
+  collectImages: (markdown: string) => void,
+): Promise<"auth" | "cached" | null> {
+  const existing = await prefetchIo(signal, "storage", () =>
+    cache.getNote(summary.id),
+  );
+  if (existing && existing.note.updatedAt >= summary.updatedAt) {
+    collectImages(existing.note.markdown);
+    return null;
+  }
+  const orderingToken = await prefetchIo(signal, "storage", () =>
+    cache.beginNoteRead(summary.id),
+  );
+  // The durable denial watermark, captured before the fetch: a denial
+  // committing after this point makes the put/clear below lose — a stale
+  // 200 must not overwrite a confirmed denial. Read on the prefetch
+  // handle's own connection so no extra database churn interrupts the
+  // acquisition boundary instrumentation.
+  const denialSequence = await prefetchIo(signal, "storage", () =>
+    cache.captureNoteDenialSequence(),
+  );
+  const noteResult = await acquisition.run(() =>
+    fetchNote(summary.id, {
+      // Reuse the fence this handle captured at open — reading it through
+      // a second database connection would churn a close inside the
+      // acquisition boundary (and is pure overhead either way).
+      purgeFence: cache.capturedPurgeFence(),
+      signal,
+      viewerId: userId,
+    }),
+  );
+  if (!noteResult) {
+    return null;
+  }
+  if (!noteResult.ok) {
+    if (noteResult.status === 401) {
+      return "auth";
+    }
+    if (noteDenied(noteResult.status)) {
+      await prefetchIo(signal, "storage", () => cache.denyNote(summary.id));
+    }
+    return null;
+  }
+  await prefetchIo(signal, "storage", () =>
+    cache.putNote(noteResult.data, {
+      denialSequence: denialSequence ?? undefined,
+      orderingToken,
+      signal,
+    }),
+  );
+  if (denialSequence !== null) {
+    await prefetchIo(signal, "storage", () =>
+      cache.clearNoteDenial(summary.id, orderingToken, denialSequence),
+    );
+  }
+  collectImages(noteResult.data.markdown);
+  return "cached";
+}
+
 async function acquireNotes(
   cache: PrefetchCache,
   signal: AbortSignal,
@@ -374,60 +439,20 @@ async function acquireNotes(
   );
   while (targets.length) {
     const summary = takeNextNote(targets, getPriority());
-    const existing = await prefetchIo(signal, "storage", () =>
-      cache.getNote(summary.id),
+    const outcome = await acquireOneNote(
+      cache,
+      signal,
+      userId,
+      summary,
+      acquisition,
+      collectImages,
     );
-    if (existing && existing.note.updatedAt >= summary.updatedAt) {
-      collectImages(existing.note.markdown);
-      continue;
+    if (outcome === "auth") {
+      return "auth";
     }
-    const orderingToken = await prefetchIo(signal, "storage", () =>
-      cache.beginNoteRead(summary.id),
-    );
-    // The durable denial watermark, captured before the fetch: a denial
-    // committing after this point makes the put/clear below lose — a stale
-    // 200 must not overwrite a confirmed denial. Read on the prefetch
-    // handle's own connection so no extra database churn interrupts the
-    // acquisition boundary instrumentation.
-    const denialSequence = await prefetchIo(signal, "storage", () =>
-      cache.captureNoteDenialSequence(),
-    );
-    const noteResult = await acquisition.run(() =>
-      fetchNote(summary.id, {
-        // Reuse the fence this handle captured at open — reading it through
-        // a second database connection would churn a close inside the
-        // acquisition boundary (and is pure overhead either way).
-        purgeFence: cache.capturedPurgeFence(),
-        signal,
-        viewerId: userId,
-      }),
-    );
-    if (!noteResult) {
-      continue;
+    if (outcome === "cached") {
+      counts.notes += 1;
     }
-    if (!noteResult.ok) {
-      if (noteResult.status === 401) {
-        return "auth";
-      }
-      if (noteDenied(noteResult.status)) {
-        await prefetchIo(signal, "storage", () => cache.denyNote(summary.id));
-      }
-      continue;
-    }
-    await prefetchIo(signal, "storage", () =>
-      cache.putNote(noteResult.data, {
-        denialSequence: denialSequence ?? undefined,
-        orderingToken,
-        signal,
-      }),
-    );
-    if (denialSequence !== null) {
-      await prefetchIo(signal, "storage", () =>
-        cache.clearNoteDenial(summary.id, orderingToken, denialSequence),
-      );
-    }
-    collectImages(noteResult.data.markdown);
-    counts.notes += 1;
   }
   await acquireImages(images, userId, signal, storageRecovery);
   return null;

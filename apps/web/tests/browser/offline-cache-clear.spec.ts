@@ -224,8 +224,7 @@ test("failed user purge degrades opens and stays stopped until a successful retr
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async (note) => {
     const cacheUrl = "/src/lib/offline-cache.ts";
-    const { clearOfflineCacheUser, openOfflineCache } =
-      await import(cacheUrl);
+    const { clearOfflineCacheUser, openOfflineCache } = await import(cacheUrl);
     const cache = await openOfflineCache({ userId: "alice" });
     await cache.putNote(note);
     const originalRemove = FileSystemDirectoryHandle.prototype.removeEntry;

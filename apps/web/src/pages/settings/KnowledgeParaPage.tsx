@@ -40,6 +40,19 @@ function spaceSelectorOf(space: ParaSpaceSummary): ParaSpaceSelector {
   return space.isDefault ? "default" : { id: space.id };
 }
 
+/** plan/enable API が受け取るスペース指定を文字列キーに正規化する。 */
+function spaceSelectorKey(
+  space: ParaSpaceSelector | undefined | null,
+): string | undefined {
+  if (space === undefined || space === null || space === "default") {
+    return space === "default" ? "default" : undefined;
+  }
+  if (typeof space === "string") {
+    return space;
+  }
+  return "id" in space ? space.id : space.name;
+}
+
 function SpaceRow({
   space,
   busy,
@@ -174,9 +187,7 @@ export function KnowledgeParaPage() {
   const runEnable = useCallback(
     async (
       space: ParaSpaceSelector | undefined,
-      resolutions?: Partial<
-        Record<ParaResolutionKey, ParaBucketResolution>
-      >,
+      resolutions?: Partial<Record<ParaResolutionKey, ParaBucketResolution>>,
     ): Promise<boolean> => {
       setSetupBusy(true);
       setSetupError(null);
@@ -208,16 +219,7 @@ export function KnowledgeParaPage() {
       setSetupBusy(true);
       setSetupError(null);
       const planResult = await fetchParaPlan({
-        space:
-          space === undefined || space === null
-            ? undefined
-            : space === "default"
-              ? "default"
-              : typeof space === "string"
-                ? space
-                : "id" in space
-                  ? space.id
-                  : space.name,
+        space: spaceSelectorKey(space),
       });
       setSetupBusy(false);
       if (!planResult.ok) {
@@ -354,10 +356,11 @@ export function KnowledgeParaPage() {
           onClose={() => setConflictPlan(null)}
           onSubmit={(resolutions) => {
             void (async () => {
-              if (await runEnable(conflictSpace, resolutions)) {
-                if (conflictSpace === undefined) {
-                  await setEnabled(true);
-                }
+              if (
+                (await runEnable(conflictSpace, resolutions)) &&
+                conflictSpace === undefined
+              ) {
+                await setEnabled(true);
               }
             })();
           }}

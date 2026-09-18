@@ -129,7 +129,6 @@ export function usePreviewImages(
     let unsubscribeNote: (() => void) | undefined;
     let unsubscribeRealm: (() => void) | undefined;
     const usesCache = mode !== "network-only";
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: cache subscriptions and network-only acquisition have intentionally separate lifecycles.
     const initialize = async () => {
       if (usesCache) {
         const cache = await import("./offline-cache.ts");

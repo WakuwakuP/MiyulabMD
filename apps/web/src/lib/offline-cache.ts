@@ -427,6 +427,24 @@ function invalidateDeviceRealm(): void {
   notifyLifecycle({ type: "device-invalidate", userId: "" });
 }
 
+function handleInvalidateEvent(data: object, userId: string): void {
+  const event = data as Partial<OfflineCacheLifecycleEvent>;
+  if (isNoteDenialEvent(data)) {
+    // A peer's committed denial also fences this tab's in-flight note
+    // reads: the in-memory generation must move even though the durable
+    // marker was written on the other side.
+    for (const alias of data.resource.aliases) {
+      enterNoteDenialOrder(data.userId, alias);
+    }
+    notifyLifecycle(data);
+  } else if (isFolderDenialEvent(data) || isImageInvalidationEvent(data)) {
+    notifyLifecycle(data);
+  } else if (!event.resource) {
+    bumpUserRealm(userId);
+    notifyLifecycle({ type: "invalidate", userId });
+  }
+}
+
 // Lifecycle messages are reload hints: peers invalidate their in-memory view
 // and notify observers, but the durable ledger/purge state stays the source
 // of truth. A missed message never corrupts state.
@@ -439,22 +457,7 @@ function handleLifecycleMessage(data: unknown): void {
     deviceRealmGeneration += 1;
     notifyLifecycle({ type: "device-invalidate", userId: "" });
   } else if (event.type === "invalidate" && typeof event.userId === "string") {
-    if (isNoteDenialEvent(data)) {
-      // A peer's committed denial also fences this tab's in-flight note
-      // reads: the in-memory generation must move even though the durable
-      // marker was written on the other side.
-      for (const alias of data.resource.aliases) {
-        enterNoteDenialOrder(data.userId, alias);
-      }
-      notifyLifecycle(data);
-    } else if (isFolderDenialEvent(data)) {
-      notifyLifecycle(data);
-    } else if (isImageInvalidationEvent(data)) {
-      notifyLifecycle(data);
-    } else if (!event.resource) {
-      bumpUserRealm(event.userId);
-      notifyLifecycle({ type: "invalidate", userId: event.userId });
-    }
+    handleInvalidateEvent(data, event.userId);
   } else if (event.type === "identity" && typeof event.userId === "string") {
     notifyLifecycle({ type: "identity", userId: event.userId });
   }
@@ -1079,6 +1082,60 @@ async function finishInterruptedDevicePurge(): Promise<void> {
   }
 }
 
+/** device 墓標が残っていたら中断済みデバイス purge をロック下で完了させる。 */
+async function healDeviceTombstone(
+  database: IDBDatabase,
+  userId: string,
+): Promise<"clean" | "purging"> {
+  try {
+    const healed = await requestLockIfAvailable(
+      GLOBAL_LOCK_NAME,
+      "exclusive",
+      async () => {
+        const again = await readPurgeState(database, userId);
+        if (again.deviceTombstone) {
+          await finishInterruptedDevicePurge();
+        }
+      },
+    );
+    if (!healed.acquired) {
+      return "purging";
+    }
+  } catch {
+    return "purging";
+  }
+  const scan = await readPurgeState(database, userId);
+  return scan.deviceTombstone ? "purging" : "clean";
+}
+
+/** user 墓標が残っていたら中断済みユーザー purge をロック下で完了させる。 */
+async function healUserTombstone(
+  database: IDBDatabase,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<"clean" | "purging"> {
+  try {
+    const healed = await requestLockIfAvailable(
+      GLOBAL_LOCK_NAME,
+      "shared",
+      () =>
+        requestLockIfAvailable(userLockName(userId), "exclusive", async () => {
+          const again = await readPurgeState(database, userId);
+          if (again.userTombstone) {
+            await finishInterruptedUserPurge(userId, signal);
+          }
+        }),
+    );
+    if (!healed.acquired || healed.value?.acquired !== true) {
+      return "purging";
+    }
+  } catch {
+    return "purging";
+  }
+  const after = await readPurgeState(database, userId);
+  return after.userTombstone ? "purging" : "clean";
+}
+
 async function healInterruptedPurgeMarkers(
   database: IDBDatabase,
   userId: string,
@@ -1087,69 +1144,25 @@ async function healInterruptedPurgeMarkers(
   // Runs on the caller's already-open connection: opening and closing a
   // second database here would show up as extra connection churn in
   // instrumented environments (and is pure overhead either way).
-  {
-    let scan: PurgeState;
-    try {
-      scan = await readPurgeState(database, userId);
-    } catch {
-      // A transient scan failure must not degrade the whole open: the
-      // caller's own purge-state read decides, and a leftover tombstone is
-      // retried by the next observer.
-      return "clean";
-    }
-    if (scan.deviceTombstone) {
-      try {
-        const healed = await requestLockIfAvailable(
-          GLOBAL_LOCK_NAME,
-          "exclusive",
-          async () => {
-            const again = await readPurgeState(database, userId);
-            if (again.deviceTombstone) {
-              await finishInterruptedDevicePurge();
-            }
-          },
-        );
-        if (!healed.acquired) {
-          return "purging";
-        }
-      } catch {
-        return "purging";
-      }
-      scan = await readPurgeState(database, userId);
-      if (scan.deviceTombstone) {
-        return "purging";
-      }
-    }
-    if (scan.userTombstone) {
-      try {
-        const healed = await requestLockIfAvailable(
-          GLOBAL_LOCK_NAME,
-          "shared",
-          () =>
-            requestLockIfAvailable(
-              userLockName(userId),
-              "exclusive",
-              async () => {
-                const again = await readPurgeState(database, userId);
-                if (again.userTombstone) {
-                  await finishInterruptedUserPurge(userId, signal);
-                }
-              },
-            ),
-        );
-        if (!healed.acquired || healed.value?.acquired !== true) {
-          return "purging";
-        }
-      } catch {
-        return "purging";
-      }
-      const after = await readPurgeState(database, userId);
-      if (after.userTombstone) {
-        return "purging";
-      }
-    }
+  let scan: PurgeState;
+  try {
+    scan = await readPurgeState(database, userId);
+  } catch {
+    // A transient scan failure must not degrade the whole open: the
+    // caller's own purge-state read decides, and a leftover tombstone is
+    // retried by the next observer.
     return "clean";
   }
+  if (
+    scan.deviceTombstone &&
+    (await healDeviceTombstone(database, userId)) === "purging"
+  ) {
+    return "purging";
+  }
+  if (scan.userTombstone) {
+    return healUserTombstone(database, userId, signal);
+  }
+  return "clean";
 }
 
 async function purgeOfflineCacheUser(userId: string): Promise<void> {
@@ -1914,6 +1927,27 @@ async function readDeniedNote(
   );
 }
 
+/** Denial-ledger check across every identity a note route may resolve. */
+async function isNoteRecordDenied(
+  database: IDBDatabase,
+  userId: string,
+  record: NoteRecord,
+): Promise<boolean> {
+  const identities = [
+    ...new Set([
+      record.noteId,
+      record.note.shortId,
+      ...noteIdentityIds(userId, record.noteId),
+    ]),
+  ];
+  for (const identity of identities) {
+    if (await readDeniedNote(database, userId, identity)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function readDeniedNoteIds(
   database: IDBDatabase,
   userId: string,
@@ -2427,22 +2461,6 @@ function commitStoreRecords(
       abort();
     }
   });
-}
-
-function commitFolderRecord(
-  database: IDBDatabase,
-  record: FolderRecord,
-  userId: string,
-  purgeFence: PurgeGenerations | undefined,
-  signal?: AbortSignal,
-): Promise<void> {
-  return commitStoreRecords(
-    database,
-    [{ record, storeName: FOLDER_STORE }],
-    userId,
-    purgeFence,
-    signal,
-  );
 }
 
 function commitNoteListRecord(
@@ -3165,11 +3183,375 @@ function createOfflineCacheHandle(
   };
 
   return {
-    degraded: database === null,
+    async beginFolderRead(id) {
+      const db = readable();
+      if (!db) {
+        return 1;
+      }
+      void id;
+      return (await readFolderDenialSnapshot(db, userId)).sequence;
+    },
+
+    beginImageRead(noteId, imageId) {
+      return lockedWrite(async () => {
+        const db = readable();
+        if (!db) {
+          return 0;
+        }
+        return (
+          (await changeImageOrder(
+            db,
+            userId,
+            noteId,
+            imageId,
+            undefined,
+            false,
+            purgeFence,
+          )) ?? 0
+        );
+      });
+    },
+
+    beginNoteRead(id) {
+      return beginNoteReadOrder(userId, id);
+    },
+
+    capturedPurgeFence() {
+      return purgeFence ?? null;
+    },
+
+    async captureNoteDenialSequence() {
+      const db = readable();
+      if (!(db && isRealmCurrent(userId, openRealm))) {
+        return null;
+      }
+      try {
+        return noteSequence(await readMetadataRecord(db, noteOrderKey(userId)));
+      } catch {
+        // The ledger is best-effort; an unreadable sequence is no authority.
+        return null;
+      }
+    },
+
+    clearFolderDenial(id, orderingToken) {
+      return lockedWrite(async () => {
+        const realm = openRealm;
+        const db = writable(realm);
+        const receipt = await updateFolderDenial(
+          db,
+          userId,
+          id,
+          orderingToken,
+          "clear",
+          undefined,
+          undefined,
+          purgeFence,
+        );
+        if (receipt.committed && receipt.changed) {
+          reportOfflineFolderDenial(userId, id, null, receipt.aliases);
+        }
+      });
+    },
+
+    clearNoteDenial(id, orderingToken, denialSequence) {
+      return lockedWrite(async () => {
+        const realm = openRealm;
+        const db = writable(realm);
+        await trackUserWrite(userId, () =>
+          updateNoteAuthority(
+            db,
+            userId,
+            id,
+            "clear",
+            purgeFence,
+            orderingToken,
+            denialSequence,
+          ),
+        );
+        // A lifted denial is not a denial event — broadcasting one would make
+        // observers hide the very note this successful read just published.
+      });
+    },
 
     close(): void {
       closed = true;
       database?.close();
+    },
+    degraded: database === null,
+
+    denyFolder(id, orderingToken, signal) {
+      return lockedWrite(async () => {
+        const realm = openRealm;
+        const db = writable(realm);
+        let committedReceipt: FolderDenialReceipt | undefined;
+        await trackUserWrite(userId, async () => {
+          committedReceipt = await updateFolderDenial(
+            db,
+            userId,
+            id,
+            orderingToken,
+            "deny",
+            undefined,
+            signal,
+            purgeFence,
+          );
+        });
+        const receipt = committedReceipt ?? {
+          aliases: [id],
+          committed: false,
+          generation: null,
+        };
+        reportCommittedFolderDenial(userId, id, receipt);
+        return receipt.committed;
+      });
+    },
+
+    denyImage(noteId, imageId, orderingToken) {
+      return lockedWrite(async () => {
+        const realm = openRealm;
+        const db = writable(realm);
+        const generation = await trackUserWrite(userId, async () => {
+          await changeImageOrder(
+            db,
+            userId,
+            noteId,
+            imageId,
+            orderingToken,
+            true,
+            purgeFence,
+          );
+        });
+        void generation;
+        reportImageInvalidation(userId, noteId, imageId);
+      });
+    },
+
+    denyNote(id, orderingToken) {
+      return lockedWrite(async () => {
+        const realm = openRealm;
+        const db = writable(realm);
+        const token = orderingToken ?? enterOfflineNoteDenial(userId, id);
+        const generation = await trackUserWrite(userId, () =>
+          updateNoteAuthority(db, userId, id, "deny", purgeFence, token),
+        );
+        // The durable marker is committed first; removing the record is
+        // belt-and-suspenders — projection hides it either way.
+        const removedFileName = await removeCachedNote(db, userId, id);
+        if (removedFileName) {
+          await removeUnreferencedNoteFile(userId, id, removedFileName);
+        }
+        reportOfflineNoteDenial(userId, id, generation);
+      });
+    },
+
+    async getFolder(id) {
+      const realm = openRealm;
+      const db = readable();
+      if (!(db && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      // The token fences the whole read: a denial committing between the
+      // snapshot and the check turns this into a miss.
+      const orderingToken = (await readFolderDenialSnapshot(db, userId))
+        .sequence;
+      const record = await readFolderForRoute(db, userId, id);
+      if (!(record && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      const deniedFolderIds = await readDeniedFolderIds(db, userId);
+      const projected = projectDeniedFolder(record.folder, deniedFolderIds);
+      if (!(projected && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      try {
+        await updateFolderDenial(
+          db,
+          userId,
+          id,
+          orderingToken,
+          "check",
+          undefined,
+          undefined,
+          purgeFence,
+        );
+      } catch {
+        return null;
+      }
+      return { cachedAt: record.cachedAt, folder: projected };
+    },
+
+    async getFolderState(id) {
+      const realm = openRealm;
+      const db = readable();
+      if (!(db && isRealmCurrent(userId, realm))) {
+        return "missing";
+      }
+      const deniedFolderIds = await readDeniedFolderIds(db, userId);
+      const record = await readFolderForRoute(db, userId, id);
+      if (record) {
+        return projectDeniedFolder(record.folder, deniedFolderIds)
+          ? "available"
+          : "denied";
+      }
+      if (deniedFolderIds.has(id)) {
+        return "denied";
+      }
+      if (id === null) {
+        // Root denials may be recorded under the concrete root folder id.
+        const rootReference = await readMetadataRecord(
+          db,
+          driveRootMetadataKey(userId),
+        );
+        if (deniedFolderIds.has(rootReferenceId(rootReference))) {
+          return "denied";
+        }
+      }
+      return "missing";
+    },
+
+    async getImage(noteId, imageId) {
+      const realm = openRealm;
+      const db = readable();
+      if (!(db && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      const image = parseImageRecord(
+        await readMetadataRecord(db, imageMetadataKey(userId, noteId, imageId)),
+      );
+      if (!(image && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      const blob = await readNoteFileBlob(userId, noteId, image.fileName, () =>
+        assertReadable(realm),
+      );
+      if (!(blob && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      return blob.slice(0, blob.size, image.mime);
+    },
+
+    async getNote(id) {
+      const realm = openRealm;
+      const db = readable();
+      if (!(db && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      const orderingToken = beginNoteReadOrder(userId, id);
+      const record = await readNoteForRoute(db, userId, id);
+      if (!(record && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      // A denial or realm change committing mid-read makes the snapshot
+      // stale; each stage re-checks this before returning.
+      const stillFresh = () =>
+        isRealmCurrent(userId, realm) &&
+        isCurrentNoteReadOrder(userId, record.noteId, orderingToken);
+      // Check the denial ledger for every identity the route may resolve.
+      if (await isNoteRecordDenied(db, userId, record)) {
+        return null;
+      }
+      if (!stillFresh()) {
+        return null;
+      }
+      const blob = await readNoteFileBlob(
+        userId,
+        record.noteId,
+        record.fileName,
+        () => assertReadable(realm),
+      );
+      if (!(blob && stillFresh())) {
+        return null;
+      }
+      // The denial must also fence a read whose body decode was already in
+      // flight, so the ordering token is re-checked after blob.text().
+      const markdown = await blob.text();
+      if (!stillFresh()) {
+        return null;
+      }
+      bindNoteIdentity(userId, record.noteId, record.note.shortId);
+      return {
+        cachedAt: record.cachedAt,
+        note: { ...record.note, markdown },
+      };
+    },
+
+    async getNoteList() {
+      const realm = openRealm;
+      const db = readable();
+      if (!(db && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      const record = await readNoteListRecord(db, noteListKey(userId));
+      if (!(record && isRealmCurrent(userId, realm))) {
+        return null;
+      }
+      const sequenceBefore = (await readFolderDenialSnapshot(db, userId))
+        .sequence;
+      const visible = await readVisibleNoteList(db, userId, realm, record);
+      if (!visible) {
+        return null;
+      }
+      // A folder denial committing while this read was in flight makes the
+      // snapshot stale; report a miss so callers re-read the current ledger.
+      const sequenceAfter = (await readFolderDenialSnapshot(db, userId))
+        .sequence;
+      if (sequenceAfter !== sequenceBefore || !isRealmCurrent(userId, realm)) {
+        return null;
+      }
+      return visible;
+    },
+
+    async getNoteListState() {
+      const realm = openRealm;
+      const db = readable();
+      if (!(db && isRealmCurrent(userId, realm))) {
+        return "missing";
+      }
+      const record = await readNoteListRecord(db, noteListKey(userId));
+      if (record) {
+        return "available";
+      }
+      const { deniedFolderIds } = await readFolderDenialSnapshot(db, userId);
+      return deniedFolderIds.has(null) ? "denied" : "missing";
+    },
+
+    putFolder(folder, options = {}) {
+      return lockedWrite(async () => {
+        const realm = openRealm;
+        const db = writable(realm);
+        // A caller token captured at read start authorizes lifting a denial;
+        // without one the record is saved but the ledger is left alone, so a
+        // stale success can never resurrect a denied folder.
+        const orderingToken = options.orderingToken;
+        const record: FolderRecord = {
+          cachedAt: Date.now(),
+          folder,
+          folderId: folder.id,
+          key: folderKey(userId, folder.id),
+          userId,
+        };
+        const receipt = await trackUserWrite(userId, async () =>
+          updateFolderDenial(
+            db,
+            userId,
+            folder.id,
+            orderingToken,
+            "clear",
+            { asDriveRoot: options.asDriveRoot === true, record },
+            options.signal,
+            purgeFence,
+          ),
+        );
+        // Only notify peers when this write lifted a recorded denial —
+        // otherwise every successful folder fetch would retrigger the
+        // denial listeners and loop the reload.
+        if (receipt.liftedDenial) {
+          reportOfflineFolderDenial(userId, folder.id, null, [
+            folder.id,
+            ...(options.asDriveRoot === true ? [null] : []),
+          ]);
+        }
+      });
     },
 
     putImage(noteId, imageId, bytes, options = {}) {
@@ -3224,67 +3606,6 @@ function createOfflineCacheHandle(
           await removeUnreferencedNoteFile(userId, noteId, fileName);
           throw error;
         }
-      });
-    },
-
-    async getImage(noteId, imageId) {
-      const realm = openRealm;
-      const db = readable();
-      if (!db || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      const image = parseImageRecord(
-        await readMetadataRecord(db, imageMetadataKey(userId, noteId, imageId)),
-      );
-      if (!image || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      const blob = await readNoteFileBlob(userId, noteId, image.fileName, () =>
-        assertReadable(realm),
-      );
-      if (!blob || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      return blob.slice(0, blob.size, image.mime);
-    },
-
-    beginImageRead(noteId, imageId) {
-      return lockedWrite(async () => {
-        const db = readable();
-        if (!db) {
-          return 0;
-        }
-        return (
-          (await changeImageOrder(
-            db,
-            userId,
-            noteId,
-            imageId,
-            undefined,
-            false,
-            purgeFence,
-          )) ?? 0
-        );
-      });
-    },
-
-    denyImage(noteId, imageId, orderingToken) {
-      return lockedWrite(async () => {
-        const realm = openRealm;
-        const db = writable(realm);
-        const generation = await trackUserWrite(userId, async () => {
-          await changeImageOrder(
-            db,
-            userId,
-            noteId,
-            imageId,
-            orderingToken,
-            true,
-            purgeFence,
-          );
-        });
-        void generation;
-        reportImageInvalidation(userId, noteId, imageId);
       });
     },
 
@@ -3344,182 +3665,6 @@ function createOfflineCacheHandle(
       });
     },
 
-    beginNoteRead(id) {
-      return beginNoteReadOrder(userId, id);
-    },
-
-    denyNote(id, orderingToken) {
-      return lockedWrite(async () => {
-        const realm = openRealm;
-        const db = writable(realm);
-        const token = orderingToken ?? enterOfflineNoteDenial(userId, id);
-        const generation = await trackUserWrite(userId, () =>
-          updateNoteAuthority(db, userId, id, "deny", purgeFence, token),
-        );
-        // The durable marker is committed first; removing the record is
-        // belt-and-suspenders — projection hides it either way.
-        const removedFileName = await removeCachedNote(db, userId, id);
-        if (removedFileName) {
-          await removeUnreferencedNoteFile(userId, id, removedFileName);
-        }
-        reportOfflineNoteDenial(userId, id, generation);
-      });
-    },
-
-    clearNoteDenial(id, orderingToken, denialSequence) {
-      return lockedWrite(async () => {
-        const realm = openRealm;
-        const db = writable(realm);
-        await trackUserWrite(userId, () =>
-          updateNoteAuthority(
-            db,
-            userId,
-            id,
-            "clear",
-            purgeFence,
-            orderingToken,
-            denialSequence,
-          ),
-        );
-        // A lifted denial is not a denial event — broadcasting one would make
-        // observers hide the very note this successful read just published.
-      });
-    },
-
-    async captureNoteDenialSequence() {
-      const db = readable();
-      if (!db || !isRealmCurrent(userId, openRealm)) {
-        return null;
-      }
-      try {
-        return noteSequence(
-          await readMetadataRecord(db, noteOrderKey(userId)),
-        );
-      } catch {
-        // The ledger is best-effort; an unreadable sequence is no authority.
-        return null;
-      }
-    },
-
-    capturedPurgeFence() {
-      return purgeFence ?? null;
-    },
-
-    async beginFolderRead(id) {
-      const db = readable();
-      if (!db) {
-        return 1;
-      }
-      void id;
-      return (await readFolderDenialSnapshot(db, userId)).sequence;
-    },
-
-    denyFolder(id, orderingToken, signal) {
-      return lockedWrite(async () => {
-        const realm = openRealm;
-        const db = writable(realm);
-        let committedReceipt: FolderDenialReceipt | undefined;
-        await trackUserWrite(userId, async () => {
-          committedReceipt = await updateFolderDenial(
-            db,
-            userId,
-            id,
-            orderingToken,
-            "deny",
-            undefined,
-            signal,
-            purgeFence,
-          );
-        });
-        const receipt = committedReceipt ?? {
-          aliases: [id],
-          committed: false,
-          generation: null,
-        };
-        reportCommittedFolderDenial(userId, id, receipt);
-        return receipt.committed;
-      });
-    },
-
-    clearFolderDenial(id, orderingToken) {
-      return lockedWrite(async () => {
-        const realm = openRealm;
-        const db = writable(realm);
-        const receipt = await updateFolderDenial(
-          db,
-          userId,
-          id,
-          orderingToken,
-          "clear",
-          undefined,
-          undefined,
-          purgeFence,
-        );
-        if (receipt.committed && receipt.changed) {
-          reportOfflineFolderDenial(userId, id, null, receipt.aliases);
-        }
-      });
-    },
-
-    async getNote(id) {
-      const realm = openRealm;
-      const db = readable();
-      if (!db || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      const orderingToken = beginNoteReadOrder(userId, id);
-      const record = await readNoteForRoute(db, userId, id);
-      if (!record || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      // Check the denial ledger for every identity the route may resolve.
-      const identities = [
-        ...new Set([
-          record.noteId,
-          record.note.shortId,
-          ...noteIdentityIds(userId, record.noteId),
-        ]),
-      ];
-      for (const identity of identities) {
-        if (await readDeniedNote(db, userId, identity)) {
-          return null;
-        }
-      }
-      if (
-        !isRealmCurrent(userId, realm) ||
-        !isCurrentNoteReadOrder(userId, record.noteId, orderingToken)
-      ) {
-        return null;
-      }
-      const blob = await readNoteFileBlob(
-        userId,
-        record.noteId,
-        record.fileName,
-        () => assertReadable(realm),
-      );
-      if (
-        !blob ||
-        !isRealmCurrent(userId, realm) ||
-        !isCurrentNoteReadOrder(userId, record.noteId, orderingToken)
-      ) {
-        return null;
-      }
-      // The denial must also fence a read whose body decode was already in
-      // flight, so the ordering token is re-checked after blob.text().
-      const markdown = await blob.text();
-      if (
-        !isRealmCurrent(userId, realm) ||
-        !isCurrentNoteReadOrder(userId, record.noteId, orderingToken)
-      ) {
-        return null;
-      }
-      bindNoteIdentity(userId, record.noteId, record.note.shortId);
-      return {
-        cachedAt: record.cachedAt,
-        note: { ...record.note, markdown },
-      };
-    },
-
     putNoteList(notes, options = {}) {
       return lockedWrite(async () => {
         const realm = openRealm;
@@ -3534,150 +3679,6 @@ function createOfflineCacheHandle(
           commitNoteListRecord(db, record, userId, purgeFence, options.signal),
         );
       });
-    },
-
-    async getNoteList() {
-      const realm = openRealm;
-      const db = readable();
-      if (!db || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      const record = await readNoteListRecord(db, noteListKey(userId));
-      if (!record || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      const sequenceBefore = (await readFolderDenialSnapshot(db, userId))
-        .sequence;
-      const visible = await readVisibleNoteList(db, userId, realm, record);
-      if (!visible) {
-        return null;
-      }
-      // A folder denial committing while this read was in flight makes the
-      // snapshot stale; report a miss so callers re-read the current ledger.
-      const sequenceAfter = (await readFolderDenialSnapshot(db, userId))
-        .sequence;
-      if (sequenceAfter !== sequenceBefore || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      return visible;
-    },
-
-    async getNoteListState() {
-      const realm = openRealm;
-      const db = readable();
-      if (!db || !isRealmCurrent(userId, realm)) {
-        return "missing";
-      }
-      const record = await readNoteListRecord(db, noteListKey(userId));
-      if (record) {
-        return "available";
-      }
-      const { deniedFolderIds } = await readFolderDenialSnapshot(db, userId);
-      return deniedFolderIds.has(null) ? "denied" : "missing";
-    },
-
-    putFolder(folder, options = {}) {
-      return lockedWrite(async () => {
-        const realm = openRealm;
-        const db = writable(realm);
-        // A caller token captured at read start authorizes lifting a denial;
-        // without one the record is saved but the ledger is left alone, so a
-        // stale success can never resurrect a denied folder.
-        const orderingToken = options.orderingToken;
-        const record: FolderRecord = {
-          cachedAt: Date.now(),
-          folder,
-          folderId: folder.id,
-          key: folderKey(userId, folder.id),
-          userId,
-        };
-        const receipt = await trackUserWrite(userId, async () =>
-          updateFolderDenial(
-            db,
-            userId,
-            folder.id,
-            orderingToken,
-            "clear",
-            { asDriveRoot: options.asDriveRoot === true, record },
-            options.signal,
-            purgeFence,
-          ),
-        );
-        // Only notify peers when this write lifted a recorded denial —
-        // otherwise every successful folder fetch would retrigger the
-        // denial listeners and loop the reload.
-        if (receipt.liftedDenial) {
-          reportOfflineFolderDenial(userId, folder.id, null, [
-            folder.id,
-            ...(options.asDriveRoot === true ? [null] : []),
-          ]);
-        }
-      });
-    },
-
-    async getFolder(id) {
-      const realm = openRealm;
-      const db = readable();
-      if (!db || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      // The token fences the whole read: a denial committing between the
-      // snapshot and the check turns this into a miss.
-      const orderingToken = (await readFolderDenialSnapshot(db, userId))
-        .sequence;
-      const record = await readFolderForRoute(db, userId, id);
-      if (!record || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      const deniedFolderIds = await readDeniedFolderIds(db, userId);
-      const projected = projectDeniedFolder(record.folder, deniedFolderIds);
-      if (!projected || !isRealmCurrent(userId, realm)) {
-        return null;
-      }
-      try {
-        await updateFolderDenial(
-          db,
-          userId,
-          id,
-          orderingToken,
-          "check",
-          undefined,
-          undefined,
-          purgeFence,
-        );
-      } catch {
-        return null;
-      }
-      return { cachedAt: record.cachedAt, folder: projected };
-    },
-
-    async getFolderState(id) {
-      const realm = openRealm;
-      const db = readable();
-      if (!db || !isRealmCurrent(userId, realm)) {
-        return "missing";
-      }
-      const deniedFolderIds = await readDeniedFolderIds(db, userId);
-      const record = await readFolderForRoute(db, userId, id);
-      if (record) {
-        return projectDeniedFolder(record.folder, deniedFolderIds)
-          ? "available"
-          : "denied";
-      }
-      if (deniedFolderIds.has(id)) {
-        return "denied";
-      }
-      if (id === null) {
-        // Root denials may be recorded under the concrete root folder id.
-        const rootReference = await readMetadataRecord(
-          db,
-          driveRootMetadataKey(userId),
-        );
-        if (deniedFolderIds.has(rootReferenceId(rootReference))) {
-          return "denied";
-        }
-      }
-      return "missing";
     },
   };
 }

@@ -110,11 +110,11 @@ function projectNetworkSnapshot(
   snapshot.notes = snapshot.notes.filter(
     (note) =>
       !(
-        denial.deniedFolderIds.has(note.folderId) &&
-        note.access?.inherit !== false
-      ) &&
-      !denial.deniedNoteIds.has(note.id) &&
-      !denial.deniedNoteIds.has(note.shortId),
+        (denial.deniedFolderIds.has(note.folderId) &&
+          note.access?.inherit !== false) ||
+        denial.deniedNoteIds.has(note.id) ||
+        denial.deniedNoteIds.has(note.shortId)
+      ),
   );
   if (snapshot.visibleFolder) {
     snapshot.visibleFolder = denial.deniedFolderIds.has(

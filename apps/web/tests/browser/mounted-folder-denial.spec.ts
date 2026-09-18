@@ -764,9 +764,8 @@ test("stale note denial receipt is false after a newer clear generation", async 
     const id = "stale-note-receipt-note";
     try {
       await cache.denyNote(id);
-      const generation = await module.captureOfflineNoteDenialSequence(
-        "stale-note-receipt",
-      );
+      const generation =
+        await module.captureOfflineNoteDenialSequence("stale-note-receipt");
       if (generation === null) {
         throw new Error("note denial sequence is unavailable");
       }
@@ -779,11 +778,7 @@ test("stale note denial receipt is false after a newer clear generation", async 
         type: "invalidate",
         userId: "stale-note-receipt",
       } as const;
-      await cache.clearNoteDenial(
-        id,
-        cache.beginNoteRead(id),
-        generation,
-      );
+      await cache.clearNoteDenial(id, cache.beginNoteRead(id), generation);
       return module.readOfflineNoteDenial(oldEvent, [id]);
     } finally {
       cache.close();

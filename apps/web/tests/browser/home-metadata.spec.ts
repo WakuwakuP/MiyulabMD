@@ -174,7 +174,7 @@ test("a metadata read saves under the viewer captured before awaiting the networ
       const bob = await openOfflineCache({ userId: "bob" });
       try {
         // The cache save is detached: the read resolves before it commits.
-        let aliceFolder = null;
+        let aliceFolder: { folder: unknown } | null = null;
         const deadline = Date.now() + 5000;
         while (Date.now() < deadline) {
           aliceFolder = await alice.getFolder(null);

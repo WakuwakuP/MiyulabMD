@@ -107,8 +107,7 @@ test("an image response arriving after purge resolves empty instead of failing",
     const imageUrl = "/src/lib/attached-images.ts";
     const cacheUrl = "/src/lib/offline-cache.ts";
     const { acquireAttachedImage, attachedImage } = await import(imageUrl);
-    const { clearOfflineCacheUser, openOfflineCache } =
-      await import(cacheUrl);
+    const { clearOfflineCacheUser, openOfflineCache } = await import(cacheUrl);
     const originalFetch = globalThis.fetch;
     let release!: () => void;
     let started!: () => void;
@@ -142,7 +141,11 @@ test("an image response arriving after purge resolves empty instead of failing",
       const { rejected, text } = await pending;
       const fresh = await openOfflineCache({ userId: "alice" });
       try {
-        return { image: await fresh.getImage("parent", "image"), rejected, text };
+        return {
+          image: await fresh.getImage("parent", "image"),
+          rejected,
+          text,
+        };
       } finally {
         fresh.close();
       }
@@ -162,8 +165,7 @@ test("unsupported image MIME cannot replace a supported cached image", async ({
   await page.goto("/tests/browser/fixtures/storage.html");
   const result = await page.evaluate(async () => {
     const cacheUrl = "/src/lib/offline-cache.ts";
-    const { clearOfflineCacheUser, openOfflineCache } =
-      await import(cacheUrl);
+    const { clearOfflineCacheUser, openOfflineCache } = await import(cacheUrl);
     const cache = await openOfflineCache({ userId: "alice" });
     try {
       await cache.putImage(

@@ -223,7 +223,9 @@ async function assignBucket(
   spaceId: string | null,
 ): Promise<void> {
   await db(env)
-    .prepare("UPDATE folders SET para_bucket = ?, para_space_id = ? WHERE id = ?")
+    .prepare(
+      "UPDATE folders SET para_bucket = ?, para_space_id = ? WHERE id = ?",
+    )
     .bind(key, spaceId, folderId)
     .run();
 }
@@ -288,29 +290,6 @@ async function allAssignedBucketRows(
       path: row.folder,
       spaceId: row.para_space_id,
     }));
-}
-
-/**
- * Read-only bucket listing for one space in canonical PARA order.
- * `spaceId === null` selects the default space (`para_space_id IS NULL`).
- */
-async function assignedBucketRows(
-  env: Env,
-  ownerId: string,
-  spaceId: string | null,
-): Promise<AssignedBucketRow[]> {
-  const rows = await allAssignedBucketRows(env, ownerId);
-  const byKey = new Map(
-    rows.filter((row) => row.spaceId === spaceId).map((row) => [row.bucket, row]),
-  );
-  const out: AssignedBucketRow[] = [];
-  for (const def of PARA_BUCKETS) {
-    const row = byKey.get(def.key);
-    if (row) {
-      out.push(row);
-    }
-  }
-  return out;
 }
 
 /**
@@ -491,9 +470,7 @@ async function paraPlanFor(
         continue;
       }
     }
-    const path = target.rootPath
-      ? `${target.rootPath}/${def.name}`
-      : def.name;
+    const path = target.rootPath ? `${target.rootPath}/${def.name}` : def.name;
     const occupying = await folderWithBucketAtPath(env, ownerId, path);
     if (occupying) {
       buckets.push({
@@ -546,6 +523,23 @@ function invalidResolution(error: string, status = 400): MoveError {
   return { error, kind: "invalid", status };
 }
 
+/** Flat overlap check (ADR 0005): the folder must not already carry a PARA role. */
+async function paraRoleConflict(
+  env: Env,
+  target: FolderBucketRow,
+): Promise<MoveError | null> {
+  if (target.para_bucket !== null) {
+    return invalidResolution(
+      "このフォルダは既に PARA バケツに割り当て済みです",
+      409,
+    );
+  }
+  if (await folderIsSpaceRoot(env, target.id)) {
+    return invalidResolution("このフォルダは既に別スペースのルートです", 409);
+  }
+  return null;
+}
+
 /**
  * Validate an adopt/rename target: exists, owned, and carrying no PARA role
  * yet (flat overlap — neither a bucket nor a space root, ADR 0005).
@@ -560,9 +554,7 @@ async function normalizeTargetedResolution(
     newName?: string;
   },
   user: SessionUser,
-  constraint:
-    | { kind: "bucket"; parentPath: string }
-    | { kind: "space-root" },
+  constraint: { kind: "bucket"; parentPath: string } | { kind: "space-root" },
 ): Promise<TargetedResolution | MoveError> {
   if (
     typeof resolution.folderId !== "string" ||
@@ -588,17 +580,9 @@ async function normalizeTargetedResolution(
   } else if (!target.folder) {
     return invalidResolution("マイドライブはスペースルートにできません");
   }
-  if (target.para_bucket !== null) {
-    return invalidResolution(
-      "このフォルダは既に PARA バケツに割り当て済みです",
-      409,
-    );
-  }
-  if (await folderIsSpaceRoot(env, target.id)) {
-    return invalidResolution(
-      "このフォルダは既に別スペースのルートです",
-      409,
-    );
+  const roleConflict = await paraRoleConflict(env, target);
+  if (roleConflict) {
+    return roleConflict;
   }
   if (resolution.action === "adopt") {
     return { action: "adopt", target };
@@ -647,9 +631,7 @@ async function normalizeSpaceResolution(
     return normalized;
   }
   if (seenTargets.has(normalized.target.id)) {
-    return invalidResolution(
-      "同じフォルダを複数の役割に割り当てられません",
-    );
+    return invalidResolution("同じフォルダを複数の役割に割り当てられません");
   }
   seenTargets.add(normalized.target.id);
   return normalized;
@@ -806,18 +788,20 @@ type SpaceApplyResult =
  * "collision" = the root name is still occupied — the space is aborted and
  * reported pending so the caller can resolve and re-run.
  */
-async function applySpaceSetup(
+/**
+ * Decide the space root folder: adopt the target / rename the colliding one
+ * then create / create outright. "collision" = the root name is still
+ * occupied after applying the resolution.
+ */
+async function resolveSpaceRootFolder(
   env: Env,
   notes: ReturnType<typeof createNoteService>,
   user: SessionUser,
   target: Extract<SpaceTarget, { kind: "proposed" }>,
   resolution: NormalizedResolution | undefined,
-): Promise<SpaceApplyResult> {
-  if (resolution?.action === "skip") {
-    return "skipped";
-  }
-  let rootFolderId: string;
-  let rootPath = target.rootPath;
+): Promise<
+  { rootFolderId: string; rootPath: string } | "collision" | MoveError
+> {
   if (resolution?.action === "adopt") {
     // Re-check: the folder may have gained a PARA role since validation.
     const fresh = await folderWithBucketById(env, resolution.target.id);
@@ -828,39 +812,63 @@ async function applySpaceSetup(
     ) {
       return "collision";
     }
-    rootFolderId = fresh.id;
-    rootPath = fresh.folder;
-  } else {
-    if (resolution?.action === "rename") {
-      const renamed = await notes.renameFolder(
-        resolution.target.id,
-        resolution.newName,
-        user,
-      );
-      if (renamed.kind !== "ok") {
-        return renamed;
-      }
-      // The proposed root name is now free — fall through to create it.
-    }
-    const occupying = await folderWithBucketAtPath(
-      env,
-      user.id,
-      target.rootPath,
-    );
-    if (occupying) {
-      return "collision";
-    }
-    const created = await ensureFolderRow(env, user.id, target.rootPath);
-    if (!created) {
-      return invalidResolution("スペースルートを作成できませんでした", 500);
-    }
-    rootFolderId = created;
+    return { rootFolderId: fresh.id, rootPath: fresh.folder };
   }
-  const spaceRow = await insertSpaceRow(env, user.id, target.name, rootFolderId);
+  if (resolution?.action === "rename") {
+    const renamed = await notes.renameFolder(
+      resolution.target.id,
+      resolution.newName,
+      user,
+    );
+    if (renamed.kind !== "ok") {
+      return renamed;
+    }
+    // The proposed root name is now free — fall through to create it.
+  }
+  const occupying = await folderWithBucketAtPath(env, user.id, target.rootPath);
+  if (occupying) {
+    return "collision";
+  }
+  const created = await ensureFolderRow(env, user.id, target.rootPath);
+  if (!created) {
+    return invalidResolution("スペースルートを作成できませんでした", 500);
+  }
+  return { rootFolderId: created, rootPath: target.rootPath };
+}
+
+async function applySpaceSetup(
+  env: Env,
+  notes: ReturnType<typeof createNoteService>,
+  user: SessionUser,
+  target: Extract<SpaceTarget, { kind: "proposed" }>,
+  resolution: NormalizedResolution | undefined,
+): Promise<SpaceApplyResult> {
+  if (resolution?.action === "skip") {
+    return "skipped";
+  }
+  const root = await resolveSpaceRootFolder(
+    env,
+    notes,
+    user,
+    target,
+    resolution,
+  );
+  if (root === "collision") {
+    return "collision";
+  }
+  if ("kind" in root) {
+    return root;
+  }
+  const spaceRow = await insertSpaceRow(
+    env,
+    user.id,
+    target.name,
+    root.rootFolderId,
+  );
   if (spaceRow === "conflict") {
     return invalidResolution("同名のスペースが既に存在します", 409);
   }
-  return { kind: "ok", rootPath, spaceRow };
+  return { kind: "ok", rootPath: root.rootPath, spaceRow };
 }
 
 /**
@@ -915,6 +923,62 @@ async function applyBucketSetup(
  * root and any unresolved buckets come back in `pending` so the caller can
  * collect resolutions and re-run.
  */
+/**
+ * Step 2 of enable: apply every bucket resolution under the space root.
+ * Returns the set of keys the caller asked to skip, or a MoveError.
+ */
+async function applyAllBuckets(
+  env: Env,
+  notes: ReturnType<typeof createNoteService>,
+  user: SessionUser,
+  rootPath: string,
+  spaceId: string | null,
+  buckets: Map<ParaBucketKey, NormalizedResolution>,
+): Promise<Set<ParaResolutionKey> | MoveError> {
+  const skipped = new Set<ParaResolutionKey>();
+  for (const def of PARA_BUCKETS) {
+    if (await bucketRow(env, user.id, def.key, spaceId)) {
+      continue; // already assigned: no-op
+    }
+    const applied = await applyBucketSetup(
+      env,
+      notes,
+      user,
+      def,
+      buckets.get(def.key),
+      rootPath,
+      spaceId,
+    );
+    if (applied === "skipped") {
+      skipped.add(def.key);
+      continue;
+    }
+    if (applied !== "ok") {
+      return applied;
+    }
+  }
+  return skipped;
+}
+
+/**
+ * Step 1 of enable for an already-existing space: the effective root path
+ * and space id. A rowless default space is materialized so it can be
+ * listed/unassigned.
+ */
+async function existingSpaceContext(
+  env: Env,
+  user: SessionUser,
+  target: SpaceTarget,
+): Promise<{ rootPath: string; spaceId: string | null } | MoveError> {
+  if (target.kind === "rootless" && target.row === null) {
+    const row = await ensureRootlessSpace(env, user.id);
+    if (!("id" in row)) {
+      return row;
+    }
+  }
+  return { rootPath: target.rootPath, spaceId: bucketSpaceId(target) };
+}
+
 export async function enablePara(
   env: Env,
   input: ParaEnableInput | null | undefined,
@@ -962,39 +1026,25 @@ export async function enablePara(
     spaceId = applied.spaceRow.id;
     rootPath = applied.rootPath;
   } else {
-    rootPath = target.rootPath;
-    spaceId = bucketSpaceId(target);
-    if (target.kind === "rootless" && target.row === null) {
-      // Materialize the default space row so it can be listed/unassigned.
-      const row = await ensureRootlessSpace(env, user.id);
-      if (!("id" in row)) {
-        return row;
-      }
+    const context = await existingSpaceContext(env, user, target);
+    if ("kind" in context) {
+      return context;
     }
+    rootPath = context.rootPath;
+    spaceId = context.spaceId;
   }
 
   // 2. Buckets under the (effective) space root.
-  const skipped = new Set<ParaResolutionKey>();
-  for (const def of PARA_BUCKETS) {
-    if (await bucketRow(env, user.id, def.key, spaceId)) {
-      continue; // already assigned: no-op
-    }
-    const applied = await applyBucketSetup(
-      env,
-      notes,
-      user,
-      def,
-      normalized.buckets.get(def.key),
-      rootPath,
-      spaceId,
-    );
-    if (applied === "skipped") {
-      skipped.add(def.key);
-      continue;
-    }
-    if (applied !== "ok") {
-      return applied;
-    }
+  const skipped = await applyAllBuckets(
+    env,
+    notes,
+    user,
+    rootPath,
+    spaceId,
+    normalized.buckets,
+  );
+  if (!(skipped instanceof Set)) {
+    return skipped;
   }
 
   return finishEnable(env, user.id, input?.space, target, "ok", skipped);
@@ -1062,12 +1112,11 @@ function findListedSpace(
   const id =
     typeof selector === "object" && "id" in selector ? selector.id : needle;
   const name =
-    typeof selector === "object" && "name" in selector
-      ? selector.name
-      : needle;
+    typeof selector === "object" && "name" in selector ? selector.name : needle;
   return (
-    spaces.find((space) => (id && space.id === id) || (name && space.name === name)) ??
-    null
+    spaces.find(
+      (space) => (id && space.id === id) || (name && space.name === name),
+    ) ?? null
   );
 }
 
@@ -1077,6 +1126,88 @@ function findListedSpace(
  * the default space otherwise (backward compatible).
  * Read-only per §2.4: an unset-up drive returns `{ spaces: [], buckets: [] }`.
  */
+/** Assigned buckets of one space, in canonical PARA order, with note counts. */
+async function paraBucketSummaries(
+  env: Env,
+  ownerId: string,
+  rows: AssignedBucketRow[],
+): Promise<ParaBucket[]> {
+  const buckets: ParaBucket[] = [];
+  for (const def of PARA_BUCKETS) {
+    const assigned = rows.find((entry) => entry.bucket === def.key);
+    if (assigned) {
+      buckets.push({
+        folderId: assigned.id,
+        key: def.key,
+        name: folderName(assigned.path),
+        noteCount: await countNotesInSubtree(env, ownerId, assigned.path),
+        path: assigned.path,
+      });
+    }
+  }
+  return buckets;
+}
+
+/**
+ * Materialize every space row into a summary. `bySpace` is consumed; rows
+ * left under the null key (a DB pre-dating the 0016 backfill) still list
+ * under a synthesized default space.
+ */
+async function listSpaceSummaries(
+  env: Env,
+  ownerId: string,
+  spaceRows: SpaceRow[],
+  bySpace: Map<string | null, AssignedBucketRow[]>,
+): Promise<ParaSpaceSummary[]> {
+  const spaces: ParaSpaceSummary[] = [];
+  for (const row of spaceRows) {
+    const isDefault = row.root_folder_id === null;
+    const root =
+      row.root_folder_id === null
+        ? null
+        : await getFolderById(env, row.root_folder_id);
+    const buckets = await paraBucketSummaries(
+      env,
+      ownerId,
+      bySpace.get(isDefault ? null : row.id) ?? [],
+    );
+    spaces.push({
+      buckets,
+      id: row.id,
+      isDefault,
+      name: row.name,
+      rootFolderId: row.root_folder_id,
+      rootPath: isDefault ? "" : (root?.folder ?? ""),
+    });
+    bySpace.delete(isDefault ? null : row.id);
+  }
+  const orphanDefault = bySpace.get(null);
+  if (orphanDefault?.length) {
+    spaces.unshift({
+      buckets: await paraBucketSummaries(env, ownerId, orphanDefault),
+      id: "default",
+      isDefault: true,
+      name: DEFAULT_PARA_SPACE_NAME,
+      rootFolderId: null,
+      rootPath: "",
+    });
+  }
+  spaces.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  return spaces;
+}
+
+function groupBucketsBySpace(
+  rows: AssignedBucketRow[],
+): Map<string | null, AssignedBucketRow[]> {
+  const bySpace = new Map<string | null, AssignedBucketRow[]>();
+  for (const row of rows) {
+    const list = bySpace.get(row.spaceId) ?? [];
+    list.push(row);
+    bySpace.set(row.spaceId, list);
+  }
+  return bySpace;
+}
+
 export async function paraList(
   env: Env,
   user: SessionUser | undefined,
@@ -1098,106 +1229,35 @@ export async function paraList(
     listSpaceRows(env, user.id),
     allAssignedBucketRows(env, user.id),
   ]);
-  const bySpace = new Map<string | null, AssignedBucketRow[]>();
-  for (const row of bucketRows) {
-    const list = bySpace.get(row.spaceId) ?? [];
-    list.push(row);
-    bySpace.set(row.spaceId, list);
-  }
-
-  const spaces: ParaSpaceSummary[] = [];
-  for (const row of spaceRows) {
-    const isDefault = row.root_folder_id === null;
-    const rootId = row.root_folder_id;
-    const root = rootId === null ? null : await getFolderById(env, rootId);
-    const rows = bySpace.get(isDefault ? null : row.id) ?? [];
-    const buckets: ParaBucket[] = [];
-    for (const def of PARA_BUCKETS) {
-      const assigned = rows.find((entry) => entry.bucket === def.key);
-      if (assigned) {
-        buckets.push({
-          folderId: assigned.id,
-          key: def.key,
-          name: folderName(assigned.path),
-          noteCount: await countNotesInSubtree(env, user.id, assigned.path),
-          path: assigned.path,
-        });
-      }
-    }
-    spaces.push({
-      buckets,
-      id: row.id,
-      isDefault,
-      name: row.name,
-      rootFolderId: row.root_folder_id,
-      rootPath: isDefault ? "" : (root?.folder ?? ""),
-    });
-    bySpace.delete(isDefault ? null : row.id);
-  }
-  // Defensive: default-space buckets without a materialized row (a DB that
-  // pre-dates the 0016 backfill) still list under a synthesized space.
-  const orphanDefault = bySpace.get(null);
-  if (orphanDefault?.length) {
-    const buckets: ParaBucket[] = [];
-    for (const def of PARA_BUCKETS) {
-      const assigned = orphanDefault.find((entry) => entry.bucket === def.key);
-      if (assigned) {
-        buckets.push({
-          folderId: assigned.id,
-          key: def.key,
-          name: folderName(assigned.path),
-          noteCount: await countNotesInSubtree(env, user.id, assigned.path),
-          path: assigned.path,
-        });
-      }
-    }
-    spaces.unshift({
-      buckets,
-      id: "default",
-      isDefault: true,
-      name: DEFAULT_PARA_SPACE_NAME,
-      rootFolderId: null,
-      rootPath: "",
-    });
-  }
-  spaces.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
-
+  const spaces = await listSpaceSummaries(
+    env,
+    user.id,
+    spaceRows,
+    groupBucketsBySpace(bucketRows),
+  );
   const defaultSpace = spaces.find((space) => space.isDefault);
   const result: ParaListResult = {
     buckets: defaultSpace?.buckets ?? [],
     spaces,
   };
 
+  const scoped =
+    spaceSelector === undefined || spaceSelector === null
+      ? defaultSpace
+      : findListedSpace(spaces, spaceSelector);
   if (spaceSelector !== undefined && spaceSelector !== null) {
-    const space = findListedSpace(spaces, spaceSelector);
-    if (!space) {
+    if (!scoped) {
       return {
         error: "スペースが見つかりません",
         kind: "invalid",
         status: 400,
       };
     }
-    result.spaces = [space];
-    result.buckets = space.buckets;
-    if (bucket) {
-      const target = space.buckets.find((entry) => entry.key === bucket);
-      if (target) {
-        result.children = await listFolderChildren(
-          env,
-          user.id,
-          target.path,
-          target.folderId,
-          user,
-        );
-      }
-    }
-    return { kind: "ok", result };
+    result.spaces = [scoped];
+    result.buckets = scoped.buckets;
   }
-
-  if (bucket) {
-    const target = defaultSpace?.buckets.find(
-      (entry) => entry.key === bucket,
-    );
+  if (bucket && scoped) {
+    const target = scoped.buckets.find((entry) => entry.key === bucket);
     if (target) {
       result.children = await listFolderChildren(
         env,

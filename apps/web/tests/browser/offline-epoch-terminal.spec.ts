@@ -107,8 +107,9 @@ for (const scenario of [
       const cacheUrl = "/src/lib/offline-cache.ts";
       const sessionUrl = "/src/lib/note-read-session.ts";
       const homeUrl = "/src/lib/home-metadata-reader.ts";
-      const { enterOfflineNoteDenial, openOfflineCache } =
-        await import(cacheUrl);
+      const { enterOfflineNoteDenial, openOfflineCache } = await import(
+        cacheUrl
+      );
       const { createNoteReadSession } = await import(sessionUrl);
       const { readHomeMetadata } = await import(homeUrl);
       const viewer = {
@@ -146,7 +147,7 @@ for (const scenario of [
       // read awaits the parallel denial snapshot's metadata range scan.
       IDBObjectStore.prototype.get = function (key) {
         const request = originalGet.call(this, key);
-        if (!home && !gated && String(key).startsWith("note-order:")) {
+        if (!(home || gated) && String(key).startsWith("note-order:")) {
           delay(request);
         }
         return request;

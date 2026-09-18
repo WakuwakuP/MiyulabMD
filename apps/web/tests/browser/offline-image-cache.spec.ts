@@ -40,8 +40,7 @@ test("image references and binary files stay user scoped and purge fences expire
 }) => {
   const result = await page.evaluate(async () => {
     const moduleUrl = "/src/lib/offline-cache.ts";
-    const { openOfflineCache, clearOfflineCacheUser } =
-      await import(moduleUrl);
+    const { openOfflineCache, clearOfflineCacheUser } = await import(moduleUrl);
     const alice = await openOfflineCache({ userId: "alice" });
     const bob = await openOfflineCache({ userId: "bob" });
     try {

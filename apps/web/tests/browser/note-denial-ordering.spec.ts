@@ -8,8 +8,9 @@ test("a request started before denial cannot revive a note, but a new successful
   const result = await page.evaluate(async (note) => {
     const cacheUrl = "/src/lib/offline-cache.ts";
     const readerUrl = "/src/lib/note-read-session.ts";
-    const { openOfflineCache, subscribeOfflineCacheNoteDenial } =
-      await import(cacheUrl);
+    const { openOfflineCache, subscribeOfflineCacheNoteDenial } = await import(
+      cacheUrl
+    );
     const { createNoteReadSession } = await import(readerUrl);
     const barrierUrl = "/tests/browser/fixtures/deferred-cache-open.ts";
     const { deferNextDatabaseOpen } = await import(barrierUrl);

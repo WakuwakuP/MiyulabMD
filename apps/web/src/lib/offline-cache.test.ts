@@ -264,7 +264,10 @@ class FakeDatabase {
     this.backend.stores.delete(name);
   }
 
-  transaction(storeNames: string[] | string, mode = "readonly"): FakeTransaction {
+  transaction(
+    storeNames: string[] | string,
+    mode = "readonly",
+  ): FakeTransaction {
     const names = Array.isArray(storeNames) ? storeNames : [storeNames];
     const transaction = new FakeTransaction(this.backend, names, mode);
     if (idbHarness.abortNextTransaction) {
@@ -418,7 +421,9 @@ const opfsRoot = new FakeDirectoryHandle();
 
 Object.defineProperty(globalThis, "indexedDB", {
   configurable: true,
-  value: { open: (name: string, version?: number) => idbHarness.open(name, version) },
+  value: {
+    open: (name: string, version?: number) => idbHarness.open(name, version),
+  },
 });
 Object.defineProperty(globalThis, "IDBKeyRange", {
   configurable: true,
@@ -638,10 +643,12 @@ test("upgrading a v4 database wipes every record and legacy store", async () => 
   } finally {
     cache.close();
   }
-  assert.deepEqual(
-    [...backend.stores.keys()].sort(),
-    ["folders", "metadata", "note-lists", "notes"],
-  );
+  assert.deepEqual([...backend.stores.keys()].sort(), [
+    "folders",
+    "metadata",
+    "note-lists",
+    "notes",
+  ]);
   assert.equal(backend.stores.get("metadata")?.size, 0);
   assert.equal(backend.stores.get("notes")?.size, 0);
   // A wiped cache accepts fresh writes under the v5 layout.
@@ -914,10 +921,7 @@ test("putFolder clears a committed denial only with a fresh read token", async (
     // A token captured after the denial proves revalidation and lifts it.
     const orderingToken = await cache.beginFolderRead("folder-b");
     await cache.putFolder(folder("folder-b", userId), { orderingToken });
-    assert.equal(
-      (await cache.getFolder("folder-b"))?.folder.id,
-      "folder-b",
-    );
+    assert.equal((await cache.getFolder("folder-b"))?.folder.id, "folder-b");
   } finally {
     cache.close();
   }

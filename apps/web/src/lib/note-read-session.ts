@@ -405,6 +405,86 @@ export function createNoteReadSession(
     }
   };
 
+  /** 成功したネットワーク結果を即座に publish し、キャッシュ保存は切り離す。 */
+  const publishNetworkResult = async (
+    result: ApiResult<Note> & { ok: true },
+    orderingToken: number,
+    owner: ReadOwner,
+    denialSequencePromise: Promise<number | null>,
+    purgeFencePromise: Promise<{ device: number; user: number } | null>,
+  ): Promise<NoteReadResult> => {
+    const cacheViewerId = capturedViewer.cacheViewerId;
+    owner.denialSequence = await denialSequencePromise;
+    const purgeFence = await purgeFencePromise;
+    if (
+      cacheViewerId &&
+      purgeFence &&
+      !(await isOfflinePurgeFenceCurrent(cacheViewerId, purgeFence))
+    ) {
+      throw new DOMException("Note read invalidated by purge", "AbortError");
+    }
+    const published: NoteReadResult = {
+      cachedAt: null,
+      data: result.data,
+      ok: true,
+      source: "network",
+      viewer: snapshotViewer(capturedViewer),
+    };
+    if (cacheViewerId) {
+      persistNoteDetached(
+        cacheViewerId,
+        result.data,
+        orderingToken,
+        owner.denialSequence,
+      );
+    }
+    return published;
+  };
+
+  /** 失敗結果を publish 用の形に整える。denial は台帳へ best-effort 記録。 */
+  const publishFailedResult = async (
+    result: ApiResult<Note> & { ok: false },
+    id: string,
+    owner: ReadOwner,
+  ): Promise<NoteReadResult> => {
+    if (signal.aborted) {
+      throw signal.reason;
+    }
+    let cacheWarning: string | undefined;
+    if (isDenial(result) && capturedViewer.cacheViewerId) {
+      owner.deniedLocally = true;
+      const persisted = await persistDenial(id);
+      if (!persisted) {
+        cacheWarning =
+          "キャッシュを無効化できませんでした。安全のためキャッシュをクリアしてください。";
+      }
+    }
+    return failedReadResult(result, capturedViewer, cacheWarning);
+  };
+
+  const publishResult = (
+    result: ApiResult<Note> | NoteReadResult,
+    id: string,
+    orderingToken: number,
+    owner: ReadOwner,
+    denialSequencePromise: Promise<number | null>,
+    purgeFencePromise: Promise<{ device: number; user: number } | null>,
+  ): Promise<NoteReadResult> => {
+    if (isPublishedReadResult(result)) {
+      return Promise.resolve(result);
+    }
+    if (result.ok) {
+      return publishNetworkResult(
+        result,
+        orderingToken,
+        owner,
+        denialSequencePromise,
+        purgeFencePromise,
+      );
+    }
+    return publishFailedResult(result, id, owner);
+  };
+
   return {
     dispose() {
       if (disposed) {
@@ -448,53 +528,14 @@ export function createNoteReadSession(
         capturedViewer.mode === "cached"
           ? await readCachedOnly(id)
           : await fetchWithFallback(id, orderingToken, purgeFencePromise);
-      let published: NoteReadResult;
-      if (isPublishedReadResult(result)) {
-        published = result;
-      } else if (result.ok) {
-        owner.denialSequence = await denialSequencePromise;
-        const purgeFence = await purgeFencePromise;
-        if (
-          cacheViewerId &&
-          purgeFence &&
-          !(await isOfflinePurgeFenceCurrent(cacheViewerId, purgeFence))
-        ) {
-          throw new DOMException(
-            "Note read invalidated by purge",
-            "AbortError",
-          );
-        }
-        // Publish immediately; the cache save is detached.
-        published = {
-          cachedAt: null,
-          data: result.data,
-          ok: true,
-          source: "network",
-          viewer: snapshotViewer(capturedViewer),
-        };
-        if (cacheViewerId) {
-          persistNoteDetached(
-            cacheViewerId,
-            result.data,
-            orderingToken,
-            owner.denialSequence,
-          );
-        }
-      } else {
-        if (signal.aborted) {
-          throw signal.reason;
-        }
-        let cacheWarning: string | undefined;
-        if (isDenial(result) && capturedViewer.cacheViewerId) {
-          owner.deniedLocally = true;
-          const persisted = await persistDenial(id);
-          if (!persisted) {
-            cacheWarning =
-              "キャッシュを無効化できませんでした。安全のためキャッシュをクリアしてください。";
-          }
-        }
-        published = failedReadResult(result, capturedViewer, cacheWarning);
-      }
+      const published = await publishResult(
+        result,
+        id,
+        orderingToken,
+        owner,
+        denialSequencePromise,
+        purgeFencePromise,
+      );
       ensurePublishable(published, id, orderingToken);
       if (published.ok) {
         owner.identities.add(published.data.id);

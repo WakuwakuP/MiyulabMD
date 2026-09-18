@@ -72,7 +72,7 @@ function fenceMatches(
   theirs: NotePurgeFence | null,
 ): boolean {
   // An unreadable ledger cannot prove staleness; degrade to shared.
-  if (!mine || !theirs) {
+  if (!(mine && theirs)) {
     return true;
   }
   return mine.device === theirs.device && mine.user === theirs.user;

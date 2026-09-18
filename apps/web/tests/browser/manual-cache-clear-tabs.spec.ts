@@ -16,9 +16,7 @@ test("durable device epoch rejects stale Alice and Bob handles when BroadcastCha
   await other.goto("/tests/browser/fixtures/storage.html");
   try {
     await other.evaluate(async (source) => {
-      const { openOfflineCache } = await import(
-        "/src/lib/offline-cache.ts"
-      );
+      const { openOfflineCache } = await import("/src/lib/offline-cache.ts");
       const alice = await openOfflineCache({ userId: "manual-tab-alice-7" });
       const bob = await openOfflineCache({ userId: "manual-tab-bob-7" });
       await alice.putNote({
