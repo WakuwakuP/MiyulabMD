@@ -696,7 +696,10 @@ export function EditorPage() {
     readSource === "network" &&
     !editLocked &&
     (viewMode === "preview" || (!paused && (!collab || collabWritable)));
-  const bodyEditable = canEdit && !paused && !editLocked;
+  // preview 中の warmup セッション切断は編集可否に関係しないため、
+  // paused は編集モード時だけ Edit 表示の条件にする。
+  const bodyEditable =
+    canEdit && !editLocked && (viewMode === "preview" || !paused);
   // REST 変更は preview 中の warmup セッションの同期状態に依存しない。
   // 編集セッションがあるモードだけ ws 同期を配送可否の条件にする。
   const canStartMutation = () =>

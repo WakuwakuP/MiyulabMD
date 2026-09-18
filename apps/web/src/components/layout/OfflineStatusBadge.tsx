@@ -29,8 +29,8 @@ export function OfflineStatusBadge() {
       </button>
       <span
         className={cn(
-          "absolute top-[calc(100%+0.45rem)] left-0 z-40 hidden whitespace-nowrap rounded-xl border border-border bg-canvas px-3 py-2 text-xs shadow-menu group-hover:block",
-          open && "block",
+          "absolute top-[calc(100%+0.45rem)] left-0 z-40 whitespace-nowrap rounded-xl border border-border bg-canvas px-3 py-2 text-xs shadow-menu group-hover:block",
+          open ? "block" : "hidden",
         )}
         role="status"
       >
