@@ -254,8 +254,15 @@ export function bindEditorCollab(input: {
         if (input.sessionRef.current !== session) {
           return;
         }
-        input.setCollabReady(true);
         const next = session.yMarkdown.toString();
+        // 復元 doc が空なのに表示スナップショットに本文があるときは、
+        // 同期済みマーカーだけ残って編集キャッシュが失われた可能性がある。
+        // 空 doc への編集は後のマージで本文を二重化・置換しうるため
+        // 書き込みを開放せず、オンライン再同期を待つ。
+        if (next.length === 0 && (input.note?.markdown.length ?? 0) > 0) {
+          return;
+        }
+        input.setCollabReady(true);
         if (next.length > 0) {
           input.setMarkdown(next);
         }

@@ -207,6 +207,89 @@ test("a synced self-owned note edits its local document offline and merges after
   }
 });
 
+test("a synced marker without the edit cache document stays unwritable offline", async ({
+  page,
+}) => {
+  // localStorage marker survives while y-indexeddb was evicted: entering edit
+  // mode must not unlock a blank local Y.Doc, or later merges could duplicate
+  // or displace the real body.
+  let apiAvailable = true;
+  const mutations: string[] = [];
+  await mockApis(page, () => apiAvailable, mutations);
+  await page.addInitScript(() => {
+    localStorage.setItem("miyulabmd:editor-edit-mode", "source");
+  });
+
+  const serverDoc = new Y.Doc();
+  serverDoc.getText("markdown").insert(0, note.markdown);
+  await page.routeWebSocket("**/ws/notes/**", (socket) => {
+    socket.onMessage(() => {
+      if (apiAvailable) {
+        socket.send(syncFrame(serverDoc));
+      }
+    });
+  });
+
+  try {
+    // Online: sync once so the synced marker and the edit cache both exist.
+    await page.goto(`/n/${note.id}`);
+    await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    await expect(page.locator(".cm-content")).toContainText(
+      "通信なしでも読みたい本文。",
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          localStorage.getItem("miyulabmd:yjs-synced:alice:note-1"),
+        ),
+      )
+      .toBe("1");
+    await expect.poll(() => editCacheUpdateCount(page)).toBeGreaterThan(0);
+
+    // Offline: evict only the edit cache, keeping the marker and display cache.
+    apiAvailable = false;
+    await page.reload();
+    await expect(
+      page.getByText("通信なしでも読みたい本文。", { exact: true }),
+    ).toBeVisible();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const request = indexedDB.deleteDatabase(
+            "miyulabmd-edit:alice:note-1",
+          );
+          request.onsuccess = () => resolve();
+          request.onerror = () => resolve();
+        }),
+    );
+
+    // Edit mode restores an empty document: the editor must stay unwritable
+    // instead of exposing a blank document for edits. Wait until the
+    // persistence layer recreated the database (whenSynced already fired).
+    await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          indexedDB
+            .databases()
+            .then((dbs) =>
+              dbs.some((db) => db.name === "miyulabmd-edit:alice:note-1"),
+            ),
+        ),
+      )
+      .toBe(true);
+    await page.waitForTimeout(500);
+    await expect(page.getByText("共同編集に接続中…")).toBeVisible();
+    await expect(page.locator(".cm-content")).toHaveCount(0);
+    await expect(
+      page.getByRole("status").filter({ hasText: "未送信の編集" }),
+    ).toHaveCount(0);
+    expect(mutations).toEqual([]);
+  } finally {
+    serverDoc.destroy();
+  }
+});
+
 test("a synced note that is not self-scoped stays read-only offline", async ({
   page,
 }) => {

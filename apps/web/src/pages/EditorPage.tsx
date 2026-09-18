@@ -669,8 +669,15 @@ export function EditorPage() {
   const bodyWritable = collabWritable || offlineWritable;
   const paused = ready && !bodyWritable;
   // §2.6: edit lock freezes all mutations, not just the body.
-  // 本文以外の REST 変更はオンライン同期（collabWritable）まで常に不可。
-  const canMutate = canEdit && !paused && !editLocked && collabWritable;
+  // 本文以外の REST 変更はネットワーク由来の閲覧と、セッションがない
+  // （preview 等）かオンライン同期済みの場合に限る。表示キャッシュ由来では
+  // ws が後から同期しても REST UI は有効化しない。
+  const canMutate =
+    canEdit &&
+    readSource === "network" &&
+    !paused &&
+    !editLocked &&
+    (!collab || collabWritable);
   const bodyEditable = canEdit && !paused && !editLocked;
 
   useLayoutEffect(() => {
