@@ -23,15 +23,20 @@ const GUEST_LABEL = "ゲスト";
 
 type Props = {
   user: SessionUser | null;
+  /** Display-only profile restored from the offline cache; never authenticated. */
+  cachedUser?: SessionUser | null;
   authConfig: AuthConfig;
 };
 
-export function AccountMenu({ user, authConfig }: Props) {
+export function AccountMenu({ user, cachedUser, authConfig }: Props) {
   const [open, setOpen] = useState(false);
   const [loginEmail, setLoginEmail] = useState("dev@example.com");
   const rootRef = useRef<HTMLDivElement>(null);
-  const label = user?.displayName?.trim() || user?.email || GUEST_LABEL;
-  const mockLogin = !(user || authConfig.access) && authConfig.mock;
+  const displayUser = user ?? cachedUser ?? null;
+  const label =
+    displayUser?.displayName?.trim() || displayUser?.email || GUEST_LABEL;
+  const mockLogin =
+    !(user || cachedUser || authConfig.access) && authConfig.mock;
   useDismiss(open, () => setOpen(false), rootRef);
 
   function handleLoginSubmit(event: FormEvent) {
@@ -54,16 +59,16 @@ export function AccountMenu({ user, authConfig }: Props) {
         type="button"
       >
         <Avatar
-          color={colorForEmail(user?.email, user?.id)}
+          color={colorForEmail(displayUser?.email, displayUser?.id)}
           name={label}
           size="md"
         />
       </button>
       {open && (
         <MenuPanel width="20rem">
-          <MenuHeader email={user?.email} name={label}>
+          <MenuHeader email={displayUser?.email} name={label}>
             <Avatar
-              color={colorForEmail(user?.email, user?.id)}
+              color={colorForEmail(displayUser?.email, displayUser?.id)}
               name={label}
               size="lg"
             />
@@ -74,6 +79,16 @@ export function AccountMenu({ user, authConfig }: Props) {
             <ThemeSwitch />
           </MenuRow>
           <MenuSeparator />
+          {!user && cachedUser && (
+            <>
+              <MenuRow>
+                <span className="text-[0.85rem] text-muted">
+                  キャッシュから閲覧中
+                </span>
+              </MenuRow>
+              <MenuSeparator />
+            </>
+          )}
           {user && (
             <>
               <MenuItem onClick={() => setOpen(false)} to="/settings">
@@ -113,7 +128,7 @@ export function AccountMenu({ user, authConfig }: Props) {
               </Button>
             </form>
           )}
-          {!(user || mockLogin) && (
+          {!(user || cachedUser || mockLogin) && (
             <MenuItem href="/auth/login">ログイン</MenuItem>
           )}
         </MenuPanel>

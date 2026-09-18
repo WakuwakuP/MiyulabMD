@@ -39,6 +39,13 @@ function sameAssociation(
 
 function snapshotViewer(viewer: ViewerContext): ViewerContext {
   return {
+    cachedUser: viewer.cachedUser
+      ? {
+          displayName: viewer.cachedUser.displayName,
+          email: viewer.cachedUser.email,
+          id: viewer.cachedUser.id,
+        }
+      : null,
     cacheViewerId: viewer.cacheViewerId,
     mode: viewer.mode,
     user: viewer.user

@@ -2395,6 +2395,38 @@ git diff --check: PASS
 これは記載した live workflow と採用 hash の検証結果であり、全 offline
 workflow の完了を意味しない。
 
+## D132：cached viewer の表示用プロフィールを viewer-id と分離して永続化する
+
+- 状態：実装中。
+- 背景・観測した問題：オフライン起動では `viewer-id` だけが残るため
+  cached モードの `viewer.user` が null になり、ヘッダーが「ゲスト」表示
+  （ログイン導線付き）になる。キャッシュ領域の判定には viewer-id で足りるが、
+  「誰のキャッシュを見せているか」を画面に出せるデータがなかった。
+- 検討した選択肢と各案の利点・欠点：
+  - `viewer.user` を cached モードでも埋める案：ヘッダー変更が最小だが、
+    `user != null` をログイン中とみなす全箇所（設定・ログアウト・所有者判定・
+    サイト公開）の監査が必要。オフラインでログアウトを押すとサーバー確認前に
+    `clearOfflineCacheUser` が走り、失敗してもキャッシュは既に消えている。
+    §9.1「ローカルの識別情報は認証・権限の証明に使わない」の線引きも曖昧になる。
+  - 表示専用フィールド `cachedUser` を `ViewerContext` に追加する案：
+    `user`（サーバー確認済みセッション）の意味を壊さず、mutation ゲート・
+    権限判定を変更せずに済む。AccountMenu は `cachedUser` で名前・アバターと
+    「キャッシュから閲覧中」を出し、ログイン／設定／ログアウト項目は出さない。
+- 推奨・採用した案と理由：表示専用フィールド案。永続化は `viewer-id` と同じ
+  メタデータ領域の別キー `viewer-profile`（JSON で id/email/displayName のみ、
+  settings は含めない）にし、`viewer-id` だけ残る既存データとの互換を保つ。
+  `persistCachedViewer` は tombstone・realm のフェンスを viewer-id と共有し、
+  user purge で id が一致する場合のみ削除、device clear では viewer-id と同様
+  保持する。
+- 影響範囲・制約・未確認事項：`cachedUser` は optional フィールドで
+  `viewer.user` の意味を変更しない。`viewer-profile` を持たない旧データは
+  `cachedUser: null` に縮退し、次回の /api/me 成功で書き込まれる。
+  AccountMenu の cached 表示のブラウザ検証は未実施。
+- テスト／再現手順と実際の結果：`pnpm --filter @miyulabmd/web typecheck` 成功、
+  `pnpm test` 198件成功、Biome 対象7ファイル成功。
+  `viewer-context.spec.ts` に cached 復元時の `cachedUser` 期待値を追加済み、
+  browser suite の実行は未実施。
+
 ## 今後の記録テンプレート
 
 新しい判断を行った時点で、次を追記する。失敗しても記録を消さない。

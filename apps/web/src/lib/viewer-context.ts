@@ -2,12 +2,22 @@ import type { SessionUser } from "@miyulabmd/shared";
 
 import { ApiCommunicationError, requestJson } from "./api-transport.ts";
 import { clearIdentityCache } from "./identity-lifecycle.ts";
-import { persistCachedViewerId, readCachedViewerId } from "./offline-cache.ts";
+import {
+  persistCachedViewer,
+  readCachedViewer,
+  readCachedViewerId,
+} from "./offline-cache.ts";
 
 export type ViewerContext = {
   mode: "authenticated" | "guest" | "cached" | "unavailable";
   user: SessionUser | null;
   cacheViewerId: string | null;
+  /**
+   * Display-only profile of the last signed-in viewer, restored from local
+   * storage in "cached" mode. It is not proof of authentication — mutations
+   * and permission checks must keep relying on `mode`/`user`.
+   */
+  cachedUser?: SessionUser | null;
 };
 
 type MeResponse = { user: SessionUser | null };
@@ -38,17 +48,18 @@ function context(
   mode: ViewerContext["mode"],
   cacheViewerId: string | null,
   user: SessionUser | null = null,
+  cachedUser: SessionUser | null = null,
 ): ViewerContext {
-  return { cacheViewerId, mode, user };
+  return { cachedUser, cacheViewerId, mode, user };
 }
 
 async function cachedOrUnavailable(
   signal?: AbortSignal,
 ): Promise<ViewerContext> {
   try {
-    const cacheViewerId = await readCachedViewerId({ signal });
-    return cacheViewerId
-      ? context("cached", cacheViewerId)
+    const cached = await readCachedViewer({ signal });
+    return cached
+      ? context("cached", cached.id, null, cached.user)
       : context("unavailable", null);
   } catch {
     signal?.throwIfAborted();
@@ -93,7 +104,7 @@ async function authenticatedContext(
     return context("authenticated", null, user);
   }
   try {
-    await persistCachedViewerId(user.id, { signal });
+    await persistCachedViewer(user, { signal });
     signal?.throwIfAborted();
     return context("authenticated", user.id, user);
   } catch {
