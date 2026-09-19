@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   fetchOgTarget,
   isBlockedHost,
+  isBlockedOgUrl,
   OG_TARGET_HEADER,
   OG_USER_AGENT,
   parseOgTargetUrl,
@@ -78,9 +79,61 @@ test("isBlockedHost covers loopback aliases and IPv6", () => {
   assert.equal(isBlockedHost("::1"), true);
   assert.equal(isBlockedHost("[::1]"), true);
   assert.equal(isBlockedHost("::ffff:127.0.0.1"), true);
+  assert.equal(isBlockedHost("::ffff:7f00:1"), true);
+  assert.equal(isBlockedHost("[::ffff:7f00:1]"), true);
+  assert.equal(isBlockedHost("0:0:0:0:0:ffff:7f00:1"), true);
+  assert.equal(isBlockedHost("::ffff:a00:1"), true);
+  assert.equal(isBlockedHost("::ffff:c0a8:101"), true);
+  assert.equal(isBlockedHost("::ffff:ac10:1"), true);
+  assert.equal(isBlockedHost("::ffff:a9fe:101"), true);
+  assert.equal(isBlockedHost("::ffff:808:808"), false);
   assert.equal(isBlockedHost("0x7f000001"), true);
   assert.equal(isBlockedHost("2130706433"), true);
   assert.equal(isBlockedHost("example.com"), false);
+});
+
+test("isBlockedOgUrl rejects URL-canonicalized IPv4-mapped private targets", () => {
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:127.0.0.1]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:7f00:1]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:10.0.0.1]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:192.168.1.1]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:172.16.0.1]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:169.254.1.1]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:0.0.0.0]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:0:127.0.0.1]/")), true);
+  assert.equal(isBlockedOgUrl(new URL("http://[::ffff:8.8.8.8]/")), false);
+  assert.equal(isBlockedOgUrl(new URL("https://example.com/")), false);
+  assert.equal(
+    parseOgTargetUrl(
+      new Request("https://og-fetch.workers.dev/", {
+        headers: { [OG_TARGET_HEADER]: "http://[::ffff:127.0.0.1]/" },
+      }),
+    ),
+    null,
+  );
+});
+
+test("fetchOgTarget does not follow redirects to IPv4-mapped loopback", async () => {
+  let fetched = 0;
+  const response = await fetchOgTarget(
+    new URL("https://example.com/"),
+    (input) => {
+      fetched += 1;
+      const url = String(input);
+      if (fetched === 1 && url === "https://example.com/") {
+        return Promise.resolve(
+          new Response(null, {
+            headers: { Location: "http://[::ffff:127.0.0.1]/" },
+            status: 302,
+          }),
+        );
+      }
+      throw new Error(`must not fetch blocked mapped target: ${url}`);
+    },
+  );
+  assert.equal(fetched, 1);
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "blocked host");
 });
 
 test("fetchOgPreview does not follow redirects to blocked hosts", async () => {

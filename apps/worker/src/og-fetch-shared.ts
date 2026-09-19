@@ -46,6 +46,40 @@ function ipv4IntIsBlocked(value: number): boolean {
   return first === 172 && second >= 16 && second <= 31;
 }
 
+/** IPv4-mapped tail after ::ffff: — dotted-quad or two URL-canonical hextets. */
+function ipv4IntFromMappedTail(tail: string): number | null {
+  const dotted = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(tail);
+  if (dotted?.[1] && dotted[2] && dotted[3] && dotted[4]) {
+    const o1 = Number.parseInt(dotted[1], 10);
+    const o2 = Number.parseInt(dotted[2], 10);
+    const o3 = Number.parseInt(dotted[3], 10);
+    const o4 = Number.parseInt(dotted[4], 10);
+    if (o1 > 255 || o2 > 255 || o3 > 255 || o4 > 255) {
+      return null;
+    }
+    return ((o1 << 24) | (o2 << 16) | (o3 << 8) | o4) >>> 0;
+  }
+  const hextets = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(tail);
+  if (!(hextets?.[1] && hextets[2])) {
+    return null;
+  }
+  const high = Number.parseInt(hextets[1], 16);
+  const low = Number.parseInt(hextets[2], 16);
+  return ((high << 16) | low) >>> 0;
+}
+
+function ipv4IntFromIpv6Mapped(host: string): number | null {
+  const mapped = /^(?:0:0:0:0:0:|::)ffff:(.+)$/.exec(host);
+  if (!mapped?.[1]) {
+    return null;
+  }
+  const tail = mapped[1];
+  return (
+    ipv4IntFromMappedTail(tail) ??
+    (tail.startsWith("0:") ? ipv4IntFromMappedTail(tail.slice(2)) : null)
+  );
+}
+
 function isBlockedIpv6(host: string): boolean {
   if (host === "::1" || host === "0:0:0:0:0:0:0:1") {
     return true;
@@ -57,8 +91,8 @@ function isBlockedIpv6(host: string): boolean {
   ) {
     return true;
   }
-  const mapped = /^::ffff:([^:]+)$/.exec(host);
-  return Boolean(mapped?.[1] && isBlockedHost(mapped[1]));
+  const mapped = ipv4IntFromIpv6Mapped(host);
+  return mapped !== null && ipv4IntIsBlocked(mapped);
 }
 
 export function isBlockedHost(hostname: string): boolean {
