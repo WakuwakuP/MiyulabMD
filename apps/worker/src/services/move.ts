@@ -17,10 +17,8 @@ import {
   folderName,
   getFolderById,
   getFolderByPath,
-  parentFolderPath,
   resolveNoteAccess,
 } from "./access.ts";
-import { escapeLikePattern } from "./articles.ts";
 import {
   accessFields,
   findNoteRow,
@@ -28,8 +26,11 @@ import {
   NOTE_COLUMNS,
   type NoteRow,
   relocateFolderTree,
-  syncNoteLinks,
 } from "./notes.ts";
+import {
+  folderDirectChildrenFilter,
+  folderSubtreeFilter,
+} from "./folder-path-sql.ts";
 
 export type MoveError =
   | { kind: "not_found" }
@@ -87,7 +88,7 @@ async function resolveDest(
 async function countQuery(
   env: Env,
   sql: string,
-  ...params: string[]
+  ...params: Array<string | number>
 ): Promise<number> {
   const row = await db(env)
     .prepare(sql)
@@ -102,45 +103,39 @@ export async function countSubtree(
   ownerId: string,
   path: string,
 ): Promise<MovePlan> {
-  const like = `${escapeLikePattern(path)}/%`;
-  const subtree = "(folder = ? OR folder LIKE ? ESCAPE '\\')";
-  const grants = "(target_key = ? OR target_key LIKE ? ESCAPE '\\')";
+  const subtree = folderSubtreeFilter(path);
+  const grants = folderSubtreeFilter(path, "target_key");
   const [notes, folders, policies, grantsCount, articleSources] =
     await Promise.all([
       countQuery(
         env,
-        `SELECT COUNT(*) AS c FROM notes WHERE owner_id = ? AND ${subtree}`,
+        `SELECT COUNT(*) AS c FROM notes WHERE owner_id = ? AND ${subtree.sql}`,
         ownerId,
-        path,
-        like,
+        ...subtree.binds,
       ),
       countQuery(
         env,
-        `SELECT COUNT(*) AS c FROM folders WHERE owner_id = ? AND ${subtree}`,
+        `SELECT COUNT(*) AS c FROM folders WHERE owner_id = ? AND ${subtree.sql}`,
         ownerId,
-        path,
-        like,
+        ...subtree.binds,
       ),
       countQuery(
         env,
-        `SELECT COUNT(*) AS c FROM folder_policies WHERE owner_id = ? AND ${subtree}`,
+        `SELECT COUNT(*) AS c FROM folder_policies WHERE owner_id = ? AND ${subtree.sql}`,
         ownerId,
-        path,
-        like,
+        ...subtree.binds,
       ),
       countQuery(
         env,
-        `SELECT COUNT(*) AS c FROM access_grants WHERE owner_id = ? AND target_kind = 'folder' AND ${grants}`,
+        `SELECT COUNT(*) AS c FROM access_grants WHERE owner_id = ? AND target_kind = 'folder' AND ${grants.sql}`,
         ownerId,
-        path,
-        like,
+        ...grants.binds,
       ),
       countQuery(
         env,
-        `SELECT COUNT(*) AS c FROM article_sources WHERE owner_id = ? AND ${subtree}`,
+        `SELECT COUNT(*) AS c FROM article_sources WHERE owner_id = ? AND ${subtree.sql}`,
         ownerId,
-        path,
-        like,
+        ...subtree.binds,
       ),
     ]);
   return {
@@ -268,7 +263,6 @@ async function moveOneNote(
       .prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?")
       .bind(destPath, Date.now(), row.id)
       .run();
-    await syncNoteLinks(env, { ...row, folder: destPath }, row);
   }
   return { from: row.folder, noteId: row.id, status: "moved", to: destPath };
 }
@@ -320,11 +314,12 @@ export async function moveFolderContents(
     ? (
         await db(env)
           .prepare(
-            "SELECT id, owner_id, folder, created_at FROM folders WHERE owner_id = ?",
+            `SELECT id, owner_id, folder, created_at FROM folders
+              WHERE owner_id = ? AND ${folderDirectChildrenFilter(src.folder).sql}`,
           )
-          .bind(src.owner_id)
+          .bind(src.owner_id, ...folderDirectChildrenFilter(src.folder).binds)
           .all<{ id: string; owner_id: string; folder: string }>()
-      ).results.filter((row) => parentFolderPath(row.folder) === src.folder)
+      ).results
     : [];
 
   // Enforce the per-request cap before writing anything.

@@ -20,7 +20,6 @@ import {
   type PermissionPreset,
   parseSearchQuery,
   presetFromScopes,
-  rewriteFolderPrefix,
   type SearchScope,
   type SessionUser,
   scopesFromPreset,
@@ -59,8 +58,11 @@ import {
 import {
   createArticleService,
   deleteArticleSourcesInFolder,
-  escapeLikePattern,
 } from "./articles.ts";
+import {
+  folderRewriteBinds,
+  folderSubtreeFilter,
+} from "./folder-path-sql.ts";
 import { ftsMatchQuery } from "./fts.ts";
 import { deleteRevisionsForNote } from "./history.ts";
 import { createImageService } from "./images.ts";
@@ -508,8 +510,9 @@ function buildFolderPrefixCondition(folders: string[]): {
   const parts: string[] = [];
   const binds: string[] = [];
   for (const folder of unique) {
-    parts.push("folder = ?", "folder LIKE ? ESCAPE '\\'");
-    binds.push(folder, `${escapeLikePattern(folder)}/%`);
+    const filter = folderSubtreeFilter(folder);
+    parts.push(filter.sql);
+    binds.push(...filter.binds.map(String));
   }
 
   return { binds, clause: `(${parts.join(" OR ")})` };
@@ -986,13 +989,14 @@ export async function lockedNotesInFolder(
   ownerId: string,
   folder: string,
 ): Promise<number> {
+  const subtree = folderSubtreeFilter(folder);
   const row = await db(env)
     .prepare(
       `SELECT COUNT(*) AS c FROM notes
         WHERE owner_id = ? AND edit_locked = 1
-          AND (folder = ? OR folder LIKE ? ESCAPE '\\')`,
+          AND ${subtree.sql}`,
     )
-    .bind(ownerId, folder, `${escapeLikePattern(folder)}/%`)
+    .bind(ownerId, ...subtree.binds)
     .first<{ c: number }>();
   return row?.c ?? 0;
 }
@@ -1002,15 +1006,15 @@ async function deleteOwnedNotesInFolder(
   ownerId: string,
   folder: string,
 ): Promise<void> {
+  const subtree = folderSubtreeFilter(folder);
   const owned = await db(env)
-    .prepare(`SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?`)
-    .bind(ownerId)
+    .prepare(
+      `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ? AND ${subtree.sql}`,
+    )
+    .bind(ownerId, ...subtree.binds)
     .all<NoteRow>();
   const images = createImageService(env);
   for (const row of owned.results ?? []) {
-    if (!folderContains(folder, row.folder ?? "")) {
-      continue;
-    }
     await images.deleteAllForNote(row.id);
     await deleteRevisionsForNote(env, row.id);
     await db(env)
@@ -1038,113 +1042,10 @@ async function deleteOwnedNotesInFolder(
 }
 
 /**
- * フォルダ配下のパスを一括書き換える。notes/folders/folder_policies/
- * access_grants/article_sources を prefix rewrite し、移動したノートと
- * それを指すリンクを再索引する。renameFolder と move 系サービスで共有。
- */
-type RelocateRows = {
-  folderRows: { id: string; folder: string }[];
-  grantRows: { id: string; target_key: string }[];
-  noteRows: { id: string; folder: string }[];
-  policyRows: { folder: string }[];
-  sourceRows: { id: string; folder: string }[];
-};
-
-function prefixUpdateStatements<Row>(
-  rows: Row[],
-  from: string,
-  to: string,
-  pathOf: (row: Row) => string,
-  build: (next: string, row: Row) => D1PreparedStatement,
-): D1PreparedStatement[] {
-  const statements: D1PreparedStatement[] = [];
-  for (const row of rows) {
-    const next = rewriteFolderPrefix(pathOf(row), from, to);
-    if (next !== null) {
-      statements.push(build(next, row));
-    }
-  }
-  return statements;
-}
-
-function relocationStatements(
-  d1: D1Database,
-  ownerId: string,
-  from: string,
-  to: string,
-  rows: RelocateRows,
-): D1PreparedStatement[] {
-  const folderIdByPath = new Map<string, string>();
-  for (const row of rows.folderRows) {
-    folderIdByPath.set(
-      rewriteFolderPrefix(row.folder, from, to) ?? row.folder,
-      row.id,
-    );
-  }
-  return [
-    ...prefixUpdateStatements(
-      rows.folderRows,
-      from,
-      to,
-      (row) => row.folder,
-      (next, row) =>
-        d1
-          .prepare(
-            "UPDATE folders SET folder = ? WHERE owner_id = ? AND folder = ?",
-          )
-          .bind(next, ownerId, row.folder),
-    ),
-    ...prefixUpdateStatements(
-      rows.noteRows,
-      from,
-      to,
-      (row) => row.folder ?? "",
-      (next, row) =>
-        d1
-          .prepare("UPDATE notes SET folder = ? WHERE id = ?")
-          .bind(next, row.id),
-    ),
-    ...prefixUpdateStatements(
-      rows.policyRows,
-      from,
-      to,
-      (row) => row.folder,
-      (next, row) =>
-        d1
-          .prepare(
-            "UPDATE folder_policies SET folder = ? WHERE owner_id = ? AND folder = ?",
-          )
-          .bind(next, ownerId, row.folder),
-    ),
-    ...prefixUpdateStatements(
-      rows.grantRows,
-      from,
-      to,
-      (row) => row.target_key,
-      (next, row) =>
-        d1
-          .prepare("UPDATE access_grants SET target_key = ? WHERE id = ?")
-          .bind(next, row.id),
-    ),
-    ...prefixUpdateStatements(
-      rows.sourceRows,
-      from,
-      to,
-      (row) => row.folder,
-      (next, row) =>
-        d1
-          .prepare(
-            "UPDATE article_sources SET folder = ?, folder_id = ? WHERE id = ?",
-          )
-          .bind(next, folderIdByPath.get(next) ?? null, row.id),
-    ),
-  ];
-}
-
-/**
- * Rewrites a folder path prefix across every table that stores it. All path
- * rewrites run as one D1 batch so a mid-way failure cannot leave the tree
- * half-moved; the derived link index is refreshed afterwards.
+ * フォルダ配下のパスを集合 UPDATE で書き換える。notes / folders /
+ * folder_policies / access_grants / article_sources を 1 D1 batch（6 文）
+ * で原子的に prefix rewrite する。wiki-link 再索引はフォルダ移動では走らせない
+ * （本文・title は変わらない。folder/Title リンクは次の本文同期で直る）。
  */
 export async function relocateFolderTree(
   env: Env,
@@ -1156,55 +1057,103 @@ export async function relocateFolderTree(
     return;
   }
   const d1 = db(env);
-  const [noteRows, folderRows, policyRows, grantRows, sourceRows] =
-    await Promise.all([
-      d1
-        .prepare("SELECT id, folder FROM notes WHERE owner_id = ?")
-        .bind(ownerId)
-        .all<{ id: string; folder: string }>(),
-      d1
-        .prepare("SELECT id, folder FROM folders WHERE owner_id = ?")
-        .bind(ownerId)
-        .all<{ id: string; folder: string }>(),
-      d1
-        .prepare("SELECT folder FROM folder_policies WHERE owner_id = ?")
-        .bind(ownerId)
-        .all<{ folder: string }>(),
-      d1
-        .prepare(
-          "SELECT id, target_key FROM access_grants WHERE owner_id = ? AND target_kind = 'folder'",
-        )
-        .bind(ownerId)
-        .all<{ id: string; target_key: string }>(),
-      d1
-        .prepare("SELECT id, folder FROM article_sources WHERE owner_id = ?")
-        .bind(ownerId)
-        .all<{ id: string; folder: string }>(),
-    ]);
+  const subtree = folderSubtreeFilter(from);
+  const dest = folderSubtreeFilter(to);
+  const { suffixStart } = folderRewriteBinds(from, to);
+  const grants = folderSubtreeFilter(from, "target_key");
+  await d1.batch([
+    d1
+      .prepare(
+        `UPDATE folders SET folder = ? || substr(folder, ?)
+          WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(to, suffixStart, ownerId, ...subtree.binds),
+    d1
+      .prepare(
+        `UPDATE notes SET folder = ? || substr(folder, ?)
+          WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(to, suffixStart, ownerId, ...subtree.binds),
+    d1
+      .prepare(
+        `UPDATE folder_policies SET folder = ? || substr(folder, ?)
+          WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(to, suffixStart, ownerId, ...subtree.binds),
+    d1
+      .prepare(
+        `UPDATE access_grants SET target_key = ? || substr(target_key, ?)
+          WHERE owner_id = ? AND target_kind = 'folder' AND ${grants.sql}`,
+      )
+      .bind(to, suffixStart, ownerId, ...grants.binds),
+    d1
+      .prepare(
+        `UPDATE article_sources SET folder = ? || substr(folder, ?)
+          WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(to, suffixStart, ownerId, ...subtree.binds),
+    d1
+      .prepare(
+        `UPDATE article_sources
+            SET folder_id = (
+              SELECT id FROM folders
+               WHERE owner_id = article_sources.owner_id
+                 AND folder = article_sources.folder
+            )
+          WHERE owner_id = ? AND ${dest.sql}`,
+      )
+      .bind(ownerId, ...dest.binds),
+  ]);
+}
 
-  const statements = relocationStatements(d1, ownerId, from, to, {
-    folderRows: folderRows.results ?? [],
-    grantRows: grantRows.results ?? [],
-    noteRows: noteRows.results ?? [],
-    policyRows: policyRows.results ?? [],
-    sourceRows: sourceRows.results ?? [],
-  });
-  if (statements.length > 0) {
-    await d1.batch(statements);
+async function loadRemovableNote(
+  env: Env,
+  idOrShortId: string,
+  user: SessionUser | undefined,
+): Promise<
+  Exclude<MutateNoteResult, { kind: "ok" }> | { kind: "ready"; row: NoteRow; note: Note }
+> {
+  const row = await findNoteRow(env, idOrShortId);
+  if (!row) {
+    return { kind: "not_found" };
   }
+  const note = await toNote(env, row, user);
+  if (!note.access.flags.canAdmin) {
+    return {
+      kind: "denied",
+      status:
+        user === undefined
+          ? viewDeniedHttpStatus(
+              { flags: note.access.flags, ownerId: row.owner_id },
+              undefined,
+              env,
+            )
+          : 403,
+    };
+  }
+  if (row.edit_locked === 1) {
+    return { code: EDIT_LOCKED_CODE, kind: "denied", status: 403 };
+  }
+  return { kind: "ready", note, row };
+}
 
-  const moved = await d1
-    .prepare(
-      `SELECT ${NOTE_COLUMNS} FROM notes
-       WHERE owner_id = ? AND (folder = ? OR folder LIKE ? ESCAPE '\\')`,
-    )
-    .bind(ownerId, to, `${escapeLikePattern(to)}/%`)
-    .all<NoteRow>();
-  for (const movedRow of moved.results ?? []) {
-    const prevFolder =
-      rewriteFolderPrefix(movedRow.folder ?? "", to, from) ?? from;
-    await syncNoteLinks(env, movedRow, { ...movedRow, folder: prevFolder });
-  }
+async function deleteNoteMetadata(env: Env, noteId: string): Promise<void> {
+  const d1 = db(env);
+  await d1.batch([
+    d1
+      .prepare(
+        "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+      )
+      .bind(noteId),
+    d1.prepare("DELETE FROM notes WHERE id = ?").bind(noteId),
+    d1.prepare("DELETE FROM notes_fts WHERE note_id = ?").bind(noteId),
+    d1.prepare("DELETE FROM note_links WHERE src_note_id = ?").bind(noteId),
+    d1
+      .prepare(
+        "UPDATE note_links SET dest_note_id = NULL, dest_status = 'missing', updated_at = ? WHERE dest_note_id = ?",
+      )
+      .bind(Date.now(), noteId),
+  ]);
 }
 
 type FolderRecord = NonNullable<Awaited<ReturnType<typeof getFolderById>>>;
@@ -1371,18 +1320,15 @@ export function createNoteService(env: Env) {
         return { kind: "not_found" };
       }
 
+      const subtree = folderSubtreeFilter(rec.folder);
       const rows = recursive
         ? await db(env)
             .prepare(
               `SELECT ${NOTE_COLUMNS} FROM notes
-                 WHERE owner_id = ? AND (folder = ? OR folder LIKE ? ESCAPE '\\')
+                 WHERE owner_id = ? AND ${subtree.sql}
                  ORDER BY updated_at DESC`,
             )
-            .bind(
-              rec.owner_id,
-              rec.folder,
-              `${escapeLikePattern(rec.folder)}/%`,
-            )
+            .bind(rec.owner_id, ...subtree.binds)
             .all<NoteRow>()
         : await db(env)
             .prepare(
@@ -1425,57 +1371,14 @@ export function createNoteService(env: Env) {
       idOrShortId: string,
       user: SessionUser | undefined,
     ): Promise<MutateNoteResult> {
-      const row = await findNoteRow(env, idOrShortId);
-      if (!row) {
-        return { kind: "not_found" };
+      const loaded = await loadRemovableNote(env, idOrShortId, user);
+      if (loaded.kind !== "ready") {
+        return loaded;
       }
-
-      const current = await toNote(env, row, user);
-      if (!current.access.flags.canAdmin) {
-        return {
-          kind: "denied",
-          status:
-            user === undefined
-              ? viewDeniedHttpStatus(
-                  { flags: current.access.flags, ownerId: row.owner_id },
-                  undefined,
-                  env,
-                )
-              : 403,
-        };
-      }
-      // §2.6: delete is a mutation — blocked while edit_locked.
-      if (row.edit_locked === 1) {
-        return { code: EDIT_LOCKED_CODE, kind: "denied", status: 403 };
-      }
-
-      await createImageService(env).deleteAllForNote(row.id);
-      await deleteRevisionsForNote(env, row.id);
-      await db(env)
-        .prepare(
-          "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
-        )
-        .bind(row.id)
-        .run();
-      await db(env)
-        .prepare("DELETE FROM notes WHERE id = ?")
-        .bind(row.id)
-        .run();
-      await db(env)
-        .prepare("DELETE FROM notes_fts WHERE note_id = ?")
-        .bind(row.id)
-        .run();
-      await db(env)
-        .prepare("DELETE FROM note_links WHERE src_note_id = ?")
-        .bind(row.id)
-        .run();
-      await db(env)
-        .prepare(
-          "UPDATE note_links SET dest_note_id = NULL, dest_status = 'missing', updated_at = ? WHERE dest_note_id = ?",
-        )
-        .bind(Date.now(), row.id)
-        .run();
-      return { kind: "ok", note: current };
+      await createImageService(env).deleteAllForNote(loaded.row.id);
+      await deleteRevisionsForNote(env, loaded.row.id);
+      await deleteNoteMetadata(env, loaded.row.id);
+      return { kind: "ok", note: loaded.note };
     },
 
     async removeFolder(

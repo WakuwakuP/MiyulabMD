@@ -262,6 +262,39 @@ test("moveFolderContents moves direct notes and subfolders", async (t) => {
   assert.equal(noteFolderOf(sqlite, n2.id), "Dest/Sub");
 });
 
+test("moveFolder relocates a subtree with a path longer than D1 LIKE 50 bytes", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+  const { ensureFolderRow } = await import("./access.ts");
+
+  const long =
+    "10-19 ライフ/15 仕事/15.22 プロジェクト名/Resources/深い配下";
+  assert.ok(Buffer.byteLength(`${long}/%`, "utf8") > 50);
+  const note = await notes.create(owner, {
+    folder: long,
+    markdown: "# Deep",
+  });
+  assert.ok(!("error" in note));
+  const srcId = folderIdOf(sqlite, long);
+  const destId = await ensureFolderRow(env, owner.id, "Archives");
+  assert.ok(srcId && destId);
+
+  const dry = await moveFolder(
+    env,
+    srcId,
+    { destFolderId: destId, dryRun: true },
+    owner,
+  );
+  assert.equal(dry.kind, "ok");
+  const moved = await moveFolder(env, srcId, { destFolderId: destId }, owner);
+  assert.equal(moved.kind, "ok");
+  if (moved.kind !== "ok") {
+    return;
+  }
+  assert.equal(noteFolderOf(sqlite, note.id), "Archives/深い配下");
+});
+
 test("moveNotes reports per-note results and reindexes links", async (t) => {
   const { env, owner, sqlite, viewer } = await createEnv();
   t.after(() => sqlite.close());

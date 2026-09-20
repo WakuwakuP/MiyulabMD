@@ -9,7 +9,7 @@ import {
   listFolderChildren,
   resolveFolderAccess,
 } from "./access.ts";
-import { createNoteService } from "./notes.ts";
+import { createNoteService, relocateFolderTree } from "./notes.ts";
 
 const MIGRATIONS = [
   "0001_init.sql",
@@ -206,4 +206,72 @@ test("listFolderChildren query count stays bounded as folder count grows", async
     counts[1] <= counts[0] + 3,
     `query count grew with folders: ${counts[0]} -> ${counts[1]}`,
   );
+});
+
+test("listFolderChildren without snapshot stays bounded when vault grows elsewhere", async (t) => {
+  const { d1, env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  const listed = await ensureFolderRow(env, owner.id, "listed");
+  await ensureFolderRow(env, owner.id, "listed/child");
+  await notes.create(owner, { folder: "listed", markdown: "# in", title: "in" });
+  assert.ok(listed);
+
+  const counts: number[] = [];
+  for (const extra of [10, 80]) {
+    const start = sqlite
+      .prepare("SELECT COUNT(*) AS c FROM folders WHERE owner_id = ?")
+      .get(owner.id) as { c: number };
+    for (let i = start.c; i < extra + 2; i += 1) {
+      await ensureFolderRow(env, owner.id, `noise/area-${i}`);
+      await notes.create(owner, {
+        folder: `noise/area-${i}`,
+        markdown: `# n-${i}`,
+        title: `n-${i}`,
+      });
+    }
+    d1.queries = 0;
+    const result = await listFolderChildren(
+      env,
+      owner.id,
+      "listed",
+      listed,
+      owner,
+      { includeNoteCounts: false },
+    );
+    assert.equal(result.entries.length, 2);
+    counts.push(d1.queries);
+    t.diagnostic(`vaultFolders~${extra} childrenQueries=${d1.queries}`);
+  }
+
+  assert.equal(counts[0], counts[1], `queries grew with vault: ${counts}`);
+  assert.ok(counts[1] <= 4, `too many queries: ${counts[1]}`);
+});
+
+test("relocateFolderTree statement count does not grow with vault size", async (t) => {
+  const { d1, env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  const counts: number[] = [];
+  for (const extra of [8, 40]) {
+    const from = `move-${extra}`;
+    await ensureFolderRow(env, owner.id, `${from}/child`);
+    await notes.create(owner, {
+      folder: from,
+      markdown: `# m-${extra}`,
+      title: `m-${extra}`,
+    });
+    for (let i = 0; i < extra; i += 1) {
+      await ensureFolderRow(env, owner.id, `other-${extra}-${i}`);
+    }
+    d1.queries = 0;
+    await relocateFolderTree(env, owner.id, from, `dest-${extra}/${from}`);
+    counts.push(d1.queries);
+    t.diagnostic(`vaultExtra=${extra} relocatePrepares=${d1.queries}`);
+  }
+
+  assert.equal(counts[0], counts[1], `relocate grew with vault: ${counts}`);
+  assert.equal(counts[1], 6);
 });

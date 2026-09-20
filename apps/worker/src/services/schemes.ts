@@ -35,6 +35,7 @@ import {
   parentFolderPath,
   resolveFolderAccess,
 } from "./access.ts";
+import { folderDirectChildrenFilter } from "./folder-path-sql.ts";
 
 export type SchemeError =
   | { kind: "denied"; status: 401 | 403; error: string }
@@ -760,14 +761,14 @@ export async function jdListCategory(
   if (level === null) {
     return invalid(400, "ID フォルダの配下に採番対象はありません");
   }
-  const prefix = parent.folder ? `${parent.folder}/` : "";
+  const childrenFilter = folderDirectChildrenFilter(parent.folder);
   const rows = await db(env_)
     .prepare(
       `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at
          FROM folders
-        WHERE owner_id = ? AND folder LIKE ? ESCAPE '\\' AND scheme_id IS NOT NULL`,
+        WHERE owner_id = ? AND ${childrenFilter.sql} AND scheme_id IS NOT NULL`,
     )
-    .bind(parent.owner_id, `${prefix.replace(/[%_\\]/g, (c) => `\\${c}`)}%`)
+    .bind(parent.owner_id, ...childrenFilter.binds)
     .all<FolderRow>();
 
   const entries = (rows.results ?? [])

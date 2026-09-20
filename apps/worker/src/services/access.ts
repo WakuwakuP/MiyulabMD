@@ -29,6 +29,10 @@ import {
 import { db } from "../db/client.ts";
 import { findUserByEmail } from "../db/users.ts";
 import { instanceFlags } from "../env.ts";
+import {
+  folderDirectChildrenFilter,
+  folderSubtreeFilter,
+} from "./folder-path-sql.ts";
 
 function applyInstanceFlags(
   flags: PermissionFlags,
@@ -786,6 +790,17 @@ async function projectVisibleChildFolder(
   if (!row.folder || parentFolderPath(row.folder) !== parentFolder) {
     return null;
   }
+  if (isOwner) {
+    return {
+      folder: row.folder,
+      id: row.id,
+      name: folderName(row.folder),
+      parentId: currentId,
+      scheme: row.scheme ?? null,
+      schemeId: row.scheme_id ?? null,
+      schemeTitle: row.scheme_title ?? null,
+    };
+  }
   const effective = snapshot
     ? folderEffectiveSnapshot(ownerId, row.folder, snapshot)
     : await loadFolderEffective(env, ownerId, row.folder);
@@ -849,14 +864,18 @@ async function listVisibleChildren(
   snapshot?: AccessSnapshot,
 ): Promise<FolderRecord[]> {
   const isOwner = user?.id === ownerId;
+  const childrenFilter = folderDirectChildrenFilter(folder);
   const rows = snapshot
-    ? snapshotFolderRows(snapshot, ownerId)
+    ? snapshotFolderRows(snapshot, ownerId).filter(
+        (row) => parentFolderPath(row.folder) === folder,
+      )
     : ((
         await db(env)
           .prepare(
-            "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
+            `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at
+               FROM folders WHERE owner_id = ? AND ${childrenFilter.sql} ORDER BY folder`,
           )
-          .bind(ownerId)
+          .bind(ownerId, ...childrenFilter.binds)
           .all<FolderRow>()
       ).results ?? []);
 
@@ -1024,6 +1043,19 @@ type FolderEntryNoteRow = {
   updated_at: number;
 };
 
+function sortFolderEntries(entries: FolderEntry[]): void {
+  entries.sort((a, b) => {
+    if (a.type !== b.type) {
+      return a.type === "folder" ? -1 : 1;
+    }
+    const byName = (a.type === "folder" ? a.name : a.title).localeCompare(
+      b.type === "folder" ? b.name : b.title,
+      "ja",
+    );
+    return byName === 0 ? a.id.localeCompare(b.id) : byName;
+  });
+}
+
 function decodeFolderEntriesCursor(cursor: string | undefined): number {
   if (!cursor) {
     return 0;
@@ -1037,6 +1069,7 @@ function folderEntryOf(
   row: FolderRow,
   noteCounts: Map<string, number>,
   isOwner: boolean,
+  includeNoteCounts: boolean,
 ): FolderEntry {
   return {
     id: record.id,
@@ -1046,7 +1079,9 @@ function folderEntryOf(
     updatedAt: row.created_at,
     ...(isOwner
       ? {
-          noteCount: noteCounts.get(row.id) ?? 0,
+          ...(includeNoteCounts
+            ? { noteCount: noteCounts.get(row.id) ?? 0 }
+            : {}),
           scheme: row.scheme ?? null,
           schemeId: row.scheme_id ?? null,
           schemeTitle: row.scheme_title ?? null,
@@ -1084,21 +1119,6 @@ async function visibleChildFolders(
   return children;
 }
 
-function childNoteCounts(
-  noteFolders: { folder: string }[],
-  children: { row: FolderRow }[],
-): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const { folder: noteFolder } of noteFolders) {
-    for (const child of children) {
-      if (folderContains(child.row.folder, noteFolder)) {
-        counts.set(child.row.id, (counts.get(child.row.id) ?? 0) + 1);
-      }
-    }
-  }
-  return counts;
-}
-
 async function noteEntryVisible(
   env: Env,
   folder: string,
@@ -1129,14 +1149,12 @@ async function loadFolderEntryData(
   env: Env,
   ownerId: string,
   folder: string,
-  isOwner: boolean,
-  snapshot: AccessSnapshot | undefined,
 ): Promise<{
   folderRows: FolderRow[];
   noteRows: FolderEntryNoteRow[];
-  noteFolderRows: { folder: string }[];
 }> {
-  const [noteRows, noteFolderRows, folderRows] = await Promise.all([
+  const childrenFilter = folderDirectChildrenFilter(folder);
+  const [noteRows, folderRows] = await Promise.all([
     db(env)
       .prepare(
         `SELECT id, owner_id, title, folder, read_scope, write_scope, updated_at
@@ -1144,30 +1162,68 @@ async function loadFolderEntryData(
       )
       .bind(ownerId, folder)
       .all<FolderEntryNoteRow>(),
-    isOwner
-      ? db(env)
-          .prepare(
-            "SELECT folder FROM notes WHERE owner_id = ? AND folder != ''",
-          )
-          .bind(ownerId)
-          .all<{ folder: string }>()
-      : Promise.resolve(null),
-    snapshot
-      ? Promise.resolve(null)
-      : db(env)
-          .prepare(
-            "SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at FROM folders WHERE owner_id = ? ORDER BY folder",
-          )
-          .bind(ownerId)
-          .all<FolderRow>(),
+    db(env)
+      .prepare(
+        `SELECT id, owner_id, folder, scheme, scheme_id, scheme_title, scheme_root, created_at
+           FROM folders WHERE owner_id = ? AND ${childrenFilter.sql} ORDER BY folder`,
+      )
+      .bind(ownerId, ...childrenFilter.binds)
+      .all<FolderRow>(),
   ]);
   return {
-    folderRows: snapshot
-      ? snapshotFolderRows(snapshot, ownerId)
-      : (folderRows?.results ?? []),
-    noteFolderRows: noteFolderRows?.results ?? [],
+    folderRows: folderRows.results ?? [],
     noteRows: noteRows.results ?? [],
   };
+}
+
+async function applyPageNoteCounts(
+  env: Env,
+  ownerId: string,
+  folder: string,
+  children: { row: FolderRow }[],
+  page: FolderEntry[],
+): Promise<void> {
+  const pageFolders = children.filter((child) =>
+    page.some((entry) => entry.type === "folder" && entry.id === child.row.id),
+  );
+  const noteCounts = await noteCountsForFolders(
+    env,
+    ownerId,
+    folder,
+    pageFolders,
+  );
+  for (const entry of page) {
+    if (entry.type === "folder") {
+      entry.noteCount = noteCounts.get(entry.id) ?? 0;
+    }
+  }
+}
+
+async function noteCountsForFolders(
+  env: Env,
+  ownerId: string,
+  parentFolder: string,
+  children: { row: FolderRow }[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (children.length === 0) {
+    return counts;
+  }
+  const subtree = folderSubtreeFilter(parentFolder);
+  const rows = await db(env)
+    .prepare(
+      `SELECT folder FROM notes WHERE owner_id = ? AND ${subtree.sql}`,
+    )
+    .bind(ownerId, ...subtree.binds)
+    .all<{ folder: string }>();
+  for (const { folder: noteFolder } of rows.results ?? []) {
+    for (const child of children) {
+      if (folderContains(child.row.folder, noteFolder)) {
+        counts.set(child.row.id, (counts.get(child.row.id) ?? 0) + 1);
+      }
+    }
+  }
+  return counts;
 }
 
 /** 直下の子フォルダとノートを1レスポンスで返す。発見可能性は resolveFolderAccess と同じ規則。 */
@@ -1177,7 +1233,11 @@ export async function listFolderChildren(
   folder: string,
   currentId: string | null,
   user?: SessionUser | null,
-  options: { cursor?: string; limit?: number } = {},
+  options: {
+    cursor?: string;
+    limit?: number;
+    includeNoteCounts?: boolean;
+  } = {},
   snapshot?: AccessSnapshot,
 ): Promise<FolderChildrenResult> {
   const requested = options.limit ?? FOLDER_ENTRIES_DEFAULT_LIMIT;
@@ -1186,14 +1246,9 @@ export async function listFolderChildren(
     : FOLDER_ENTRIES_DEFAULT_LIMIT;
   const offset = decodeFolderEntriesCursor(options.cursor);
   const isOwner = user?.id === ownerId;
+  const includeNoteCounts = options.includeNoteCounts ?? true;
 
-  const data = await loadFolderEntryData(
-    env,
-    ownerId,
-    folder,
-    isOwner,
-    snapshot,
-  );
+  const data = await loadFolderEntryData(env, ownerId, folder);
 
   const children = await visibleChildFolders(
     env,
@@ -1206,12 +1261,8 @@ export async function listFolderChildren(
     snapshot,
   );
 
-  const noteCounts = isOwner
-    ? childNoteCounts(data.noteFolderRows, children)
-    : new Map<string, number>();
-
   const entries: FolderEntry[] = children.map(({ record, row }) =>
-    folderEntryOf(record, row, noteCounts, isOwner),
+    folderEntryOf(record, row, new Map(), isOwner, includeNoteCounts),
   );
   for (const row of data.noteRows) {
     if (
@@ -1227,18 +1278,12 @@ export async function listFolderChildren(
     }
   }
 
-  entries.sort((a, b) => {
-    if (a.type !== b.type) {
-      return a.type === "folder" ? -1 : 1;
-    }
-    const byName = (a.type === "folder" ? a.name : a.title).localeCompare(
-      b.type === "folder" ? b.name : b.title,
-      "ja",
-    );
-    return byName === 0 ? a.id.localeCompare(b.id) : byName;
-  });
+  sortFolderEntries(entries);
 
   const page = entries.slice(offset, offset + limit);
+  if (includeNoteCounts && isOwner) {
+    await applyPageNoteCounts(env, ownerId, folder, children, page);
+  }
   // 非オーナーには resolveFolderAccess の crumbs と同じ規則で、
   // 発見可能な祖先の suffix だけを返す。
   const path = isOwner
@@ -1553,15 +1598,15 @@ export async function deleteFolderTree(
   if (!folder) {
     return;
   }
+  const subtree = folderSubtreeFilter(folder);
   const rows = await db(env)
-    .prepare("SELECT folder FROM folders WHERE owner_id = ?")
-    .bind(ownerId)
+    .prepare(
+      `SELECT folder FROM folders WHERE owner_id = ? AND ${subtree.sql}`,
+    )
+    .bind(ownerId, ...subtree.binds)
     .all<{ folder: string }>();
 
   for (const row of rows.results ?? []) {
-    if (!folderContains(folder, row.folder)) {
-      continue;
-    }
     await deleteFolderPolicy(env, ownerId, row.folder);
     await db(env)
       .prepare(
