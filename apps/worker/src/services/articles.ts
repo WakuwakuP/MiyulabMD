@@ -18,6 +18,7 @@ import {
 
 import { db } from "../db/client.ts";
 import { ensureFolderRow, getFolderById } from "./access.ts";
+import { folderSubtreeFilter } from "./folder-path-sql.ts";
 
 type SourceRow = {
   id: string;
@@ -250,22 +251,16 @@ async function sourceFolderConflict(
   return null;
 }
 
+export function sourceNoteFilter(folder: string) {
+  return folderSubtreeFilter(folder);
+}
+
+/** @deprecated D1 LIKE は 50 バイト上限。子孫判定は folderSubtreeFilter を使う。 */
 export function escapeLikePattern(value: string): string {
   return value
     .replaceAll("\\", "\\\\")
     .replaceAll("%", "\\%")
     .replaceAll("_", "\\_");
-}
-
-/** ソース（または指定パス）直下と、何階層下のノートも含める。 */
-export function sourceNoteFilter(folder: string): {
-  sql: string;
-  binds: string[];
-} {
-  return {
-    binds: [folder, `${escapeLikePattern(folder)}/%`],
-    sql: "(folder = ? OR folder LIKE ? ESCAPE '\\')",
-  };
 }
 
 async function maxNoteUpdatedAt(
