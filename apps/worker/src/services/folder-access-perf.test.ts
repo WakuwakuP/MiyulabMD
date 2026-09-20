@@ -215,7 +215,11 @@ test("listFolderChildren without snapshot stays bounded when vault grows elsewhe
 
   const listed = await ensureFolderRow(env, owner.id, "listed");
   await ensureFolderRow(env, owner.id, "listed/child");
-  await notes.create(owner, { folder: "listed", markdown: "# in", title: "in" });
+  await notes.create(owner, {
+    folder: "listed",
+    markdown: "# in",
+    title: "in",
+  });
   assert.ok(listed);
 
   const counts: number[] = [];

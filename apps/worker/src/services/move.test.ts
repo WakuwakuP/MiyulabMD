@@ -268,8 +268,7 @@ test("moveFolder relocates a subtree with a path longer than D1 LIKE 50 bytes", 
   const notes = createNoteService(env);
   const { ensureFolderRow } = await import("./access.ts");
 
-  const long =
-    "10-19 ライフ/15 仕事/15.22 プロジェクト名/Resources/深い配下";
+  const long = "10-19 ライフ/15 仕事/15.22 プロジェクト名/Resources/深い配下";
   assert.ok(Buffer.byteLength(`${long}/%`, "utf8") > 50);
   const note = await notes.create(owner, {
     folder: long,

@@ -20,6 +20,10 @@ import {
   resolveNoteAccess,
 } from "./access.ts";
 import {
+  folderDirectChildrenFilter,
+  folderSubtreeFilter,
+} from "./folder-path-sql.ts";
+import {
   accessFields,
   findNoteRow,
   lockedNotesInFolder,
@@ -27,10 +31,6 @@ import {
   type NoteRow,
   relocateFolderTree,
 } from "./notes.ts";
-import {
-  folderDirectChildrenFilter,
-  folderSubtreeFilter,
-} from "./folder-path-sql.ts";
 
 export type MoveError =
   | { kind: "not_found" }

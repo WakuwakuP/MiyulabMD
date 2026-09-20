@@ -178,9 +178,7 @@ function moveToolError(result: MoveError | SchemeError) {
 }
 
 async function runMoveTool<T>(
-  run: () => Promise<
-    { kind: "ok"; result: T } | MoveError | SchemeError
-  >,
+  run: () => Promise<{ kind: "ok"; result: T } | MoveError | SchemeError>,
 ): Promise<ToolTextResult> {
   try {
     const result = await run();
@@ -1356,7 +1354,7 @@ export async function createMcpServerFactory() {
       if (!user) {
         return textError("Unauthorized");
       }
-      return runMoveTool(() =>
+      return await runMoveTool(() =>
         moveFolder(
           env,
           folder_id,
@@ -1394,7 +1392,7 @@ export async function createMcpServerFactory() {
       if (!user) {
         return textError("Unauthorized");
       }
-      return runMoveTool(() =>
+      return await runMoveTool(() =>
         moveFolderContents(
           env,
           folder_id,
@@ -1435,7 +1433,7 @@ export async function createMcpServerFactory() {
       if (!user) {
         return textError("Unauthorized");
       }
-      return runMoveTool(() =>
+      return await runMoveTool(() =>
         moveNotes(
           env,
           { destFolderId: folder_id, dryRun: dry_run, noteIds: note_ids },
@@ -1509,7 +1507,7 @@ export async function createMcpServerFactory() {
         if (!user) {
           return textError("Unauthorized");
         }
-        return runMoveTool(() =>
+        return await runMoveTool(() =>
           paraArchiveProject(
             env,
             folder_id,

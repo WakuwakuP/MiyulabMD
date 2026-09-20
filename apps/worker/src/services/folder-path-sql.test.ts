@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { rewriteFolderPrefix } from "@miyulabmd/shared";
 import {
   folderDirectChildrenFilter,
-  folderRewriteBinds,
+  folderRewriteAssignment,
   folderSubtreeFilter,
 } from "./folder-path-sql.ts";
 
@@ -96,16 +96,41 @@ test("folderDirectChildrenFilter returns one level only", () => {
   }
 });
 
+test("folder filters use SQLite character length for supplementary-plane names", () => {
+  const emoji = "work/😀😀";
+  assert.ok(emoji.length !== [...emoji].length);
+  const db = seedPaths([emoji, `${emoji}/child`, `${emoji}/child/grand`]);
+  try {
+    assert.deepEqual(rowsMatching(db, folderDirectChildrenFilter(emoji)), [
+      `${emoji}/child`,
+    ]);
+    const rewrite = folderRewriteAssignment(emoji, "play/😀😀");
+    db.prepare(
+      `UPDATE paths SET ${rewrite.sql} WHERE ${folderSubtreeFilter(emoji).sql}`,
+    ).run(...rewrite.binds, ...folderSubtreeFilter(emoji).binds);
+    const next = db
+      .prepare("SELECT folder FROM paths ORDER BY folder")
+      .all() as { folder: string }[];
+    assert.deepEqual(
+      next.map((row) => row.folder),
+      ["play/😀😀", "play/😀😀/child", "play/😀😀/child/grand"],
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test("folder rewrite SQL matches rewriteFolderPrefix", () => {
   const db = seedPaths(["work", "work/infra", "work/infra/db", "workplace"]);
   try {
     const from = "work";
     const to = "play";
     const filter = folderSubtreeFilter(from);
-    const { suffixStart } = folderRewriteBinds(from, to);
-    db.prepare(
-      `UPDATE paths SET folder = ? || substr(folder, ?) WHERE ${filter.sql}`,
-    ).run(to, suffixStart, ...filter.binds);
+    const rewrite = folderRewriteAssignment(from, to);
+    db.prepare(`UPDATE paths SET ${rewrite.sql} WHERE ${filter.sql}`).run(
+      ...rewrite.binds,
+      ...filter.binds,
+    );
     const next = db
       .prepare("SELECT folder FROM paths ORDER BY folder")
       .all() as { folder: string }[];

@@ -38,15 +38,23 @@ export function folderDirectChildrenFilter(
     };
   }
   return {
-    binds: [`${parent}/`, `${parent}0`, parent.length + 2],
-    sql: `${column} >= ? AND ${column} < ? AND instr(substr(${column}, ?), '/') = 0`,
+    binds: [`${parent}/`, `${parent}0`, parent],
+    sql: `${column} >= ? AND ${column} < ? AND instr(substr(${column}, length(?) + 2), '/') = 0`,
   };
 }
 
-/** 集合 UPDATE 用。`to || substr(folder, length(from)+1)` は rewriteFolderPrefix と同じ。 */
-export function folderRewriteBinds(
+/**
+ * 集合 UPDATE 用。`to || substr(col, length(from)+1)` は rewriteFolderPrefix と同じ。
+ * 開始位置は SQLite の `length()`（Unicode 文字数）。JS の String.length
+ * （UTF-16）を渡すと絵文字などで slash が落ちる。
+ */
+export function folderRewriteAssignment(
   from: string,
   to: string,
-): { suffixStart: number; to: string } {
-  return { suffixStart: from.length + 1, to };
+  column = "folder",
+): { binds: [string, string]; sql: string } {
+  return {
+    binds: [to, from],
+    sql: `${column} = ? || substr(${column}, length(?) + 1)`,
+  };
 }

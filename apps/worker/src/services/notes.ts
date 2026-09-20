@@ -60,7 +60,7 @@ import {
   deleteArticleSourcesInFolder,
 } from "./articles.ts";
 import {
-  folderRewriteBinds,
+  folderRewriteAssignment,
   folderSubtreeFilter,
 } from "./folder-path-sql.ts";
 import { ftsMatchQuery } from "./fts.ts";
@@ -1059,39 +1059,40 @@ export async function relocateFolderTree(
   const d1 = db(env);
   const subtree = folderSubtreeFilter(from);
   const dest = folderSubtreeFilter(to);
-  const { suffixStart } = folderRewriteBinds(from, to);
+  const rewrite = folderRewriteAssignment(from, to);
+  const grantRewrite = folderRewriteAssignment(from, to, "target_key");
   const grants = folderSubtreeFilter(from, "target_key");
   await d1.batch([
     d1
       .prepare(
-        `UPDATE folders SET folder = ? || substr(folder, ?)
+        `UPDATE folders SET ${rewrite.sql}
           WHERE owner_id = ? AND ${subtree.sql}`,
       )
-      .bind(to, suffixStart, ownerId, ...subtree.binds),
+      .bind(...rewrite.binds, ownerId, ...subtree.binds),
     d1
       .prepare(
-        `UPDATE notes SET folder = ? || substr(folder, ?)
+        `UPDATE notes SET ${rewrite.sql}
           WHERE owner_id = ? AND ${subtree.sql}`,
       )
-      .bind(to, suffixStart, ownerId, ...subtree.binds),
+      .bind(...rewrite.binds, ownerId, ...subtree.binds),
     d1
       .prepare(
-        `UPDATE folder_policies SET folder = ? || substr(folder, ?)
+        `UPDATE folder_policies SET ${rewrite.sql}
           WHERE owner_id = ? AND ${subtree.sql}`,
       )
-      .bind(to, suffixStart, ownerId, ...subtree.binds),
+      .bind(...rewrite.binds, ownerId, ...subtree.binds),
     d1
       .prepare(
-        `UPDATE access_grants SET target_key = ? || substr(target_key, ?)
+        `UPDATE access_grants SET ${grantRewrite.sql}
           WHERE owner_id = ? AND target_kind = 'folder' AND ${grants.sql}`,
       )
-      .bind(to, suffixStart, ownerId, ...grants.binds),
+      .bind(...grantRewrite.binds, ownerId, ...grants.binds),
     d1
       .prepare(
-        `UPDATE article_sources SET folder = ? || substr(folder, ?)
+        `UPDATE article_sources SET ${rewrite.sql}
           WHERE owner_id = ? AND ${subtree.sql}`,
       )
-      .bind(to, suffixStart, ownerId, ...subtree.binds),
+      .bind(...rewrite.binds, ownerId, ...subtree.binds),
     d1
       .prepare(
         `UPDATE article_sources
@@ -1111,7 +1112,8 @@ async function loadRemovableNote(
   idOrShortId: string,
   user: SessionUser | undefined,
 ): Promise<
-  Exclude<MutateNoteResult, { kind: "ok" }> | { kind: "ready"; row: NoteRow; note: Note }
+  | Exclude<MutateNoteResult, { kind: "ok" }>
+  | { kind: "ready"; row: NoteRow; note: Note }
 > {
   const row = await findNoteRow(env, idOrShortId);
   if (!row) {

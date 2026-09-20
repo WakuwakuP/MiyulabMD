@@ -1211,9 +1211,7 @@ async function noteCountsForFolders(
   }
   const subtree = folderSubtreeFilter(parentFolder);
   const rows = await db(env)
-    .prepare(
-      `SELECT folder FROM notes WHERE owner_id = ? AND ${subtree.sql}`,
-    )
+    .prepare(`SELECT folder FROM notes WHERE owner_id = ? AND ${subtree.sql}`)
     .bind(ownerId, ...subtree.binds)
     .all<{ folder: string }>();
   for (const { folder: noteFolder } of rows.results ?? []) {
@@ -1600,9 +1598,7 @@ export async function deleteFolderTree(
   }
   const subtree = folderSubtreeFilter(folder);
   const rows = await db(env)
-    .prepare(
-      `SELECT folder FROM folders WHERE owner_id = ? AND ${subtree.sql}`,
-    )
+    .prepare(`SELECT folder FROM folders WHERE owner_id = ? AND ${subtree.sql}`)
     .bind(ownerId, ...subtree.binds)
     .all<{ folder: string }>();
 
