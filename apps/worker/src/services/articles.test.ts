@@ -8,10 +8,10 @@ import {
 
 test("sourceNoteFilter matches the folder and any descendant path", () => {
   const filter = sourceNoteFilter("work");
-  assert.match(filter.sql, /folder = \? OR folder LIKE \? ESCAPE/);
-  assert.deepEqual(filter.binds, ["work", "work/%"]);
+  assert.match(filter.sql, /folder = \? OR \(folder >= \? AND folder < \?\)/);
+  assert.deepEqual(filter.binds, ["work", "work/", "work0"]);
   const escaped = sourceNoteFilter("a_b");
-  assert.deepEqual(escaped.binds, ["a_b", "a\\_b/%"]);
+  assert.deepEqual(escaped.binds, ["a_b", "a_b/", "a_b0"]);
 });
 
 test("escapeLikePattern escapes LIKE wildcards", () => {

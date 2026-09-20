@@ -27,7 +27,7 @@ import {
   listFolderChildren,
   parentFolderPath,
 } from "./access.ts";
-import { escapeLikePattern } from "./articles.ts";
+import { folderSubtreeFilter } from "./folder-path-sql.ts";
 import { type MoveError, moveFolder } from "./move.ts";
 import { createNoteService } from "./notes.ts";
 
@@ -1086,12 +1086,13 @@ async function countNotesInSubtree(
   ownerId: string,
   path: string,
 ): Promise<number> {
+  const subtree = folderSubtreeFilter(path);
   const row = await db(env)
     .prepare(
       `SELECT COUNT(*) AS c FROM notes
-       WHERE owner_id = ? AND (folder = ? OR folder LIKE ? ESCAPE '\\')`,
+       WHERE owner_id = ? AND ${subtree.sql}`,
     )
-    .bind(ownerId, path, `${escapeLikePattern(path)}/%`)
+    .bind(ownerId, ...subtree.binds)
     .first<{ c: number }>();
   return row?.c ?? 0;
 }

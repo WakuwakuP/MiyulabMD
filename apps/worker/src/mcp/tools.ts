@@ -19,9 +19,11 @@ import {
   numberMarkdownLines,
 } from "../durable-objects/markdown-edit.ts";
 import {
+  buildAccessSnapshot,
   ensureFolderRow,
   folderViewFlags,
   getFolderById,
+  getFolderByPath,
   listFolderChildren,
 } from "../services/access.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
@@ -162,6 +164,9 @@ async function folderIdArg(
   return { folderId: resolved[0] };
 }
 
+const MOVE_OVERLOAD_MESSAGE =
+  "Do not retry the same call. Wait a few seconds; split into shallower moves (move_folder on a direct child, or move_folder_contents without include_subfolders).";
+
 function moveToolError(result: MoveError | SchemeError) {
   if (result.kind === "not_found") {
     return textError("Not found");
@@ -170,6 +175,20 @@ function moveToolError(result: MoveError | SchemeError) {
     return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
   }
   return textError(result.error);
+}
+
+async function runMoveTool<T>(
+  run: () => Promise<{ kind: "ok"; result: T } | MoveError | SchemeError>,
+): Promise<ToolTextResult> {
+  try {
+    const result = await run();
+    if (result.kind !== "ok") {
+      return moveToolError(result);
+    }
+    return textResult(result.result);
+  } catch {
+    return textError(MOVE_OVERLOAD_MESSAGE);
+  }
 }
 
 function requireUser(): SessionUser | null {
@@ -564,7 +583,7 @@ export async function createMcpServerFactory() {
   server.registerTool(
     "list_folder_entries",
     {
-      description: `List direct children (subfolders and notes) of a folder — one level only. Browse folders with this instead of enumerating all notes. ${MCP_NOTE_URL_HINT}`,
+      description: `List direct children (subfolders and notes) of a folder — one level only. Do not recurse; call again on a child folder_id. If the call fails with a resource-limit error, do not retry immediately. ${MCP_NOTE_URL_HINT}`,
       inputSchema: {
         cursor: z
           .string()
@@ -601,18 +620,34 @@ export async function createMcpServerFactory() {
         folderPath = rec.folder;
         currentId = rec.id;
       } else {
-        currentId = await ensureFolderRow(env, user.id, "");
+        const root = await getFolderByPath(env, user.id, "");
+        currentId = root?.id ?? (await ensureFolderRow(env, user.id, ""));
       }
 
-      const flags = await folderViewFlags(env, ownerId, folderPath, user);
+      const snapshot =
+        user.id === ownerId
+          ? undefined
+          : await buildAccessSnapshot(env, [ownerId]);
+      const flags = await folderViewFlags(
+        env,
+        ownerId,
+        folderPath,
+        user,
+        snapshot,
+      );
       if (!flags.canView) {
         return textError("Not found");
       }
       return textResult(
-        await listFolderChildren(env, ownerId, folderPath, currentId, user, {
-          cursor,
-          limit,
-        }),
+        await listFolderChildren(
+          env,
+          ownerId,
+          folderPath,
+          currentId,
+          user,
+          { cursor, includeNoteCounts: false, limit },
+          snapshot,
+        ),
       );
     },
   );
@@ -835,7 +870,8 @@ export async function createMcpServerFactory() {
   server.registerTool(
     "delete_note",
     {
-      description: "Delete a note (requires canAdmin).",
+      description:
+        "Delete a note (requires canAdmin). Call once per note; do not burst-delete. If a resource-limit error is returned, wait a few seconds before the next delete.",
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
       },
@@ -1298,7 +1334,7 @@ export async function createMcpServerFactory() {
     "move_folder",
     {
       description:
-        "Move a folder (with all contents) under another folder, or to the drive root. Detects cycles, conflicts, and the 500-item cap. Set dry_run first to preview counts.",
+        "Move a folder (with all contents) under another folder, or to the drive root. Detects cycles, conflicts, and the 500-item cap. Set dry_run first to preview counts. On resource-limit / 503: do not retry the same call; wait a few seconds and move a shallower child instead.",
       inputSchema: {
         dest_folder_id: z
           .string()
@@ -1318,16 +1354,14 @@ export async function createMcpServerFactory() {
       if (!user) {
         return textError("Unauthorized");
       }
-      const result = await moveFolder(
-        env,
-        folder_id,
-        { destFolderId: dest_folder_id, dryRun: dry_run, name },
-        user,
+      return await runMoveTool(() =>
+        moveFolder(
+          env,
+          folder_id,
+          { destFolderId: dest_folder_id, dryRun: dry_run, name },
+          user,
+        ),
       );
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
     },
   );
 
@@ -1335,7 +1369,7 @@ export async function createMcpServerFactory() {
     "move_folder_contents",
     {
       description:
-        "Move the direct notes (and optionally direct subfolders with their subtrees) of a folder into another folder. The source folder itself stays. Set dry_run first to preview counts and skip reasons.",
+        "Move the direct notes (and optionally direct subfolders with their subtrees) of a folder into another folder. The source folder itself stays. Set dry_run first. Prefer include_subfolders=false for large trees. On resource-limit / 503: do not retry the same call.",
       inputSchema: {
         dest_folder_id: z
           .string()
@@ -1358,20 +1392,18 @@ export async function createMcpServerFactory() {
       if (!user) {
         return textError("Unauthorized");
       }
-      const result = await moveFolderContents(
-        env,
-        folder_id,
-        {
-          destFolderId: dest_folder_id,
-          dryRun: dry_run,
-          includeSubfolders: include_subfolders,
-        },
-        user,
+      return await runMoveTool(() =>
+        moveFolderContents(
+          env,
+          folder_id,
+          {
+            destFolderId: dest_folder_id,
+            dryRun: dry_run,
+            includeSubfolders: include_subfolders,
+          },
+          user,
+        ),
       );
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
     },
   );
 
@@ -1379,7 +1411,7 @@ export async function createMcpServerFactory() {
     "move_notes",
     {
       description:
-        "Move notes (by UUID or short ID) into a folder in the caller's own drive. Returns per-note moved/skipped/failed with reasons. Max 500 IDs per call. Set dry_run first to preview.",
+        "Move notes (by UUID or short ID) into a folder in the caller's own drive. Returns per-note moved/skipped/failed with reasons. Max 500 IDs per call. Set dry_run first. On resource-limit / 503: do not retry the same call.",
       inputSchema: {
         dry_run: z
           .boolean()
@@ -1401,15 +1433,13 @@ export async function createMcpServerFactory() {
       if (!user) {
         return textError("Unauthorized");
       }
-      const result = await moveNotes(
-        env,
-        { destFolderId: folder_id, dryRun: dry_run, noteIds: note_ids },
-        user,
+      return await runMoveTool(() =>
+        moveNotes(
+          env,
+          { destFolderId: folder_id, dryRun: dry_run, noteIds: note_ids },
+          user,
+        ),
       );
-      if (result.kind !== "ok") {
-        return moveToolError(result);
-      }
-      return textResult(result.result);
     },
   );
 
@@ -1453,7 +1483,7 @@ export async function createMcpServerFactory() {
       "para_archive_project",
       {
         description:
-          "Move a folder inside the Projects bucket into Archives. dated adds a YYYY-MM- prefix to the name. Set dry_run first to preview counts.",
+          "Move a folder inside the Projects bucket into Archives. dated adds a YYYY-MM- prefix to the name. Set dry_run first. On resource-limit / 503: do not retry the same call; wait and archive a shallower folder.",
         inputSchema: {
           dated: z
             .boolean()
@@ -1477,16 +1507,14 @@ export async function createMcpServerFactory() {
         if (!user) {
           return textError("Unauthorized");
         }
-        const result = await paraArchiveProject(
-          env,
-          folder_id,
-          { dated, dryRun: dry_run, name },
-          user,
+        return await runMoveTool(() =>
+          paraArchiveProject(
+            env,
+            folder_id,
+            { dated, dryRun: dry_run, name },
+            user,
+          ),
         );
-        if (result.kind !== "ok") {
-          return moveToolError(result);
-        }
-        return textResult(result.result);
       },
     );
   }
