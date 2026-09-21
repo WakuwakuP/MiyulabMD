@@ -63,12 +63,23 @@ async function renderMermaid(source: string, dark: boolean): Promise<string> {
   return svg;
 }
 
-// PlantUML preprocessing directives can reach the network (`!include <url>`,
-// `%load_json("http://…")`, URL sprites). Shared notes would turn viewers'
-// browsers into confused deputies, so sources using them are rejected up
-// front; stdlib `!include <lib/…>` is intentionally unsupported too (F2).
-const BLOCKED_PLANTUML =
-  /^\s*!.*\b(?:include\w*|import)\b|^\s*!.*https?:\/\/|%load[_a-z]*\s*\(|sprite\s+\$?\w+\s*<https?:\/\//im;
+// PlantUML features that can reach the network are rejected up front —
+// shared notes would otherwise turn viewers' browsers into confused
+// deputies. Blocked vectors: `!include`/`!import` directives (stdlib is
+// intentionally unsupported, F2), `!theme … from <url>`, `%load_*` data
+// functions, URL sprites, Creole `<img:url>` tags, and `skinparam` image
+// options. Plain text that merely mentions a URL stays allowed.
+const BLOCKED_PLANTUML = new RegExp(
+  [
+    /^[^\S\r\n]*![^\S\r\n]*(?:include\w*|import)\b/.source, // include/import directives
+    /^[^\S\r\n]*![^\S\r\n]*theme\b[^\n]*\bfrom\b[^\n]*https?:\/\//.source, // !theme from URL
+    /%load[_a-z]*\s*\(/.source, // %load_json / %load_xml / %loadYAML …
+    /sprite\s+\$?\w+\s*<https?:\/\//.source, // sprite $name <url>
+    /<img\s*:[^>\n]*https?:\/\//.source, // creole <img:https://…>
+    /^[^\S\r\n]*skinparam\b[^\n]*https?:\/\//.source, // skinparam backgroundImage <url>
+  ].join("|"),
+  "im",
+);
 
 function validatePlantUmlSource(source: string): void {
   if (BLOCKED_PLANTUML.test(source)) {
@@ -141,6 +152,8 @@ function sanitizeSvg(svg: string): string {
 // is allowed solely for internal fragment references (clip-path, filter).
 const ALLOWED_CSS_PROPS = new Set([
   "alignment-baseline",
+  "background",
+  "background-color",
   "baseline-shift",
   "clip-path",
   "clip-rule",

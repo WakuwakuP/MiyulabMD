@@ -114,10 +114,44 @@ test.describe("diagram rendering", () => {
           '@startuml\n!$d = %load_json("https://example.com/d.json")\n@enduml',
           false,
         ),
+        render(
+          "plantuml",
+          "@startuml\nAlice -> Bob: <img:https://example.com/i.png>\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nskinparam backgroundImage <https://example.com/bg.png>\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\n!theme spacelab from https://example.com/t.puml\nA -> B\n@enduml",
+          false,
+        ),
       ]);
       return results.map((result) => result.ok);
     });
-    expect(rejected).toEqual([false, false, false]);
+    expect(rejected).toEqual([false, false, false, false, false, false]);
+  });
+
+  test("plantuml sources citing urls in plain text still render", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    const rendered = await page.evaluate(async () => {
+      const render = window.renderDiagramForTest;
+      if (!render) {
+        throw new Error("renderDiagramForTest is not exposed");
+      }
+      const result = await render(
+        "plantuml",
+        "@startuml\nnote left: see https://example.com/docs\nAlice -> Bob\n@enduml",
+        false,
+      );
+      return result.ok;
+    });
+    expect(rendered).toBe(true);
   });
 
   test("rich editor shows the diagram until the block is focused", async ({
