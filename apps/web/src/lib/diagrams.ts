@@ -46,20 +46,8 @@ function onPlantUmlMessage(event: MessageEvent): void {
   }
 }
 
-// PlantUML runs inside a sandboxed iframe (opaque origin) whose CSP forbids
-// every network egress (`connect-src 'none'; img-src 'none'`). Source-level
-// filtering cannot keep up with the preprocessor's expansion tricks, so the
-// sandbox — not the regex — is the real confused-deputy barrier. The engine
-// is an ES module; an opaque origin cannot CORS-import it, so the parent
-// fetches the source and the iframe imports it from a blob: URL.
-async function plantUmlSandbox(): Promise<Window> {
-  const iframe = document.createElement("iframe");
-  iframe.setAttribute("sandbox", "allow-scripts");
-  iframe.style.display = "none";
-  iframe.setAttribute("aria-hidden", "true");
-  const origin = location.origin;
-  const base = `${origin}${PLANTUML_ASSETS}`;
-  iframe.srcdoc = `<!doctype html><html><head>
+function sandboxSrcdoc(base: string, origin: string): string {
+  return `<!doctype html><html><head>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: ${origin}; connect-src 'none'; img-src 'none'; font-src 'none'; style-src 'unsafe-inline'">
 <script src="${base}viz-global.js"></script>
 </head><body><script type="module">
@@ -93,41 +81,59 @@ window.addEventListener("message", async (e) => {
 });
 parent.postMessage({ type: "plantuml-listening" }, "*");
 </script></body></html>`;
+}
+
+// The engine is an ES module and an opaque origin cannot CORS-import it, so
+// the parent fetches the source and the iframe imports it from a blob: URL.
+async function deliverEngineSource(assets: string, win: Window): Promise<void> {
+  const response = await fetch(`${assets}plantuml.js`);
+  if (!response.ok) {
+    throw new Error(`status ${response.status}`);
+  }
+  win.postMessage({ code: await response.text(), type: "plantuml-load" }, "*");
+}
+
+// PlantUML runs inside a sandboxed iframe (opaque origin) whose CSP forbids
+// every network egress (`connect-src 'none'; img-src 'none'`). Source-level
+// filtering cannot keep up with the preprocessor's expansion tricks, so the
+// sandbox — not the regex — is the real confused-deputy barrier.
+function plantUmlSandbox(): Promise<Window> {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-scripts");
+  iframe.style.display = "none";
+  iframe.setAttribute("aria-hidden", "true");
+  const origin = location.origin;
+  iframe.srcdoc = sandboxSrcdoc(`${origin}${PLANTUML_ASSETS}`, origin);
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const finish = (action: () => void) => {
       window.removeEventListener("message", onMessage);
-      reject(new Error("PlantUML サンドボックスの初期化に失敗しました"));
-    }, 30_000);
-    const onMessage = async (event: MessageEvent) => {
+      clearTimeout(timer);
+      action();
+    };
+    const timer = setTimeout(
+      () =>
+        finish(() =>
+          reject(new Error("PlantUML サンドボックスの初期化に失敗しました")),
+        ),
+      30_000,
+    );
+    const onMessage = (event: MessageEvent) => {
       // contentWindow is null until the iframe is connected; compare lazily.
       const win = iframe.contentWindow;
       if (!win || event.source !== win) {
         return;
       }
       if (event.data?.type === "plantuml-listening") {
-        try {
-          const response = await fetch(`${PLANTUML_ASSETS}plantuml.js`);
-          if (!response.ok) {
-            throw new Error(`status ${response.status}`);
-          }
-          win.postMessage(
-            { code: await response.text(), type: "plantuml-load" },
-            "*",
-          );
-        } catch (error) {
-          window.removeEventListener("message", onMessage);
-          clearTimeout(timer);
-          reject(
-            new Error(`plantuml.js の取得に失敗: ${String(error)}`),
-          );
-        }
+        deliverEngineSource(PLANTUML_ASSETS, win).catch((error) =>
+          finish(() =>
+            reject(new Error(`plantuml.js の取得に失敗: ${String(error)}`)),
+          ),
+        );
       } else if (event.data?.type === "plantuml-ready") {
-        window.removeEventListener("message", onMessage);
-        clearTimeout(timer);
         if (event.data.error) {
-          reject(new Error(String(event.data.error)));
+          finish(() => reject(new Error(String(event.data.error))));
         } else {
-          resolve(win);
+          finish(() => resolve(win));
         }
       }
     };
