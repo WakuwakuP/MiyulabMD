@@ -26,3 +26,6 @@ playwright-report/
 
 # diagram engine assets synced from node_modules
 apps/web/public/diagram/
+
+# specs
+specs/
