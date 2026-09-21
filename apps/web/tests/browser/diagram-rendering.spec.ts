@@ -237,7 +237,7 @@ test.describe("diagram rendering", () => {
           `<rect fill="url('https://evil.example/g')" width="1" height="1"/>` +
           `<rect fill="url(#grad)" width="1" height="1"/>` +
           `<animate attributeName="xlink:href" to="https://evil.example/a"/>` +
-          `</svg>`,
+          "</svg>",
       );
       return host.innerHTML;
     });
