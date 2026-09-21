@@ -1,6 +1,8 @@
 import type { WikiLinkMap } from "@miyulabmd/markdown";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "../../hooks/use-theme.ts";
 import { cn } from "../../lib/cn.ts";
+import { useDiagrams } from "../../lib/diagrams.ts";
 import { loadOgCards, renderMarkdownHtml } from "../../lib/markdown.ts";
 import {
   type ImageViewContext,
@@ -91,6 +93,8 @@ export function MarkdownPreview({
     deferredMarkdown,
     taskNoteId,
   );
+  const { theme } = useTheme();
+  useDiagrams(articleRef, html, theme);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reapply the scroll ratio when rendered content changes height.
   useEffect(() => {

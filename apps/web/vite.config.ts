@@ -27,13 +27,30 @@ const workerProxy = {
   target: workerUrl.origin,
 };
 
+const DIAGRAM_CHUNK_DEPS =
+  /node_modules[/\\](?:\.pnpm[/\\][^/\\]+[/\\]node_modules[/\\])?(?:@?mermaid|@mermaid-js|@plantuml|cytoscape|cytoscape-fcose|cytoscape-cose-bilkent|cose-base|layout-base|dagre-d3-es|non-layered-tidy-tree-layout|elkjs|katex|khroma|roughjs|stylis|ts-dedent|chevrotain|es-toolkit|@upsetjs|@iconify|@braintree|dompurify|marked|dayjs|uuid|d3(?:-[\w-]+)?)[/\\]/;
+
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        // Diagram engines are heavy and only load on demand. Tag their chunks
+        // so the service worker can exclude them from the precache manifest
+        // and serve them via runtime caching instead.
+        chunkFileNames: (chunkInfo) =>
+          chunkInfo.moduleIds.some((id) => DIAGRAM_CHUNK_DEPS.test(id))
+            ? "assets/diagram-[name]-[hash].js"
+            : "assets/[name]-[hash].js",
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
       filename: "sw.js",
       injectManifest: {
+        globIgnores: ["assets/diagram-*", "diagram/**"],
         globPatterns: [
           "index.html",
           "manifest.webmanifest",

@@ -5,10 +5,11 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "node scripts/sync-diagram-assets.mjs && vite build",
     "build-storybook": "storybook build",
-    "dev": "vite",
+    "dev": "node scripts/sync-diagram-assets.mjs && vite",
     "storybook": "storybook dev -p 6006",
+    "sync:diagrams": "node scripts/sync-diagram-assets.mjs",
     "test": "node --experimental-strip-types --test src/lib/*.test.ts src/pages/*.test.ts src/components/editor/*.test.ts",
     "test:browser": "node scripts/playwright.mjs test",
     "test:browser:install": "node scripts/playwright.mjs install chromium",
@@ -26,6 +27,7 @@
     "@lezer/highlight": "^1.2.3",
     "@miyulabmd/markdown": "workspace:*",
     "@miyulabmd/shared": "workspace:*",
+    "@plantuml/core": "1.2026.8",
     "@tiptap/core": "^3.31.3",
     "@tiptap/extension-code-block-lowlight": "^3.31.3",
     "@tiptap/extension-drag-handle": "^3.31.3",
@@ -42,11 +44,13 @@
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
     "codemirror": "^6.0.2",
+    "dompurify": "^3.4.15",
     "fast-diff": "^1.3.0",
     "github-slugger": "^2.0.0",
     "highlight.js": "^11.12.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.41.0",
+    "mermaid": "^12.0.0",
     "nuqs": "2.10.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -75,6 +79,7 @@
     "workbox-core": "7.4.1",
     "workbox-precaching": "7.4.1",
     "workbox-routing": "7.4.1",
+    "workbox-strategies": "7.4.1",
     "y-protocols": "^1.0.7"
   }
 }

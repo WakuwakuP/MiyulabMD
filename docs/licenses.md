@@ -20,7 +20,7 @@ MiyulabMD 本体は [GNU Affero General Public License v3.0 or later](../LICENSE
 
 - MIT / ISC / Apache-2.0 / BSD-2-Clause / BSD-3-Clause
 - CC-BY-4.0 / CC0-1.0 / 0BSD / Unlicense / BlueOak-1.0.0
-- MPL-2.0 / OFL-1.1
+- MPL-2.0 / OFL-1.1 / EPL-2.0（弱コピーレフト。無改変のライブラリ利用に限る）
 - AGPL-3.0-or-later（このリポジトリ自身）
 
 デュアルライセンスは、OR の一方が許可なら通す。AND は両方必要。
