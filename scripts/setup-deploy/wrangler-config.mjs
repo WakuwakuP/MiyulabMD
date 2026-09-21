@@ -1,6 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { replaceTomlQuotedValue, upsertCustomDomainRoute } from "./helpers.mjs";
+import {
+  replaceServiceBindingTarget,
+  replaceTomlQuotedValue,
+  upsertCustomDomainRoute,
+} from "./helpers.mjs";
 
 export const PLACEHOLDER_D1_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -8,12 +12,14 @@ export const PLACEHOLDER_ACCESS_TEAM_DOMAIN = "example.cloudflareaccess.com";
 
 export const WRANGLER_DEPLOY_TOML = "wrangler.deploy.toml";
 export const OG_FETCH_DEPLOY_TOML = "wrangler.og-fetch.deploy.toml";
+export const DIAGRAM_CHECK_DEPLOY_TOML = "wrangler.diagram-check.deploy.toml";
 
 export const DEPLOY_VAR_NAMES = {
   accessTeamDomain: "ACCESS_TEAM_DOMAIN",
   customHostname: "CUSTOM_HOSTNAME",
   d1Id: "D1_DATABASE_ID",
   d1Name: "D1_DATABASE_NAME",
+  diagramCheckName: "DIAGRAM_CHECK_WORKER_NAME",
   ogFetchName: "OG_FETCH_WORKER_NAME",
   r2Name: "R2_BUCKET_NAME",
   workerName: "WORKER_NAME",
@@ -30,13 +36,19 @@ export function readDeployOverridesFromEnv(env = process.env) {
     customHostname: trimToUndef(env.CUSTOM_HOSTNAME),
     d1Id: trimToUndef(env.D1_DATABASE_ID),
     d1Name: trimToUndef(env.D1_DATABASE_NAME),
+    diagramCheckName: trimToUndef(env.DIAGRAM_CHECK_WORKER_NAME),
     ogFetchName: trimToUndef(env.OG_FETCH_WORKER_NAME),
     r2Name: trimToUndef(env.R2_BUCKET_NAME),
     workerName: trimToUndef(env.WORKER_NAME),
   };
 }
 
-export function applyDeployOverrides(wranglerToml, ogToml, overrides) {
+export function applyDeployOverrides(
+  wranglerToml,
+  ogToml,
+  diagramCheckToml,
+  overrides,
+) {
   let nextWrangler = wranglerToml;
   if (overrides.workerName) {
     nextWrangler = replaceTomlQuotedValue(
@@ -67,10 +79,17 @@ export function applyDeployOverrides(wranglerToml, ogToml, overrides) {
     );
   }
   if (overrides.ogFetchName) {
-    nextWrangler = replaceTomlQuotedValue(
+    nextWrangler = replaceServiceBindingTarget(
       nextWrangler,
-      "service",
+      "OG_FETCH",
       overrides.ogFetchName,
+    );
+  }
+  if (overrides.diagramCheckName) {
+    nextWrangler = replaceServiceBindingTarget(
+      nextWrangler,
+      "DIAGRAM_CHECK",
+      overrides.diagramCheckName,
     );
   }
   if (overrides.accessTeamDomain) {
@@ -92,7 +111,20 @@ export function applyDeployOverrides(wranglerToml, ogToml, overrides) {
     nextOg = replaceTomlQuotedValue(nextOg, "name", overrides.ogFetchName);
   }
 
-  return { ogToml: nextOg, wranglerToml: nextWrangler };
+  let nextDiagramCheck = diagramCheckToml;
+  if (overrides.diagramCheckName) {
+    nextDiagramCheck = replaceTomlQuotedValue(
+      nextDiagramCheck,
+      "name",
+      overrides.diagramCheckName,
+    );
+  }
+
+  return {
+    diagramCheckToml: nextDiagramCheck,
+    ogToml: nextOg,
+    wranglerToml: nextWrangler,
+  };
 }
 
 export function assertRemoteOverrides(overrides) {
@@ -117,9 +149,19 @@ export async function writeDeployConfigFiles(workerDir, overrides) {
     join(workerDir, "wrangler.og-fetch.toml"),
     "utf8",
   );
-  const next = applyDeployOverrides(wranglerToml, ogToml, overrides);
+  const diagramCheckToml = await readFile(
+    join(workerDir, "wrangler.diagram-check.toml"),
+    "utf8",
+  );
+  const next = applyDeployOverrides(
+    wranglerToml,
+    ogToml,
+    diagramCheckToml,
+    overrides,
+  );
   const mainPath = join(workerDir, WRANGLER_DEPLOY_TOML);
   const ogPath = join(workerDir, OG_FETCH_DEPLOY_TOML);
+  const diagramCheckPath = join(workerDir, DIAGRAM_CHECK_DEPLOY_TOML);
   await writeFile(
     mainPath,
     `# Generated from wrangler.toml and deploy variables. Do not commit.\n${next.wranglerToml}`,
@@ -128,5 +170,9 @@ export async function writeDeployConfigFiles(workerDir, overrides) {
     ogPath,
     `# Generated from wrangler.og-fetch.toml and deploy variables. Do not commit.\n${next.ogToml}`,
   );
-  return { mainPath, ogPath };
+  await writeFile(
+    diagramCheckPath,
+    `# Generated from wrangler.diagram-check.toml and deploy variables. Do not commit.\n${next.diagramCheckToml}`,
+  );
+  return { diagramCheckPath, mainPath, ogPath };
 }

@@ -60,7 +60,11 @@ export {
   userSettingsFromObject,
 } from "./knowledge.ts";
 export type { McpToolName } from "./mcp.ts";
-export { MCP_NOTE_URL_HINT, MCP_TOOLS } from "./mcp.ts";
+export {
+  MCP_DIAGRAM_CHECK_HINT,
+  MCP_NOTE_URL_HINT,
+  MCP_TOOLS,
+} from "./mcp.ts";
 export type {
   MedallionAssignment,
   MedallionLayer,
@@ -182,6 +186,10 @@ export {
   rewriteFolderPrefix,
   scopesFromPreset,
 } from "./permission.ts";
+export {
+  PLANTUML_EXTERNAL_RESOURCE_ERROR,
+  validatePlantUmlSource,
+} from "./plantuml-guard.ts";
 export type {
   JdLevel,
   NamingScheme,
