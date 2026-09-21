@@ -14,3 +14,8 @@ declare module "@plantuml/core" {
     options?: { dark?: boolean },
   ): void;
 }
+
+declare module "@plantuml/core/package.json" {
+  const pkg: { version: string };
+  export default pkg;
+}

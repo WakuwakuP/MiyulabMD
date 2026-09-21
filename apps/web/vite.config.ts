@@ -28,7 +28,7 @@ const workerProxy = {
 };
 
 const DIAGRAM_CHUNK_DEPS =
-  /node_modules[/\\](?:\.pnpm[/\\][^/\\]+[/\\]node_modules[/\\])?(?:@?mermaid|@mermaid-js|@plantuml|cytoscape|cytoscape-fcose|cytoscape-cose-bilkent|cose-base|layout-base|dagre-d3-es|non-layered-tidy-tree-layout|elkjs|katex|khroma|roughjs|stylis|ts-dedent|chevrotain|es-toolkit|@upsetjs|@iconify|@braintree|dompurify|marked|dayjs|uuid|d3(?:-[\w-]+)?)[/\\]/;
+  /node_modules[/\\](?:\.pnpm[/\\][^/\\]+[/\\]node_modules[/\\])?(?:@?mermaid|@mermaid-js|@plantuml|cytoscape|cytoscape-fcose|cytoscape-cose-bilkent|cose-base|layout-base|dagre-d3-es|non-layered-tidy-tree-layout|elkjs|katex|khroma|roughjs|stylis|ts-dedent|chevrotain|es-toolkit|@upsetjs|@iconify|@braintree|marked|dayjs|uuid|d3(?:-[\w-]+)?)[/\\]/;
 
 export default defineConfig({
   build: {
@@ -36,11 +36,25 @@ export default defineConfig({
       output: {
         // Diagram engines are heavy and only load on demand. Tag their chunks
         // so the service worker can exclude them from the precache manifest
-        // and serve them via runtime caching instead.
-        chunkFileNames: (chunkInfo) =>
-          chunkInfo.moduleIds.some((id) => DIAGRAM_CHUNK_DEPS.test(id))
+        // and serve them via runtime caching instead. Only tag chunks made
+        // purely of node_modules code: a chunk that also contains app source
+        // (e.g. a shared dep like dompurify pulled into the preview path)
+        // must stay precached.
+        chunkFileNames: (chunkInfo) => {
+          const ids = chunkInfo.moduleIds;
+          // A chunk is diagram-only when it pulls in engine code and every
+          // module is either a dependency or a bundler helper (virtual
+          // modules carry a \0 prefix). Any app source module keeps the
+          // default name so it stays precached.
+          const isAppModule = (id: string) =>
+            !id.includes("node_modules") && !id.includes("\0");
+          const isDiagramOnly =
+            ids.some((id) => DIAGRAM_CHUNK_DEPS.test(id)) &&
+            !ids.some(isAppModule);
+          return isDiagramOnly
             ? "assets/diagram-[name]-[hash].js"
-            : "assets/[name]-[hash].js",
+            : "assets/[name]-[hash].js";
+        },
       },
     },
   },

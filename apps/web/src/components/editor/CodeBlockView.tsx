@@ -8,11 +8,12 @@ import {
 import type { Editor } from "@tiptap/core";
 import type { NodeViewProps } from "@tiptap/react";
 import { NodeViewContent, NodeViewWrapper } from "@tiptap/react";
-import { type MouseEvent, useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../hooks/use-theme.ts";
 import { CODE_BLOCK_LANGUAGES } from "../../lib/code-highlight.ts";
 import {
   type DiagramResult,
+  insertDiagramSvg,
   renderDiagram,
   useDiagramDark,
 } from "../../lib/diagrams.ts";
@@ -85,6 +86,16 @@ function useDiagramResult(
   return result;
 }
 
+function DiagramFigure({ svg }: { svg: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      insertDiagramSvg(ref.current, svg);
+    }
+  }, [svg]);
+  return <div className="md-diagram-figure" ref={ref} />;
+}
+
 function DiagramPane({
   lang,
   result,
@@ -102,12 +113,7 @@ function DiagramPane({
       data-diagram-state={diagramState(result)}
       onClick={onSelect}
     >
-      {result?.ok && (
-        <div
-          className="md-diagram-figure"
-          dangerouslySetInnerHTML={{ __html: result.svg }}
-        />
-      )}
+      {result?.ok && <DiagramFigure svg={result.svg} />}
       {result && !result.ok && (
         <div className="md-diagram-error">
           図の描画に失敗しました: {result.error}

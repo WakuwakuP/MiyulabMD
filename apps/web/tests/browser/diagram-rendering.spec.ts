@@ -21,6 +21,10 @@ test.describe("diagram rendering", () => {
     await expect(
       mermaid.first().locator(".md-diagram-figure svg"),
     ).toBeVisible();
+    // foreignObject labels must survive sanitization (node text renders).
+    await expect(mermaid.first().locator(".md-diagram-figure")).toContainText(
+      "Client",
+    );
 
     await expect(plantuml).toHaveAttribute("data-diagram-state", "done", {
       timeout: 60_000,
@@ -79,6 +83,41 @@ test.describe("diagram rendering", () => {
     }, source);
 
     expect(light).not.toEqual(dark);
+  });
+
+  test("plantuml sources with include/import directives are rejected", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    await expect(
+      page.locator('.md-diagram[data-diagram-lang="plantuml"]'),
+    ).toHaveAttribute("data-diagram-state", "done", { timeout: 60_000 });
+
+    const rejected = await page.evaluate(async () => {
+      const render = window.renderDiagramForTest;
+      if (!render) {
+        throw new Error("renderDiagramForTest is not exposed");
+      }
+      const results = await Promise.all([
+        render(
+          "plantuml",
+          "@startuml\n!include <C4/C4_Context>\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\n!includeurl https://example.com/x.puml\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          '@startuml\n!$d = %load_json("https://example.com/d.json")\n@enduml',
+          false,
+        ),
+      ]);
+      return results.map((result) => result.ok);
+    });
+    expect(rejected).toEqual([false, false, false]);
   });
 
   test("rich editor shows the diagram until the block is focused", async ({
