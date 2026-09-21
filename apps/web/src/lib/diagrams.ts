@@ -161,11 +161,21 @@ async function renderMermaid(source: string, dark: boolean): Promise<string> {
   mermaid.initialize({
     securityLevel: "strict",
     startOnLoad: false,
+    // Without this, mermaid draws its "Syntax error" bomb into a temp div
+    // appended to <body> and throws before removing it — the graphic then
+    // shows up at the end of the page instead of inside the diagram block.
+    suppressErrorRendering: true,
     theme: dark ? "dark" : "default",
   });
   mermaidId += 1;
-  const { svg } = await mermaid.render(`md-diagram-${mermaidId}`, source);
-  return svg;
+  const renderId = `md-diagram-${mermaidId}`;
+  try {
+    const { svg } = await mermaid.render(renderId, source);
+    return svg;
+  } finally {
+    // The scratch container mermaid appends to <body> is "d" + renderId.
+    document.getElementById(`d${renderId}`)?.remove();
+  }
 }
 
 // PlantUML features that can reach the network are rejected up front —

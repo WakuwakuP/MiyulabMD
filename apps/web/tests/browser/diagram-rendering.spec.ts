@@ -51,6 +51,12 @@ test.describe("diagram rendering", () => {
     );
     await expect(broken.locator(".md-diagram-source")).toBeVisible();
     await expect(broken.locator(".md-diagram-figure")).toHaveCount(0);
+
+    // Mermaid must not leave its "Syntax error" bomb behind: without
+    // suppressErrorRendering it draws the graphic into a scratch div
+    // appended to <body> and throws before cleaning it up.
+    await expect(page.locator("text=Syntax error in text")).toHaveCount(0);
+    await expect(page.locator('[id^="dmd-diagram"]')).toHaveCount(0);
   });
 
   test("plantuml {dark:true} produces different svg (undocumented arg smoke test)", async ({
