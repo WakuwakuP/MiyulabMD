@@ -195,6 +195,31 @@ export function installDiagramDomStub(): void {
   // globalThis already, but Node (tests) does not.
   g.addEventListener ??= () => undefined;
   g.removeEventListener ??= () => undefined;
+  // The browser sandbox relies on CSP connect-src 'none' to physically stop
+  // the engine's egress. This worker has no CSP, so deny egress at the JS
+  // surface instead — the source regex alone can be evaded by preprocessor
+  // line continuations. None of the engines need the network: viz wasm is
+  // base64-embedded and stdlib modules resolve via PLANTUML_STDLIB_LOADER.
+  const denyEgress = (name: string) => {
+    throw new Error(`network access is disabled in diagram-check (${name})`);
+  };
+  g.fetch = () => denyEgress("fetch");
+  g.XMLHttpRequest = class {
+    constructor() {
+      denyEgress("XMLHttpRequest");
+    }
+  };
+  g.WebSocket = class {
+    constructor() {
+      denyEgress("WebSocket");
+    }
+  };
+  g.EventSource = class {
+    constructor() {
+      denyEgress("EventSource");
+    }
+  };
+  g.importScripts = () => denyEgress("importScripts");
   // DOMPurify (loaded via mermaid) only installs addHook()/sanitize() when
   // window.document.nodeType === 9 and window.Element exist. With those, its
   // isSupported check still fails (no implementation.createHTMLDocument), so

@@ -26,7 +26,10 @@ export const PLANTUML_EXTERNAL_RESOURCE_ERROR =
   "外部リソースを取り込む PlantUML 記法には対応していません";
 
 export function validatePlantUmlSource(source: string): void {
-  if (BLOCKED_PLANTUML.test(source)) {
+  // PlantUML joins lines ending in a backslash before preprocessing, so
+  // "!inc\␤lude https://…" would evade a per-line pattern — collapse first.
+  const normalized = source.replace(/\\\r?\n/g, "");
+  if (BLOCKED_PLANTUML.test(normalized)) {
     throw new Error(PLANTUML_EXTERNAL_RESOURCE_ERROR);
   }
 }

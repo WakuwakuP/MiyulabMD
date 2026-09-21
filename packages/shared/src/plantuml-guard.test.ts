@@ -4,6 +4,7 @@ import { validatePlantUmlSource } from "./plantuml-guard.ts";
 
 const BLOCKED = [
   "!include https://evil.example/x.iuml",
+  "!inc\\\nlude https://evil.example/x.iuml",
   "!include_local sub.puml",
   "!define INC !include https://evil.example/x\nINC",
   "!import https://evil.example/x",
