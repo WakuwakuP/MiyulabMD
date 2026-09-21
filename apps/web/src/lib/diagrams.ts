@@ -72,11 +72,13 @@ async function renderMermaid(source: string, dark: boolean): Promise<string> {
 const BLOCKED_PLANTUML = new RegExp(
   [
     /^[^\S\r\n]*![^\S\r\n]*(?:include\w*|import)\b/.source, // include/import directives
-    /^[^\S\r\n]*![^\S\r\n]*theme\b[^\n]*\bfrom\b[^\n]*https?:\/\//.source, // !theme from URL
+    /^[^\S\r\n]*![^\S\r\n]*theme\b[^\n]*\bfrom\b/.source, // !theme … from <resource>
     /%load[_a-z]*\s*\(/.source, // %load_json / %load_xml / %loadYAML …
-    /sprite\s+\$?\w+\s*<https?:\/\//.source, // sprite $name <url>
-    /<img\s*:[^>\n]*https?:\/\//.source, // creole <img:https://…>
-    /^[^\S\r\n]*skinparam\b[^\n]*https?:\/\//.source, // skinparam backgroundImage <url>
+    /sprite\s+\$?\w+\s*</.source, // sprite $name <resource>
+    /<img\b/.source, // creole images always reference a resource
+    /<\s*(?:https?:)?\/\//.source, // <https://…> / <//host> resource refs
+    /^[^\S\r\n]*skinparam\b[^\n]*(?:https?:)?\/\//.source, // skinparam … url
+    /<style\b[^>\n]*(?:file|src)\s*=/.source, // creole <style file=…>
   ].join("|"),
   "im",
 );
