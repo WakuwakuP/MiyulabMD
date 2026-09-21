@@ -20,3 +20,4 @@ if (requireRemote) {
 const paths = await writeDeployConfigFiles(WORKER_DIR, overrides);
 console.log(`wrote ${paths.mainPath}`);
 console.log(`wrote ${paths.ogPath}`);
+console.log(`wrote ${paths.diagramCheckPath}`);

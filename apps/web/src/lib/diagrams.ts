@@ -1,4 +1,5 @@
 import type { DiagramLanguage } from "@miyulabmd/markdown";
+import { validatePlantUmlSource } from "@miyulabmd/shared";
 import plantumlPkg from "@plantuml/core/package.json";
 import DOMPurify from "dompurify";
 import { type RefObject, useEffect, useSyncExternalStore } from "react";
@@ -161,41 +162,26 @@ async function renderMermaid(source: string, dark: boolean): Promise<string> {
   mermaid.initialize({
     securityLevel: "strict",
     startOnLoad: false,
+    // Without this, mermaid draws its "Syntax error" bomb into a temp div
+    // appended to <body> and throws before removing it — the graphic then
+    // shows up at the end of the page instead of inside the diagram block.
+    suppressErrorRendering: true,
     theme: dark ? "dark" : "default",
   });
   mermaidId += 1;
-  const { svg } = await mermaid.render(`md-diagram-${mermaidId}`, source);
-  return svg;
-}
-
-// PlantUML features that can reach the network are rejected up front —
-// shared notes would otherwise turn viewers' browsers into confused
-// deputies. Blocked vectors: `!include`/`!import` directives (stdlib is
-// intentionally unsupported, F2), `!theme … from <url>`, `%load_*` data
-// functions, URL sprites, Creole `<img:url>` tags, and `skinparam` image
-// options. Plain text that merely mentions a URL stays allowed.
-const BLOCKED_PLANTUML = new RegExp(
-  [
-    /![^\S\r\n]*(?:include\w*|import)\b/.source, // !include/!import, incl. via !define macros
-    /![^\S\r\n]*theme\b[^\n]*\bfrom\b/.source, // !theme … from <resource>
-    /%load[_a-z]*\s*\(/.source, // %load_json / %load_xml / %loadYAML …
-    /sprite\s+\$?\w+(?:[^\S\r\n]*\[[^\]\n]*\])?[^\S\r\n]*(?:<|\{[^{}]*<|(?:https?:)?\/)/
-      .source, // sprite <res>, {…<svg>}, url/path
-    /<img\b/.source, // creole images always reference a resource
-    /\bbackgroundImage\b/.source, // skinparam image (any value form)
-    /<\s*(?:https?:)?\/\//.source, // <https://…> / <//host> resource refs
-    /^[^\S\r\n]*skinparam\b[^\n]*(?:https?:)?\/\//.source, // skinparam … url
-    /skinparam\b[^\n{]*\{[^{}]*(?:https?:)?\/\//.source, // skinparam { … url }
-    /<style\b[^>]*(?:file|src|href)\s*=/.source, // creole <style file=…>
-  ].join("|"),
-  "im",
-);
-
-function validatePlantUmlSource(source: string): void {
-  if (BLOCKED_PLANTUML.test(source)) {
-    throw new Error("外部リソースを取り込む PlantUML 記法には対応していません");
+  const renderId = `md-diagram-${mermaidId}`;
+  try {
+    const { svg } = await mermaid.render(renderId, source);
+    return svg;
+  } finally {
+    // The scratch container mermaid appends to <body> is "d" + renderId.
+    document.getElementById(`d${renderId}`)?.remove();
   }
 }
+
+// The PlantUML source guard (validatePlantUmlSource) lives in
+// @miyulabmd/shared so the MCP diagram-check worker applies the same
+// rules — it can fetch outbound; the browser sandbox cannot.
 
 async function renderPlantUml(source: string, dark: boolean): Promise<string> {
   validatePlantUmlSource(source);

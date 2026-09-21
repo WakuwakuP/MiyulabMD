@@ -43,3 +43,7 @@ export type McpToolName = (typeof MCP_TOOLS)[number];
 /** list_notes / get_note / create_note の description に付ける。結果に url は載せない。 */
 export const MCP_NOTE_URL_HINT =
   "Note page URL is /n/{id} using the UUID id. Do not use /{shortId}. Origin is the same host as this MCP endpoint.";
+
+/** 書き込み系ツールの description に付ける。diagramCheck の読み方を LLM に伝える。 */
+export const MCP_DIAGRAM_CHECK_HINT =
+  "If the markdown contains ```mermaid or ```plantuml blocks, the response includes diagramCheck.errors with per-block syntax errors; each error's line is the 1-based line of the block's opening fence in the note — fix the block at that line.";

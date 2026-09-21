@@ -68,6 +68,7 @@ jobs:
         working-directory: apps/worker
         run: |
           pnpm exec wrangler deploy -c wrangler.og-fetch.toml --dry-run --outdir /tmp/miyulabmd-og-fetch-dry-run
+          pnpm exec wrangler deploy -c wrangler.diagram-check.toml --dry-run --outdir /tmp/miyulabmd-diagram-check-dry-run
           pnpm exec wrangler deploy --dry-run --outdir /tmp/miyulabmd-worker-dry-run
 
   deploy:
@@ -113,6 +114,7 @@ jobs:
           ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
           WORKER_NAME: ${{ vars.WORKER_NAME }}
           OG_FETCH_WORKER_NAME: ${{ vars.OG_FETCH_WORKER_NAME }}
+          DIAGRAM_CHECK_WORKER_NAME: ${{ vars.DIAGRAM_CHECK_WORKER_NAME }}
           R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
           CUSTOM_HOSTNAME: ${{ vars.CUSTOM_HOSTNAME }}
         run: node ../../scripts/apply-wrangler-env.mjs --require-remote
@@ -131,4 +133,5 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           pnpm exec wrangler deploy -c wrangler.og-fetch.deploy.toml --message "${{ github.sha }}-og-fetch"
+          pnpm exec wrangler deploy -c wrangler.diagram-check.deploy.toml --message "${{ github.sha }}-diagram-check"
           pnpm exec wrangler deploy -c wrangler.deploy.toml --message "${{ github.sha }}"

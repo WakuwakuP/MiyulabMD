@@ -49,6 +49,7 @@ import {
 import { commandExists, runCommand } from "./setup-deploy/process.mjs";
 import { createPrompt } from "./setup-deploy/prompt.mjs";
 import {
+  DIAGRAM_CHECK_DEPLOY_TOML,
   OG_FETCH_DEPLOY_TOML,
   PLACEHOLDER_ACCESS_TEAM_DOMAIN,
   WRANGLER_DEPLOY_TOML,
@@ -60,6 +61,7 @@ const REPO_ROOT = join(ROOT, "..");
 const WORKER_DIR = join(REPO_ROOT, "apps/worker");
 const WRANGLER_TOML = join(WORKER_DIR, "wrangler.toml");
 const OG_TOML = join(WORKER_DIR, "wrangler.og-fetch.toml");
+const DIAGRAM_CHECK_TOML = join(WORKER_DIR, "wrangler.diagram-check.toml");
 
 function printHelp() {
   console.log(`MiyulabMD デプロイ環境セットアップ
@@ -228,7 +230,7 @@ async function selectAccount(prompt, token, cloudflare) {
   return account;
 }
 
-async function collectNames(prompt, wranglerToml, ogToml) {
+async function collectNames(prompt, wranglerToml, ogToml, diagramCheckToml) {
   logStep(2, "リソース名");
   const workerName = await prompt.ask(
     "Worker 名",
@@ -238,6 +240,11 @@ async function collectNames(prompt, wranglerToml, ogToml) {
     "og-fetch Worker 名",
     readTomlQuotedValue(ogToml, "name") ?? `${workerName}-og-fetch`,
   );
+  const diagramCheckName = await prompt.ask(
+    "diagram-check Worker 名",
+    readTomlQuotedValue(diagramCheckToml, "name") ??
+      `${workerName}-diagram-check`,
+  );
   const d1Name = await prompt.ask(
     "D1 データベース名",
     readTomlQuotedValue(wranglerToml, "database_name") ?? workerName,
@@ -246,7 +253,7 @@ async function collectNames(prompt, wranglerToml, ogToml) {
     "R2 バケット名",
     readTomlQuotedValue(wranglerToml, "bucket_name") ?? `${workerName}-images`,
   );
-  return { d1Name, ogFetchName, r2Name, workerName };
+  return { d1Name, diagramCheckName, ogFetchName, r2Name, workerName };
 }
 
 async function canUseAccessApi(token, accountId) {
@@ -352,6 +359,7 @@ function toDeployOverrides({ names, databaseId, teamDomain, customHostname }) {
     customHostname: customHostname ?? undefined,
     d1Id: databaseId,
     d1Name: names.d1Name,
+    diagramCheckName: names.diagramCheckName,
     ogFetchName: names.ogFetchName,
     r2Name: names.r2Name,
     workerName: names.workerName,
@@ -459,6 +467,10 @@ async function deployWorkers(prompt, cloudflare, env, { applyMigrations }) {
     env,
     inherit: true,
   });
+  await cloudflare.wrangler(["deploy", "-c", DIAGRAM_CHECK_DEPLOY_TOML], {
+    env,
+    inherit: true,
+  });
   await cloudflare.wrangler(["deploy", "-c", WRANGLER_DEPLOY_TOML], {
     env,
     inherit: true,
@@ -531,6 +543,7 @@ async function setupGitHub(
   const variables = {
     D1_DATABASE_ID: d1.id,
     D1_DATABASE_NAME: names.d1Name,
+    DIAGRAM_CHECK_WORKER_NAME: names.diagramCheckName,
     OG_FETCH_WORKER_NAME: names.ogFetchName,
     R2_BUCKET_NAME: names.r2Name,
     WORKER_NAME: names.workerName,
@@ -745,7 +758,13 @@ async function runInteractiveSetup(prompt) {
 
   const wranglerToml = await readFile(WRANGLER_TOML, "utf8");
   const ogToml = await readFile(OG_TOML, "utf8");
-  const names = await collectNames(prompt, wranglerToml, ogToml);
+  const diagramCheckToml = await readFile(DIAGRAM_CHECK_TOML, "utf8");
+  const names = await collectNames(
+    prompt,
+    wranglerToml,
+    ogToml,
+    diagramCheckToml,
+  );
 
   const configureAccess = await prompt.confirm(
     "Zero Trust Access（ログイン）を設定しますか？",

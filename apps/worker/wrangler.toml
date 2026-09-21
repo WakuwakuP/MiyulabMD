@@ -33,6 +33,10 @@ bucket_name = "miyulabmd-images"
 binding = "OG_FETCH"
 service = "miyulabmd-og-fetch"
 
+[[services]]
+binding = "DIAGRAM_CHECK"
+service = "miyulabmd-diagram-check"
+
 [durable_objects]
 bindings = [{ name = "DOCUMENT_ROOM", class_name = "DocumentRoom" }]
 

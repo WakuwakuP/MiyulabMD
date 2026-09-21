@@ -13,6 +13,7 @@ interface __BaseEnv_Env {
 	DEV_AUTH: "false";
 	DOCUMENT_ROOM: DurableObjectNamespace<import("./src/index").DocumentRoom>;
 	OG_FETCH: Fetcher /* miyulabmd-og-fetch */;
+	DIAGRAM_CHECK: Fetcher /* miyulabmd-diagram-check */;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

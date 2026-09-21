@@ -3,6 +3,7 @@ dist/
 .wrangler/
 apps/worker/wrangler.deploy.toml
 apps/worker/wrangler.og-fetch.deploy.toml
+apps/worker/wrangler.diagram-check.deploy.toml
 .dev.vars
 .env
 .env.*

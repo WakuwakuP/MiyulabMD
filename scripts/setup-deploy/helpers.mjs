@@ -41,6 +41,20 @@ export function replaceTomlQuotedValue(source, key, value) {
   return source.replace(pattern, `$1"${value}"`);
 }
 
+// wrangler.toml has one [[services]] block per bound worker; the service
+// name must be rewritten inside the block for that binding, not globally.
+export function replaceServiceBindingTarget(source, binding, value) {
+  const pattern = new RegExp(
+    `(binding\\s*=\\s*["']${escapeRegExp(binding)}["']\\s*\\n\\s*service\\s*=\\s*)(["'])[^"']*\\2`,
+  );
+  if (!pattern.test(source)) {
+    throw new Error(
+      `wrangler 設定に services バインディング ${binding} がありません`,
+    );
+  }
+  return source.replace(pattern, `$1"${value}"`);
+}
+
 export function upsertCustomDomainRoute(source, hostname) {
   const block = `[[routes]]\npattern = "${hostname}"\ncustom_domain = true\n`;
   if (/^\[\[routes\]\]/m.test(source)) {

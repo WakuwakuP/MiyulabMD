@@ -1,0 +1,8 @@
+name = "miyulabmd-diagram-check"
+main = "src/diagram-check-worker.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Binding-only: called through the DIAGRAM_CHECK service binding from the
+# main worker. No public URL.
+workers_dev = false

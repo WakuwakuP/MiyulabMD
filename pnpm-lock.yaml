@@ -225,6 +225,9 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
+      '@plantuml/core':
+        specifier: 1.2026.8
+        version: 1.2026.8
       agents:
         specifier: ^0.22.0
         version: 0.22.0(@babel/core@7.29.7)(@babel/runtime@7.29.7)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(@modelcontextprotocol/server@2.0.0)(react@19.2.8)(rolldown@1.2.6)(zod@4.5.4)
@@ -240,6 +243,9 @@ importers:
       lib0:
         specifier: ^0.2.117
         version: 0.2.117
+      mermaid:
+        specifier: 12.0.0
+        version: 12.0.0
       y-protocols:
         specifier: ^1.0.7
         version: 1.0.7(yjs@13.6.32)

@@ -13,11 +13,21 @@ const wranglerToml = `name = "miyulabmd"
 database_name = "miyulabmd"
 database_id = "${PLACEHOLDER_D1_DATABASE_ID}"
 bucket_name = "miyulabmd-images"
-service = "miyulabmd-og-fetch"
 ACCESS_TEAM_DOMAIN = "example.cloudflareaccess.com"
+
+[[services]]
+binding = "OG_FETCH"
+service = "miyulabmd-og-fetch"
+
+[[services]]
+binding = "DIAGRAM_CHECK"
+service = "miyulabmd-diagram-check"
 `;
 
 const ogToml = `name = "miyulabmd-og-fetch"
+`;
+
+const diagramCheckToml = `name = "miyulabmd-diagram-check"
 `;
 
 test("readDeployOverridesFromEnv ignores empty strings", () => {
@@ -32,6 +42,7 @@ test("readDeployOverridesFromEnv ignores empty strings", () => {
       customHostname: undefined,
       d1Id: "db-1",
       d1Name: undefined,
+      diagramCheckName: undefined,
       ogFetchName: undefined,
       r2Name: undefined,
       workerName: undefined,
@@ -40,7 +51,7 @@ test("readDeployOverridesFromEnv ignores empty strings", () => {
 });
 
 test("applyDeployOverrides only rewrites provided keys", () => {
-  const next = applyDeployOverrides(wranglerToml, ogToml, {
+  const next = applyDeployOverrides(wranglerToml, ogToml, diagramCheckToml, {
     accessTeamDomain: "fork.cloudflareaccess.com",
     d1Id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
   });
@@ -54,20 +65,34 @@ test("applyDeployOverrides only rewrites provided keys", () => {
     "fork.cloudflareaccess.com",
   );
   assert.equal(readTomlQuotedValue(next.ogToml, "name"), "miyulabmd-og-fetch");
+  assert.equal(
+    readTomlQuotedValue(next.diagramCheckToml, "name"),
+    "miyulabmd-diagram-check",
+  );
 });
 
 test("applyDeployOverrides can rename workers and add a custom domain", () => {
-  const next = applyDeployOverrides(wranglerToml, ogToml, {
+  const next = applyDeployOverrides(wranglerToml, ogToml, diagramCheckToml, {
     customHostname: "md.fork.dev",
+    diagramCheckName: "fork-md-diagram-check",
     ogFetchName: "fork-md-og-fetch",
     workerName: "fork-md",
   });
   assert.equal(readTomlQuotedValue(next.wranglerToml, "name"), "fork-md");
-  assert.equal(
-    readTomlQuotedValue(next.wranglerToml, "service"),
-    "fork-md-og-fetch",
+  // Each service binding is renamed inside its own [[services]] block.
+  assert.match(
+    next.wranglerToml,
+    /binding = "OG_FETCH"\s*service = "fork-md-og-fetch"/,
+  );
+  assert.match(
+    next.wranglerToml,
+    /binding = "DIAGRAM_CHECK"\s*service = "fork-md-diagram-check"/,
   );
   assert.equal(readTomlQuotedValue(next.ogToml, "name"), "fork-md-og-fetch");
+  assert.equal(
+    readTomlQuotedValue(next.diagramCheckToml, "name"),
+    "fork-md-diagram-check",
+  );
   assert.match(next.wranglerToml, /pattern = "md\.fork\.dev"/);
 });
 

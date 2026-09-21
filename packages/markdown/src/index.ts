@@ -1,3 +1,7 @@
+export {
+  type DiagramBlock,
+  extractDiagramBlocks,
+} from "./diagram-blocks.ts";
 export { rehypeDiagrams } from "./diagrams.ts";
 export {
   attr,

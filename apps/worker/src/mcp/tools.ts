@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
+import { extractDiagramBlocks } from "@miyulabmd/markdown";
 import {
   ACCESS_SCOPES,
   EDIT_LOCKED_CODE,
+  MCP_DIAGRAM_CHECK_HINT,
   MCP_NOTE_URL_HINT,
   NOTE_RESTORE_MESSAGE,
   type Note,
@@ -11,6 +13,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { db } from "../db/client.ts";
+import type { DiagramCheckResult } from "../diagram-check/validate.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import {
@@ -221,7 +224,42 @@ function agentOf(user: SessionUser) {
   };
 }
 
-function editToolResult(noteId: string, result: ApplyEditResult) {
+/**
+ * Send mermaid/PlantUML blocks to the diagram-check worker so agents get
+ * syntax errors (with note line numbers) at write time instead of a generic
+ * render failure in the browser later. A broken checker must never fail the
+ * write itself.
+ */
+async function diagramCheckReport(markdown: string) {
+  const blocks = extractDiagramBlocks(markdown);
+  if (blocks.length === 0) {
+    return null;
+  }
+  try {
+    const response = await env.DIAGRAM_CHECK.fetch(
+      "https://diagram-check.internal/",
+      {
+        body: JSON.stringify({ blocks }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+    if (!response.ok) {
+      return { checked: blocks.length, unavailable: true };
+    }
+    return (await response.json()) as DiagramCheckResult;
+  } catch {
+    return { checked: blocks.length, unavailable: true };
+  }
+}
+
+/** Spread-ready `{ diagramCheck }` (or `{}`) for tool result objects. */
+async function diagramCheckFields(markdown: string) {
+  const check = await diagramCheckReport(markdown);
+  return check ? { diagramCheck: check } : {};
+}
+
+async function editToolResult(noteId: string, result: ApplyEditResult) {
   if (!result.ok) {
     const suffix =
       result.matches === undefined ? "" : ` (matches: ${result.matches})`;
@@ -230,6 +268,7 @@ function editToolResult(noteId: string, result: ApplyEditResult) {
   return textResult({
     applied: true,
     cursor: result.cursor,
+    ...(await diagramCheckFields(result.markdown)),
     excerpt: result.excerpt,
     id: noteId,
     markdownLength: result.markdownLength,
@@ -446,6 +485,7 @@ async function restoreRevisionTool(
     message: NOTE_RESTORE_MESSAGE,
     restored: true,
     revisionId: revision.id,
+    ...(await diagramCheckFields(revision.markdown)),
   });
 }
 
@@ -698,7 +738,7 @@ export async function createMcpServerFactory() {
   server.registerTool(
     "create_note",
     {
-      description: `Create a new note owned by the authenticated user. ${MCP_NOTE_URL_HINT}`,
+      description: `Create a new note owned by the authenticated user. ${MCP_NOTE_URL_HINT} ${MCP_DIAGRAM_CHECK_HINT}`,
       inputSchema: {
         folder: z.string().optional(),
         inheritAccess: z.boolean().optional(),
@@ -733,15 +773,17 @@ export async function createMcpServerFactory() {
         return textError(created.error);
       }
 
-      return textResult({ note: created });
+      return textResult({
+        note: created,
+        ...(await diagramCheckFields(created.markdown)),
+      });
     },
   );
 
   server.registerTool(
     "replace_in_note",
     {
-      description:
-        "Replace a unique old_string with new_string in the live note. If old_string matches more than once and replace_all is not true, the call fails. Prefer this over update_note. Shows an AI(username) cursor at the edit.",
+      description: `Replace a unique old_string with new_string in the live note. If old_string matches more than once and replace_all is not true, the call fails. Prefer this over update_note. Shows an AI(username) cursor at the edit. ${MCP_DIAGRAM_CHECK_HINT}`,
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
         new_string: z.string().describe("Replacement text"),
@@ -791,8 +833,7 @@ export async function createMcpServerFactory() {
   server.registerTool(
     "insert_in_note",
     {
-      description:
-        "Insert text into the live note. Provide exactly one of: at (start|end), after (unique context), or before (unique context). Prefer unique surrounding text when editing the middle. Shows an AI(username) cursor at the insert.",
+      description: `Insert text into the live note. Provide exactly one of: at (start|end), after (unique context), or before (unique context). Prefer unique surrounding text when editing the middle. Shows an AI(username) cursor at the insert. ${MCP_DIAGRAM_CHECK_HINT}`,
       inputSchema: {
         after: z
           .string()
@@ -814,8 +855,7 @@ export async function createMcpServerFactory() {
   server.registerTool(
     "update_note",
     {
-      description:
-        "Last-resort full replace of the live note markdown. Concurrent human edits may be disrupted. Prefer replace_in_note or insert_in_note. Shows an AI(username) cursor.",
+      description: `Last-resort full replace of the live note markdown. Concurrent human edits may be disrupted. Prefer replace_in_note or insert_in_note. Shows an AI(username) cursor. ${MCP_DIAGRAM_CHECK_HINT}`,
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
         markdown: z.string().describe("Full markdown body"),
@@ -858,6 +898,7 @@ export async function createMcpServerFactory() {
       return textResult({
         applied: true,
         cursor: applied.cursor,
+        ...(await diagramCheckFields(applied.markdown)),
         excerpt: applied.excerpt,
         id: note.id,
         markdownLength: applied.markdownLength,
@@ -1319,8 +1360,7 @@ export async function createMcpServerFactory() {
   server.registerTool(
     "restore_revision",
     {
-      description:
-        "Replace the live note with a stored revision. Concurrent edits are overwritten. Requires canEdit.",
+      description: `Replace the live note with a stored revision. Concurrent edits are overwritten. Requires canEdit. ${MCP_DIAGRAM_CHECK_HINT}`,
       inputSchema: {
         id: z.string().describe("Note UUID or short ID"),
         revisionId: z.string().describe("Revision UUID to restore"),

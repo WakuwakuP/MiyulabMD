@@ -104,6 +104,7 @@ export type ApplyEditResult =
       ok: true;
       cursor: AgentCursor;
       excerpt: string;
+      markdown: string;
       markdownLength: number;
     }
   | {
@@ -458,6 +459,7 @@ export class DocumentRoom extends DurableObject<Env> {
     return {
       cursor: plan.cursor,
       excerpt: excerptAround(plan.next, plan.cursor.anchor, plan.cursor.head),
+      markdown: plan.next,
       markdownLength: plan.next.length,
       ok: true,
     };
@@ -483,6 +485,7 @@ export class DocumentRoom extends DurableObject<Env> {
     return {
       cursor,
       excerpt: excerptAround(markdown, cursor.anchor, cursor.head),
+      markdown,
       markdownLength: markdown.length,
       ok: true,
     };
