@@ -10,6 +10,8 @@ export const ALLOWED_LICENSES = new Set([
   "BSD-3-Clause",
   "CC-BY-4.0",
   "CC0-1.0",
+  // Weak file-level copyleft; used unmodified via mermaid's lazy ELK layout.
+  "EPL-2.0",
   "ISC",
   "MIT",
   "MPL-2.0",
@@ -20,6 +22,56 @@ export const ALLOWED_LICENSES = new Set([
 
 /** Package name prefixes that must not enter the tree, regardless of SPDX. */
 export const FORBIDDEN_PACKAGE_PREFIXES = ["@tiptap-pro/"];
+
+/**
+ * Packages whose registry metadata omits the license field. Membership here
+ * only marks the package as "reviewed"; the checker re-reads the bundled
+ * LICENSE file on every run and fingerprints it, so an upstream license
+ * change still fails the check.
+ */
+export const MISSING_METADATA_PACKAGES = new Set([
+  // khroma ships a `license` file but package.json has no license field.
+  "khroma",
+]);
+
+const LICENSE_FINGERPRINTS = [
+  // Check before BSD-2-Clause: the contributor clause distinguishes it.
+  {
+    license: "BSD-3-Clause",
+    pattern: /neither the name.{0,200}(contributors|copyright holder)/is,
+  },
+  {
+    license: "BSD-2-Clause",
+    pattern: /redistribution and use in source and binary forms/i,
+  },
+  {
+    license: "Apache-2.0",
+    pattern: /apache license[\s\S]{0,200}version 2\.0/i,
+  },
+  {
+    license: "ISC",
+    pattern:
+      /permission to use, copy, modify,? and\/or distribute this software/i,
+  },
+  {
+    license: "MIT",
+    pattern: /permission is hereby granted, free of charge/i,
+  },
+];
+
+/**
+ * Identify a license from the raw text of a bundled LICENSE file.
+ * @param {string} text
+ * @returns {string | null} SPDX id, or null when unrecognized
+ */
+export function detectLicenseFromText(text) {
+  for (const { license, pattern } of LICENSE_FINGERPRINTS) {
+    if (pattern.test(text)) {
+      return license;
+    }
+  }
+  return null;
+}
 
 const FORBIDDEN_LICENSE_NEEDLES = [
   "busl",

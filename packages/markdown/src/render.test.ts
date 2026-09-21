@@ -68,3 +68,62 @@ test("renderMarkdownHtml does not embed an inline YouTube URL", () => {
   assert.doesNotMatch(html, /embed-youtube/);
   assert.match(html, /youtu\.be\/yI81_De3Hjk/);
 });
+
+test("renderMarkdownHtml turns a mermaid fence into a diagram placeholder", () => {
+  const html = renderMarkdownHtml("```mermaid\ngraph TD;\n  A-->B;\n```\n");
+  assert.match(html, /class="md-diagram"/);
+  assert.match(html, /data-diagram-lang="mermaid"/);
+  assert.match(html, /class="md-diagram-source"/);
+  assert.match(html, /A--&gt;B|A--&gt;\w*;?B|graph TD/);
+});
+
+test("renderMarkdownHtml treats puml and uml aliases as plantuml diagrams", () => {
+  for (const fence of ["plantuml", "puml", "uml"]) {
+    const html = renderMarkdownHtml(
+      `\`\`\`${fence}\n@startuml\na -> b\n@enduml\n\`\`\`\n`,
+    );
+    assert.match(html, /data-diagram-lang="plantuml"/);
+  }
+});
+
+test("renderMarkdownHtml infers a plantuml diagram from a filename fence", () => {
+  const html = renderMarkdownHtml(
+    "```flow.puml\n@startuml\na -> b\n@enduml\n```\n",
+  );
+  assert.match(html, /data-diagram-lang="plantuml"/);
+  assert.match(html, />flow\.puml</);
+});
+
+test("renderMarkdownHtml infers diagrams from every accepted extension", () => {
+  const cases: [string, string][] = [
+    ["flow.mmd", "mermaid"],
+    ["flow.mermaid", "mermaid"],
+    ["flow.puml", "plantuml"],
+    ["flow.pu", "plantuml"],
+    ["flow.wsd", "plantuml"],
+    ["flow.iuml", "plantuml"],
+    ["flow.plantuml", "plantuml"],
+  ];
+  for (const [filename, lang] of cases) {
+    const html = renderMarkdownHtml(`\`\`\`${filename}\nx\n\`\`\`\n`);
+    assert.match(html, new RegExp(`data-diagram-lang="${lang}"`), filename);
+  }
+});
+
+test("renderMarkdownHtml treats the mmd alias as a mermaid diagram", () => {
+  const html = renderMarkdownHtml("```mmd\ngraph TD;\n```\n");
+  assert.match(html, /data-diagram-lang="mermaid"/);
+});
+
+test("renderMarkdownHtml keeps a filename label on a diagram fence", () => {
+  const html = renderMarkdownHtml("```mermaid:seq.mmd\nsequenceDiagram\n```\n");
+  assert.match(html, /data-diagram-lang="mermaid"/);
+  assert.match(html, /class="md-code-filename"/);
+  assert.match(html, />seq\.mmd</);
+});
+
+test("renderMarkdownHtml leaves non-diagram fences as highlighted code", () => {
+  const html = renderMarkdownHtml("```typescript\nconst answer = 42;\n```\n");
+  assert.doesNotMatch(html, /md-diagram/);
+  assert.match(html, /language-typescript/);
+});

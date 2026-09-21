@@ -5,6 +5,7 @@ import {
   precacheAndRoute,
 } from "workbox-precaching";
 import { registerRoute } from "workbox-routing";
+import { CacheFirst } from "workbox-strategies";
 
 declare global {
   // Interface merging augments Workbox's worker manifest declaration.
@@ -65,6 +66,19 @@ registerRoute(
       return shellFallback();
     }
   },
+);
+
+// Diagram engines (mermaid chunks, public/diagram/*) are excluded from the
+// precache so users without diagrams never pay the multi-MB update cost.
+// They are cached on first use, which keeps diagrams working offline
+// afterwards; a cold offline start degrades to the source fallback.
+registerRoute(
+  ({ request, url, sameOrigin }) =>
+    request.method === "GET" &&
+    sameOrigin &&
+    (url.pathname.startsWith("/diagram/") ||
+      url.pathname.startsWith("/assets/diagram-")),
+  new CacheFirst({ cacheName: "diagram-engines" }),
 );
 
 // This is intentionally the only cache population performed by this worker:

@@ -106,3 +106,40 @@
 .md-code pre {
   margin: 0;
 }
+
+.md-diagram {
+  margin: 0.8em 0;
+}
+
+.md-diagram-figure {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem;
+}
+
+.md-diagram-figure svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.md-diagram[data-diagram-state="loading"]::before {
+  display: block;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8em;
+  color: var(--color-muted);
+  content: "図を描画中…";
+}
+
+.md-diagram-error {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8em;
+  color: var(--color-error);
+  border-left: 3px solid var(--color-error);
+}
+
+/* Rich editor: the rendered figure is a click target that focuses the block. */
+.md-code .md-diagram-embed {
+  cursor: pointer;
+  background: var(--syn-code-bg);
+  border-radius: 0 0 0.5rem 0.5rem;
+}

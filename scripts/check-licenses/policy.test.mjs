@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  detectLicenseFromText,
   findLicenseViolations,
   flattenLicenseReport,
   isAllowedLicenseExpression,
@@ -71,4 +72,20 @@ test("findLicenseViolations reports name and license", () => {
     violations.map((item) => item.name),
     ["@tiptap-pro/foo", "secret-lib"],
   );
+});
+
+test("detectLicenseFromText fingerprints bundled license files", () => {
+  assert.equal(
+    detectLicenseFromText(
+      "The MIT License\n\nPermission is hereby granted, free of charge, to any person",
+    ),
+    "MIT",
+  );
+  assert.equal(
+    detectLicenseFromText(
+      "Apache License\nVersion 2.0, January 2004\nhttp://www.apache.org/licenses/",
+    ),
+    "Apache-2.0",
+  );
+  assert.equal(detectLicenseFromText("all rights reserved"), null);
 });

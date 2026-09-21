@@ -12,7 +12,11 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   jsx: "javascript",
   kt: "kotlin",
   md: "markdown",
+  mermaid: "mermaid",
   mjs: "javascript",
+  mmd: "mermaid",
+  plantuml: "plantuml",
+  puml: "plantuml",
   py: "python",
   rb: "ruby",
   rs: "rust",
@@ -20,6 +24,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   shell: "bash",
   ts: "typescript",
   tsx: "typescript",
+  uml: "plantuml",
   yml: "yaml",
 };
 
@@ -42,9 +47,11 @@ const KNOWN_LANGUAGES = new Set([
   "lua",
   "makefile",
   "markdown",
+  "mermaid",
   "objectivec",
   "perl",
   "php",
+  "plantuml",
   "plaintext",
   "python",
   "r",
@@ -75,12 +82,16 @@ const EXTENSION_LANGUAGES: Record<string, string> = {
   h: "c",
   hpp: "cpp",
   ini: "ini",
+  iuml: "plantuml",
   java: "java",
   json: "json",
   less: "less",
   lua: "lua",
   markdown: "markdown",
+  mermaid: "mermaid",
   php: "php",
+  plantuml: "plantuml",
+  pu: "plantuml",
   py: "python",
   r: "r",
   rb: "ruby",
@@ -89,9 +100,14 @@ const EXTENSION_LANGUAGES: Record<string, string> = {
   sql: "sql",
   swift: "swift",
   toml: "ini",
+  wsd: "plantuml",
   yaml: "yaml",
   yml: "yaml",
 };
+
+export type DiagramLanguage = "mermaid" | "plantuml";
+
+const DIAGRAM_LANGUAGES = new Set<string>(["mermaid", "plantuml"]);
 
 function looksLikeFilename(value: string): boolean {
   if (!value.includes(".") || value.endsWith(".")) {
@@ -158,6 +174,12 @@ export function highlightLanguage(info: FenceInfo): string {
 
 export function normalizeFilename(filename: string): string {
   return filename.trim().replace(/\s+/g, "");
+}
+
+/** Resolve a fence to a diagram language, or null when it is plain code. */
+export function diagramLanguage(info: FenceInfo): DiagramLanguage | null {
+  const language = highlightLanguage(info);
+  return DIAGRAM_LANGUAGES.has(language) ? (language as DiagramLanguage) : null;
 }
 
 export function serializeFenceInfo(info: FenceInfo): string {
