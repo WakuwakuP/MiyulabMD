@@ -74,11 +74,13 @@ const BLOCKED_PLANTUML = new RegExp(
     /^[^\S\r\n]*![^\S\r\n]*(?:include\w*|import)\b/.source, // include/import directives
     /^[^\S\r\n]*![^\S\r\n]*theme\b[^\n]*\bfrom\b/.source, // !theme … from <resource>
     /%load[_a-z]*\s*\(/.source, // %load_json / %load_xml / %loadYAML …
-    /sprite\s+\$?\w+\s*</.source, // sprite $name <resource>
+    /sprite\s+\$?\w+[^\n]*[<{]/.source, // sprite decl with <resource> or {block}
     /<img\b/.source, // creole images always reference a resource
+    /\bbackgroundImage\b/.source, // skinparam image (any value form)
     /<\s*(?:https?:)?\/\//.source, // <https://…> / <//host> resource refs
     /^[^\S\r\n]*skinparam\b[^\n]*(?:https?:)?\/\//.source, // skinparam … url
-    /<style\b[^>\n]*(?:file|src)\s*=/.source, // creole <style file=…>
+    /skinparam\b[^\n{]*\{[^{}]*(?:https?:)?\/\//.source, // skinparam { … url }
+    /<style\b[^>]*(?:file|src|href)\s*=/.source, // creole <style file=…>
   ].join("|"),
   "im",
 );

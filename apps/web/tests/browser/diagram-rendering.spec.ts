@@ -149,10 +149,30 @@ test.describe("diagram rendering", () => {
           "@startuml\nAlice -> Bob: <style file=https://example.com/x.css>hi</style>\n@enduml",
           false,
         ),
+        render(
+          "plantuml",
+          "@startuml\nskinparam {\n  backgroundImage https://example.com/bg.png\n}\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nskinparam backgroundImage /api/secret.png\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nAlice -> Bob: <style\nfile=https://example.com/x.css>hi</style>\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $bad { <svg>evil</svg> }\nA -> B\n@enduml",
+          false,
+        ),
       ]);
       return results.map((result) => result.ok);
     });
-    expect(rejected).toEqual(new Array(10).fill(false));
+    expect(rejected).toEqual(new Array(14).fill(false));
   });
 
   test("plantuml sources citing urls in plain text still render", async ({
