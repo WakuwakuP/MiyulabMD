@@ -22,3 +22,6 @@ playwright-report/
 
 # code-graph index
 .code-graph/
+
+# diagram engine assets synced from node_modules
+apps/web/public/diagram/

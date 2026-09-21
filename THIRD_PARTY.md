@@ -16,9 +16,10 @@ MiyulabMD 本体は [AGPL-3.0-or-later](LICENSE)。このファイルは、帰�
 
 NOTICE / ライセンス文言の保持が必要。
 
-| パッケージ                                       | 用途                     |
-| ------------------------------------------------ | ------------------------ |
-| [fast-diff](https://github.com/jhchen/fast-diff) | 差分計算（web / worker） |
+| パッケージ                                       | 用途                                                        |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| [fast-diff](https://github.com/jhchen/fast-diff) | 差分計算（web / worker）                                     |
+| [dompurify](https://github.com/cure53/DOMPurify) | 図 SVG のサニタイズ（Apache-2.0 OR MPL-2.0 デュアル）        |
 
 ### BSD-3-Clause
 
@@ -46,6 +47,24 @@ NOTICE / ライセンス文言の保持が必要。
 - Yjs（`yjs`, `y-websocket`, `y-codemirror.next`, `y-protocols`, `lib0`）
 - remark / rehype 一式
 - Elysia, jose, zod, `agents`, `@modelcontextprotocol/server`
+- [mermaid](https://github.com/mermaid-js/mermaid) — ```mermaid 図の描画
+- [@plantuml/core](https://github.com/plantuml/plantuml.js) — PlantUML の
+  TeaVM コンパイル版（1.2026.6 以降が MIT。それ以前は GPL-3.0 なので
+  ピン必須）。同梱の `viz-global.js` は Viz.js（MIT）＋ Graphviz
+  （EPL-2.0）＋ Expat（MIT）を含む。`public/diagram/plantuml/` に
+  コピーして配布するため、同梱物のライセンス表示を保持すること。
+- [khroma](https://github.com/fabiospampinato/khroma) — mermaid の色計算
+  （推移的依存。package.json に license フィールドは無いが同梱の
+  `license` ファイルは MIT。`licenses:check` が同梱ファイルを毎回
+  フィンガープリント検証する）
+
+### EPL-2.0
+
+弱コピーレフト（ファイル単位）。無改変で遅延チャンクとして配布する。
+
+| パッケージ                                  | 用途                                                  |
+| ------------------------------------------- | ----------------------------------------------------- |
+| [elkjs](https://github.com/kieler/elkjs)   | mermaid の ELK レイアウト（`elk` 系図の遅延チャンク） |
 
 ## フォント（CDN）
 

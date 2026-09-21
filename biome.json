@@ -303,7 +303,11 @@
       }
     },
     {
-      "includes": ["**/MarkdownPreview.tsx"],
+      "includes": [
+        "**/MarkdownPreview.tsx",
+        "**/CodeBlockView.tsx",
+        "**/tests/browser/fixtures/diagrams.tsx"
+      ],
       "linter": {
         "rules": {
           "security": {

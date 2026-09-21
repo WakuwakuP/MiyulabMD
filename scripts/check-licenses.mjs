@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  detectLicenseFromText,
   findLicenseViolations,
   flattenLicenseReport,
+  isAllowedLicenseExpression,
+  MISSING_METADATA_PACKAGES,
 } from "./check-licenses/policy.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const PNPM_STORE = join(ROOT, "node_modules", ".pnpm");
+const LICENSE_FILE_RE = /^li[cs]en[cs]e/i;
 
 /**
  * @returns {Promise<unknown>}
@@ -58,10 +65,69 @@ function readPnpmLicenseReport() {
   });
 }
 
+/**
+ * Locate an installed package inside the pnpm virtual store.
+ * @param {string} name e.g. "khroma" or "@scope/name"
+ * @returns {string | null}
+ */
+function findPackageDir(name) {
+  const storeKey = `${name.replace("/", "+")}@`;
+  try {
+    for (const entry of readdirSync(PNPM_STORE)) {
+      if (!entry.startsWith(storeKey)) {
+        continue;
+      }
+      const dir = join(PNPM_STORE, entry, "node_modules", ...name.split("/"));
+      if (existsSync(dir)) {
+        return dir;
+      }
+    }
+  } catch {
+    // store unreadable; fall through
+  }
+  return null;
+}
+
+/**
+ * Read a package's bundled LICENSE file and fingerprint its SPDX id.
+ * @param {string} name
+ * @returns {string | null}
+ */
+function licenseFromBundledFile(name) {
+  const dir = findPackageDir(name);
+  if (!dir) {
+    return null;
+  }
+  for (const file of readdirSync(dir)) {
+    if (!LICENSE_FILE_RE.test(file)) {
+      continue;
+    }
+    const detected = detectLicenseFromText(
+      readFileSync(join(dir, file), "utf8"),
+    );
+    if (detected) {
+      return detected;
+    }
+  }
+  return null;
+}
+
 const report = await readPnpmLicenseReport();
 const packages = flattenLicenseReport(
   /** @type {Record<string, unknown>} */ (report),
-);
+).map((pkg) => {
+  if (
+    isAllowedLicenseExpression(pkg.license) ||
+    !MISSING_METADATA_PACKAGES.has(pkg.name)
+  ) {
+    return pkg;
+  }
+  // Registry metadata is missing the field; fingerprint the bundled LICENSE
+  // file instead of trusting a static override, so upstream re-licensing is
+  // detected rather than silently accepted.
+  const detected = licenseFromBundledFile(pkg.name);
+  return detected ? { ...pkg, license: detected } : pkg;
+});
 const violations = findLicenseViolations(packages);
 
 console.log(

@@ -1,0 +1,310 @@
+import { expect, test } from "@playwright/test";
+
+// Diagram engines are heavy (mermaid chunks + ~4MB PlantUML TeaVM build), so
+// first-time hydration is allowed a generous budget.
+test.setTimeout(120_000);
+
+test.describe("diagram rendering", () => {
+  test("hydrates mermaid and plantuml placeholders into sanitized svg", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+
+    const mermaid = page.locator('.md-diagram[data-diagram-lang="mermaid"]');
+    const plantuml = page.locator('.md-diagram[data-diagram-lang="plantuml"]');
+
+    await expect(mermaid.first()).toHaveAttribute(
+      "data-diagram-state",
+      "done",
+      { timeout: 60_000 },
+    );
+    await expect(
+      mermaid.first().locator(".md-diagram-figure svg"),
+    ).toBeVisible();
+    // foreignObject labels must survive sanitization (node text renders).
+    await expect(mermaid.first().locator(".md-diagram-figure")).toContainText(
+      "Client",
+    );
+
+    await expect(plantuml).toHaveAttribute("data-diagram-state", "done", {
+      timeout: 60_000,
+    });
+    await expect(plantuml.locator(".md-diagram-figure svg")).toBeVisible();
+
+    // Successful renders hide the source block (decision Q2: diagram only).
+    await expect(plantuml.locator(".md-diagram-source")).not.toBeVisible();
+  });
+
+  test("falls back to source with an error note on invalid mermaid", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+
+    const broken = page
+      .locator('.md-diagram[data-diagram-lang="mermaid"]')
+      .nth(1);
+    await expect(broken).toHaveAttribute("data-diagram-state", "error", {
+      timeout: 60_000,
+    });
+    await expect(broken.locator(".md-diagram-error")).toContainText(
+      "図の描画に失敗しました",
+    );
+    await expect(broken.locator(".md-diagram-source")).toBeVisible();
+    await expect(broken.locator(".md-diagram-figure")).toHaveCount(0);
+  });
+
+  test("plantuml {dark:true} produces different svg (undocumented arg smoke test)", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    // First PlantUML load makes vite dev optimize @plantuml/core and triggers a
+    // full reload; wait for the fixture diagram to settle before evaluating.
+    await expect(
+      page.locator('.md-diagram[data-diagram-lang="plantuml"]'),
+    ).toHaveAttribute("data-diagram-state", "done", { timeout: 60_000 });
+    await page.waitForFunction(
+      () => typeof window.renderDiagramForTest === "function",
+    );
+
+    const source = "@startuml\nAlice -> Bob: ping\n@enduml";
+    const [light, dark] = await page.evaluate(async (src) => {
+      const render = window.renderDiagramForTest;
+      if (!render) {
+        throw new Error("renderDiagramForTest is not exposed");
+      }
+      const lightResult = await render("plantuml", src, false);
+      const darkResult = await render("plantuml", src, true);
+      if (!(lightResult.ok && darkResult.ok)) {
+        throw new Error(
+          `plantuml render failed: ${JSON.stringify({ darkResult, lightResult })}`,
+        );
+      }
+      return [lightResult.svg, darkResult.svg];
+    }, source);
+
+    expect(light).not.toEqual(dark);
+  });
+
+  test("plantuml sources with include/import directives are rejected", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    await expect(
+      page.locator('.md-diagram[data-diagram-lang="plantuml"]'),
+    ).toHaveAttribute("data-diagram-state", "done", { timeout: 60_000 });
+
+    const rejected = await page.evaluate(async () => {
+      const render = window.renderDiagramForTest;
+      if (!render) {
+        throw new Error("renderDiagramForTest is not exposed");
+      }
+      const results = await Promise.all([
+        render(
+          "plantuml",
+          "@startuml\n!include <C4/C4_Context>\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\n!includeurl https://example.com/x.puml\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          '@startuml\n!$d = %load_json("https://example.com/d.json")\n@enduml',
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nAlice -> Bob: <img:https://example.com/i.png>\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nAlice -> Bob: <img https://example.com/i.png>\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nskinparam backgroundImage <https://example.com/bg.png>\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nskinparam {\n  backgroundImage <https://example.com/bg.png>\n}\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\n!theme spacelab from https://example.com/t.puml\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\n!theme spacelab from //example.com/t.puml\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nAlice -> Bob: <style file=https://example.com/x.css>hi</style>\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nskinparam {\n  backgroundImage https://example.com/bg.png\n}\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nskinparam backgroundImage /api/secret.png\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nAlice -> Bob: <style\nfile=https://example.com/x.css>hi</style>\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $bad { <svg>evil</svg> }\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $icon [16x16/16] https://example.com/i.png\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $icon /api/sprite.png\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\n!define INC !include https://example.com/x.puml\nINC\nA -> B\n@enduml",
+          false,
+        ),
+      ]);
+      return results.map((result) => result.ok);
+    });
+    expect(rejected).toEqual(new Array(17).fill(false));
+  });
+
+  test("plantuml sources citing urls in plain text still render", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    const rendered = await page.evaluate(async () => {
+      const render = window.renderDiagramForTest;
+      if (!render) {
+        throw new Error("renderDiagramForTest is not exposed");
+      }
+      const results = await Promise.all([
+        render(
+          "plantuml",
+          "@startuml\nnote left: see https://example.com/docs\nAlice -> Bob\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $dot [8x8/8] {\nFFFFFFFFFFFF\n}\nA -> B\n@enduml",
+          false,
+        ),
+      ]);
+      return results.map((result) => result.ok);
+    });
+    expect(rendered).toEqual([true, true]);
+  });
+
+  test("inserted svg confines references to internal fragments", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    const html = await page.evaluate(() => {
+      const insert = window.insertDiagramSvgForTest;
+      if (!insert) {
+        throw new Error("insertDiagramSvgForTest is not exposed");
+      }
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      insert(
+        host,
+        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">` +
+          `<defs><linearGradient id="grad"/></defs>` +
+          `<use href="https://evil.example/x.svg#y"/>` +
+          `<use xlink:href="#grad"/>` +
+          `<image href="https://evil.example/i.png"/>` +
+          `<rect fill="url('https://evil.example/g')" width="1" height="1"/>` +
+          `<rect fill="url(#grad)" width="1" height="1"/>` +
+          `<animate attributeName="xlink:href" to="https://evil.example/a"/>` +
+          "</svg>",
+      );
+      return host.innerHTML;
+    });
+    expect(html).not.toContain("evil.example");
+    // Internal fragment references and namespaced ids survive.
+    expect(html).toContain("url(#dg-");
+    expect(html).toContain('xlink:href="#dg-');
+  });
+
+  test("style text cannot break out of foreignObject via css escapes", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    const count = await page.evaluate(() => {
+      const insert = window.insertDiagramSvgForTest;
+      if (!insert) {
+        throw new Error("insertDiagramSvgForTest is not exposed");
+      }
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      // \3C/\3E decode to < and > through CSSOM — without re-escaping, the
+      // serialized raw-text <style> would end at "</style" and the rest
+      // would re-parse as markup on insertion.
+      insert(
+        host,
+        `<svg xmlns="http://www.w3.org/2000/svg"><foreignObject>` +
+          `<style xmlns="http://www.w3.org/1999/xhtml">a{font-family:'x\\3C/style\\3E<img src=1 onerror=alert(1)\\3E'}</style>` +
+          "</foreignObject></svg>",
+      );
+      return host.querySelectorAll("img, [onerror]").length;
+    });
+    expect(count).toBe(0);
+  });
+
+  test("rich editor shows the diagram until the block is focused", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams-editor.html");
+
+    const block = page.locator('.md-code[data-language="mermaid"]');
+    const figure = block.locator(".md-diagram");
+    const source = block.locator("pre");
+
+    // Unfocused: the diagram renders and the editable source stays hidden.
+    await expect(figure).toHaveAttribute("data-diagram-state", "done", {
+      timeout: 60_000,
+    });
+    await expect(figure.locator(".md-diagram-figure svg")).toBeVisible();
+    await expect(source).toBeHidden();
+
+    // Plain code blocks are untouched.
+    const plain = page.locator('.md-code[data-language="typescript"]');
+    await expect(plain.locator(".md-diagram")).toHaveCount(0);
+    await expect(plain.locator("pre")).toBeVisible();
+
+    // Clicking the figure focuses the block and reveals the source.
+    await figure.click();
+    await expect(source).toBeVisible();
+    await expect(block.locator(".md-diagram")).toHaveCount(0);
+
+    // Moving the caret out restores the rendered diagram.
+    await page
+      .locator(".ProseMirror p", { hasText: "plain paragraph" })
+      .click();
+    await expect(figure).toHaveAttribute("data-diagram-state", "done", {
+      timeout: 60_000,
+    });
+    await expect(source).toBeHidden();
+  });
+});

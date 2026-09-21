@@ -12,6 +12,7 @@ import {
   rehypeCodeFilenameWrap,
   remarkFenceInfo,
 } from "./code-filename.ts";
+import { rehypeDiagrams } from "./diagrams.ts";
 import {
   expandEmbedsForPreview,
   normalizeEmbedMarkdown,
@@ -40,7 +41,7 @@ const schema = {
     ...defaultSchema.attributes,
     a: ["href", "target", "rel", "className"],
     code: ["className", "dataFilename"],
-    div: ["className"],
+    div: ["className", "dataDiagramLang"],
     h1: ["id"],
     h2: ["id"],
     h3: ["id"],
@@ -77,6 +78,7 @@ function createProcessor(render: boolean) {
   if (render) {
     configured
       .use(rehypeCodeFilename)
+      .use(rehypeDiagrams)
       .use(rehypeHighlight)
       .use(rehypeCodeFilenameWrap)
       .use(rehypeSlug);

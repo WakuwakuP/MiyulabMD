@@ -17,7 +17,8 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm exec vite --host 127.0.0.1 --port 4174 --strictPort",
+    command:
+      "node scripts/sync-diagram-assets.mjs && pnpm exec vite --host 127.0.0.1 --port 4174 --strictPort",
     reuseExistingServer: false,
     url: "http://127.0.0.1:4174/tests/browser/fixtures/storage.html",
   },

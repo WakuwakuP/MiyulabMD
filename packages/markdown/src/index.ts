@@ -1,3 +1,4 @@
+export { rehypeDiagrams } from "./diagrams.ts";
 export {
   attr,
   canonicalizeEditorMarkdown,
@@ -10,8 +11,9 @@ export {
   youtubeId,
   youtubeStartSeconds,
 } from "./embeds.ts";
-export type { FenceInfo } from "./fence-info.ts";
+export type { DiagramLanguage, FenceInfo } from "./fence-info.ts";
 export {
+  diagramLanguage,
   highlightLanguage,
   inferLanguageFromFilename,
   isKnownLanguage,

@@ -27,6 +27,20 @@ export function applyTheme(theme: ThemePreference): void {
   delete root.dataset.theme;
 }
 
+export function isDarkTheme(theme: ThemePreference): boolean {
+  if (theme === "dark" || theme === "black") {
+    return true;
+  }
+  if (theme === "system") {
+    return (
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    );
+  }
+  return false;
+}
+
 export function readTheme(): ThemePreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY) ?? "";
