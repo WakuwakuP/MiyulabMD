@@ -47,7 +47,7 @@ export default defineConfig({
           // modules carry a \0 prefix). Any app source module keeps the
           // default name so it stays precached.
           const isAppModule = (id: string) =>
-            !id.includes("node_modules") && !id.includes("\0");
+            !(id.includes("node_modules") || id.includes("\0"));
           const isDiagramOnly =
             ids.some((id) => DIAGRAM_CHUNK_DEPS.test(id)) &&
             !ids.some(isAppModule);
