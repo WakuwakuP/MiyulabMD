@@ -8,46 +8,132 @@ export type DiagramResult =
   | { ok: true; svg: string }
   | { ok: false; error: string };
 
-// The engine module itself is bundled via import("@plantuml/core"); the files
-// in public/diagram/plantuml/<version>/ are its lazy script-tag siblings
-// (viz-global, themes, emoji, openiconic, stdlib), resolved via
-// PLANTUML_STDLIB_BASE. Versioning the path keeps CacheFirst entries honest
-// across @plantuml/core bumps.
+// The PlantUML engine is fetched at runtime as a classic script into a
+// sandboxed iframe — never bundled into the page's module graph. The files
+// in public/diagram/plantuml/<version>/ (plantuml.js, viz-global.js, and the
+// lazy siblings themes/emoji/openiconic/stdlib resolved via
+// PLANTUML_STDLIB_BASE) are synced from the pinned package. Versioning the
+// path keeps CacheFirst entries honest across @plantuml/core bumps.
 const PLANTUML_ASSETS = `/diagram/plantuml/${plantumlPkg.version}/`;
-
-type PlantUmlModule = typeof import("@plantuml/core");
-
-declare global {
-  // biome-ignore lint/style/useConsistentTypeDefinitions: declaration merging required
-  interface Window {
-    PLANTUML_STDLIB_BASE?: string;
-  }
-}
 
 const svgCache = new Map<string, string>();
 let mermaidModule: Promise<typeof import("mermaid")> | null = null;
-let plantumlModule: Promise<PlantUmlModule> | null = null;
+let plantumlSandbox: Promise<Window> | null = null;
 let renderTail: Promise<void> = Promise.resolve();
 let mermaidId = 0;
 let insertId = 0;
+let plantumlReqId = 0;
 
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`failed to load ${src}`));
-    document.head.appendChild(script);
-  });
+const plantumlPending = new Map<
+  number,
+  { resolve: (svg: string) => void; reject: (error: Error) => void }
+>();
+
+function onPlantUmlMessage(event: MessageEvent): void {
+  const data = event.data;
+  if (!data || typeof data.id !== "number" || typeof data.ok !== "boolean") {
+    return;
+  }
+  const pending = plantumlPending.get(data.id);
+  if (!pending) {
+    return;
+  }
+  plantumlPending.delete(data.id);
+  if (data.ok) {
+    pending.resolve(String(data.svg));
+  } else {
+    pending.reject(new Error(String(data.error)));
+  }
 }
 
-function loadPlantUml(): Promise<PlantUmlModule> {
-  plantumlModule ??= (async () => {
-    window.PLANTUML_STDLIB_BASE = PLANTUML_ASSETS;
-    await loadScript(`${PLANTUML_ASSETS}viz-global.js`);
-    return await import("@plantuml/core");
-  })();
-  return plantumlModule;
+// PlantUML runs inside a sandboxed iframe (opaque origin) whose CSP forbids
+// every network egress (`connect-src 'none'; img-src 'none'`). Source-level
+// filtering cannot keep up with the preprocessor's expansion tricks, so the
+// sandbox — not the regex — is the real confused-deputy barrier. The engine
+// is an ES module; an opaque origin cannot CORS-import it, so the parent
+// fetches the source and the iframe imports it from a blob: URL.
+async function plantUmlSandbox(): Promise<Window> {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-scripts");
+  iframe.style.display = "none";
+  iframe.setAttribute("aria-hidden", "true");
+  const origin = location.origin;
+  const base = `${origin}${PLANTUML_ASSETS}`;
+  iframe.srcdoc = `<!doctype html><html><head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: ${origin}; connect-src 'none'; img-src 'none'; font-src 'none'; style-src 'unsafe-inline'">
+<script src="${base}viz-global.js"></script>
+</head><body><script type="module">
+window.PLANTUML_STDLIB_BASE = ${JSON.stringify(base)};
+window.addEventListener("message", async (e) => {
+  var d = e.data;
+  if (!d || d.type === undefined) return;
+  if (d.type === "plantuml-load") {
+    try {
+      var url = URL.createObjectURL(new Blob([d.code], { type: "text/javascript" }));
+      var mod = await import(url);
+      URL.revokeObjectURL(url);
+      window.__renderToString = mod.renderToString;
+      parent.postMessage({ type: "plantuml-ready" }, "*");
+    } catch (err) {
+      parent.postMessage({ type: "plantuml-ready", error: String(err) }, "*");
+    }
+    return;
+  }
+  if (d.type !== "plantuml" || typeof d.id !== "number" || !window.__renderToString) return;
+  try {
+    window.__renderToString(
+      String(d.source).split(/\\r?\\n/),
+      function (svg) { parent.postMessage({ id: d.id, ok: true, svg: svg }, "*"); },
+      function (err) { parent.postMessage({ id: d.id, ok: false, error: String(err) }, "*"); },
+      { dark: d.dark === true }
+    );
+  } catch (err) {
+    parent.postMessage({ id: d.id, ok: false, error: String(err) }, "*");
+  }
+});
+parent.postMessage({ type: "plantuml-listening" }, "*");
+</script></body></html>`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener("message", onMessage);
+      reject(new Error("PlantUML サンドボックスの初期化に失敗しました"));
+    }, 30_000);
+    const onMessage = async (event: MessageEvent) => {
+      // contentWindow is null until the iframe is connected; compare lazily.
+      const win = iframe.contentWindow;
+      if (!win || event.source !== win) {
+        return;
+      }
+      if (event.data?.type === "plantuml-listening") {
+        try {
+          const response = await fetch(`${PLANTUML_ASSETS}plantuml.js`);
+          if (!response.ok) {
+            throw new Error(`status ${response.status}`);
+          }
+          win.postMessage(
+            { code: await response.text(), type: "plantuml-load" },
+            "*",
+          );
+        } catch (error) {
+          window.removeEventListener("message", onMessage);
+          clearTimeout(timer);
+          reject(
+            new Error(`plantuml.js の取得に失敗: ${String(error)}`),
+          );
+        }
+      } else if (event.data?.type === "plantuml-ready") {
+        window.removeEventListener("message", onMessage);
+        clearTimeout(timer);
+        if (event.data.error) {
+          reject(new Error(String(event.data.error)));
+        } else {
+          resolve(win);
+        }
+      }
+    };
+    window.addEventListener("message", onMessage);
+    document.body.appendChild(iframe);
+  });
 }
 
 async function renderMermaid(source: string, dark: boolean): Promise<string> {
@@ -71,8 +157,8 @@ async function renderMermaid(source: string, dark: boolean): Promise<string> {
 // options. Plain text that merely mentions a URL stays allowed.
 const BLOCKED_PLANTUML = new RegExp(
   [
-    /!\s*(?:include\w*|import)\b/.source, // !include/!import, incl. via !define macros
-    /!\s*theme\b[^\n]*\bfrom\b/.source, // !theme … from <resource>
+    /![^\S\r\n]*(?:include\w*|import)\b/.source, // !include/!import, incl. via !define macros
+    /![^\S\r\n]*theme\b[^\n]*\bfrom\b/.source, // !theme … from <resource>
     /%load[_a-z]*\s*\(/.source, // %load_json / %load_xml / %loadYAML …
     /sprite\s+\$?\w+(?:[^\S\r\n]*\[[^\]\n]*\])?[^\S\r\n]*(?:<|\{[^{}]*<|(?:https?:)?\/)/
       .source, // sprite <res>, {…<svg>}, url/path
@@ -94,16 +180,31 @@ function validatePlantUmlSource(source: string): void {
 
 async function renderPlantUml(source: string, dark: boolean): Promise<string> {
   validatePlantUmlSource(source);
-  const engine = await loadPlantUml();
+  plantumlSandbox ??= plantUmlSandbox();
+  // addEventListener dedupes identical listeners, so registering per call is
+  // safe and keeps the handler alive for the sandbox's lifetime.
+  window.addEventListener("message", onPlantUmlMessage);
+  const win = await plantumlSandbox;
   return new Promise((resolve, reject) => {
-    // The fourth argument ({dark}) is undocumented but wired in the engine
+    plantumlReqId += 1;
+    const id = plantumlReqId;
+    const timer = setTimeout(() => {
+      plantumlPending.delete(id);
+      reject(new Error("PlantUML の描画がタイムアウトしました"));
+    }, 60_000);
+    plantumlPending.set(id, {
+      reject: (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+      resolve: (svg) => {
+        clearTimeout(timer);
+        resolve(svg);
+      },
+    });
+    // The fourth option ({dark}) is undocumented but wired in the engine
     // build; a smoke test guards it across @plantuml/core version bumps.
-    engine.renderToString(
-      source.split(/\r?\n/),
-      resolve,
-      (message) => reject(new Error(message)),
-      { dark },
-    );
+    win.postMessage({ dark, id, source, type: "plantuml" }, "*");
   });
 }
 

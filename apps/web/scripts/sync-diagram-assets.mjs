@@ -23,6 +23,7 @@ const outDir = join(baseDir, version);
 rmSync(baseDir, { force: true, recursive: true });
 mkdirSync(outDir, { recursive: true });
 for (const file of [
+  "plantuml.js",
   "viz-global.js",
   "themes.js",
   "emoji.js",
