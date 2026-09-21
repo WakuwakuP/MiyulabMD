@@ -61,6 +61,10 @@ function sandboxSrcdoc(base: string, origin: string): string {
 window.PLANTUML_STDLIB_BASE = ${JSON.stringify(base)};
 window.addEventListener("message", async (e) => {
   var d = e.data;
+  // Only the embedding document may drive this frame — sibling iframes in
+  // shared markdown could otherwise swap in their own engine code or forge
+  // render results under a guessed request id.
+  if (e.source !== parent) return;
   if (!d || d.type === undefined) return;
   if (d.type === "plantuml-load") {
     try {
@@ -562,7 +566,13 @@ function sanitizeStyleElements(
       // CSS bodies may carry url(#id) references — rename them like the
       // attributes before the rules are scoped and filtered.
       sheet.replaceSync(rewriteRefs(styleEl.textContent ?? ""));
-      styleEl.textContent = sanitizeStyleRules(sheet.cssRules, scope);
+      const css = sanitizeStyleRules(sheet.cssRules, scope);
+      // A <style> inside foreignObject is an HTML raw-text element: it is
+      // serialized verbatim and ends at the first literal "</style". CSSOM
+      // decodes escapes like \3C into real "<" characters, so a decoded
+      // "</style" would break out into markup on innerHTML re-parse.
+      // CSS-escape every "<" — semantically identical, never a terminator.
+      styleEl.textContent = css.replace(/</g, "\\3C ");
     } catch {
       styleEl.remove();
     }

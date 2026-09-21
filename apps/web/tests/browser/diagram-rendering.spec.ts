@@ -247,6 +247,31 @@ test.describe("diagram rendering", () => {
     expect(html).toContain('xlink:href="#dg-');
   });
 
+  test("style text cannot break out of foreignObject via css escapes", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    const count = await page.evaluate(() => {
+      const insert = window.insertDiagramSvgForTest;
+      if (!insert) {
+        throw new Error("insertDiagramSvgForTest is not exposed");
+      }
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      // \3C/\3E decode to < and > through CSSOM — without re-escaping, the
+      // serialized raw-text <style> would end at "</style" and the rest
+      // would re-parse as markup on insertion.
+      insert(
+        host,
+        `<svg xmlns="http://www.w3.org/2000/svg"><foreignObject>` +
+          `<style xmlns="http://www.w3.org/1999/xhtml">a{font-family:'x\\3C/style\\3E<img src=1 onerror=alert(1)\\3E'}</style>` +
+          "</foreignObject></svg>",
+      );
+      return host.querySelectorAll("img, [onerror]").length;
+    });
+    expect(count).toBe(0);
+  });
+
   test("rich editor shows the diagram until the block is focused", async ({
     page,
   }) => {
