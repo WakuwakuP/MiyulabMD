@@ -216,6 +216,37 @@ test.describe("diagram rendering", () => {
     expect(rendered).toEqual([true, true]);
   });
 
+  test("inserted svg confines references to internal fragments", async ({
+    page,
+  }) => {
+    await page.goto("/tests/browser/fixtures/diagrams.html");
+    const html = await page.evaluate(() => {
+      const insert = window.insertDiagramSvgForTest;
+      if (!insert) {
+        throw new Error("insertDiagramSvgForTest is not exposed");
+      }
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      insert(
+        host,
+        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">` +
+          `<defs><linearGradient id="grad"/></defs>` +
+          `<use href="https://evil.example/x.svg#y"/>` +
+          `<use xlink:href="#grad"/>` +
+          `<image href="https://evil.example/i.png"/>` +
+          `<rect fill="url('https://evil.example/g')" width="1" height="1"/>` +
+          `<rect fill="url(#grad)" width="1" height="1"/>` +
+          `<animate attributeName="xlink:href" to="https://evil.example/a"/>` +
+          `</svg>`,
+      );
+      return host.innerHTML;
+    });
+    expect(html).not.toContain("evil.example");
+    // Internal fragment references and namespaced ids survive.
+    expect(html).toContain("url(#dg-");
+    expect(html).toContain('xlink:href="#dg-');
+  });
+
   test("rich editor shows the diagram until the block is focused", async ({
     page,
   }) => {

@@ -23,6 +23,7 @@ let renderTail: Promise<void> = Promise.resolve();
 let mermaidId = 0;
 let insertId = 0;
 let plantumlReqId = 0;
+let plantumlSandboxWindow: Window | null = null;
 
 const plantumlPending = new Map<
   number,
@@ -30,6 +31,12 @@ const plantumlPending = new Map<
 >();
 
 function onPlantUmlMessage(event: MessageEvent): void {
+  // Accept results only from the live sandbox frame — a hostile <iframe>
+  // embedded via shared markdown could otherwise postMessage a forged
+  // {id, ok, svg} and feed attacker markup into the diagram host.
+  if (!plantumlSandboxWindow || event.source !== plantumlSandboxWindow) {
+    return;
+  }
   const data = event.data;
   if (!data || typeof data.id !== "number" || typeof data.ok !== "boolean") {
     return;
@@ -110,11 +117,15 @@ function plantUmlSandbox(): Promise<Window> {
       clearTimeout(timer);
       action();
     };
+    // A dead allow-scripts frame must leave the DOM — retries append a
+    // fresh one each time and they would stack up otherwise.
+    const fail = (error: Error) =>
+      finish(() => {
+        iframe.remove();
+        reject(error);
+      });
     const timer = setTimeout(
-      () =>
-        finish(() =>
-          reject(new Error("PlantUML サンドボックスの初期化に失敗しました")),
-        ),
+      () => fail(new Error("PlantUML サンドボックスの初期化に失敗しました")),
       30_000,
     );
     const onMessage = (event: MessageEvent) => {
@@ -125,13 +136,11 @@ function plantUmlSandbox(): Promise<Window> {
       }
       if (event.data?.type === "plantuml-listening") {
         deliverEngineSource(PLANTUML_ASSETS, win).catch((error) =>
-          finish(() =>
-            reject(new Error(`plantuml.js の取得に失敗: ${String(error)}`)),
-          ),
+          fail(new Error(`plantuml.js の取得に失敗: ${String(error)}`)),
         );
       } else if (event.data?.type === "plantuml-ready") {
         if (event.data.error) {
-          finish(() => reject(new Error(String(event.data.error))));
+          fail(new Error(String(event.data.error)));
         } else {
           finish(() => resolve(win));
         }
@@ -188,10 +197,16 @@ async function renderPlantUml(source: string, dark: boolean): Promise<string> {
   validatePlantUmlSource(source);
   // A failed init (asset fetch error, timeout) must not poison the cache:
   // clear it so the next render retries with a fresh iframe.
-  plantumlSandbox ??= plantUmlSandbox().catch((error: unknown) => {
-    plantumlSandbox = null;
-    throw error;
-  });
+  plantumlSandbox ??= plantUmlSandbox().then(
+    (win) => {
+      plantumlSandboxWindow = win;
+      return win;
+    },
+    (error: unknown) => {
+      plantumlSandbox = null;
+      throw error;
+    },
+  );
   // addEventListener dedupes identical listeners, so registering per call is
   // safe and keeps the handler alive for the sandbox's lifetime.
   window.addEventListener("message", onPlantUmlMessage);
@@ -254,6 +269,13 @@ const FORBIDDEN_LABEL_TAGS = [
   "link",
   "meta",
   "base",
+  // SMIL animation can mutate href attribute values at runtime, which
+  // would bypass the static "#fragment"-only check below.
+  "animate",
+  "animatemotion",
+  "animatetransform",
+  "set",
+  "discard",
 ];
 
 function sanitizeSvg(svg: string): string {
@@ -459,6 +481,63 @@ function namespaceIds(
   return rewriteRefs;
 }
 
+// Attributes whose values are URLs the browser would fetch. Diagrams are
+// self-contained — none of these have a legitimate use in output.
+const FETCH_ATTRS = new Set([
+  "action",
+  "background",
+  "data",
+  "dynsrc",
+  "formaction",
+  "lowsrc",
+  "ping",
+  "poster",
+  "src",
+  "srcset",
+  // Rebasing relative refs to an external host turns "#id" external too.
+  "xml:base",
+]);
+
+// SMIL elements can rewrite href values at runtime and bypass the static
+// checks — DOMPurify forbids them upstream, but the insert path keeps its
+// own guard so insertion never depends on a single sanitizer.
+const SMIL_TAGS = new Set([
+  "animate",
+  "animatemotion",
+  "animatetransform",
+  "discard",
+  "set",
+]);
+
+// A single attribute is unsafe when it is a known fetch attribute, a
+// non-fragment href, or a presentation attribute holding an external url().
+function isUnsafeRefAttr(name: string, value: string): boolean {
+  if (FETCH_ATTRS.has(name)) {
+    return true;
+  }
+  if (name === "href" || name === "xlink:href") {
+    return !value.trimStart().startsWith("#");
+  }
+  return /url\(\s*['"]?\s*(?!#)/i.test(value);
+}
+
+// After DOMPurify, <use>/<feImage> hrefs and url() presentation attributes
+// still survive. Confine every reference to an internal "#fragment" so the
+// inserted SVG cannot make the viewer's document fetch an attacker URL.
+function scrubExternalRefs(content: DocumentFragment): void {
+  for (const el of content.querySelectorAll("*")) {
+    if (SMIL_TAGS.has(el.localName.toLowerCase())) {
+      el.remove();
+      continue;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      if (isUnsafeRefAttr(attr.name.toLowerCase(), attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+}
+
 function sanitizeStyleAttribute(el: Element): void {
   if (!el.hasAttribute("style")) {
     return;
@@ -504,6 +583,7 @@ function prepareSvgForInsert(
   template.innerHTML = sanitized;
   const { content } = template;
   const rewriteRefs = namespaceIds(content, uid);
+  scrubExternalRefs(content);
   for (const el of content.querySelectorAll("*")) {
     sanitizeStyleAttribute(el);
   }

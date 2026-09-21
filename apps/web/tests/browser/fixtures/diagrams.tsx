@@ -3,6 +3,7 @@ import { StrictMode, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   type DiagramResult,
+  insertDiagramSvg,
   renderDiagram,
   useDiagrams,
 } from "../../../src/lib/diagrams.ts";
@@ -10,6 +11,7 @@ import {
 declare global {
   // biome-ignore lint/style/useConsistentTypeDefinitions: declaration merging required
   interface Window {
+    insertDiagramSvgForTest?: (host: HTMLElement, svg: string) => void;
     renderDiagramForTest?: (
       lang: "mermaid" | "plantuml",
       source: string,
@@ -46,6 +48,7 @@ function App() {
 }
 
 window.renderDiagramForTest = renderDiagram;
+window.insertDiagramSvgForTest = insertDiagramSvg;
 
 const root = document.getElementById("root");
 if (root) {
