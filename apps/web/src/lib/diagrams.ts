@@ -71,10 +71,11 @@ async function renderMermaid(source: string, dark: boolean): Promise<string> {
 // options. Plain text that merely mentions a URL stays allowed.
 const BLOCKED_PLANTUML = new RegExp(
   [
-    /^[^\S\r\n]*![^\S\r\n]*(?:include\w*|import)\b/.source, // include/import directives
-    /^[^\S\r\n]*![^\S\r\n]*theme\b[^\n]*\bfrom\b/.source, // !theme … from <resource>
+    /!\s*(?:include\w*|import)\b/.source, // !include/!import, incl. via !define macros
+    /!\s*theme\b[^\n]*\bfrom\b/.source, // !theme … from <resource>
     /%load[_a-z]*\s*\(/.source, // %load_json / %load_xml / %loadYAML …
-    /sprite\s+\$?\w+[^\n]*[<{]/.source, // sprite decl with <resource> or {block}
+    /sprite\s+\$?\w+(?:[^\S\r\n]*\[[^\]\n]*\])?[^\S\r\n]*(?:<|\{[^{}]*<|(?:https?:)?\/)/
+      .source, // sprite <res>, {…<svg>}, url/path
     /<img\b/.source, // creole images always reference a resource
     /\bbackgroundImage\b/.source, // skinparam image (any value form)
     /<\s*(?:https?:)?\/\//.source, // <https://…> / <//host> resource refs

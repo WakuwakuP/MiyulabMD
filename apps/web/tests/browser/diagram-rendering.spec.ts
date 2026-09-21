@@ -169,10 +169,25 @@ test.describe("diagram rendering", () => {
           "@startuml\nsprite $bad { <svg>evil</svg> }\nA -> B\n@enduml",
           false,
         ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $icon [16x16/16] https://example.com/i.png\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $icon /api/sprite.png\nA -> B\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\n!define INC !include https://example.com/x.puml\nINC\nA -> B\n@enduml",
+          false,
+        ),
       ]);
       return results.map((result) => result.ok);
     });
-    expect(rejected).toEqual(new Array(14).fill(false));
+    expect(rejected).toEqual(new Array(17).fill(false));
   });
 
   test("plantuml sources citing urls in plain text still render", async ({
@@ -184,14 +199,21 @@ test.describe("diagram rendering", () => {
       if (!render) {
         throw new Error("renderDiagramForTest is not exposed");
       }
-      const result = await render(
-        "plantuml",
-        "@startuml\nnote left: see https://example.com/docs\nAlice -> Bob\n@enduml",
-        false,
-      );
-      return result.ok;
+      const results = await Promise.all([
+        render(
+          "plantuml",
+          "@startuml\nnote left: see https://example.com/docs\nAlice -> Bob\n@enduml",
+          false,
+        ),
+        render(
+          "plantuml",
+          "@startuml\nsprite $dot [8x8/8] {\nFFFFFFFFFFFF\n}\nA -> B\n@enduml",
+          false,
+        ),
+      ]);
+      return results.map((result) => result.ok);
     });
-    expect(rendered).toBe(true);
+    expect(rendered).toEqual([true, true]);
   });
 
   test("rich editor shows the diagram until the block is focused", async ({
