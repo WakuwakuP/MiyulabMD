@@ -7,7 +7,7 @@
   "scripts": {
     "cf-typegen": "wrangler types",
     "db:migrate": "wrangler d1 migrations apply DB --local",
-    "deploy": "wrangler deploy -c wrangler.og-fetch.toml && wrangler deploy",
+    "deploy": "wrangler deploy -c wrangler.og-fetch.toml && wrangler deploy -c wrangler.diagram-check.toml && wrangler deploy",
     "predev": "node -e \"require('node:fs').mkdirSync('../web/dist', { recursive: true })\"",
     "dev": "node scripts/dev.mjs",
     "test": "node --experimental-strip-types --test src/auth/*.test.ts src/ssr/*.test.ts src/services/*.test.ts src/durable-objects/*.test.ts src/diagram-check/*.test.ts",

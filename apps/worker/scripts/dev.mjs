@@ -13,6 +13,8 @@ const child = spawn(
     "wrangler.toml",
     "-c",
     "wrangler.og-fetch.toml",
+    "-c",
+    "wrangler.diagram-check.toml",
     "--ip",
     "127.0.0.1",
     "--port",
