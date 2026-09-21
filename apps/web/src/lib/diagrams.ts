@@ -186,7 +186,12 @@ function validatePlantUmlSource(source: string): void {
 
 async function renderPlantUml(source: string, dark: boolean): Promise<string> {
   validatePlantUmlSource(source);
-  plantumlSandbox ??= plantUmlSandbox();
+  // A failed init (asset fetch error, timeout) must not poison the cache:
+  // clear it so the next render retries with a fresh iframe.
+  plantumlSandbox ??= plantUmlSandbox().catch((error: unknown) => {
+    plantumlSandbox = null;
+    throw error;
+  });
   // addEventListener dedupes identical listeners, so registering per call is
   // safe and keeps the handler alive for the sandbox's lifetime.
   window.addEventListener("message", onPlantUmlMessage);
