@@ -2,6 +2,10 @@ packages:
   - apps/*
   - packages/*
 
+overrides:
+  lodash-es: ^4.18.1
+  '@vitest/mocker': ^4.1.11
+
 onlyBuiltDependencies:
   - esbuild
   - workerd
