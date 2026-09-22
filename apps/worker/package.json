@@ -29,7 +29,6 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/fast-diff": "^1.2.2",
     "typescript": "7.0.2",
     "wrangler": "^4.136.1"
   }

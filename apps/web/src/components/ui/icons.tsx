@@ -10,7 +10,6 @@ import {
   Link2,
   Lock,
   LockOpen,
-  Medal,
   Monitor,
   Moon,
   Pencil,
@@ -94,10 +93,6 @@ export function LinkIcon({ className }: IconProps) {
   return <Link2 aria-hidden={true} className={cn("size-4", className)} />;
 }
 
-export function MedalIcon({ className }: IconProps) {
-  return <Medal aria-hidden={true} className={cn("size-4", className)} />;
-}
-
 export function LockIcon({ className }: IconProps) {
   return <Lock aria-hidden={true} className={cn("size-4", className)} />;
 }
@@ -112,10 +107,6 @@ export function SearchIcon({ className }: IconProps) {
 
 export function GlobeOffIcon({ className }: IconProps) {
   return <GlobeOff aria-hidden={true} className={cn("size-4", className)} />;
-}
-
-export function ArticleIcon({ className }: IconProps) {
-  return <FileText aria-hidden={true} className={cn("size-4", className)} />;
 }
 
 export function FolderIcon({ className }: IconProps) {

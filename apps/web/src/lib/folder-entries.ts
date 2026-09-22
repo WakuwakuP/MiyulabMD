@@ -11,7 +11,7 @@ export type FolderExpansion = {
   path?: string;
 };
 
-export const FOLDER_ENTRIES_PAGE_SIZE = 50;
+const FOLDER_ENTRIES_PAGE_SIZE = 50;
 const FOLDER_ENTRIES_MAX_LIMIT = 200;
 
 function entryKey(entry: FolderEntry): string {

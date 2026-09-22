@@ -7,7 +7,7 @@ let notesInflight: Promise<NoteSummary[]> | null = null;
 const folderCache = new Map<string, FolderAccess>();
 const folderInflight = new Map<string, Promise<ApiResult<FolderAccess>>>();
 
-export function folderCacheKey(id?: string | null): string {
+function folderCacheKey(id?: string | null): string {
   return id ?? "__root__";
 }
 

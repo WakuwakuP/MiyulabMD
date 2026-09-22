@@ -6,6 +6,7 @@ import {
 } from "./offline-cache.ts";
 import type { StorageWriteRecovery } from "./storage-write-recovery.ts";
 
+/** @public Used by Playwright specs via dynamic import. */
 export {
   type AttachedImage,
   attachedImage,

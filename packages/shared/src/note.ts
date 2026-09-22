@@ -281,5 +281,3 @@ export type UpdateFolderAccessInput = {
   writeScope?: AccessScope;
   grants?: AccessGrantInput[];
 };
-
-export type { AccessGrant } from "./permission.ts";

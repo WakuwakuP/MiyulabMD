@@ -9,7 +9,7 @@ import { editCacheDocName } from "./edit-cache.ts";
  * DocumentRoom へ接続して sync（state vector 交換＝未送信 update の送信）
  * が完了するまで待つ。成功後に purge しても編集はサーバーにある。
  */
-export async function syncEditCacheDoc(
+async function syncEditCacheDoc(
   userId: string,
   noteId: string,
   timeoutMs = 15_000,

@@ -1,6 +1,6 @@
 import type { GrepMatch, GrepResult } from "@miyulabmd/shared";
 
-export const GREP_DEFAULTS = {
+const GREP_DEFAULTS = {
   contextAfter: 1,
   contextBefore: 1,
   maxMatchesPerNote: 10,
@@ -31,7 +31,7 @@ export type LineMatcher = {
   match(line: string): { index: number; length: number } | null;
 };
 
-export function globToRegExp(glob: string): RegExp {
+function globToRegExp(glob: string): RegExp {
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*/g, ".*")

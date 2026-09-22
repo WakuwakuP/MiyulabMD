@@ -3,7 +3,7 @@
  * Small enough that a mid-session lock takes effect quickly,
  * large enough that a typing session does not hit D1 per keystroke.
  */
-export const EDIT_LOCK_RECHECK_MS = 5_000;
+const EDIT_LOCK_RECHECK_MS = 5_000;
 
 export type EditLockRow = {
   edit_locked: number | null;

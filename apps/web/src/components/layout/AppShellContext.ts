@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { ViewerContext } from "../../lib/viewer-context.ts";
 import type { createViewingAccess } from "../../lib/viewing-access.ts";
 
-export type HeaderLayout = "page" | "editor";
+type HeaderLayout = "page" | "editor";
 
 export type AppShellContext = {
   user: SessionUser | null;

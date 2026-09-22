@@ -8,7 +8,7 @@ export type DiagramCheckBlock = {
   source: string;
 };
 
-export type DiagramCheckError = {
+type DiagramCheckError = {
   error: string;
   language: string;
   line: number;

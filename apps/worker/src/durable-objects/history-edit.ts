@@ -100,7 +100,7 @@ export function actorFromAgent(agent: {
   };
 }
 
-export function hunkOp(hunk: HistoryHunk): NoteEditOp {
+function hunkOp(hunk: HistoryHunk): NoteEditOp {
   if (hunk.inserted.length > 0 && hunk.deleted > 0) {
     return "replace";
   }
@@ -160,7 +160,7 @@ export function sessionFromHunk(
   };
 }
 
-export function isAdjacentHunk(
+function isAdjacentHunk(
   session: PendingHistorySession,
   hunk: HistoryHunk,
 ): boolean {

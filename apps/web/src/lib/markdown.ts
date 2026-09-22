@@ -11,7 +11,7 @@ function ogUrls(markdown: string): string[] {
   return collectOgUrls(normalizeEmbedMarkdown(markdown));
 }
 
-export function peekOgCards(markdown: string): Map<string, OgPreview> {
+function peekOgCards(markdown: string): Map<string, OgPreview> {
   const cards = new Map<string, OgPreview>();
   for (const url of ogUrls(markdown)) {
     const card = peekOgPreview(url);

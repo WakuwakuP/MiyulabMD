@@ -29,7 +29,7 @@ export type AwarenessUserState = {
 };
 
 /** 編集キャッシュ（y-indexeddb）が接続されたセッションの露出部。 */
-export type EditCacheSession = {
+type EditCacheSession = {
   /** 未同期ノートでは provider の初回 sync まで null のまま遅延アタッチされる。 */
   readonly persistence: IndexeddbPersistence | null;
   /** 未送信のローカル編集が残っているか（バッジ表示用）。 */
@@ -61,17 +61,7 @@ export function collaborationWsBase(): string {
   return `${wsProtocol()}://${location.host}/ws/notes`;
 }
 
-/** ノート用 WebSocket URL（デバッグ・テスト用）。 */
-export function collaborationUrl(noteId: string): string {
-  return `${collaborationWsBase()}/${noteId}`;
-}
-
-/** メールアドレスから安定した表示色を生成する。 */
-export function colorForUser(emailOrId: string): string {
-  return colorForEmail(emailOrId, emailOrId);
-}
-
-export function awarenessLabel(user: SessionUser | null): string {
+function awarenessLabel(user: SessionUser | null): string {
   return user?.displayName?.trim() || user?.email || "ゲスト";
 }
 
@@ -86,7 +76,7 @@ function colorLightFor(color: string): string {
   return `${color}33`;
 }
 
-export function awarenessUser(user: SessionUser | null): AwarenessUserState & {
+function awarenessUser(user: SessionUser | null): AwarenessUserState & {
   user: { name: string; color: string; colorLight: string };
 } {
   const userId = user?.id ?? "guest";

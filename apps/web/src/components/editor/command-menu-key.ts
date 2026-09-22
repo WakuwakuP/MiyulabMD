@@ -1,8 +1,4 @@
-export function cycleMenuIndex(
-  value: number,
-  delta: number,
-  length: number,
-): number {
+function cycleMenuIndex(value: number, delta: number, length: number): number {
   return (value + delta + length) % length;
 }
 

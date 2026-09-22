@@ -415,7 +415,7 @@ export async function loadParaSpaces(
   return result.ok ? result.data.spaces : [];
 }
 
-export function menuPosition(event: MouseEvent) {
+function menuPosition(event: MouseEvent) {
   const target = event.currentTarget;
   if (target instanceof HTMLButtonElement) {
     const rect = target.getBoundingClientRect();
@@ -549,7 +549,7 @@ export function handleItemMenu(
   });
 }
 
-export async function refreshHomeList(
+async function refreshHomeList(
   folderId: string | undefined,
   user: SessionUser | null,
   navigate: NavigateFunction,

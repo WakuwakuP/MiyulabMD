@@ -9,7 +9,7 @@ export type StorageWriteRecovery = {
   run<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T>;
 };
 
-export function isQuotaExceededError(error: unknown): boolean {
+function isQuotaExceededError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "QuotaExceededError";
 }
 

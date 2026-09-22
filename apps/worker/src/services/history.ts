@@ -11,9 +11,9 @@ import { db } from "../db/client.ts";
 const HISTORY_DEFAULT_LIMIT = 50;
 const HISTORY_MAX_LIMIT = 100;
 
-export const HISTORY_EVENT_KEEP = 200;
-export const HISTORY_REVISION_KEEP = 80;
-export const HISTORY_REVISION_BYTES_KEEP = 8 * 1024 * 1024;
+const HISTORY_EVENT_KEEP = 200;
+const HISTORY_REVISION_KEEP = 80;
+const HISTORY_REVISION_BYTES_KEEP = 8 * 1024 * 1024;
 
 export type HistoryCompactionLimits = {
   eventKeep: number;

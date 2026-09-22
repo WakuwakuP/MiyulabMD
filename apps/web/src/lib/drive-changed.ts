@@ -1,3 +1,4 @@
+/** @public Used by Playwright specs via dynamic import. */
 export const DRIVE_CHANGED_EVENT = "miyulabmd:drive-changed";
 
 export function notifyDriveChanged(): void {

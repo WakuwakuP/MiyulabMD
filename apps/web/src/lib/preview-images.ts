@@ -332,6 +332,8 @@ export function resolvePreviewImages(
  * SSR fallback for the resolver. It deliberately only interprets quoted src
  * attributes: an ambiguous managed-looking candidate is stripped, while
  * ordinary external images and all non-image markup are retained.
+ *
+ * @public Used by Playwright specs via dynamic import.
  */
 export function sanitizePreviewImagesWithoutDocument(html: string): string {
   return html.replace(/<img\b[^>]*>/gi, (tag) => {

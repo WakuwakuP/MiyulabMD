@@ -17,7 +17,7 @@ import {
 
 // --- feature registry (specs/knowledge-management.html §2.7) ----------------
 
-export type KnowledgeFeatureSurfaces = {
+type KnowledgeFeatureSurfaces = {
   /** ホーム画面の専用セクション（PARA のスペース一覧など） */
   homeSection?: boolean;
   /** フォルダ/ノートのコンテキストメニュー項目 */
@@ -27,10 +27,10 @@ export type KnowledgeFeatureSurfaces = {
 };
 
 /** 有効化に副作用がある機能のセットアップ入口。P1 では未使用の拡張スロット。 */
-export type KnowledgeFeatureSetupContext = {
+type KnowledgeFeatureSetupContext = {
   userId: string;
 };
-export type KnowledgeFeatureSetupOutcome = {
+type KnowledgeFeatureSetupOutcome = {
   ok: boolean;
   error?: string;
 };

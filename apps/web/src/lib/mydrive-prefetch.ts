@@ -20,9 +20,9 @@ import {
 } from "./storage-write-recovery.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
-export const PREFETCH_MAX_ATTEMPTS = 2;
-export const PREFETCH_RETRY_DELAY_MS = 500;
-export const PREFETCH_MAX_CONSECUTIVE_FAILURES = 4;
+const PREFETCH_MAX_ATTEMPTS = 2;
+const PREFETCH_RETRY_DELAY_MS = 500;
+const PREFETCH_MAX_CONSECUTIVE_FAILURES = 4;
 
 export type MyDrivePrefetchResult =
   | { status: "success"; folders: number; notes: number }

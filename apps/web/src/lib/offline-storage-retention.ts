@@ -42,6 +42,7 @@ export async function estimateOfflineStorage(): Promise<OfflineStorageEstimate |
   return getOfflineStorageEstimate();
 }
 
+/** @public Used by Playwright specs via dynamic import. */
 export function getOfflineStorageEstimate(): OfflineStorageEstimate | null {
   return latestEstimate ? { ...latestEstimate } : null;
 }

@@ -57,7 +57,7 @@ export function paragraphStandaloneHref(node: PMNode): string | null {
   return href;
 }
 
-export function linkParagraphFromHref(
+function linkParagraphFromHref(
   schema: EditorState["schema"],
   href: string,
 ): PMNode | null {
