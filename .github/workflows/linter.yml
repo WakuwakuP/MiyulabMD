@@ -47,12 +47,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-  # Report-only: project-wide unused files/exports/dependencies. Stays
-  # advisory until the signal proves stable, then drop continue-on-error.
   knip:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
