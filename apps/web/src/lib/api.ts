@@ -3,7 +3,6 @@ import type {
   AccessGrantInput,
   AccessScope,
   ArticleSource,
-  ArticleSourceStatus,
   CreateNoteInput,
   FolderAccess,
   FolderChildrenResult,
@@ -13,7 +12,6 @@ import type {
   MedallionLayer,
   MedallionResolution,
   MedallionSet,
-  MoveFolderContentsResult,
   MoveFolderResult,
   MoveNotesResult,
   Note,
@@ -72,6 +70,7 @@ export type ReadOptions = {
     | null;
 };
 
+/** @public Used by Playwright specs via dynamic import. */
 export {
   ApiCommunicationError,
   ApiHttpError,
@@ -552,26 +551,6 @@ export async function moveFolder(
   return { data: (await res.json()) as MoveFolderResult, ok: true };
 }
 
-export async function moveFolderContents(
-  id: string,
-  input: {
-    destFolderId?: string | null;
-    includeSubfolders?: boolean;
-    dryRun?: boolean;
-  },
-): Promise<ApiResult<MoveFolderContentsResult>> {
-  const res = await fetch(`/api/folders/${id}/move-contents`, {
-    ...fetchOpts,
-    body: JSON.stringify(input),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as MoveFolderContentsResult, ok: true };
-}
-
 export async function moveNotes(
   noteIds: string[],
   destFolderId: string | null,
@@ -1003,6 +982,7 @@ export async function deleteNote(id: string): Promise<ApiResult<void>> {
   return { data: undefined, ok: true };
 }
 
+/** @public Used by Playwright specs via dynamic import. */
 export async function logout(): Promise<void> {
   await globalThis.fetch("/auth/logout", { ...fetchOpts, method: "POST" });
 }
@@ -1070,20 +1050,6 @@ export async function fetchArticleSources(
   }
   const body = (await res.json()) as { sources: ArticleSource[] };
   return { data: body.sources, ok: true };
-}
-
-export async function fetchArticleSourceStatus(
-  options: ReadOptions = {},
-): Promise<ApiResult<ArticleSourceStatus>> {
-  const res = await fetch(
-    "/api/article-sources/status",
-    { ...fetchOpts, signal: options.signal },
-    options,
-  );
-  if (!res.ok) {
-    return { error: await parseError(res), ok: false, status: res.status };
-  }
-  return { data: (await res.json()) as ArticleSourceStatus, ok: true };
 }
 
 export async function createArticleSource(

@@ -13,7 +13,7 @@ const USER_COLORS = [
   "#0284c7",
 ] as const;
 
-export function colorForSeed(seed: string): string {
+function colorForSeed(seed: string): string {
   let hash = 2166136261;
   for (let i = 0; i < seed.length; i += 1) {
     hash ^= seed.charCodeAt(i);

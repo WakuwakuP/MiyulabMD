@@ -105,7 +105,7 @@ export async function listMedallionSets(
   return results.map(setFromRow);
 }
 
-export async function findMedallionSet(
+async function findMedallionSet(
   env: Env,
   user: SessionUser,
   id: string,

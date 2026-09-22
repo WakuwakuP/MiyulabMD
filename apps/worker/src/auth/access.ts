@@ -1,6 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-export type AccessClaims = {
+type AccessClaims = {
   email: string;
   displayName: string | null;
 };
@@ -35,7 +35,7 @@ function parseCookie(header: string, name: string): string | null {
   return null;
 }
 
-export function extractAccessJwt(request: Request): string | null {
+function extractAccessJwt(request: Request): string | null {
   const fromHeader =
     request.headers.get("Cf-Access-Jwt-Assertion") ??
     request.headers.get("cf-access-jwt-assertion");

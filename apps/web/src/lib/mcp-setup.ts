@@ -11,7 +11,7 @@ export const MCP_AGENT_IDS = [
 
 export type McpAgentId = (typeof MCP_AGENT_IDS)[number];
 
-export type McpAgentSnippet = {
+type McpAgentSnippet = {
   label: string;
   value: string;
 };

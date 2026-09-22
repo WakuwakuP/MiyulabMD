@@ -9,10 +9,12 @@ import {
 } from "./offline-storage-retention.ts";
 import type { ViewerContext } from "./viewer-context.ts";
 
+/** @public Used by Playwright specs via dynamic import. */
 export const PREFETCH_DEBOUNCE_MS = 200;
+/** @public Used by Playwright specs via dynamic import. */
 export const PREFETCH_MIN_INTERVAL_MS = 1000;
-export const PREFETCH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-export const PREFETCH_FAILURE_COOLDOWN_MS = 30_000;
+const PREFETCH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const PREFETCH_FAILURE_COOLDOWN_MS = 30_000;
 const PREFETCH_LOCK_PREFIX = "miyulabmd:mydrive-prefetch:";
 
 type PrefetchCoordinator = {

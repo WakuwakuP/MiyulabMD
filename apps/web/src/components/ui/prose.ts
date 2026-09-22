@@ -8,8 +8,6 @@ export const documentPaneScrollClass = `${documentViewShellClass} h-full overflo
 
 export const documentProseClass = "document-prose";
 
-export const markdownProseClass = documentProseClass;
-
 export const documentScrollPadClass = "px-5 py-4";
 
 export const editorLoadingClass =

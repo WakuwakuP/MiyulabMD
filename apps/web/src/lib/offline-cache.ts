@@ -219,12 +219,14 @@ function bumpUserRealm(userId: string): void {
  * to misses through their `isRealmCurrent` checks; write transactions abort
  * through the liveness probe in `guardPurgeGeneration`. A reload lifts the
  * suspension because nothing is persisted.
+ *
+ * @public Used by Playwright specs via dynamic import.
  */
 export function suspendOfflineCacheUser(userId: string): void {
   bumpUserRealm(userId);
 }
 
-export type OfflineCacheLifecycleEvent = {
+type OfflineCacheLifecycleEvent = {
   type: "identity" | "invalidate" | "device-invalidate";
   userId: string;
   resource?:
@@ -3871,7 +3873,11 @@ async function writeViewerIdentity(
   }
 }
 
-/** Remember the signed-in viewer so cold starts can route quickly. */
+/**
+ * Remember the signed-in viewer so cold starts can route quickly.
+ *
+ * @public Used by Playwright specs via dynamic import.
+ */
 export function persistCachedViewerId(
   userId: string,
   options: CancellationOptions = {},

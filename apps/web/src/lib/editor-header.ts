@@ -6,8 +6,8 @@ import type { MedallionResolution, Note } from "@miyulabmd/shared";
  * 既存ブレークポイント 900px / 640px（AppHeader・HeaderButton・PresenceBar
  * と同じ CSS メディアクエリ方式）で tier を決める。
  */
-export const HEADER_FULL_MIN_WIDTH = 900;
-export const HEADER_COMPACT_MIN_WIDTH = 640;
+const HEADER_FULL_MIN_WIDTH = 900;
+const HEADER_COMPACT_MIN_WIDTH = 640;
 
 export type EditorHeaderTier = "full" | "compact" | "minimal";
 

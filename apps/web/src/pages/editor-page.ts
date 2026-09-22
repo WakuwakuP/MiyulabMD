@@ -10,7 +10,6 @@ import {
   draftFromNote,
   noteAccessPatch,
 } from "../components/notes/access-draft.ts";
-import type { ApiResult } from "../lib/api.ts";
 import { fetchArticleSources, updateNote } from "../lib/api.ts";
 import {
   applyAwarenessUser,
@@ -18,101 +17,7 @@ import {
   type YjsSession,
 } from "../lib/collaboration.ts";
 import { type EditorMode, writeEditorMode } from "../lib/editor-mode.ts";
-import { loadOgCards } from "../lib/markdown.ts";
-import { noteFromCaches, seedNoteCache } from "../lib/note-cache.ts";
-
-export type NoteSetters = {
-  setNote: (note: Note | null) => void;
-  setMarkdown: (markdown: string) => void;
-  setFolder: (folder: string) => void;
-  setAccessDraft: (draft: AccessDraft | null) => void;
-};
-
-export function applyLoadedNote(loaded: Note, setters: NoteSetters) {
-  setters.setNote(loaded);
-  setters.setMarkdown(loaded.markdown);
-  setters.setFolder(loaded.folder);
-  setters.setAccessDraft(draftFromNote(loaded));
-}
-
-export function noteLoadErrorMessage(status: number, fallback: string): string {
-  if (status === 401) {
-    return "このノートを表示するにはログインが必要です。";
-  }
-  if (status === 403) {
-    return "このノートを表示する権限がありません。";
-  }
-  if (status === 404) {
-    return "ノートが見つかりません。";
-  }
-  return fallback;
-}
-
-type EditorLoadSetters = NoteSetters & {
-  setLoadError: (error: string | null) => void;
-  setSaveError: (error: string | null) => void;
-  setCollab: (session: YjsSession | null) => void;
-  setCollabReady: (ready: boolean) => void;
-  setMode: (mode: EditorMode) => void;
-  setSplitScroll: (ratio: number) => void;
-  setLoading: (loading: boolean) => void;
-  hydratedRef: MutableRefObject<boolean>;
-};
-
-export function beginEditorNoteLoad(
-  id: string,
-  setters: EditorLoadSetters,
-): Note | undefined {
-  const hit = noteFromCaches(id);
-  setters.setLoadError(null);
-  setters.setSaveError(null);
-  setters.setCollab(null);
-  setters.setCollabReady(false);
-  setters.setMode("preview");
-  setters.setSplitScroll(0);
-
-  if (hit) {
-    applyLoadedNote(hit, setters);
-    setters.hydratedRef.current = true;
-    setters.setLoading(false);
-    void loadOgCards(hit.markdown);
-    return hit;
-  }
-  setters.hydratedRef.current = false;
-  setters.setLoading(true);
-  return undefined;
-}
-
-export function applyEditorNoteLoad(
-  result: ApiResult<Note>,
-  id: string,
-  hit: Note | undefined,
-  cancelled: boolean,
-  setters: EditorLoadSetters,
-) {
-  if (cancelled) {
-    return;
-  }
-  if (!result.ok) {
-    setters.setLoadError(noteLoadErrorMessage(result.status, result.error));
-    if (!noteFromCaches(id)) {
-      setters.setNote(null);
-    }
-    setters.setLoading(false);
-    return;
-  }
-
-  if (hit) {
-    setters.setNote(result.data);
-    setters.setFolder(result.data.folder);
-    setters.setAccessDraft(draftFromNote(result.data));
-  } else {
-    applyLoadedNote(result.data, setters);
-    setters.hydratedRef.current = true;
-  }
-  setters.setLoading(false);
-  void loadOgCards(result.data.markdown);
-}
+import { seedNoteCache } from "../lib/note-cache.ts";
 
 export function subscribeArticleSources(
   user: SessionUser | null,

@@ -35,7 +35,7 @@ function rowToSummary(row: {
 }
 
 /** SHA-256 hex digest of the plaintext token. */
-export async function hashToken(token: string): Promise<string> {
+async function hashToken(token: string): Promise<string> {
   const data = new TextEncoder().encode(token);
   const digest = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(digest), (byte) =>
@@ -43,7 +43,7 @@ export async function hashToken(token: string): Promise<string> {
   ).join("");
 }
 
-export function generatePlainToken(): string {
+function generatePlainToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const random = Array.from(bytes, (byte) =>

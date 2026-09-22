@@ -4,7 +4,7 @@ import { runMutation } from "./viewing-access.ts";
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const DRIVE_API_PREFIXES = ["/api/notes", "/api/folders"];
 
-export const SESSION_USER_HEADER = "X-MiyulabMD-Session-User";
+const SESSION_USER_HEADER = "X-MiyulabMD-Session-User";
 
 export type ApiRequestOptions = {
   /** Captured caller identity: undefined is unchecked; null explicitly expects guest. */

@@ -1,19 +1,19 @@
 export const OG_USER_AGENT =
   "Mozilla/5.0 (compatible; MiyulabMD-OGP/1.0; +https://md.miyulab.dev)";
 
-export const OG_ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
+const OG_ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
 
 /** Service bindings rewrite request.url to this Worker; pass the page URL here. */
 export const OG_TARGET_HEADER = "x-og-target";
 
-export const OG_MAX_REDIRECTS = 5;
+const OG_MAX_REDIRECTS = 5;
 export const OG_MAX_BYTES = 512_000;
 
 export type OgOutbound = {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 };
 
-export function normalizeHostname(hostname: string): string {
+function normalizeHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/^\[|\]$/g, "");
 }
 
@@ -150,7 +150,7 @@ export function parseOgTargetUrl(request: Request): URL | null {
   }
 }
 
-export function ogRequestInit(
+function ogRequestInit(
   signal?: AbortSignal,
   redirect: RequestRedirect = "manual",
 ): RequestInit {

@@ -18,20 +18,20 @@ import { db } from "../db/client.ts";
  * medallion assignments (nearest ancestor wins).
  */
 
-export type LayerFilter = { value: LayerFilterValue; negated: boolean };
+type LayerFilter = { value: LayerFilterValue; negated: boolean };
 /** One folder assignment row used for effective-layer resolution. */
-export type MedallionSearchAssignment = {
+type MedallionSearchAssignment = {
   path: string;
   layerKey: string;
   setName: string;
 };
-export type TagFilter = { value: string; negated: boolean };
-export type FolderPrefixFilter = { value: string; negated: boolean };
+type TagFilter = { value: string; negated: boolean };
+type FolderPrefixFilter = { value: string; negated: boolean };
 /**
  * OR-ed set of folder prefixes (e.g. `para:projects` across every space).
  * Positive filters need one matching prefix; negated ones need none to match.
  */
-export type FolderPrefixSetFilter = { values: string[]; negated: boolean };
+type FolderPrefixSetFilter = { values: string[]; negated: boolean };
 
 export type ResolvedSearchDsl = {
   parsed: SearchQuery;
@@ -180,7 +180,7 @@ async function resolveFilter(
   }
 }
 
-export async function loadMedallionAssignments(
+async function loadMedallionAssignments(
   env: Env,
   userId: string,
 ): Promise<MedallionSearchAssignment[]> {

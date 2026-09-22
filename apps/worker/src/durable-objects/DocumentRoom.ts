@@ -85,7 +85,7 @@ function isRoomSocket(origin: unknown): origin is WebSocket {
   );
 }
 
-export type ApplyEditInput = {
+type ApplyEditInput = {
   noteId: string;
   agent: AgentPresenceInput;
 } & (
@@ -117,7 +117,7 @@ export type ApplyEditResult =
 const EDIT_LOCKED_MESSAGE =
   "edit_locked: this note is edit-locked. Call set_edit_lock first.";
 
-export type TaskCheckboxResult =
+type TaskCheckboxResult =
   | { checked: boolean; ok: true }
   | { error: "conflict"; ok: false }
   | { error: "locked"; message: string; ok: false };

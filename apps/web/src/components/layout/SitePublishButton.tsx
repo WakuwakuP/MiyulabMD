@@ -24,7 +24,7 @@ export type SitePublish = {
  * フォルダ一致する記事ソースの購読と dispatch をまとめたフック。
  * ヘッダーボタンと「⋯」メニュー項目（SitePublishMenuItem）で共有する。
  */
-export function useSitePublish(
+function useSitePublish(
   user: SessionUser | null,
   folder: string | null | undefined,
 ): SitePublish {

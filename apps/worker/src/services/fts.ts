@@ -27,21 +27,13 @@ export async function syncNoteFts(
     .catch(() => undefined);
 }
 
-export async function deleteNoteFts(env: Env, noteId: string): Promise<void> {
-  await db(env)
-    .prepare("DELETE FROM notes_fts WHERE note_id = ?")
-    .bind(noteId)
-    .run()
-    .catch(() => undefined);
-}
-
 /** Escape a user term into an FTS5 phrase token for the trigram index. */
 function ftsPhrase(term: string): string {
   return `"${term.replace(/"/g, '""')}"`;
 }
 
 /** trigram indexes need at least 3 characters to match. */
-export const FTS_MIN_TERM_LENGTH = 3;
+const FTS_MIN_TERM_LENGTH = 3;
 
 /**
  * Build an FTS5 MATCH query from parsed DSL terms.
@@ -60,28 +52,4 @@ export function ftsMatchQuery(
     .filter((term) => !term.negated && term.value.length >= FTS_MIN_TERM_LENGTH)
     .map((term) => `${column}${ftsPhrase(term.value)}`);
   return positives.length === 0 ? null : positives.join(" ");
-}
-
-/**
- * Candidate note IDs matching the FTS query. Returns null when the query is
- * empty or the index is unavailable — callers then scan without narrowing.
- * The FTS set is global (not permission-aware); callers MUST intersect it with
- * permission-filtered rows.
- */
-export async function ftsCandidateIds(
-  env: Env,
-  match: string | null,
-): Promise<Set<string> | null> {
-  if (!match) {
-    return null;
-  }
-  try {
-    const rows = await db(env)
-      .prepare("SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?")
-      .bind(match)
-      .all<{ note_id: string }>();
-    return new Set((rows.results ?? []).map((row) => row.note_id));
-  } catch {
-    return null;
-  }
 }

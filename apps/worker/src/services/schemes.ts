@@ -714,7 +714,7 @@ export async function folderIdsForSchemeId(
   return (rows.results ?? []).map((row) => row.id);
 }
 
-export type JdListEntry = {
+type JdListEntry = {
   folder: string;
   id: string;
   name: string;

@@ -1,6 +1,6 @@
 import type { SessionUser } from "@miyulabmd/shared";
 
-export const API_SESSION_USER_HEADER = "X-MiyulabMD-Session-User";
+const API_SESSION_USER_HEADER = "X-MiyulabMD-Session-User";
 
 /** Identity of the incoming verified session, not the note owner or a new cookie. */
 export function withApiSessionIdentity(

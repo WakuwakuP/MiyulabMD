@@ -133,7 +133,7 @@ export function ogCacheKey(origin: string, rawUrl: string): Request | null {
   }
 }
 
-export async function matchOgCache(
+async function matchOgCache(
   origin: string,
   rawUrl: string,
 ): Promise<OgPreview | null> {
@@ -152,10 +152,7 @@ export async function matchOgCache(
   }
 }
 
-export async function putOgCache(
-  origin: string,
-  preview: OgPreview,
-): Promise<void> {
+async function putOgCache(origin: string, preview: OgPreview): Promise<void> {
   const key = ogCacheKey(origin, preview.url);
   if (!key) {
     return;

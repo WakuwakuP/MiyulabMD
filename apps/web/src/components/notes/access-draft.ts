@@ -19,7 +19,7 @@ export function draftFromNote(note: Note | NoteSummary): AccessDraft {
   };
 }
 
-export function accessGrantInputs(draft: AccessDraft) {
+function accessGrantInputs(draft: AccessDraft) {
   return draft.grants.map((grant) => ({
     canWrite: grant.canWrite,
     email: grant.email,

@@ -1,28 +1,13 @@
 import type { Note } from "@miyulabmd/shared";
 import { type ApiResult, fetchNote } from "./api.ts";
 import { loadOgCards } from "./markdown.ts";
-import { consumeOgBootstrap, readNoteBootstrap } from "./note-bootstrap.ts";
 
 const noteCache = new Map<string, Note>();
 const noteInflight = new Map<string, Promise<ApiResult<Note>>>();
-let noteBootstrapAvailable = true;
 
+/** @public Used by Playwright specs via dynamic import. */
 export function peekNote(id: string): Note | undefined {
   return noteCache.get(id);
-}
-
-export function noteFromCaches(id: string): Note | undefined {
-  consumeOgBootstrap();
-  const peeked = peekNote(id);
-  if (peeked) {
-    return peeked;
-  }
-  const boot = noteBootstrapAvailable ? readNoteBootstrap(id) : null;
-  if (boot) {
-    seedNoteCache(boot);
-    return boot;
-  }
-  return undefined;
 }
 
 export function seedNoteCache(note: Note): void {
@@ -34,9 +19,6 @@ export function seedNoteCache(note: Note): void {
 
 export function invalidateNoteCache(id?: string): void {
   if (!id) {
-    // Identity invalidation must also retire SSR data still present in the DOM.
-    // Otherwise a later reader could repopulate the cleared memory cache.
-    noteBootstrapAvailable = false;
     noteCache.clear();
     noteInflight.clear();
     return;
@@ -52,6 +34,7 @@ export function invalidateNoteCache(id?: string): void {
   }
 }
 
+/** @public Used by Playwright specs via dynamic import. */
 export async function loadNote(
   id: string,
   force = false,

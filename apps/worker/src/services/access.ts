@@ -107,7 +107,7 @@ export function defaultScopes(_env?: Env): {
   return { ...ROOT_SCOPES };
 }
 
-export function normalizeGrantEmail(email: string): string | null {
+function normalizeGrantEmail(email: string): string | null {
   const normalized = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
     return null;

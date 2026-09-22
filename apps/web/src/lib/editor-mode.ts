@@ -1,4 +1,4 @@
-export const EDITOR_MODES = ["split", "preview", "source", "rich"] as const;
+const EDITOR_MODES = ["split", "preview", "source", "rich"] as const;
 export type EditorMode = (typeof EDITOR_MODES)[number];
 
 export const EDIT_MODES = ["split", "source", "rich"] as const;
@@ -20,15 +20,6 @@ export function isEditorMode(value: string): value is EditorMode {
 
 export function isEditMode(value: string): value is EditMode {
   return (EDIT_MODES as readonly string[]).includes(value);
-}
-
-export function readEditorMode(): EditorMode {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY) ?? "";
-    return isEditorMode(stored) ? stored : "preview";
-  } catch {
-    return "preview";
-  }
 }
 
 export function readLastEditMode(): EditMode {

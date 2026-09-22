@@ -98,7 +98,7 @@ async function countQuery(
 }
 
 /** Count every entity whose path lives inside `path` (inclusive). */
-export async function countSubtree(
+async function countSubtree(
   env: Env,
   ownerId: string,
   path: string,

@@ -1,5 +1,4 @@
 export {
-  attr,
   canonicalizeEditorMarkdown,
   collectOgUrls,
   expandEmbedsForPreview,

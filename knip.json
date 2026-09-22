@@ -1,0 +1,48 @@
+{
+  "$schema": "https://unpkg.com/knip@6.35.1/schema.json",
+  "ignoreDependencies": ["@mizchi/lsmcp"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.mjs"],
+      "project": ["scripts/**/*.mjs"]
+    },
+    "apps/web": {
+      "entry": [
+        "index.html",
+        "src/**/*.test.ts",
+        "service-worker/sw.ts",
+        "scripts/*.mjs",
+        "tests/**/*.ts",
+        "vite*.config.ts",
+        "playwright*.config.ts",
+        ".storybook/*.ts"
+      ],
+      "ignoreUnresolved": ["^/src/"],
+      "project": [
+        "src/**/*.{ts,tsx,css,mdx}",
+        "service-worker/**/*.ts",
+        "scripts/*.mjs",
+        "tests/**/*.ts",
+        ".storybook/*.ts"
+      ]
+    },
+    "apps/worker": {
+      "entry": [
+        "src/diagram-check-worker.ts",
+        "src/og-fetch-worker.ts",
+        "src/**/*.test.ts",
+        "scripts/*.mjs"
+      ],
+      "ignoreDependencies": ["cloudflare"],
+      "project": ["src/**/*.ts", "scripts/*.mjs"]
+    },
+    "packages/markdown": {
+      "entry": ["src/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/shared": {
+      "entry": ["src/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    }
+  }
+}

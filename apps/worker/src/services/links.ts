@@ -132,7 +132,7 @@ async function resolveByIdentity(
  * folder-qualified title → same-folder title → global title.
  * Rows the viewer cannot see are treated as missing.
  */
-export async function resolveLinkTarget(
+async function resolveLinkTarget(
   ctx: ResolveContext,
   target: string,
 ): Promise<LinkResolution> {

@@ -2,7 +2,7 @@ import { splitMarkdownFrontmatter } from "@miyulabmd/shared";
 import GithubSlugger from "github-slugger";
 
 /** Matches rehype-sanitize default `clobberPrefix`. */
-export const TOC_ID_PREFIX = "user-content-";
+const TOC_ID_PREFIX = "user-content-";
 
 export type TocEntry = {
   level: 1 | 2 | 3;

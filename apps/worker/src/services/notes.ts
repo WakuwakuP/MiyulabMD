@@ -283,7 +283,7 @@ export async function persistMarkdownSnapshot(
  * リンクも再解決する。索引は再構築可能なので失敗しても本体処理は継続する。
  * FTS 投影（notes_fts）もここで同期する。
  */
-export async function syncNoteLinks(
+async function syncNoteLinks(
   env: Env,
   after: NoteRow,
   before?: NoteRow,

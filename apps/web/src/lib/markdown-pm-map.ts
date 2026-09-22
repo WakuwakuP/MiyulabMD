@@ -109,28 +109,6 @@ export function clampPos(doc: PMNode, pos: number): number {
   return Math.max(0, Math.min(pos, doc.content.size));
 }
 
-export function alignTextSegments(
-  markdown: string,
-  segments: Array<{ text: string; pm: number; size: number }>,
-): OffsetPoint[] {
-  return buildPointsFromWalk(markdown, (emit, advance) => {
-    let mdCursor = 0;
-    for (const segment of segments) {
-      if (!segment.text) {
-        continue;
-      }
-      const idx = markdown.indexOf(segment.text, mdCursor);
-      if (idx === -1) {
-        continue;
-      }
-      emit(segment.pm, idx);
-      emit(segment.pm + segment.size, idx + segment.text.length);
-      mdCursor = idx + segment.text.length;
-      advance(mdCursor);
-    }
-  });
-}
-
 function atomNeedle(
   name: string,
   attrs: Record<string, unknown>,
@@ -492,7 +470,7 @@ export function buildOffsetMap(doc: PMNode, markdown: string): OffsetMap {
   return { markdown, points: dedupePoints(points) };
 }
 
-function buildPointsFromWalk(
+function _buildPointsFromWalk(
   markdown: string,
   walk: (
     emit: (pm: number, md: number) => void,

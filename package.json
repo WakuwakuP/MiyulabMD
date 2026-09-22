@@ -12,6 +12,7 @@
     "dev:worker": "node scripts/portless.mjs worker.miyulabmd pnpm --filter @miyulabmd/worker dev",
     "format": "biome format --write .",
     "format:check": "biome format .",
+    "knip": "knip",
     "licenses:check": "node scripts/check-licenses.mjs",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.13",
     "@mizchi/lsmcp": "0.10.0",
+    "knip": "6.35.1",
     "mprocs": "0.9.6",
     "portless": "0.15.6",
     "typescript": "7.0.2"

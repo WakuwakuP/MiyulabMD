@@ -8,7 +8,7 @@ export function jsonForScript(value: unknown): string {
     .replace(/&/g, "\\u0026");
 }
 
-export function escapeHtml(value: string): string {
+function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

@@ -256,10 +256,3 @@ export function ShareModal({
     </Modal>
   );
 }
-
-export function accessSummary(
-  readScope: AccessScope,
-  writeScope: AccessScope,
-): string {
-  return `読み ${ACCESS_SCOPE_LABELS[readScope]} / 書き ${ACCESS_SCOPE_LABELS[writeScope]}`;
-}

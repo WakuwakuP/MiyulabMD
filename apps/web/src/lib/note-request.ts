@@ -4,7 +4,7 @@ import { type ApiResult, requestJson } from "./api-transport.ts";
 import { currentNoteReadGeneration } from "./note-access-order.ts";
 import { captureOfflinePurgeFence } from "./offline-cache.ts";
 
-export type NotePurgeFence = { device: number; user: number };
+type NotePurgeFence = { device: number; user: number };
 
 type NoteRequestOptions = {
   signal?: AbortSignal;
