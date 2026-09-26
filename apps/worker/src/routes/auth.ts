@@ -30,14 +30,8 @@ function isDevAuthEnabled(env: Env): boolean {
   return envTruthy(env.DEV_AUTH);
 }
 
-function shouldUseMockLogin(request: Request, env: Env): boolean {
-  if (!isDevAuthEnabled(env)) {
-    return false;
-  }
-  if (request.headers.get("X-Dev-User-Email")) {
-    return true;
-  }
-  return !isAccessConfigured(env);
+function shouldUseMockLogin(env: Env): boolean {
+  return isDevAuthEnabled(env) && !isAccessConfigured(env);
 }
 
 function mockEmail(request: Request): string | null {
@@ -186,7 +180,7 @@ export async function handleAuthRequest(
     return finishLogin(env, verified.claims.email, verified.claims.displayName);
   }
 
-  if (pathname === "/auth/login" && shouldUseMockLogin(request, env)) {
+  if (pathname === "/auth/login" && shouldUseMockLogin(env)) {
     const email = mockEmail(request);
     if (!email) {
       return new Response(
@@ -328,6 +322,32 @@ export async function handleUpdateMe(
   });
 }
 
+function establishRequestIsSameOrigin(request: Request): boolean {
+  const expected = new URL(request.url).origin;
+  const fetchSite = request.headers.get("Sec-Fetch-Site");
+  if (fetchSite === "cross-site") {
+    return false;
+  }
+
+  const origin = request.headers.get("Origin");
+  if (origin) {
+    return origin === expected;
+  }
+
+  const referer = request.headers.get("Referer");
+  if (referer) {
+    try {
+      return new URL(referer).origin === expected;
+    } catch {
+      return false;
+    }
+  }
+
+  // Browser form POST always sends Origin. Missing Origin is a non-browser
+  // client (Playwright APIRequest, curl). Cross-site is already rejected.
+  return true;
+}
+
 /** Access の外でセッション Cookie を付ける。 */
 export async function handleEstablishSession(
   request: Request,
@@ -338,6 +358,10 @@ export async function handleEstablishSession(
       headers: { Allow: "POST" },
       status: 405,
     });
+  }
+
+  if (!establishRequestIsSameOrigin(request)) {
+    return new Response("Forbidden origin", { status: 403 });
   }
 
   const contentType = request.headers.get("Content-Type") ?? "";
