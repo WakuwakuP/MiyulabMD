@@ -21,10 +21,11 @@ import {
   upsertUserByEmail,
 } from "../db/users.ts";
 import { envTruthy } from "../env.ts";
+import { readUserSettings, updateUserSettings } from "../services/settings.ts";
 import {
-  readUserSettings,
-  updateUserKnowledgeSettings,
-} from "../services/settings.ts";
+  parseUserSettingsPatch,
+  type UserSettingsPatch,
+} from "../services/settings-input.ts";
 
 function isDevAuthEnabled(env: Env): boolean {
   return envTruthy(env.DEV_AUTH);
@@ -234,17 +235,20 @@ function notFound(): Response {
 type UpdateMePatch = {
   /** undefined = キー未指定（更新しない）。null は明示的なクリア。 */
   displayName?: string | null;
-  knowledge?: Record<string, unknown>;
+  settings?: UserSettingsPatch;
 };
 
 async function parseUpdateMeBody(
   request: Request,
 ): Promise<UpdateMePatch | Response> {
-  let body: { displayName?: unknown; settings?: unknown };
+  let body: unknown;
   try {
-    body = (await request.json()) as typeof body;
+    body = await request.json();
   } catch {
     return badRequest("Invalid JSON body");
+  }
+  if (!isRecord(body)) {
+    return badRequest("Body must be an object");
   }
   const patch: UpdateMePatch = {};
   if (body.displayName !== undefined) {
@@ -254,16 +258,11 @@ async function parseUpdateMeBody(
     patch.displayName = body.displayName;
   }
   if (body.settings !== undefined) {
-    if (!isRecord(body.settings)) {
-      return badRequest("settings must be an object");
+    const parsed = parseUserSettingsPatch(body.settings);
+    if ("error" in parsed) {
+      return badRequest(parsed.error);
     }
-    const knowledge = body.settings.knowledge;
-    if (knowledge !== undefined) {
-      if (!isRecord(knowledge)) {
-        return badRequest("settings.knowledge must be an object");
-      }
-      patch.knowledge = knowledge;
-    }
+    patch.settings = parsed.patch;
   }
   return patch;
 }
@@ -285,7 +284,7 @@ export async function handleUpdateMe(
     return patch;
   }
 
-  // displayName / settings.knowledge とも部分更新。未指定のキーは触らない
+  // displayName / settings とも部分更新。未指定のキーは触らない
   // （settings だけの PATCH で表示名が消えないようにする）。
   let updated: DbUser | null = null;
   if (patch.displayName !== undefined) {
@@ -296,12 +295,8 @@ export async function handleUpdateMe(
   }
 
   let settings: UserSettings | null = null;
-  if (patch.knowledge) {
-    settings = await updateUserKnowledgeSettings(
-      env,
-      session.id,
-      patch.knowledge,
-    );
+  if (patch.settings) {
+    settings = await updateUserSettings(env, session.id, patch.settings);
     if (!settings) {
       return notFound();
     }
