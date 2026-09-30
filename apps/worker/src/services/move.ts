@@ -13,7 +13,7 @@ import {
 
 import { db } from "../db/client.ts";
 import {
-  ensureFolderRow,
+  ensureFolderStatements,
   folderName,
   getFolderById,
   getFolderByPath,
@@ -259,10 +259,13 @@ async function moveOneNote(
     };
   }
   if (!dryRun) {
-    await db(env)
-      .prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?")
-      .bind(destPath, Date.now(), row.id)
-      .run();
+    const d1 = db(env);
+    await d1.batch([
+      ...ensureFolderStatements(env, row.owner_id, destPath),
+      d1
+        .prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?")
+        .bind(destPath, Date.now(), row.id),
+    ]);
   }
   return { from: row.folder, noteId: row.id, status: "moved", to: destPath };
 }
@@ -336,9 +339,6 @@ export async function moveFolderContents(
 
   const notes: MoveNoteItem[] = [];
   const folders: MoveFolderItem[] = [];
-  if (!dryRun) {
-    await ensureFolderRow(env, src.owner_id, destPath);
-  }
   for (const row of noteRows.results ?? []) {
     notes.push(await moveOneNote(env, row, destPath, dryRun));
   }
@@ -348,10 +348,11 @@ export async function moveFolderContents(
     );
   }
   const summary = summarizeMove([...notes, ...folders]);
+  const destFolderId = await currentDestId(env, dest, dryRun, summary.moved);
   return {
     kind: "ok",
     result: {
-      destFolderId: dest.id,
+      destFolderId,
       destPath,
       dryRun,
       folders,
@@ -359,6 +360,20 @@ export async function moveFolderContents(
       ...summary,
     },
   };
+}
+
+async function currentDestId(
+  env: Env,
+  dest: DestFolder,
+  dryRun: boolean,
+  moved: number,
+): Promise<string | null> {
+  if (dryRun || moved === 0 || dest.id === null) {
+    return dest.id;
+  }
+  // A delete may have won before the first move batch recreated the path.
+  // Return the current UUID so clients can still navigate to the destination.
+  return (await getFolderByPath(env, dest.owner_id, dest.folder))?.id ?? null;
 }
 
 async function moveChildFolder(
@@ -490,13 +505,11 @@ export async function moveNotes(
     items.push(await moveOneNote(env, classified.row, destPath, dryRun));
   }
   const summary = summarizeMove(items);
-  if (!dryRun && summary.moved > 0) {
-    await ensureFolderRow(env, dest.owner_id, destPath);
-  }
+  const destFolderId = await currentDestId(env, dest, dryRun, summary.moved);
   return {
     kind: "ok",
     result: {
-      destFolderId: dest.id,
+      destFolderId,
       destPath,
       dryRun,
       items,

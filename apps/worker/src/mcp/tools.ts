@@ -15,7 +15,10 @@ import { z } from "zod";
 import { db } from "../db/client.ts";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
-import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
+import {
+  actorFromAgent,
+  actorFromSessionUser,
+} from "../durable-objects/history-edit.ts";
 import {
   type InsertPosition,
   markdownOutline,
@@ -29,6 +32,10 @@ import {
   getFolderByPath,
   listFolderChildren,
 } from "../services/access.ts";
+import {
+  type DeleteEmptyFolderOutcome,
+  deleteEmptyFolder,
+} from "../services/folder-delete.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import {
   listBacklinks,
@@ -191,6 +198,32 @@ async function runMoveTool<T>(
     return textResult(result.result);
   } catch {
     return textError(MOVE_OVERLOAD_MESSAGE);
+  }
+}
+
+const DELETE_FOLDER_OVERLOAD_MESSAGE =
+  "Do not retry the same call. Stop bulk deletion and inspect the current folder state before deciding on a new request. Delete only one empty folder per call; do not issue repeated bulk deletion calls.";
+
+async function runDeleteFolderTool(
+  run: () => Promise<DeleteEmptyFolderOutcome>,
+): Promise<ToolTextResult> {
+  try {
+    const outcome = await run();
+    if (outcome.kind === "ok") {
+      return textResult(outcome.result);
+    }
+    // Preserve counts and currentPath so callers can act on a refusal safely.
+    return {
+      ...textResult({
+        ...outcome,
+        ...(outcome.status === 503
+          ? { guidance: DELETE_FOLDER_OVERLOAD_MESSAGE }
+          : {}),
+      }),
+      isError: true,
+    };
+  } catch {
+    return textError(DELETE_FOLDER_OVERLOAD_MESSAGE);
   }
 }
 
@@ -1368,6 +1401,50 @@ export async function createMcpServerFactory() {
     },
     async ({ id, revisionId }) =>
       restoreRevisionTool(notes, { id, revisionId }),
+  );
+
+  server.registerTool(
+    "delete_folder",
+    {
+      description:
+        "Delete ONE empty folder only (0 notes, 0 subfolders, 0 article sources in its subtree). Non-empty folders are rejected with counts; nothing is deleted partially. Set dry_run first and use expected_path to guard against moves or renames. Protected folders (drive root, PARA buckets/space roots, scheme roots, configured protected folders) cannot be deleted. Do not issue repeated bulk deletion calls. On resource-limit / 503: do not retry the same call.",
+      inputSchema: {
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe("Report the folder and metadata to remove without writing"),
+        expected_path: z
+          .string()
+          .optional()
+          .describe(
+            "Guard: the folder's current path must exactly equal this, otherwise reject",
+          ),
+        folder_id: z
+          .string()
+          .optional()
+          .describe("Folder UUID to delete (preferred)"),
+        path: z
+          .string()
+          .optional()
+          .describe(
+            "Alternative to folder_id: a folder path in your own drive. Must resolve to one folder; if both are supplied they must agree",
+          ),
+      },
+    },
+    async ({ folder_id, path, expected_path, dry_run }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      return await runDeleteFolderTool(() =>
+        deleteEmptyFolder(
+          env,
+          { dry_run, expected_path, folder_id, path },
+          user,
+          actorFromAgent(agentOf(user)),
+        ),
+      );
+    },
   );
 
   server.registerTool(

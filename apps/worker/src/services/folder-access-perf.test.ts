@@ -277,5 +277,5 @@ test("relocateFolderTree statement count does not grow with vault size", async (
   }
 
   assert.equal(counts[0], counts[1], `relocate grew with vault: ${counts}`);
-  assert.equal(counts[1], 6);
+  assert.equal(counts[1], 8);
 });
