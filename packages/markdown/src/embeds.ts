@@ -18,6 +18,38 @@ const YOUTUBE_BLOCK = /:::youtube\s*\{([^}]*)\}(?:\s*:::)?/g;
 const OGP_BLOCK = /:::ogCard\s*\{([^}]*)\}(?:\s*:::)?/g;
 const YOUTUBE_ID = /^[\w-]{11}$/;
 const YOUTUBE_VIDEO_PATH = /^\/(embed|shorts|live)\/([^/?#]+)/;
+const YOUTUBE_EMBED_HOST = "www.youtube-nocookie.com";
+const YOUTUBE_EMBED_PATH = /^\/embed\/([\w-]{11})$/;
+
+export const YOUTUBE_EMBED_ALLOW =
+  "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+
+/** True only for the privacy-enhanced YouTube embed URL this renderer emits. */
+export function isAllowedYoutubeEmbedSrc(src: string): boolean {
+  try {
+    const parsed = new URL(src);
+    if (parsed.protocol !== "https:") {
+      return false;
+    }
+    if (parsed.username || parsed.password || parsed.hash) {
+      return false;
+    }
+    if (parsed.hostname.toLowerCase() !== YOUTUBE_EMBED_HOST) {
+      return false;
+    }
+    if (!YOUTUBE_EMBED_PATH.test(parsed.pathname)) {
+      return false;
+    }
+    const keys = [...parsed.searchParams.keys()];
+    if (keys.some((key) => key !== "start")) {
+      return false;
+    }
+    const start = parsed.searchParams.get("start");
+    return start === null || /^\d+$/.test(start);
+  } catch {
+    return false;
+  }
+}
 
 export function attr(source: string, name: string): string | null {
   const match = new RegExp(`${name}="([^"]+)"`).exec(source);
@@ -167,7 +199,7 @@ function renderYoutubeHtml(src: string): string {
   if (!embed) {
     return "";
   }
-  return `<div class="embed-youtube"><iframe src="${embed}" title="YouTube" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
+  return `<div class="embed-youtube"><iframe src="${embed}" title="YouTube" allow="${YOUTUBE_EMBED_ALLOW}" allowfullscreen loading="lazy"></iframe></div>`;
 }
 
 function renderStandaloneEmbedHtml(

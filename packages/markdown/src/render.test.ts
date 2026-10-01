@@ -127,3 +127,29 @@ test("renderMarkdownHtml leaves non-diagram fences as highlighted code", () => {
   assert.doesNotMatch(html, /md-diagram/);
   assert.match(html, /language-typescript/);
 });
+
+test("renderMarkdownHtml drops author iframes that are not YouTube embeds", () => {
+  const html = renderMarkdownHtml(
+    `<iframe src="https://evil.example/phish" allow="camera; microphone" width="100%" height="800"></iframe>\n`,
+  );
+  assert.doesNotMatch(html, /iframe/i);
+  assert.doesNotMatch(html, /evil\.example/);
+  assert.doesNotMatch(html, /camera/);
+});
+
+test("renderMarkdownHtml drops protocol-relative iframes", () => {
+  const html = renderMarkdownHtml(
+    `<iframe src="//evil.example/phish"></iframe>\n`,
+  );
+  assert.doesNotMatch(html, /iframe/i);
+  assert.doesNotMatch(html, /evil\.example/);
+});
+
+test("renderMarkdownHtml keeps a privacy-enhanced YouTube embed iframe", () => {
+  const html = renderMarkdownHtml(
+    "https://www.youtube.com/watch?v=jNQXAC9IVRw\n",
+  );
+  assert.match(html, /<iframe[\s>]/);
+  assert.match(html, /youtube-nocookie\.com\/embed\/jNQXAC9IVRw/);
+  assert.doesNotMatch(html, /camera/);
+});

@@ -15,8 +15,10 @@ import {
 import { rehypeDiagrams } from "./diagrams.ts";
 import {
   expandEmbedsForPreview,
+  isAllowedYoutubeEmbedSrc,
   normalizeEmbedMarkdown,
   type OgPreview,
+  YOUTUBE_EMBED_ALLOW,
 } from "./embeds.ts";
 import {
   rehypeTaskCheckboxes,
@@ -66,6 +68,72 @@ const schema = {
   ],
 };
 
+type HastNode = {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+};
+
+function youtubeIframeProperties(
+  properties: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const src = properties.src;
+  if (typeof src !== "string" || !isAllowedYoutubeEmbedSrc(src)) {
+    return null;
+  }
+  const next: Record<string, unknown> = {
+    allow: YOUTUBE_EMBED_ALLOW,
+    loading: "lazy",
+    src,
+    title: typeof properties.title === "string" ? properties.title : "YouTube",
+  };
+  if (
+    properties.allowFullScreen === true ||
+    properties.allowfullscreen === true
+  ) {
+    next.allowFullScreen = true;
+  }
+  if (
+    typeof properties.width === "string" ||
+    typeof properties.width === "number"
+  ) {
+    next.width = properties.width;
+  }
+  if (
+    typeof properties.height === "string" ||
+    typeof properties.height === "number"
+  ) {
+    next.height = properties.height;
+  }
+  return next;
+}
+
+/** Drop author iframes; keep only the YouTube embed this renderer emits. */
+function rehypeSafeIframes() {
+  return (tree: HastNode) => {
+    function visit(node: HastNode) {
+      if (!node.children) {
+        return;
+      }
+      node.children = node.children.flatMap((child) => {
+        if (child.tagName === "iframe") {
+          const properties = youtubeIframeProperties(child.properties ?? {});
+          if (!properties) {
+            return [];
+          }
+          child.properties = properties;
+          child.children = [];
+          return [child];
+        }
+        visit(child);
+        return [child];
+      });
+    }
+    visit(tree);
+  };
+}
+
 function createProcessor(render: boolean) {
   const configured = remark()
     .use(remarkGfm)
@@ -84,7 +152,10 @@ function createProcessor(render: boolean) {
       .use(rehypeSlug);
   }
 
-  configured.use(rehypeSanitize, schema).use(rehypeTaskCheckboxes);
+  configured
+    .use(rehypeSanitize, schema)
+    .use(rehypeSafeIframes)
+    .use(rehypeTaskCheckboxes);
   if (render) {
     configured.use(rehypeStringify);
   }

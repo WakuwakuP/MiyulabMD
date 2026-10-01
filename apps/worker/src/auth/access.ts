@@ -54,9 +54,9 @@ function stringClaim(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function emailFromPayload(
+/** Identity comes only from verified JWT claims — never from request headers. */
+export function emailFromAccessPayload(
   payload: Record<string, unknown>,
-  request: Request,
 ): string | null {
   const identity =
     payload.identity && typeof payload.identity === "object"
@@ -67,8 +67,7 @@ function emailFromPayload(
   return (
     stringClaim(payload.email) ??
     stringClaim(identity?.email) ??
-    (commonName?.includes("@") ? commonName : null) ??
-    request.headers.get("Cf-Access-Authenticated-User-Email")
+    (commonName?.includes("@") ? commonName : null)
   );
 }
 
@@ -118,7 +117,7 @@ export async function verifyAccessJwt(
       }
     }
 
-    const email = emailFromPayload(payload, request);
+    const email = emailFromAccessPayload(payload);
     if (!email) {
       return { ok: false, reason: "missing_email_claim" };
     }
