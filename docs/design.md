@@ -405,6 +405,8 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 
 認証: `Authorization: Bearer <personal_access_token>`。トークンのユーザーで `canView` / `canEdit` / `canAdmin` を評価する。トークン無しは 401。ゲスト権限での MCP は提供しない。
 
+CPU 使用量とツールごとの所要時間の調べ方は [MCP の処理時間と CPU 使用量](mcp-performance.md) を参照。
+
 ### ツール
 
 | ツール                | 権限             | 内容                                                                         |
