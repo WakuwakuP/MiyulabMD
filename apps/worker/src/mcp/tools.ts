@@ -6,7 +6,10 @@ import {
   type Note,
   type SessionUser,
 } from "@miyulabmd/shared";
-import { McpServer } from "@modelcontextprotocol/server";
+import {
+  type McpRequestContext,
+  McpServer,
+} from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
@@ -68,6 +71,7 @@ import {
   validateSchemeTree,
 } from "../services/schemes.ts";
 
+import { isBootstrapRequest } from "./bootstrap-request.ts";
 import { featureConfig } from "./feature-config.ts";
 import { toolDefinitions } from "./tool-definitions.ts";
 import { withToolTiming } from "./tool-timing.ts";
@@ -561,7 +565,16 @@ async function inviteCollaboratorTool(
  * Async so it can read the caller's feature configuration inside the auth
  * context (createMcpHandler awaits the factory per request).
  */
-export async function createMcpServerFactory() {
+export async function createMcpServerFactory(context?: McpRequestContext) {
+  if (await isBootstrapRequest(context)) {
+    // Fresh per-request instance with the same advertised capabilities.
+    // No tool is invoked by these methods; auth remains in handleMcp and
+    // protocol/input validation remains entirely in the SDK.
+    return new McpServer(
+      { name: "miyulabmd", version: "0.1.0" },
+      { capabilities: { tools: { listChanged: true } } },
+    );
+  }
   const server = new McpServer({
     name: "miyulabmd",
     version: "0.1.0",
