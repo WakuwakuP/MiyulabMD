@@ -68,24 +68,31 @@ export async function authenticateBearer(
   }
 
   const tokenHash = await hashToken(plaintext);
-  const row = await db(env)
-    .prepare(
-      `SELECT t.id, t.user_id, u.email, u.display_name
+  const database = db(env);
+  // Keep validation live on every request; batch the lookup and usage update
+  // into one round trip and transaction. Revoked tokens are never cached.
+  const [lookup] = await database.batch<TokenUserRow>([
+    database
+      .prepare(
+        `SELECT t.id, t.user_id, u.email, u.display_name
        FROM api_tokens t
        INNER JOIN users u ON u.id = t.user_id
        WHERE t.token_hash = ?`,
-    )
-    .bind(tokenHash)
-    .first<TokenUserRow>();
+      )
+      .bind(tokenHash),
+    database
+      .prepare(
+        `UPDATE api_tokens SET last_used_at = ?
+       WHERE token_hash = ?
+         AND EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.user_id)`,
+      )
+      .bind(Date.now(), tokenHash),
+  ]);
+  const row = lookup?.results[0];
 
   if (!row) {
     return null;
   }
-
-  await db(env)
-    .prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?")
-    .bind(Date.now(), row.id)
-    .run();
 
   return {
     displayName: row.display_name,
