@@ -41,6 +41,8 @@ Workers Free の HTTP CPU 制限は 1 リクエスト 10 ms。代表的な読み
 
 固定のツール説明と Zod スキーマは `tool-definitions.ts` に置く。`toolInputSchema` は実際の Zod 検証を使いながら、SDK v2 が登録時と `tools/list` で要求する draft-2020-12 の入力 JSON Schema をモジュール初期化時に作って再利用する。キャッシュした JSON は再帰的に freeze し、別の dialect / `libraryOptions` は元の Zod に委譲する。
 
+認証のトークン照合と `last_used_at` 更新は D1 の `batch()` で 1 回の呼び出しにまとめる。ユーザーが存在するトークンだけを更新し、失効・表示名変更は毎回 DB で確認する。ユーザー別の PARA / medallion / scheme 設定は 3 つの `EXISTS` を 1 つの SQL で確認する。認証とサーバー構築を行うリクエストの共通部分では、D1 呼び出しが 5 回から 2 回になる。通信待ちとバインディング処理を削減する変更であり、CPU 時間の削減幅と無料枠への適合は反映後の本番ログで確認する。
+
 ローカルの比較用に、Worker パッケージのディレクトリで実行できるスクリプトを用意している。
 
 ```sh

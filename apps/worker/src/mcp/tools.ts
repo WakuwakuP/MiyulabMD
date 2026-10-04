@@ -8,7 +8,6 @@ import {
 } from "@miyulabmd/shared";
 import { McpServer } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
-import { db } from "../db/client.ts";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import {
@@ -69,6 +68,7 @@ import {
   validateSchemeTree,
 } from "../services/schemes.ts";
 
+import { featureConfig } from "./feature-config.ts";
 import { toolDefinitions } from "./tool-definitions.ts";
 import { withToolTiming } from "./tool-timing.ts";
 
@@ -554,41 +554,6 @@ async function inviteCollaboratorTool(
       : current.note.access.effectiveWriteScope,
   });
   return mutateNoteToolResponse(result);
-}
-
-/**
- * §2.6/KM-E: tool exposure follows *configured* state, not the UI feature
- * flags. A feature's tools register only when the user already has the
- * backing configuration rows — an unconfigured feature offers no tools
- * instead of failing at call time.
- */
-async function featureConfig(env_: Env, user: SessionUser | null) {
-  if (!user) {
-    return { hasMedallion: false, hasPara: false, hasSchemes: false };
-  }
-  const [para, medallion, scheme] = await Promise.all([
-    db(env_)
-      .prepare("SELECT 1 AS x FROM para_spaces WHERE owner_id = ? LIMIT 1")
-      .bind(user.id)
-      .first<{ x: number }>(),
-    db(env_)
-      .prepare(
-        "SELECT 1 AS x FROM medallion_sets WHERE owner_user_id = ? LIMIT 1",
-      )
-      .bind(user.id)
-      .first<{ x: number }>(),
-    db(env_)
-      .prepare(
-        "SELECT 1 AS x FROM folders WHERE owner_id = ? AND scheme IS NOT NULL LIMIT 1",
-      )
-      .bind(user.id)
-      .first<{ x: number }>(),
-  ]);
-  return {
-    hasMedallion: medallion !== null,
-    hasPara: para !== null,
-    hasSchemes: scheme !== null,
-  };
 }
 
 /**

@@ -15,6 +15,13 @@ export const env = {
             async first() {
               await Promise.resolve();
               const configured = features.get(userId) ?? {};
+              if (sql.includes("AS hasPara")) {
+                return {
+                  hasMedallion: Number(Boolean(configured.medallion)),
+                  hasPara: Number(Boolean(configured.para)),
+                  hasSchemes: Number(Boolean(configured.schemes)),
+                };
+              }
               const enabled =
                 (sql.includes("para_spaces") && configured.para) ||
                 (sql.includes("medallion_sets") && configured.medallion) ||
