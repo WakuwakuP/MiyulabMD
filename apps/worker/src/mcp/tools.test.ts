@@ -4,6 +4,7 @@ import {
   CLIENT_CAPABILITIES_META_KEY,
   CLIENT_INFO_META_KEY,
   createMcpHandler,
+  McpServer,
   PROTOCOL_VERSION_META_KEY,
 } from "@modelcontextprotocol/server";
 import {
@@ -16,6 +17,7 @@ import {
 
 setupMcpTestRuntime();
 const { createMcpServerFactory } = await import("./tools.ts");
+const { toolDefinitions } = await import("./tool-definitions.ts");
 const handler = createMcpHandler(createMcpServerFactory);
 
 type User = { id: string; email: string; displayName: string | null };
@@ -29,7 +31,12 @@ type RpcResponse = {
   };
 };
 
-function rpc(user: User | null, method: string, params = {}) {
+function rpc(
+  user: User | null,
+  method: string,
+  params = {},
+  headers: Record<string, string> = {},
+) {
   return runAs(user, async () => {
     const payload = JSON.stringify({ id: 1, jsonrpc: "2.0", method, params });
     const response = await handler.fetch(
@@ -40,6 +47,7 @@ function rpc(user: User | null, method: string, params = {}) {
           "Content-Length": String(Buffer.byteLength(payload)),
           "Content-Type": "application/json",
           "MCP-Protocol-Version": "2025-06-18",
+          ...headers,
         },
         method: "POST",
       }),
@@ -61,6 +69,199 @@ const user = (id: string): User => ({
   displayName: id,
   email: `${id}@example.invalid`,
   id,
+});
+
+test("each known small tool call registers only its target and only gated tools read features", async (t) => {
+  const caller = user("targeted-registration");
+  configureFeatures(caller.id, { medallion: true, para: true, schemes: true });
+  const registered = t.mock.method(McpServer.prototype, "registerTool");
+  resetFeatureReadCount();
+  for (const name of Object.keys(toolDefinitions)) {
+    const start = registered.mock.calls.length;
+    const payload = JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: { arguments: {}, name },
+    });
+    const server = await runAs(caller, () =>
+      createMcpServerFactory({
+        era: "legacy",
+        requestInfo: new Request("https://md.example.invalid/mcp", {
+          body: payload,
+          headers: { "Content-Length": String(Buffer.byteLength(payload)) },
+          method: "POST",
+        }),
+      }),
+    );
+    assert.deepEqual(
+      registered.mock.calls.slice(start).map((call) => call.arguments[0]),
+      [name],
+      name,
+    );
+    await server.close();
+  }
+  assert.equal(getFeatureReadCount(), 12);
+});
+
+test("all feature-gated tools remain unavailable after configuration removal", async () => {
+  const caller = user("targeted-feature-removal");
+  configureFeatures(caller.id, { medallion: true, para: true, schemes: true });
+  const configured = await rpc(caller, "tools/list");
+  configureFeatures(caller.id, {});
+  const plain = await rpc(caller, "tools/list");
+  const basicNames = new Set(plain.result?.tools.map((tool) => tool.name));
+  const gatedNames = configured.result?.tools
+    .map((tool) => tool.name)
+    .filter((name) => !basicNames.has(name));
+  assert.equal(gatedNames?.length, 12);
+  resetFeatureReadCount();
+  for (const name of gatedNames ?? []) {
+    const unavailable = await rpc(caller, "tools/call", {
+      arguments: {},
+      name,
+    });
+    assert.ok(unavailable.error, name);
+    assert.match(unavailable.error.message, /not found/, name);
+  }
+  assert.equal(getFeatureReadCount(), 12);
+  configureFeatures(caller.id, { para: true });
+  const enabled = await rpc(caller, "tools/call", {
+    arguments: { bucket: "invalid" },
+    name: "para_list",
+  });
+  assert.equal(enabled.result?.isError, true);
+  assert.match(enabled.result?.content[0].text ?? "", /Input validation error/);
+  assert.equal(getFeatureReadCount(), 13);
+});
+
+test("unknown names and unknown/large body lengths retain the full registry", async (t) => {
+  const caller = user("targeted-fallback");
+  configureFeatures(caller.id, { medallion: true, para: true, schemes: true });
+  const registered = t.mock.method(McpServer.prototype, "registerTool");
+  const cases = [
+    { length: "", name: "set_edit_lock" },
+    { length: "2049", name: "set_edit_lock" },
+    { name: "missing_tool" },
+    { name: "__proto__" },
+    { name: "toString" },
+  ];
+  resetFeatureReadCount();
+  for (const { name, length } of cases) {
+    const payload = JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: { arguments: {}, name },
+    });
+    const input = new Request("https://md.example.invalid/mcp", {
+      body: payload,
+      headers: {
+        "Content-Length": length ?? String(Buffer.byteLength(payload)),
+      },
+      method: "POST",
+    });
+    const start = registered.mock.calls.length;
+    const server = await runAs(caller, () =>
+      createMcpServerFactory({ era: "legacy", requestInfo: input }),
+    );
+    assert.equal(registered.mock.calls.length - start, 38);
+    assert.equal(input.bodyUsed, false);
+    await server.close();
+  }
+  assert.equal(getFeatureReadCount(), cases.length);
+});
+
+test("legacy spoofed name headers do not select a different tool or cause feature reads", async (t) => {
+  t.mock.method(console, "log", () => undefined);
+  resetFeatureReadCount();
+  const result = await rpc(
+    user("targeted-spoofed-name"),
+    "tools/call",
+    { arguments: { id: "note", locked: false }, name: "set_edit_lock" },
+    { "Mcp-Method": "ping", "Mcp-Name": "para_list" },
+  );
+  assert.match(
+    result.result?.content[0].text ?? "",
+    /confirm=true is required/,
+  );
+  assert.equal(getFeatureReadCount(), 0);
+});
+
+test("modern calls preserve input validation, gates and encoded-name fallback", async () => {
+  const caller = user("targeted-modern");
+  configureFeatures(caller.id, { para: true });
+  resetFeatureReadCount();
+  for (const { name, args, headerName } of [
+    { args: { limit: 0 }, name: "list_folder_entries" },
+    { args: { bucket: "invalid" }, name: "para_list" },
+    {
+      args: { limit: 0 },
+      headerName: "=?base64?bGlzdF9mb2xkZXJfZW50cmllcw==?=",
+      name: "list_folder_entries",
+    },
+  ]) {
+    const result = await rpc(
+      caller,
+      "tools/call",
+      {
+        _meta: {
+          [CLIENT_CAPABILITIES_META_KEY]: {},
+          [CLIENT_INFO_META_KEY]: { name: "test", version: "1" },
+          [PROTOCOL_VERSION_META_KEY]: "2026-07-28",
+        },
+        arguments: args,
+        name,
+      },
+      {
+        "MCP-Protocol-Version": "2026-07-28",
+        "Mcp-Method": "tools/call",
+        "Mcp-Name": headerName ?? name,
+      },
+    );
+    assert.equal(result.result?.isError, true);
+    assert.match(
+      result.result?.content[0].text ?? "",
+      /Input validation error/,
+    );
+  }
+  assert.equal(getFeatureReadCount(), 2);
+});
+
+test("modern mismatched tool names are rejected before feature reads or dispatch", async () => {
+  const payload = JSON.stringify({
+    id: 1,
+    jsonrpc: "2.0",
+    method: "tools/call",
+    params: {
+      _meta: {
+        [CLIENT_CAPABILITIES_META_KEY]: {},
+        [CLIENT_INFO_META_KEY]: { name: "test", version: "1" },
+        [PROTOCOL_VERSION_META_KEY]: "2026-07-28",
+      },
+      arguments: {},
+      name: "para_list",
+    },
+  });
+  resetFeatureReadCount();
+  const response = await runAs(user("targeted-modern-spoof"), () =>
+    handler.fetch(
+      new Request("https://md.example.invalid/mcp", {
+        body: payload,
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "2026-07-28",
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "get_note",
+        },
+        method: "POST",
+      }),
+    ),
+  );
+  assert.equal(response.status, 400);
+  assert.match(await response.text(), /Mcp-Name/);
+  assert.equal(getFeatureReadCount(), 0);
 });
 
 test("tool lists follow each user's current configuration, including concurrent requests", async () => {

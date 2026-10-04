@@ -28,11 +28,41 @@ const { createMcpServerFactory } = await import(moduleUrl.href);
 const handler = createMcpHandler(
   fullRegistration ? () => createMcpServerFactory() : createMcpServerFactory,
 );
-for (const method of [
-  "initialize",
-  "notifications/initialized",
-  "ping",
-  "tools/list",
+// Avoid flooding stdout with per-call timing events. The timing wrapper and
+// the real SDK still run; only the log sink is replaced in this local benchmark.
+const log = console.log;
+console.log = (event) => {
+  if (event?.event !== "mcp_tool_timing") {
+    log(event);
+  }
+};
+for (const { method, params } of [
+  {
+    method: "initialize",
+    params: {
+      capabilities: {},
+      clientInfo: { name: "benchmark", version: "1" },
+      protocolVersion: "2025-06-18",
+    },
+  },
+  { method: "notifications/initialized" },
+  { method: "ping" },
+  { method: "tools/list" },
+  {
+    method: "tools/call",
+    params: {
+      arguments: { id: "note", locked: false },
+      name: "set_edit_lock",
+    },
+  },
+  {
+    method: "tools/call",
+    params: { arguments: { limit: 0 }, name: "list_folder_entries" },
+  },
+  {
+    method: "tools/call",
+    params: { arguments: { bucket: "invalid" }, name: "para_list" },
+  },
 ]) {
   const samples = [];
   let firstRequestCpuMs;
@@ -46,15 +76,7 @@ for (const method of [
       ...(method === "notifications/initialized" ? {} : { id: 1 }),
       jsonrpc: "2.0",
       method,
-      ...(method === "initialize"
-        ? {
-            params: {
-              capabilities: {},
-              clientInfo: { name: "benchmark", version: "1" },
-              protocolVersion: "2025-06-18",
-            },
-          }
-        : {}),
+      ...(params ? { params } : {}),
     });
     await runAs(user, async () => {
       const response = await handler.fetch(
@@ -94,6 +116,7 @@ for (const method of [
     method,
     module: moduleUrl.pathname,
     samples: samples.length,
+    tool: params?.name,
     variant: fullRegistration ? "full_registration" : "request_aware",
     wallMedianMs: median("wall"),
   });
