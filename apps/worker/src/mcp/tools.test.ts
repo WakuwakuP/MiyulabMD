@@ -36,10 +36,12 @@ function rpc(
   method: string,
   params = {},
   headers: Record<string, string> = {},
+  serving = handler,
+  expectedStatus = 200,
 ) {
   return runAs(user, async () => {
     const payload = JSON.stringify({ id: 1, jsonrpc: "2.0", method, params });
-    const response = await handler.fetch(
+    const response = await serving.fetch(
       new Request("https://md.example.invalid/mcp", {
         body: payload,
         headers: {
@@ -52,8 +54,8 @@ function rpc(
         method: "POST",
       }),
     );
-    assert.equal(response.status, 200);
     const body = await response.text();
+    assert.equal(response.status, expectedStatus, body);
     const data = body.startsWith("{")
       ? body
       : body
@@ -69,6 +71,137 @@ const user = (id: string): User => ({
   displayName: id,
   email: `${id}@example.invalid`,
   id,
+});
+
+const fullHandler = createMcpHandler(() => createMcpServerFactory());
+const modernMeta = {
+  [CLIENT_CAPABILITIES_META_KEY]: {},
+  [CLIENT_INFO_META_KEY]: { name: "test", version: "1" },
+  [PROTOCOL_VERSION_META_KEY]: "2026-07-28",
+};
+const modernHeaders = (method: string) => ({
+  "MCP-Protocol-Version": "2026-07-28",
+  "Mcp-Method": method,
+});
+
+test("catalog exactly matches full SDK listings for every feature combination and protocol era", async (t) => {
+  t.mock.method(console, "log", () => undefined);
+  const registered = t.mock.method(McpServer.prototype, "registerTool");
+  const caller = user("catalog-equivalence");
+  for (let mask = 0; mask < 8; mask++) {
+    const configured = {
+      medallion: Boolean(mask & 1),
+      para: Boolean(mask & 2),
+      schemes: Boolean(mask & 4),
+    };
+    configureFeatures(caller.id, configured);
+    for (const modern of [false, true]) {
+      const params = modern ? { _meta: modernMeta } : {};
+      const headers = modern ? modernHeaders("tools/list") : {};
+      const expected = await rpc(
+        caller,
+        "tools/list",
+        params,
+        headers,
+        fullHandler,
+      );
+      const before = registered.mock.calls.length;
+      resetFeatureReadCount();
+      const actual = await rpc(caller, "tools/list", params, headers);
+      assert.deepEqual(actual, expected, `mask=${mask}, modern=${modern}`);
+      assert.equal(
+        actual.result?.tools.length,
+        26 +
+          Number(configured.medallion) * 3 +
+          Number(configured.para) * 2 +
+          Number(configured.schemes) * 7,
+      );
+      assert.equal(registered.mock.calls.length, before);
+      assert.equal(getFeatureReadCount(), 1);
+    }
+  }
+});
+
+test("catalog keeps SDK validation, pagination behavior and legacy header spoofing defenses", async (t) => {
+  t.mock.method(console, "log", () => undefined);
+  const caller = user("catalog-validation");
+  for (const params of [{ cursor: "opaque" }, { cursor: 123 }]) {
+    assert.deepEqual(
+      await rpc(caller, "tools/list", params),
+      await rpc(caller, "tools/list", params, {}, fullHandler),
+    );
+  }
+  assert.deepEqual(
+    await rpc(caller, "tools/list", { _meta: "invalid" }, {}, handler, 400),
+    await rpc(caller, "tools/list", { _meta: "invalid" }, {}, fullHandler, 400),
+  );
+  const call = await rpc(
+    caller,
+    "tools/call",
+    {
+      arguments: {},
+      name: "para_list",
+    },
+    { "Mcp-Method": "tools/list" },
+  );
+  assert.match(call.error?.message ?? "", /not found/);
+});
+
+test("modern discovery matches the full server without tool registrations or feature reads", async (t) => {
+  t.mock.method(console, "log", () => undefined);
+  const registered = t.mock.method(McpServer.prototype, "registerTool");
+  const caller = user("catalog-discovery");
+  configureFeatures(caller.id, { medallion: true, para: true, schemes: true });
+  const headers = modernHeaders("server/discover");
+  const expected = await rpc(
+    caller,
+    "server/discover",
+    { _meta: modernMeta },
+    headers,
+    fullHandler,
+  );
+  const before = registered.mock.calls.length;
+  resetFeatureReadCount();
+  const actual = await rpc(
+    caller,
+    "server/discover",
+    { _meta: modernMeta },
+    headers,
+  );
+  assert.deepEqual(actual, expected);
+  assert.ok(actual.result);
+  assert.equal(registered.mock.calls.length, before);
+  assert.equal(getFeatureReadCount(), 0);
+});
+
+test("dispatch logs identify methods and registration paths without request data", async (t) => {
+  const logs = t.mock.method(console, "log", () => undefined);
+  const caller = user("private-user-name");
+  await rpc(caller, "tools/list");
+  await rpc(caller, "ping");
+  await rpc(caller, "tools/call", {
+    arguments: { id: "private-note-id", locked: false },
+    name: "set_edit_lock",
+  });
+  await rpc(caller, "tools/call", {
+    arguments: { secret: "private-argument" },
+    name: "private-unknown-tool",
+  });
+  const events = logs.mock.calls
+    .map((call) => call.arguments[0])
+    .filter((event) => event?.event === "mcp_dispatch");
+  assert.deepEqual(events, [
+    { event: "mcp_dispatch", method: "tools/list", registration: "catalog" },
+    { event: "mcp_dispatch", method: "ping", registration: "bootstrap" },
+    {
+      event: "mcp_dispatch",
+      method: "tools/call",
+      registration: "targeted",
+      tool: "set_edit_lock",
+    },
+    { event: "mcp_dispatch", method: "tools/call", registration: "full" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(events), /private-/);
 });
 
 test("each known small tool call registers only its target and only gated tools read features", async (t) => {

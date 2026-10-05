@@ -9,6 +9,7 @@ import {
 import {
   type McpRequestContext,
   McpServer,
+  Server,
   type StandardSchemaWithJSON,
   type ToolCallback,
 } from "@modelcontextprotocol/server";
@@ -75,26 +76,9 @@ import {
 
 import { featureConfig } from "./feature-config.ts";
 import { getMcpRequestTarget } from "./request-target.ts";
+import { listToolsForFeatures, requiredToolFeature } from "./tool-catalog.ts";
 import { toolDefinitions } from "./tool-definitions.ts";
 import { withToolTiming } from "./tool-timing.ts";
-
-const toolFeatures = new Map<
-  string,
-  keyof Awaited<ReturnType<typeof featureConfig>>
->([
-  ["para_list", "hasPara"],
-  ["para_archive_project", "hasPara"],
-  ["set_folder_scheme", "hasSchemes"],
-  ["scheme_get", "hasSchemes"],
-  ["jd_allocate_id", "hasSchemes"],
-  ["jd_create_id_folder", "hasSchemes"],
-  ["jd_get", "hasSchemes"],
-  ["jd_list_category", "hasSchemes"],
-  ["jd_validate_tree", "hasSchemes"],
-  ["medallion_list_sets", "hasMedallion"],
-  ["medallion_assign_folder", "hasMedallion"],
-  ["medallion_unassign_folder", "hasMedallion"],
-]);
 
 function textResult(data: unknown) {
   return {
@@ -580,6 +564,54 @@ async function inviteCollaboratorTool(
   return mutateNoteToolResponse(result);
 }
 
+type MetadataTarget = Extract<
+  Awaited<ReturnType<typeof getMcpRequestTarget>>,
+  { kind: "bootstrap" | "list" }
+>;
+
+async function createMetadataServer(target: MetadataTarget) {
+  // Auth remains in handleMcp; protocol/input validation remains in the SDK.
+  const server = new Server(
+    { name: "miyulabmd", version: "0.1.0" },
+    { capabilities: { tools: { listChanged: true } } },
+  );
+  if (target.kind === "list") {
+    const features = await featureConfig(env, requireUser());
+    // SDK still validates the envelope/params and serializes the response.
+    // Listing does not need executable tool registrations or note services.
+    server.setRequestHandler("tools/list", () => ({
+      tools: listToolsForFeatures(features),
+    }));
+    console.log({
+      event: "mcp_dispatch",
+      method: "tools/list",
+      registration: "catalog",
+    });
+  } else {
+    console.log({
+      event: "mcp_dispatch",
+      method: target.method,
+      registration: "bootstrap",
+    });
+  }
+  return server;
+}
+
+function logToolDispatch(
+  isToolCall: boolean,
+  candidate: string | undefined,
+  requestedTool: string | undefined,
+) {
+  // Fixed method labels and allow-listed tool names only. Workers Logs supplies
+  // the request ID for joining to CPU time; never log the body or raw headers.
+  console.log({
+    event: "mcp_dispatch",
+    method: isToolCall ? "tools/call" : "unclassified",
+    registration: requestedTool ? "targeted" : "full",
+    ...(candidate ? { tool: candidate } : {}),
+  });
+}
+
 /**
  * createMcpHandler に渡す MCP サーバーファクトリ。
  * Async so it can read the caller's feature configuration inside the auth
@@ -587,14 +619,8 @@ async function inviteCollaboratorTool(
  */
 export async function createMcpServerFactory(context?: McpRequestContext) {
   const target = await getMcpRequestTarget(context);
-  if (target?.kind === "bootstrap") {
-    // Fresh per-request instance with the same advertised capabilities.
-    // No tool is invoked by these methods; auth remains in handleMcp and
-    // protocol/input validation remains entirely in the SDK.
-    return new McpServer(
-      { name: "miyulabmd", version: "0.1.0" },
-      { capabilities: { tools: { listChanged: true } } },
-    );
+  if (target && target.kind !== "tool") {
+    return createMetadataServer(target);
   }
   const server = new McpServer({
     name: "miyulabmd",
@@ -605,7 +631,9 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
     target?.kind === "tool" && Object.hasOwn(toolDefinitions, target.name)
       ? target.name
       : undefined;
-  const requiredFeature = candidate ? toolFeatures.get(candidate) : undefined;
+  const requiredFeature = candidate
+    ? requiredToolFeature(candidate)
+    : undefined;
   const features =
     !candidate || requiredFeature
       ? await featureConfig(env, requireUser())
@@ -616,6 +644,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
     candidate && (!requiredFeature || features[requiredFeature])
       ? candidate
       : undefined;
+  logToolDispatch(target?.kind === "tool", candidate, requestedTool);
   function registerTool<Input extends StandardSchemaWithJSON>(
     name: string,
     definition: { description: string; inputSchema: Input },

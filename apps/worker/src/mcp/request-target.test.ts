@@ -16,7 +16,7 @@ test("only small known legacy bootstrap messages skip registration, without cons
     const input = request(body);
     assert.deepEqual(
       await getMcpRequestTarget({ era: "legacy", requestInfo: input }),
-      { kind: "bootstrap" },
+      { kind: "bootstrap", method },
     );
     assert.equal(input.bodyUsed, false);
     assert.equal(await input.text(), body);
@@ -26,7 +26,7 @@ test("only small known legacy bootstrap messages skip registration, without cons
     "null",
     "[]",
     '{"method":"ping"}',
-    JSON.stringify({ jsonrpc: "2.0", method: "tools/list" }),
+    JSON.stringify({ jsonrpc: "2.0", method: "unknown" }),
   ]) {
     const input = request(body, { "Mcp-Method": "ping" });
     assert.equal(
@@ -51,15 +51,33 @@ test("missing/invalid lengths and large bodies retain the full factory", async (
   }
 });
 
-test("modern ping uses the SDK-validated method header, not an already-consumed body", async () => {
+test("modern bootstrap uses the SDK-validated method header, not an already-consumed body", async () => {
   for (const method of ["ping", "tools/call", "server/discover", ""]) {
     const input = request("{}", { "Mcp-Method": method });
     await input.text();
     assert.deepEqual(
       await getMcpRequestTarget({ era: "modern", requestInfo: input }),
-      method === "ping" ? { kind: "bootstrap" } : null,
+      method === "ping" || method === "server/discover"
+        ? { kind: "bootstrap", method }
+        : null,
     );
   }
+});
+
+test("tool lists use small legacy bodies or SDK-validated modern headers", async () => {
+  const body = JSON.stringify({ jsonrpc: "2.0", method: "tools/list" });
+  const legacy = request(body, { "Mcp-Method": "tools/call" });
+  assert.deepEqual(
+    await getMcpRequestTarget({ era: "legacy", requestInfo: legacy }),
+    { kind: "list" },
+  );
+  assert.equal(await legacy.text(), body);
+  const modern = request(body, { "Mcp-Method": "tools/list" });
+  await modern.text();
+  assert.deepEqual(
+    await getMcpRequestTarget({ era: "modern", requestInfo: modern }),
+    { kind: "list" },
+  );
 });
 
 test("legacy calls use the body name, ignoring routing headers and preserving the original body", async () => {

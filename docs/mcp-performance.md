@@ -25,25 +25,39 @@ MCP の無料枠判定には、リクエスト全体の **CPU 時間** を使う
 
 Workers の時計はセキュリティ上 I/O のタイミングで進むため、`durationMs` は所要時間の目安になる。I/O を挟まない処理では 0 になる場合があり、関数の CPU 時間の精密な計測には使えない。CPU を使う箇所の内訳はローカルの DevTools CPU profiler で調べ、本番の制限判定は Invocation Log を使う。
 
-引数・ノート本文・戻り値・トークン・ユーザー情報・例外の内容はタイミングイベントに記録しない。SDK がコールバック前に拒否する不正な引数・未登録ツール、および `initialize` / `tools/list` はツールイベントが出ず、Invocation Log で確認する。DO や別 Worker の CPU は、そのサービスの計測を別途確認する。
+引数・ノート本文・戻り値・トークン・ユーザー情報・例外の内容はタイミングイベントに記録しない。SDK がコールバック前に拒否する不正な引数・未登録ツール、および `initialize` / `tools/list` はツールイベントが出ない。
+
+サーバー構築時には `mcp_dispatch` を 1 件出す。`method` は固定のメソッド名、`registration` は `bootstrap` / `catalog` / `targeted` / `full`。既知のツールの場合だけ `tool` も付ける。次のようなイベントを同じ request ID の Invocation Log に結合すると、ツールのコールバックを実行しない一覧取得や初期化でも CPU を分類できる。
+
+```json
+{
+  "event": "mcp_dispatch",
+  "method": "tools/list",
+  "registration": "catalog"
+}
+```
+
+このイベントは実行完了や成功を示すものではない。認証失敗や SDK が factory の前で拒否したリクエストには出ず、長さ不明・大きな Legacy 本文などの未分類リクエストは `method: "unclassified"` / `registration: "full"` になる。未知のメソッド名・ツール名はそのまま記録しない。完了状態・リクエスト全体の CPU は Invocation Log、DO や別 Worker の CPU はそのサービスの計測を使う。
 
 Cloudflare ダッシュボードで **Workers & Pages → miyulabmd → Observability** を開く。
 
 1. `event = mcp_tool_timing` を絞り、`tool` ごとの件数・`durationMs` の中央値 / P95 を調べる。
 2. `/mcp` の Invocation Logs を絞り、CPU time が 10 ms を超える呼び出しの件数・割合と、CPU 時間の分位点を調べる。
-3. 該当する invocation の関連ログを開く（request ID で対応づける）と、ツール名と所要時間が分かる。CPU とツールイベントは別のログ行なので、両条件を同じ行に掛けない。
+3. 該当する invocation の関連ログを開く（request ID で対応づける）と、`mcp_dispatch` のメソッド・登録経路と `mcp_tool_timing` の所要時間が分かる。CPU と各イベントは別のログ行なので、両条件を同じ行に掛けない。
 
 Workers Free の HTTP CPU 制限は 1 リクエスト 10 ms。代表的な読み取り・更新・大きな本文・ツール一覧を、初回と継続利用の両方で確認する。平均値や Paid でのエラー 0 件だけでは無料枠内と判定できない。ログ保存の上限・保持期間や sampling により未収集の呼び出しがないかも確認する。
 
 ## 共通処理の削減
 
-`createMcpServerFactory` はリクエストごとに新しいサーバーを作る。認証コンテキスト、サービス、ユーザーの機能設定はリクエストごとに評価する。
+`createMcpServerFactory` はリクエストごとに新しい SDK サーバーを作る。認証コンテキスト、サービス、ユーザーの機能設定はリクエストごとに評価する。
 
 固定のツール説明と Zod スキーマは `tool-definitions.ts` に置く。`toolInputSchema` は実際の Zod 検証を使いながら、SDK v2 が登録時と `tools/list` で要求する draft-2020-12 の入力 JSON Schema をモジュール初期化時に作って再利用する。キャッシュした JSON は再帰的に freeze し、別の dialect / `libraryOptions` は元の Zod に委譲する。
 
 認証のトークン照合と `last_used_at` 更新は D1 の `batch()` で 1 回の呼び出しにまとめる。ユーザーが存在するトークンだけを更新し、失効・表示名変更は毎回 DB で確認する。ユーザー別の PARA / medallion / scheme 設定は 3 つの `EXISTS` を 1 つの SQL で確認する。認証とサーバー構築を行うリクエストの共通部分では、D1 呼び出しが 5 回から 2 回になる。通信待ちとバインディング処理を削減する変更であり、CPU 時間の削減幅と無料枠への適合は反映後の本番ログで確認する。
 
-`initialize` / `notifications/initialized` / `ping` はツールを実行しないため、同じ `tools.listChanged` capability を宣言した新しいサーバーだけを作り、ツール登録と機能設定の DB 読み取りを省く。認証はその前の `handleMcp` で毎回行い、プロトコルの入力検証・応答・終了処理は SDK に委譲する。
+`initialize` / `notifications/initialized` / `ping` と Modern の `server/discover` はツールを実行しないため、同じ `tools.listChanged` capability を宣言した新しい `Server` だけを作り、ツール登録と機能設定の DB 読み取りを省く。認証はその前の `handleMcp` で毎回行い、プロトコルの入力検証・応答・終了処理は SDK に委譲する。
+
+`tools/list` は `tool-catalog.ts` の不変な説明・入力スキーマから一覧を返す。公開 API の `Server.setRequestHandler("tools/list", ...)` を使い、実行コールバックやノートサービスを作らない。機能設定は毎回 DB から読み、現在のユーザーに対して有効なツールだけを抽出する。最大 38 回の `registerTool` が 0 回になり、登録時のスキーマ走査も省ける。説明・スキーマ・順序・capability は従来の全登録と一致することを、全 8 通りの機能設定と Legacy / Modern 両方の実 SDK 応答で差分検証している。
 
 小さく既知の `tools/call` は、最大 38 ツールのうち呼び出し対象だけを SDK に登録する。通常の 26 ツールは機能設定によって利用可否が変わらないため、機能設定の照会も省く。共通部分の D1 呼び出しは認証の 1 回になり、実際のツール内で行う DB / 権限確認は従来どおり実行する。
 
@@ -64,12 +78,16 @@ Legacy リクエストは `Content-Length` が既知かつ 2 KiB 以下の場合
 ```sh
 node --experimental-strip-types scripts/benchmark-mcp.mjs
 node --experimental-strip-types scripts/benchmark-mcp.mjs --full-registration
+node --experimental-strip-types scripts/benchmark-mcp.mjs --agents --compare
+node --experimental-strip-types scripts/benchmark-mcp.mjs --agents --modern --compare
 node --experimental-strip-types scripts/benchmark-search.mjs
 ```
 
 `benchmark-mcp.mjs` は実際の MCP SDK に各メソッドを 220 回送り、20 回のウォームアップ後の 200 回について Node の CPU / 経過時間の中央値と機能設定の DB 読み取り回数を出す。38 ツールを有効にし、D1 と認証アクセサーだけをテスト用に置き換えている。ツール呼び出しは更新前の確認エラー（`set_edit_lock`）と SDK の入力検証エラー（`list_folder_entries` / `para_list`）を使い、DB・DO の実処理を含まない。タイミング wrapper は実行し、イベントの stdout 出力だけを抑制する。`--full-registration` はリクエスト情報を factory に渡さず、常に全登録する比較モード。比較対象の `tools.ts` のパスを引数に渡す方法も維持する。`firstRequestCpuMs` は同じ Node プロセスで各メソッドを最初に実行した診断値であり、独立した Workers のコールドスタート計測ではない。
 
 `benchmark-search.mjs` は約 135 万文字・20 ノートの固定文字列スキャンを、元の行単位 matcher と新しい indexed matcher で比較する。DB・権限・MCP・通信処理は含まない。
+
+`--agents` は本番で使う Agents SDK の HTTP・CORS・認証コンテキスト・ストリームのラッパーも実行する。Bearer 照合と D1 は引き続き含まない。`--modern` は 2026-07-28 の `server/discover` / `tools/list` / `tools/call` を測る。`--compare` は同じプロセスで全登録と最適化経路を交互に実行し、各方式 20 回のウォームアップ後の 200 回を比較する。タイミングと dispatch イベントは生成し、stdout 出力だけを抑制する。
 
 2026-10-04 の同じ環境での一例（各 200 warm samples、単位 ms）:
 
@@ -94,6 +112,14 @@ node --experimental-strip-types scripts/benchmark-search.mjs
 | `list_folder_entries`（入力検証エラー） | 0.367 | 0.291 | 200 → 0 |
 | `para_list`（入力検証エラー） | 0.341 | 0.228 | 200 → 200 |
 
-以上は Node の合成比較で、MCP の認証実処理・ツール本体の DB / DO 処理・Workers のコールドスタートを含まない。`tools/list` の機能判定は意図的に残しており、すべてのメソッドの CPU が下がる変更ではない。本番の 10 ms 判定にはデプロイ後の Invocation Logs を使う。
+2026-10-06 JST の一覧・discovery 改善の比較（`--agents --compare`、Modern はさらに `--modern`、各方式 200 warm samples、単位 ms）:
+
+| メソッド | 常に全登録 | 最適化経路 | CPU 中央値の減少 | 機能設定の読み取り（200 回分） |
+| --- | ---: | ---: | ---: | --- |
+| Legacy `tools/list` | 0.846 | 0.642 | 24% | 200 → 200 |
+| Modern `tools/list` | 1.047 | 0.779 | 26% | 200 → 200 |
+| Modern `server/discover` | 0.747 | 0.498 | 33% | 200 → 0 |
+
+以上は Node の合成比較で、MCP の認証実処理・ツール本体の DB / DO 処理・Workers のコールドスタート・ログの送信を含まない。全登録の比較経路は factory にリクエスト情報を渡さないため、Legacy 本文の判定用 clone も省いている。`tools/list` の機能判定は意図的に残しており、すべてのメソッドの CPU が下がる変更ではない。本番の 10 ms 判定にはデプロイ後の Invocation Logs を使う。
 
 参考: [Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[Workers の CPU 制限](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)、[CPU profiling と時計の制約](https://developers.cloudflare.com/workers/observability/dev-tools/cpu-usage/)。
