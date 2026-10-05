@@ -1,13 +1,15 @@
 import type { McpRequestContext } from "@modelcontextprotocol/server";
 
-const BOOTSTRAP_METHODS = new Set([
-  "initialize",
-  "notifications/initialized",
-  "ping",
-]);
-
 type RequestTarget =
-  | { kind: "bootstrap" }
+  | {
+      kind: "bootstrap";
+      method:
+        | "initialize"
+        | "notifications/initialized"
+        | "ping"
+        | "server/discover";
+    }
+  | { kind: "list" }
   | { kind: "tool"; name: string }
   | null;
 
@@ -27,8 +29,11 @@ export async function getMcpRequestTarget(
     // The SDK validates modern Mcp-Method/Mcp-Name against the envelope
     // before constructing the server. Modern bodies may already be consumed.
     const method = request.headers.get("Mcp-Method")?.trim();
-    if (method === "ping") {
-      return { kind: "bootstrap" };
+    if (method === "ping" || method === "server/discover") {
+      return { kind: "bootstrap", method };
+    }
+    if (method === "tools/list") {
+      return { kind: "list" };
     }
     const name = request.headers.get("Mcp-Name")?.trim();
     return method === "tools/call" && name ? { kind: "tool", name } : null;
@@ -56,8 +61,15 @@ function legacyTarget(body: unknown): RequestTarget {
   ) {
     return null;
   }
-  if (BOOTSTRAP_METHODS.has(body.method)) {
-    return { kind: "bootstrap" };
+  if (
+    body.method === "initialize" ||
+    body.method === "notifications/initialized" ||
+    body.method === "ping"
+  ) {
+    return { kind: "bootstrap", method: body.method };
+  }
+  if (body.method === "tools/list") {
+    return { kind: "list" };
   }
   if (body.method === "tools/call" && "params" in body) {
     const params = body.params;
