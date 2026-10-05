@@ -3,6 +3,7 @@ import { registerHooks } from "node:module";
 
 const auth = new AsyncLocalStorage();
 const features = new Map();
+let featureReads = 0;
 
 // Only Workers bindings and the Agents auth accessor are substituted. The MCP
 // SDK, schemas, server factory, protocol handling and tool callbacks are real.
@@ -13,6 +14,7 @@ export const env = {
         bind(userId) {
           return {
             async first() {
+              featureReads += 1;
               await Promise.resolve();
               const configured = features.get(userId) ?? {};
               if (sql.includes("AS hasPara")) {
@@ -37,6 +39,14 @@ export const env = {
 
 export function configureFeatures(userId, configured) {
   features.set(userId, configured);
+}
+
+export function getFeatureReadCount() {
+  return featureReads;
+}
+
+export function resetFeatureReadCount() {
+  featureReads = 0;
 }
 
 export function getMcpAuthContext() {
