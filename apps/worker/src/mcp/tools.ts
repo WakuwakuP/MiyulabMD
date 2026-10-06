@@ -6,9 +6,13 @@ import {
   type Note,
   type SessionUser,
 } from "@miyulabmd/shared";
-import { McpServer } from "@modelcontextprotocol/server";
+import {
+  type McpRequestContext,
+  McpServer,
+  type StandardSchemaWithJSON,
+  type ToolCallback,
+} from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
-import { db } from "../db/client.ts";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import {
@@ -69,8 +73,28 @@ import {
   validateSchemeTree,
 } from "../services/schemes.ts";
 
+import { featureConfig } from "./feature-config.ts";
+import { getMcpRequestTarget } from "./request-target.ts";
 import { toolDefinitions } from "./tool-definitions.ts";
 import { withToolTiming } from "./tool-timing.ts";
+
+const toolFeatures = new Map<
+  string,
+  keyof Awaited<ReturnType<typeof featureConfig>>
+>([
+  ["para_list", "hasPara"],
+  ["para_archive_project", "hasPara"],
+  ["set_folder_scheme", "hasSchemes"],
+  ["scheme_get", "hasSchemes"],
+  ["jd_allocate_id", "hasSchemes"],
+  ["jd_create_id_folder", "hasSchemes"],
+  ["jd_get", "hasSchemes"],
+  ["jd_list_category", "hasSchemes"],
+  ["jd_validate_tree", "hasSchemes"],
+  ["medallion_list_sets", "hasMedallion"],
+  ["medallion_assign_folder", "hasMedallion"],
+  ["medallion_unassign_folder", "hasMedallion"],
+]);
 
 function textResult(data: unknown) {
   return {
@@ -557,54 +581,52 @@ async function inviteCollaboratorTool(
 }
 
 /**
- * §2.6/KM-E: tool exposure follows *configured* state, not the UI feature
- * flags. A feature's tools register only when the user already has the
- * backing configuration rows — an unconfigured feature offers no tools
- * instead of failing at call time.
- */
-async function featureConfig(env_: Env, user: SessionUser | null) {
-  if (!user) {
-    return { hasMedallion: false, hasPara: false, hasSchemes: false };
-  }
-  const [para, medallion, scheme] = await Promise.all([
-    db(env_)
-      .prepare("SELECT 1 AS x FROM para_spaces WHERE owner_id = ? LIMIT 1")
-      .bind(user.id)
-      .first<{ x: number }>(),
-    db(env_)
-      .prepare(
-        "SELECT 1 AS x FROM medallion_sets WHERE owner_user_id = ? LIMIT 1",
-      )
-      .bind(user.id)
-      .first<{ x: number }>(),
-    db(env_)
-      .prepare(
-        "SELECT 1 AS x FROM folders WHERE owner_id = ? AND scheme IS NOT NULL LIMIT 1",
-      )
-      .bind(user.id)
-      .first<{ x: number }>(),
-  ]);
-  return {
-    hasMedallion: medallion !== null,
-    hasPara: para !== null,
-    hasSchemes: scheme !== null,
-  };
-}
-
-/**
  * createMcpHandler に渡す MCP サーバーファクトリ。
  * Async so it can read the caller's feature configuration inside the auth
  * context (createMcpHandler awaits the factory per request).
  */
-export async function createMcpServerFactory() {
+export async function createMcpServerFactory(context?: McpRequestContext) {
+  const target = await getMcpRequestTarget(context);
+  if (target?.kind === "bootstrap") {
+    // Fresh per-request instance with the same advertised capabilities.
+    // No tool is invoked by these methods; auth remains in handleMcp and
+    // protocol/input validation remains entirely in the SDK.
+    return new McpServer(
+      { name: "miyulabmd", version: "0.1.0" },
+      { capabilities: { tools: { listChanged: true } } },
+    );
+  }
   const server = new McpServer({
     name: "miyulabmd",
     version: "0.1.0",
   });
   const notes = createNoteService(env);
-  const features = await featureConfig(env, requireUser());
+  const candidate =
+    target?.kind === "tool" && Object.hasOwn(toolDefinitions, target.name)
+      ? target.name
+      : undefined;
+  const requiredFeature = candidate ? toolFeatures.get(candidate) : undefined;
+  const features =
+    !candidate || requiredFeature
+      ? await featureConfig(env, requireUser())
+      : { hasMedallion: false, hasPara: false, hasSchemes: false };
+  // An unavailable gated tool keeps the full registry so the SDK reports the
+  // same "tool not found" error. Unknown/large/non-HTTP requests do likewise.
+  const requestedTool =
+    candidate && (!requiredFeature || features[requiredFeature])
+      ? candidate
+      : undefined;
+  function registerTool<Input extends StandardSchemaWithJSON>(
+    name: string,
+    definition: { description: string; inputSchema: Input },
+    callback: ToolCallback<Input>,
+  ) {
+    if (!requestedTool || name === requestedTool) {
+      server.registerTool(name, definition, callback);
+    }
+  }
 
-  server.registerTool(
+  registerTool(
     "list_notes",
     toolDefinitions.list_notes,
     withToolTiming(
@@ -631,7 +653,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "list_folder_entries",
     toolDefinitions.list_folder_entries,
     withToolTiming(
@@ -687,7 +709,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "get_note",
     toolDefinitions.get_note,
     withToolTiming("get_note", async ({ id, numbered }) => {
@@ -721,7 +743,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "create_note",
     toolDefinitions.create_note,
     withToolTiming(
@@ -759,7 +781,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "replace_in_note",
     toolDefinitions.replace_in_note,
     withToolTiming(
@@ -801,7 +823,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "insert_in_note",
     toolDefinitions.insert_in_note,
     withToolTiming("insert_in_note", async ({ id, text, at, after, before }) =>
@@ -809,7 +831,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "update_note",
     toolDefinitions.update_note,
     withToolTiming("update_note", async ({ id, markdown }) => {
@@ -859,7 +881,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "delete_note",
     toolDefinitions.delete_note,
     withToolTiming("delete_note", async ({ id }) => {
@@ -883,7 +905,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "set_note_access",
     toolDefinitions.set_note_access,
     withToolTiming(
@@ -904,7 +926,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "invite_collaborator",
     toolDefinitions.invite_collaborator,
     withToolTiming("invite_collaborator", async ({ id, email, canWrite }) =>
@@ -912,7 +934,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "search_notes",
     toolDefinitions.search_notes,
     withToolTiming(
@@ -952,7 +974,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "grep_notes",
     toolDefinitions.grep_notes,
     withToolTiming(
@@ -1013,7 +1035,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "list_note_links",
     toolDefinitions.list_note_links,
     withToolTiming("list_note_links", async ({ id }) => {
@@ -1032,7 +1054,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_backlinks",
     toolDefinitions.list_backlinks,
     withToolTiming("list_backlinks", async ({ id }) => {
@@ -1051,7 +1073,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_broken_links",
     toolDefinitions.list_broken_links,
     withToolTiming("list_broken_links", async () => {
@@ -1063,7 +1085,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "resolve_wikilink",
     toolDefinitions.resolve_wikilink,
     withToolTiming("resolve_wikilink", async ({ target, context_id }) => {
@@ -1082,7 +1104,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "agent_join",
     toolDefinitions.agent_join,
     withToolTiming("agent_join", async ({ id }) => {
@@ -1107,7 +1129,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "agent_leave",
     toolDefinitions.agent_leave,
     withToolTiming("agent_leave", async ({ id }) => {
@@ -1129,7 +1151,7 @@ export async function createMcpServerFactory() {
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_note_history",
     toolDefinitions.list_note_history,
     withToolTiming("list_note_history", async ({ id, limit, before }) =>
@@ -1137,7 +1159,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "get_revision",
     toolDefinitions.get_revision,
     withToolTiming("get_revision", async ({ id, revisionId }) =>
@@ -1145,7 +1167,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "restore_revision",
     toolDefinitions.restore_revision,
     withToolTiming("restore_revision", async ({ id, revisionId }) =>
@@ -1153,7 +1175,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "delete_folder",
     toolDefinitions.delete_folder,
     withToolTiming(
@@ -1175,7 +1197,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "move_folder",
     toolDefinitions.move_folder,
     withToolTiming(
@@ -1197,7 +1219,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "move_folder_contents",
     toolDefinitions.move_folder_contents,
     withToolTiming(
@@ -1223,7 +1245,7 @@ export async function createMcpServerFactory() {
     ),
   );
 
-  server.registerTool(
+  registerTool(
     "move_notes",
     toolDefinitions.move_notes,
     withToolTiming("move_notes", async ({ note_ids, folder_id, dry_run }) => {
@@ -1243,7 +1265,7 @@ export async function createMcpServerFactory() {
 
   // para_* tools exist only once a PARA space is configured.
   if (features.hasPara) {
-    server.registerTool(
+    registerTool(
       "para_list",
       toolDefinitions.para_list,
       withToolTiming("para_list", async ({ bucket, space }) => {
@@ -1262,7 +1284,7 @@ export async function createMcpServerFactory() {
       }),
     );
 
-    server.registerTool(
+    registerTool(
       "para_archive_project",
       toolDefinitions.para_archive_project,
       withToolTiming(
@@ -1287,7 +1309,7 @@ export async function createMcpServerFactory() {
 
   // scheme_*/jd_* tools exist only once a naming-scheme folder is configured.
   if (features.hasSchemes) {
-    server.registerTool(
+    registerTool(
       "set_folder_scheme",
       toolDefinitions.set_folder_scheme,
       withToolTiming("set_folder_scheme", async ({ folder_id, scheme }) => {
@@ -1303,7 +1325,7 @@ export async function createMcpServerFactory() {
       }),
     );
 
-    server.registerTool(
+    registerTool(
       "scheme_get",
       toolDefinitions.scheme_get,
       withToolTiming("scheme_get", async ({ id }) => {
@@ -1319,7 +1341,7 @@ export async function createMcpServerFactory() {
       }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_allocate_id",
       toolDefinitions.jd_allocate_id,
       withToolTiming("jd_allocate_id", async ({ folder_id }) => {
@@ -1335,7 +1357,7 @@ export async function createMcpServerFactory() {
       }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_create_id_folder",
       toolDefinitions.jd_create_id_folder,
       withToolTiming(
@@ -1359,7 +1381,7 @@ export async function createMcpServerFactory() {
       ),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_get",
       toolDefinitions.jd_get,
       withToolTiming("jd_get", async ({ id }) => {
@@ -1375,7 +1397,7 @@ export async function createMcpServerFactory() {
       }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_list_category",
       toolDefinitions.jd_list_category,
       withToolTiming("jd_list_category", async ({ folder_id }) => {
@@ -1391,7 +1413,7 @@ export async function createMcpServerFactory() {
       }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_validate_tree",
       toolDefinitions.jd_validate_tree,
       withToolTiming("jd_validate_tree", async () => {
@@ -1409,7 +1431,7 @@ export async function createMcpServerFactory() {
   }
 
   // §2.6 permanent edit lock — always available (not feature-gated).
-  server.registerTool(
+  registerTool(
     "set_edit_lock",
     toolDefinitions.set_edit_lock,
     withToolTiming("set_edit_lock", async ({ id, locked, confirm }) => {
@@ -1431,7 +1453,7 @@ export async function createMcpServerFactory() {
 
   // medallion_* tools exist only once a medallion set is configured.
   if (features.hasMedallion) {
-    server.registerTool(
+    registerTool(
       "medallion_list_sets",
       toolDefinitions.medallion_list_sets,
       withToolTiming("medallion_list_sets", async () => {
@@ -1446,7 +1468,7 @@ export async function createMcpServerFactory() {
       }),
     );
 
-    server.registerTool(
+    registerTool(
       "medallion_assign_folder",
       toolDefinitions.medallion_assign_folder,
       withToolTiming(
@@ -1471,7 +1493,7 @@ export async function createMcpServerFactory() {
       ),
     );
 
-    server.registerTool(
+    registerTool(
       "medallion_unassign_folder",
       toolDefinitions.medallion_unassign_folder,
       withToolTiming("medallion_unassign_folder", async ({ folder_id }) => {
