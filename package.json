@@ -24,9 +24,9 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
     "@mizchi/lsmcp": "0.10.0",
-    "knip": "6.38.0",
+    "knip": "6.41.0",
     "mprocs": "0.9.6",
-    "portless": "0.15.6",
+    "portless": "0.15.7",
     "typescript": "7.0.2"
   },
   "packageManager": "pnpm@10.14.0"
