@@ -349,31 +349,44 @@ async function exchangeCode(
   if (!row) {
     return oauthError(400, "invalid_grant", "Authorization code is invalid");
   }
-  const consumed = await db(env)
-    .prepare(
-      `UPDATE oauth_authorization_codes SET consumed_at = ?
-       WHERE code_hash = ? AND consumed_at IS NULL`,
-    )
-    .bind(now, codeHash)
-    .run();
-  if (consumed.meta.changes !== 1) {
-    return oauthError(400, "invalid_grant", "Authorization code was used");
-  }
   const challenge = await s256Challenge(verifier);
-  if (
-    row.client_id !== clientId ||
-    row.redirect_uri !== redirectUri ||
-    row.resource !== resource ||
-    row.code_challenge !== challenge
-  ) {
+  const matches =
+    row.client_id === clientId &&
+    row.redirect_uri === redirectUri &&
+    row.resource === resource &&
+    row.code_challenge === challenge;
+  if (!matches) {
+    await db(env)
+      .prepare(
+        `UPDATE oauth_authorization_codes SET consumed_at = ?
+         WHERE code_hash = ? AND consumed_at IS NULL`,
+      )
+      .bind(now, codeHash)
+      .run();
     return oauthError(400, "invalid_grant", "Authorization code is invalid");
   }
-  return issueTokens(env, deps, {
-    clientId,
-    resource: row.resource,
-    scope: row.scope,
-    userId: row.user_id,
-  });
+  const issued = await issueTokens(
+    env,
+    now,
+    {
+      clientId,
+      resource: row.resource,
+      scope: row.scope,
+      userId: row.user_id,
+    },
+    {
+      binds: [now, codeHash],
+      existsBinds: [codeHash, now],
+      existsSql: `SELECT 1 FROM oauth_authorization_codes
+         WHERE code_hash = ? AND consumed_at = ?`,
+      sql: `UPDATE oauth_authorization_codes SET consumed_at = ?
+         WHERE code_hash = ? AND consumed_at IS NULL
+         RETURNING code_hash`,
+    },
+  );
+  return (
+    issued ?? oauthError(400, "invalid_grant", "Authorization code was used")
+  );
 }
 
 async function exchangeRefresh(
@@ -409,65 +422,92 @@ async function exchangeRefresh(
   ) {
     return oauthError(400, "invalid_grant", "Refresh token is invalid");
   }
-  const rotated = await db(env)
-    .prepare(
-      `UPDATE oauth_refresh_tokens SET rotated_at = ?
-       WHERE token_hash = ? AND rotated_at IS NULL`,
-    )
-    .bind(now, await sha256Hex(refresh))
-    .run();
-  if (rotated.meta.changes !== 1) {
-    return oauthError(400, "invalid_grant", "Refresh token was used");
-  }
-  return issueTokens(env, deps, {
-    clientId,
-    resource: row.resource,
-    scope: row.scope,
-    userId: row.user_id,
-  });
+  const refreshHash = await sha256Hex(refresh);
+  const issued = await issueTokens(
+    env,
+    now,
+    {
+      clientId,
+      resource: row.resource,
+      scope: row.scope,
+      userId: row.user_id,
+    },
+    {
+      binds: [now, refreshHash],
+      existsBinds: [refreshHash, now],
+      existsSql: `SELECT 1 FROM oauth_refresh_tokens
+         WHERE token_hash = ? AND rotated_at = ?`,
+      sql: `UPDATE oauth_refresh_tokens SET rotated_at = ?
+         WHERE token_hash = ? AND rotated_at IS NULL
+         RETURNING token_hash`,
+    },
+  );
+  return issued ?? oauthError(400, "invalid_grant", "Refresh token was used");
 }
 
+type TokenClaim = {
+  sql: string;
+  binds: unknown[];
+  existsSql: string;
+  existsBinds: unknown[];
+};
+
+/** Claim the previous credential and insert the new pair in one D1 batch. */
 async function issueTokens(
   env: Env,
-  deps: OAuthDeps,
+  now: number,
   issued: { userId: string; clientId: string; resource: string; scope: string },
-): Promise<Response> {
-  const now = clock(deps);
+  claim: TokenClaim,
+): Promise<Response | null> {
   const access = randomToken("mlo_");
   const refresh = randomToken("mlr_");
+  const accessHash = await sha256Hex(access);
+  const refreshHash = await sha256Hex(refresh);
   const database = db(env);
-  await database.batch([
+  const inserted = await database.batch<{ token_hash: string }>([
+    database.prepare(claim.sql).bind(...claim.binds),
     database
       .prepare(
         `INSERT INTO oauth_access_tokens (
            token_hash, user_id, client_id, resource, scope, expires_at, created_at, last_used_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+         )
+         SELECT ?, ?, ?, ?, ?, ?, ?, NULL
+         WHERE EXISTS (${claim.existsSql})
+         RETURNING token_hash`,
       )
       .bind(
-        await sha256Hex(access),
+        accessHash,
         issued.userId,
         issued.clientId,
         issued.resource,
         issued.scope,
         now + ACCESS_TTL_MS,
         now,
+        ...claim.existsBinds,
       ),
     database
       .prepare(
         `INSERT INTO oauth_refresh_tokens (
            token_hash, user_id, client_id, resource, scope, expires_at, created_at, rotated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+         )
+         SELECT ?, ?, ?, ?, ?, ?, ?, NULL
+         WHERE EXISTS (${claim.existsSql})
+         RETURNING token_hash`,
       )
       .bind(
-        await sha256Hex(refresh),
+        refreshHash,
         issued.userId,
         issued.clientId,
         issued.resource,
         issued.scope,
         now + REFRESH_TTL_MS,
         now,
+        ...claim.existsBinds,
       ),
   ]);
+  if (!inserted[1]?.results[0]) {
+    return null;
+  }
   return oauthJson({
     access_token: access,
     expires_in: ACCESS_TTL_MS / 1000,

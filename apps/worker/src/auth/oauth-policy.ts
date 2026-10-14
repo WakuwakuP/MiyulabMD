@@ -79,10 +79,7 @@ export function isAllowedRedirectUri(value: string): boolean {
 }
 
 /** Exact match, except loopback ports (RFC 8252). */
-export function redirectMatches(
-  registered: string,
-  requested: string,
-): boolean {
+function redirectMatches(registered: string, requested: string): boolean {
   const expected = parseUrl(registered);
   const actual = parseUrl(requested);
   if (!(expected && actual)) {

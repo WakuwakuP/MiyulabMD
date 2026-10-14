@@ -88,8 +88,25 @@ test("discovery documents point ChatGPT at this origin", () => {
   assert.equal(wwwAuthenticate(ORIGIN, true).includes("invalid_token"), true);
 });
 
+test("wrangler routes OAuth discovery to the Worker ahead of the SPA", () => {
+  const toml = readFileSync(
+    new URL("../../wrangler.toml", import.meta.url),
+    "utf8",
+  );
+  for (const route of [
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/*",
+    "/.well-known/oauth-authorization-server",
+    "/oauth/authorize",
+    "/oauth/token",
+    "/oauth/register",
+  ]) {
+    assert.ok(toml.includes(`"${route}"`), route);
+  }
+});
+
 test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
-  const { env } = fixture(t);
+  const { database, env } = fixture(t);
   const registered = await handleOAuthHttp(
     new Request(`${ORIGIN}/oauth/register`, {
       body: JSON.stringify({
@@ -186,6 +203,7 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
     env,
   );
   assert.equal(refreshed.status, 200);
+  const next = (await refreshed.json()) as { refresh_token: string };
   const again = await handleOAuthHttp(
     new Request(`${ORIGIN}/oauth/token`, {
       body: new URLSearchParams({
@@ -199,6 +217,28 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
     env,
   );
   assert.equal(again.status, 400);
+
+  (env.DB as { batch: () => Promise<unknown> }).batch = () =>
+    Promise.reject(new Error("batch failed"));
+  await assert.rejects(
+    handleOAuthHttp(
+      new Request(`${ORIGIN}/oauth/token`, {
+        body: new URLSearchParams({
+          client_id: client.client_id,
+          grant_type: "refresh_token",
+          refresh_token: next.refresh_token,
+          resource: RESOURCE,
+        }),
+        method: "POST",
+      }),
+      env,
+    ),
+  );
+  const hash = createHash("sha256").update(next.refresh_token).digest("hex");
+  const stored = database.sqlite
+    .prepare("SELECT rotated_at FROM oauth_refresh_tokens WHERE token_hash = ?")
+    .get(hash) as { rotated_at: number | null };
+  assert.equal(stored.rotated_at, null);
 });
 
 test("PKCE mismatch and foreign redirect URIs are rejected", async (t) => {

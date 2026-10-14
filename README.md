@@ -55,7 +55,7 @@ HTTPS が必要な場合だけ、OpenSSL と証明書の信頼登録を準備し
 
 以前の 1355 番設定など、既存の共有プロキシと設定が異なる場合は、起動中の Web / Worker を終了し、他のプロジェクトが使っていないことを確認して `pnpm exec portless proxy stop` で停止してから `pnpm dev` を起動する。環境変数に `PORTLESS_PORT` を設定している場合はそれが優先されるため、標準ポートに戻すには解除する。実際の URL は起動ログを参照。
 
-Vite は `/api` `/auth` `/mcp` `/openapi.json` `/ws` を portless 経由で Worker にプロキシする。ブラウザでは Web 側の URL を使うことでログインと WebSocket を同一オリジンに保つ。バックエンドのポートは portless が割り当て、Worker にも `PORT` を渡すため、5173 / 8787 の空きを気にする必要はない。
+Vite は `/api` `/auth` `/mcp` `/oauth` `/.well-known/oauth-*` `/openapi.json` `/ws` を portless 経由で Worker にプロキシする。ブラウザでは Web 側の URL を使うことでログインと WebSocket を同一オリジンに保つ。バックエンドのポートは portless が割り当て、Worker にも `PORT` を渡すため、5173 / 8787 の空きを気にする必要はない。
 
 Worker 単体で API だけ試す場合は `pnpm dev:worker` のみでよい。OG 取得用 Worker も従来どおり Wrangler の multi-worker 構成で起動する。`apps/web/dist` が無い場合も `predev` が空ディレクトリを作るため起動できる（本番相当の静的配信は `pnpm --filter @miyulabmd/web build` 後）。
 
