@@ -215,7 +215,7 @@ sequenceDiagram
 - セッション Cookie: `HttpOnly`, `Secure`, `SameSite=Lax`。中身は署名付き JWT（ユーザー ID / email / 期限）
 - Access JWT の検証は JWKS（チームドメインの certs）で行う。email をユーザーの安定キーにする
 
-MCP と自動化はブラウザの Access を使えない。ユーザーが設定画面で Personal Access Token を発行し、SHA-256 ハッシュだけを D1 に保存する。`Authorization: Bearer` で Worker がユーザーに紐付ける。
+MCP と自動化はブラウザの Access を使えない。Cursor などは設定画面の Personal Access Token を使い、SHA-256 ハッシュだけを D1 に保存する。ChatGPT のカスタム MCP は OAuth 2.1（PKCE、S256）で同じユーザーに紐付く。認可サーバーはこの Worker 自身で、ログインは既存の Access セッションを使う。アクセストークンもハッシュだけを保存し、`Authorization: Bearer` で照合する。
 
 管理用のマシンアクセスが必要なら、Access Service Token を追加で受けられるようにする（フェーズ 2）。
 
@@ -403,7 +403,9 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 
 同一 Worker の `/mcp` を Elysia ルートとして持ち、中で Cloudflare Agents SDK の `createMcpHandler` に `Request` を渡す。MCP 2026-07-28 の stateless Streamable HTTP を正面に据える。セッション用 Durable Object は持たない。
 
-認証: `Authorization: Bearer <personal_access_token>`。トークンのユーザーで `canView` / `canEdit` / `canAdmin` を評価する。トークン無しは 401。ゲスト権限での MCP は提供しない。
+認証: `Authorization: Bearer` の Personal Access Token、または OAuth アクセストークン。トークンのユーザーで `canView` / `canEdit` / `canAdmin` を評価する。トークン無し・無効は 401 と `WWW-Authenticate`（protected resource metadata）を返す。ゲスト権限での MCP は提供しない。
+
+OAuth は認可コード + PKCE（S256）のみ。公開クライアント（`token_endpoint_auth_method=none`）に限り、Client ID Metadata Documents と Dynamic Client Registration を受け付ける。`resource` は `{origin}/mcp` に固定する。同意画面はブラウザセッションが無いとき `/auth/login` に戻り、許可後だけ認可コードを返す。発行したアクセストークンは `/mcp` 以外では受け付けない。
 
 CPU 使用量とツールごとの所要時間の調べ方は [MCP の処理時間と CPU 使用量](mcp-performance.md) を参照。
 
@@ -603,5 +605,5 @@ Worker が `apps/web` のビルド成果を Assets として配信する。開�
 - ゲスト作成（`ALLOW_ANONYMOUS`）を将来開けるか
 - ノート上限 / 画像容量のクォータ
 - 公開ノートの OGP をサーバーレンダリングするか
-- MCP を OAuth（Access / 独自）に上げるか。初期は PAT
+- MCP の OAuth は同一オリジンの認可サーバーに決めた。PAT は残す
 - Elysia の `CloudflareAdapter` が Experimental のままか。安定化したら構成を見直す。`waitUntil` の渡し方も実装時に確認する

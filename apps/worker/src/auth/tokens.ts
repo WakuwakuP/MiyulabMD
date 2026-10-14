@@ -1,6 +1,7 @@
 import type { SessionUser } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
+import { authenticateOAuthBearer } from "./oauth.ts";
 
 export type ApiTokenSummary = {
   id: string;
@@ -52,7 +53,7 @@ function generatePlainToken(): string {
   return `mlb_${random}`;
 }
 
-/** Personal Access Token (Bearer) を SHA-256 照合する。MCP / 自動化用。 */
+/** PAT (`mlb_`) または MCP OAuth アクセストークン (`mlo_`) を照合する。 */
 export async function authenticateBearer(
   request: Request,
   env: Env,
@@ -65,6 +66,9 @@ export async function authenticateBearer(
   const plaintext = header.slice("Bearer ".length).trim();
   if (!plaintext) {
     return null;
+  }
+  if (plaintext.startsWith("mlo_")) {
+    return authenticateOAuthBearer(request, env, plaintext);
   }
 
   const tokenHash = await hashToken(plaintext);
