@@ -24,7 +24,6 @@ export function catalogListRequest(
     headers.set(
       CATALOG_USER_HEADER,
       JSON.stringify({
-        displayName: user.displayName,
         email: user.email,
         id: user.id,
       }),

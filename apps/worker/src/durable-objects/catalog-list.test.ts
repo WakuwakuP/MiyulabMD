@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
 import { createNoteService } from "../services/notes.ts";
-import { handleCatalogList } from "./catalog-list.ts";
+import { catalogListRequest, handleCatalogList } from "./catalog-list.ts";
 
 const MIGRATIONS = [
   "0001_init.sql",
@@ -179,6 +179,20 @@ test("catalog list uses listForUser for the header user and listForGuest otherwi
     new Request("https://catalog.internal/list"),
   );
   assert.deepEqual(titles(await asGuest.json()), ["Public"]);
+});
+
+test("catalog list request drops display names that headers cannot carry", () => {
+  const request = catalogListRequest({
+    displayName: "宮",
+    email: "owner@example.com",
+    id: "11111111-1111-1111-1111-111111111111",
+  });
+  const raw = request.headers.get("x-catalog-user");
+  assert.equal(typeof raw, "string");
+  assert.deepEqual(JSON.parse(raw ?? ""), {
+    email: "owner@example.com",
+    id: "11111111-1111-1111-1111-111111111111",
+  });
 });
 
 test("catalog list rejects a bad user header and a guest tool query", async (t) => {
