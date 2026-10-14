@@ -728,7 +728,8 @@ async function fetchClientMetadata(
   try {
     response = await fetchImpl(clientId, {
       headers: { Accept: "application/json" },
-      redirect: "error",
+      // Workers reject redirect:"error". manual returns 3xx without following it.
+      redirect: "manual",
       signal: AbortSignal.timeout(5000),
     });
   } catch {

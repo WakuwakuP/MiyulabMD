@@ -401,8 +401,9 @@ test("CIMD client_id is fetched and private hosts are not", async (t) => {
   const clientId = "https://chatgpt.com/oauth/client.json";
   let fetched = 0;
   const deps = {
-    fetch: () => {
+    fetch: (_input: RequestInfo | URL, init?: RequestInit) => {
       fetched += 1;
+      assert.equal(init?.redirect, "manual");
       return Promise.resolve(
         new Response(
           JSON.stringify({
