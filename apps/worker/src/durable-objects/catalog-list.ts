@@ -2,8 +2,8 @@ import type { SessionUser } from "@miyulabmd/shared";
 
 import { createNoteService } from "../services/notes.ts";
 
-export const CATALOG_USER_HEADER = "x-catalog-user";
-export const CATALOG_GUEST_NAME = "guest";
+const CATALOG_USER_HEADER = "x-catalog-user";
+const CATALOG_GUEST_NAME = "guest";
 
 export type CatalogListQuery = {
   folderId?: string;
