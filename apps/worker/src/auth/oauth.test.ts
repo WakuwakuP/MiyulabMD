@@ -236,6 +236,51 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
     access_token: string;
     refresh_token: string;
   };
+
+  const racedBatch = env.DB.batch.bind(env.DB);
+  let arrivals = 0;
+  let releaseFirst: () => void = () => undefined;
+  const firstArrived = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  (env.DB as { batch: (statements: unknown) => Promise<unknown> }).batch =
+    async (statements) => {
+      arrivals += 1;
+      if (arrivals === 1) {
+        await firstArrived;
+      } else {
+        releaseFirst();
+      }
+      return racedBatch(statements as never);
+    };
+  const refreshBody = () =>
+    new Request(`${ORIGIN}/oauth/token`, {
+      body: new URLSearchParams({
+        client_id: client.client_id,
+        grant_type: "refresh_token",
+        refresh_token: next.refresh_token,
+        resource: RESOURCE,
+      }),
+      method: "POST",
+    });
+  const frozen = { now: () => 1_700_000_000_000 };
+  let raced: Response[];
+  try {
+    raced = await Promise.all([
+      handleOAuthHttp(refreshBody(), env, frozen),
+      handleOAuthHttp(refreshBody(), env, frozen),
+    ]);
+  } finally {
+    env.DB.batch = racedBatch;
+  }
+  assert.deepEqual(raced.map((response) => response.status).sort(), [200, 400]);
+  const live = database.sqlite
+    .prepare(
+      "SELECT COUNT(*) AS n FROM oauth_refresh_tokens WHERE rotated_at IS NULL",
+    )
+    .get() as { n: number };
+  assert.equal(live.n, 1);
+
   const again = await handleOAuthHttp(
     new Request(`${ORIGIN}/oauth/token`, {
       body: new URLSearchParams({

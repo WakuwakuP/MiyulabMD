@@ -365,6 +365,7 @@ async function exchangeCode(
       .run();
     return oauthError(400, "invalid_grant", "Authorization code is invalid");
   }
+  const claim = claimMarker();
   const issued = await issueTokens(
     env,
     now,
@@ -375,8 +376,8 @@ async function exchangeCode(
       userId: row.user_id,
     },
     {
-      binds: [now, codeHash],
-      existsBinds: [codeHash, now],
+      binds: [claim, codeHash],
+      existsBinds: [codeHash, claim],
       existsSql: `SELECT 1 FROM oauth_authorization_codes
          WHERE code_hash = ? AND consumed_at = ?`,
       sql: `UPDATE oauth_authorization_codes SET consumed_at = ?
@@ -428,6 +429,7 @@ async function exchangeRefresh(
     return oauthError(400, "invalid_grant", "Refresh token is invalid");
   }
   const refreshHash = await sha256Hex(refresh);
+  const claim = claimMarker();
   const issued = await issueTokens(
     env,
     now,
@@ -438,8 +440,8 @@ async function exchangeRefresh(
       userId: row.user_id,
     },
     {
-      binds: [now, refreshHash],
-      existsBinds: [refreshHash, now],
+      binds: [claim, refreshHash],
+      existsBinds: [refreshHash, claim],
       existsSql: `SELECT 1 FROM oauth_refresh_tokens
          WHERE token_hash = ? AND rotated_at = ?`,
       sql: `UPDATE oauth_refresh_tokens SET rotated_at = ?
@@ -831,6 +833,16 @@ function safeState(state: string): boolean {
 
 function clock(deps: OAuthDeps): number {
   return deps.now ? deps.now() : Date.now();
+}
+
+/** Distinct from `now`, so a same-millisecond loser cannot satisfy EXISTS. */
+function claimMarker(): number {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  let value = 0;
+  for (const byte of bytes) {
+    value = value * 256 + byte;
+  }
+  return value + 1;
 }
 
 async function readForm(request: Request): Promise<URLSearchParams> {
