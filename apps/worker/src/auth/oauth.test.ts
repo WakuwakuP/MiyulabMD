@@ -441,6 +441,8 @@ test("CIMD client_id is fetched and private hosts are not", async (t) => {
     "https://[::ffff:169.254.169.254]/client.json",
     "https://[fd00::1]/client.json",
     "https://[fe80::1]/client.json",
+    "https://[::169.254.169.254]/client.json",
+    "https://[::ffff:0:127.0.0.1]/client.json",
   ]) {
     const response = await handleOAuthHttp(
       new Request(

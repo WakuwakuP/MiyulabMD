@@ -311,25 +311,23 @@ function isNonPublicIPv6(parts: number[]): boolean {
 }
 
 function embeddedIPv4(parts: number[]): string | null {
-  const mapped =
-    parts[0] === 0 &&
-    parts[1] === 0 &&
-    parts[2] === 0 &&
-    parts[3] === 0 &&
-    parts[4] === 0 &&
-    parts[5] === 0xffff;
+  const at = (index: number) => parts[index] ?? 0;
+  const prefix96 = at(0) === 0 && at(1) === 0 && at(2) === 0 && at(3) === 0;
+  const mapped = prefix96 && at(4) === 0 && at(5) === 0xffff;
+  const siit = prefix96 && at(4) === 0xffff && at(5) === 0;
+  const compatible = prefix96 && at(4) === 0 && at(5) === 0;
   const nat64 =
-    parts[0] === 0x64 &&
-    parts[1] === 0xff9b &&
-    parts[2] === 0 &&
-    parts[3] === 0 &&
-    parts[4] === 0 &&
-    parts[5] === 0;
-  if (mapped || nat64) {
-    return hextetsToIPv4(parts[6] ?? 0, parts[7] ?? 0);
+    at(0) === 0x64 &&
+    at(1) === 0xff9b &&
+    at(2) === 0 &&
+    at(3) === 0 &&
+    at(4) === 0 &&
+    at(5) === 0;
+  if (mapped || siit || compatible || nat64) {
+    return hextetsToIPv4(at(6), at(7));
   }
-  if (parts[0] === 0x2002) {
-    return hextetsToIPv4(parts[1] ?? 0, parts[2] ?? 0);
+  if (at(0) === 0x2002) {
+    return hextetsToIPv4(at(1), at(2));
   }
   return null;
 }
