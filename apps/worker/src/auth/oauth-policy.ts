@@ -200,23 +200,30 @@ function isLoopback(hostname: string): boolean {
 }
 
 function isBlockedHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.+$/g, "");
   if (
     host === "localhost" ||
     host.endsWith(".localhost") ||
-    host.endsWith(".local") ||
-    host === "0.0.0.0" ||
-    host === "::1" ||
-    host === "169.254.169.254"
+    host.endsWith(".local")
   ) {
     return true;
   }
-  const match = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
-  if (!match) {
+  if (isPrivateIPv4(host)) {
+    return true;
+  }
+  const v6 = parseIPv6(host);
+  return v6 !== null && isNonPublicIPv6(v6);
+}
+
+function isPrivateIPv4(host: string): boolean {
+  const octets = ipv4Octets(host);
+  if (!octets) {
     return false;
   }
-  const a = Number(match[1]);
-  const b = Number(match[2]);
+  const [a, b] = octets;
   if (a === 10 || a === 127 || a === 0 || (a === 169 && b === 254)) {
     return true;
   }
@@ -224,6 +231,111 @@ function isBlockedHost(hostname: string): boolean {
     return true;
   }
   return a === 100 && b >= 64 && b <= 127;
+}
+
+function ipv4Octets(host: string): [number, number, number, number] | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+  if (!match) {
+    return null;
+  }
+  const octets = match.slice(1, 5).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+  ];
+  return octets.every((octet) => octet <= 255) ? octets : null;
+}
+
+/** Accepts compressed IPv6, including IPv4-mapped tails. */
+function parseIPv6(host: string): number[] | null {
+  if (!host.includes(":")) {
+    return null;
+  }
+  const dotted = /^([\da-f:]*:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
+  let body = host;
+  const tail: number[] = [];
+  if (dotted?.[2]) {
+    const octets = ipv4Octets(dotted[2]);
+    if (!octets) {
+      return null;
+    }
+    tail.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+    body = dotted[1]?.slice(0, -1) ?? "";
+  }
+  const halves = body.split("::");
+  if (halves.length > 2) {
+    return null;
+  }
+  const left = parseHextets(halves[0] ?? "");
+  const right = halves.length === 2 ? parseHextets(halves[1] ?? "") : [];
+  if (!(left && right)) {
+    return null;
+  }
+  if (halves.length === 1) {
+    return left.length + tail.length === 8 ? [...left, ...tail] : null;
+  }
+  const missing = 8 - left.length - right.length - tail.length;
+  if (missing < 1) {
+    return null;
+  }
+  return [...left, ...new Array<number>(missing).fill(0), ...right, ...tail];
+}
+
+function parseHextets(side: string): number[] | null {
+  if (side === "") {
+    return [];
+  }
+  const out: number[] = [];
+  for (const group of side.split(":")) {
+    if (!/^[\da-f]{1,4}$/.test(group)) {
+      return null;
+    }
+    out.push(Number.parseInt(group, 16));
+  }
+  return out;
+}
+
+function isNonPublicIPv6(parts: number[]): boolean {
+  const first = parts[0] ?? 0;
+  const last = parts[7] ?? 0;
+  const headIsZero = parts.slice(0, 7).every((part) => part === 0);
+  if (headIsZero && (last === 0 || last === 1)) {
+    return true;
+  }
+  if ((first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80) {
+    return true;
+  }
+  const embedded = embeddedIPv4(parts);
+  return embedded !== null && isPrivateIPv4(embedded);
+}
+
+function embeddedIPv4(parts: number[]): string | null {
+  const mapped =
+    parts[0] === 0 &&
+    parts[1] === 0 &&
+    parts[2] === 0 &&
+    parts[3] === 0 &&
+    parts[4] === 0 &&
+    parts[5] === 0xffff;
+  const nat64 =
+    parts[0] === 0x64 &&
+    parts[1] === 0xff9b &&
+    parts[2] === 0 &&
+    parts[3] === 0 &&
+    parts[4] === 0 &&
+    parts[5] === 0;
+  if (mapped || nat64) {
+    return hextetsToIPv4(parts[6] ?? 0, parts[7] ?? 0);
+  }
+  if (parts[0] === 0x2002) {
+    return hextetsToIPv4(parts[1] ?? 0, parts[2] ?? 0);
+  }
+  return null;
+}
+
+function hextetsToIPv4(high: number, low: number): string {
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
 }
 
 function base64Url(bytes: Uint8Array): string {

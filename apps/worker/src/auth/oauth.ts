@@ -413,10 +413,15 @@ async function exchangeRefresh(
     )
     .bind(await sha256Hex(refresh))
     .first<RefreshRow>();
+  if (!row) {
+    return oauthError(400, "invalid_grant", "Refresh token is invalid");
+  }
+  if (row.rotated_at !== null) {
+    await revokeGrant(env, row.user_id, row.client_id, now);
+    return oauthError(400, "invalid_grant", "Refresh token is invalid");
+  }
   if (
-    !row ||
     row.client_id !== clientId ||
-    row.rotated_at !== null ||
     row.expires_at <= now ||
     (resource !== null && resource !== row.resource)
   ) {
@@ -443,6 +448,36 @@ async function exchangeRefresh(
     },
   );
   return issued ?? oauthError(400, "invalid_grant", "Refresh token was used");
+}
+
+/** RFC 9700: presenting a rotated refresh token revokes that grant. */
+async function revokeGrant(
+  env: Env,
+  userId: string,
+  clientId: string,
+  now: number,
+): Promise<void> {
+  const database = db(env);
+  await database.batch([
+    database
+      .prepare(
+        `DELETE FROM oauth_refresh_tokens
+         WHERE user_id = ? AND client_id = ?`,
+      )
+      .bind(userId, clientId),
+    database
+      .prepare(
+        `DELETE FROM oauth_access_tokens
+         WHERE user_id = ? AND client_id = ?`,
+      )
+      .bind(userId, clientId),
+    database
+      .prepare(
+        `UPDATE oauth_authorization_codes SET consumed_at = ?
+         WHERE user_id = ? AND client_id = ? AND consumed_at IS NULL`,
+      )
+      .bind(now, userId, clientId),
+  ]);
 }
 
 type TokenClaim = {

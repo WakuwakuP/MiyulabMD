@@ -190,6 +190,35 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
   const reused = await exchange(env, client.client_id, code);
   assert.equal(reused.status, 400);
 
+  const originalBatch = env.DB.batch.bind(env.DB);
+  (env.DB as { batch: () => Promise<unknown> }).batch = () =>
+    Promise.reject(new Error("batch failed"));
+  try {
+    await assert.rejects(
+      handleOAuthHttp(
+        new Request(`${ORIGIN}/oauth/token`, {
+          body: new URLSearchParams({
+            client_id: client.client_id,
+            grant_type: "refresh_token",
+            refresh_token: token.refresh_token,
+            resource: RESOURCE,
+          }),
+          method: "POST",
+        }),
+        env,
+      ),
+    );
+  } finally {
+    env.DB.batch = originalBatch;
+  }
+  const unrotated = createHash("sha256")
+    .update(token.refresh_token)
+    .digest("hex");
+  const stored = database.sqlite
+    .prepare("SELECT rotated_at FROM oauth_refresh_tokens WHERE token_hash = ?")
+    .get(unrotated) as { rotated_at: number | null };
+  assert.equal(stored.rotated_at, null);
+
   const refreshed = await handleOAuthHttp(
     new Request(`${ORIGIN}/oauth/token`, {
       body: new URLSearchParams({
@@ -203,7 +232,10 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
     env,
   );
   assert.equal(refreshed.status, 200);
-  const next = (await refreshed.json()) as { refresh_token: string };
+  const next = (await refreshed.json()) as {
+    access_token: string;
+    refresh_token: string;
+  };
   const again = await handleOAuthHttp(
     new Request(`${ORIGIN}/oauth/token`, {
       body: new URLSearchParams({
@@ -217,28 +249,32 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
     env,
   );
   assert.equal(again.status, 400);
-
-  (env.DB as { batch: () => Promise<unknown> }).batch = () =>
-    Promise.reject(new Error("batch failed"));
-  await assert.rejects(
-    handleOAuthHttp(
-      new Request(`${ORIGIN}/oauth/token`, {
-        body: new URLSearchParams({
-          client_id: client.client_id,
-          grant_type: "refresh_token",
-          refresh_token: next.refresh_token,
-          resource: RESOURCE,
-        }),
-        method: "POST",
+  const stolen = await handleOAuthHttp(
+    new Request(`${ORIGIN}/oauth/token`, {
+      body: new URLSearchParams({
+        client_id: client.client_id,
+        grant_type: "refresh_token",
+        refresh_token: next.refresh_token,
+        resource: RESOURCE,
+      }),
+      method: "POST",
+    }),
+    env,
+  );
+  assert.equal(stolen.status, 400);
+  assert.equal(
+    await authenticateBearer(
+      new Request(RESOURCE, {
+        headers: { Authorization: `Bearer ${next.access_token}` },
       }),
       env,
     ),
+    null,
   );
-  const hash = createHash("sha256").update(next.refresh_token).digest("hex");
-  const stored = database.sqlite
-    .prepare("SELECT rotated_at FROM oauth_refresh_tokens WHERE token_hash = ?")
-    .get(hash) as { rotated_at: number | null };
-  assert.equal(stored.rotated_at, null);
+  const remaining = database.sqlite
+    .prepare("SELECT COUNT(*) AS n FROM oauth_refresh_tokens WHERE user_id = ?")
+    .get("user") as { n: number };
+  assert.equal(remaining.n, 0);
 });
 
 test("PKCE mismatch and foreign redirect URIs are rejected", async (t) => {
@@ -354,6 +390,25 @@ test("CIMD client_id is fetched and private hosts are not", async (t) => {
     deps,
   );
   assert.equal(blocked.status, 400);
+  for (const blockedClientId of [
+    "https://localhost./client.json",
+    "https://[::ffff:127.0.0.1]/client.json",
+    "https://[::ffff:169.254.169.254]/client.json",
+    "https://[fd00::1]/client.json",
+    "https://[fe80::1]/client.json",
+  ]) {
+    const response = await handleOAuthHttp(
+      new Request(
+        `${ORIGIN}/oauth/authorize?${authorizeQuery(blockedClientId)}`,
+        {
+          headers: { Cookie: cookie },
+        },
+      ),
+      env,
+      deps,
+    );
+    assert.equal(response.status, 400);
+  }
   assert.equal(fetched, 1);
 });
 
