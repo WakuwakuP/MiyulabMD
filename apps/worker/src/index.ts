@@ -34,6 +34,7 @@ import {
   notePageId,
 } from "./ssr/inject-note-page.ts";
 
+export { CatalogRoom } from "./durable-objects/CatalogRoom.ts";
 export { DocumentRoom } from "./durable-objects/DocumentRoom.ts";
 
 const api = new Elysia({ adapter: CloudflareAdapter })

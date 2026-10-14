@@ -52,11 +52,18 @@ binding = "DIAGRAM_CHECK"
 service = "miyulabmd-diagram-check"
 
 [durable_objects]
-bindings = [{ name = "DOCUMENT_ROOM", class_name = "DocumentRoom" }]
+bindings = [
+  { name = "DOCUMENT_ROOM", class_name = "DocumentRoom" },
+  { name = "CATALOG", class_name = "CatalogRoom" },
+]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["DocumentRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CatalogRoom"]
 
 [vars]
 ALLOW_ANONYMOUS = "false"
