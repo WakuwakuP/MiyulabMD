@@ -130,7 +130,26 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
     env,
   );
   assert.equal(consent.status, 200);
-  assert.match(await consent.text(), /許可する/);
+  const page = await consent.text();
+  assert.match(page, /許可する/);
+  assert.match(page, /拒否する/);
+  assert.match(page, /ChatGPT/);
+  assert.match(page, /Alice/);
+  assert.match(page, /a@example\.invalid/);
+  assert.match(page, /ログイン中/);
+  assert.match(page, /ノートを読む/);
+  const switching = await handleOAuthHttp(
+    new Request(`${ORIGIN}/oauth/authorize?${query}&switch_account=1`, {
+      headers: { Cookie: cookie },
+    }),
+    env,
+  );
+  assert.equal(switching.status, 302);
+  assert.equal(switching.headers.get("Location"), "/auth/logout?resume=login");
+  const nextCookie = switching.headers.get("Set-Cookie") ?? "";
+  assert.match(nextCookie, /miyulabmd_oauth_next=/);
+  assert.equal(nextCookie.includes("switch_account"), false);
+  assert.match(page, /別のアカウントでログイン/);
 
   const allowed = await handleOAuthHttp(
     new Request(`${ORIGIN}/oauth/authorize`, {

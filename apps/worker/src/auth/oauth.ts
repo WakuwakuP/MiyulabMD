@@ -1,6 +1,7 @@
 import type { SessionUser } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
+import { consentPageHtml } from "./consent-page.ts";
 import {
   authorizationServerMetadata,
   isAllowedRedirectUri,
@@ -233,21 +234,13 @@ async function handleAuthorize(
   }
 
   const user = await readSession(request, env);
-  const secure = url.protocol === "https:";
-  if (!user) {
-    const next = safeOAuthReturnPath(`${url.pathname}${url.search}`);
-    const headers = new Headers({
-      "Cache-Control": "no-store",
-      Location: "/auth/login",
-    });
-    if (next) {
-      headers.append("Set-Cookie", oauthNextCookie(next, secure));
-    }
-    return new Response(null, { headers, status: 302 });
+  const away = leaveConsent(url, user, url.protocol === "https:");
+  if (away || !user) {
+    return away ?? new Response("Login required", { status: 401 });
   }
 
   if (request.method === "GET") {
-    return consentPage(fields, client);
+    return consentPage(fields, client, user);
   }
 
   const decision = params.get("decision");
@@ -255,7 +248,7 @@ async function handleAuthorize(
     return authorizationError(fields, "access_denied");
   }
   if (decision !== "allow") {
-    return consentPage(fields, client);
+    return consentPage(fields, client, user);
   }
 
   const code = randomToken("");
@@ -637,30 +630,60 @@ function authorizationError(fields: AuthorizeFields, error: string): Response {
   return redirectResponse(redirect);
 }
 
+function leaveConsent(
+  url: URL,
+  user: SessionUser | null,
+  secure: boolean,
+): Response | null {
+  if (user && url.searchParams.get("switch_account") !== "1") {
+    return null;
+  }
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    Location: user ? "/auth/logout?resume=login" : "/auth/login",
+  });
+  const returnPath = authorizeReturnPath(url);
+  if (returnPath) {
+    headers.append("Set-Cookie", oauthNextCookie(returnPath, secure));
+  }
+  return new Response(null, { headers, status: 302 });
+}
+
+function authorizeReturnPath(url: URL): string | null {
+  const params = new URLSearchParams(url.search);
+  params.delete("switch_account");
+  return safeOAuthReturnPath(`${url.pathname}?${params.toString()}`);
+}
+
+function switchAccountHref(fields: AuthorizeFields): string {
+  const params = new URLSearchParams({
+    client_id: fields.clientId,
+    code_challenge: fields.codeChallenge,
+    code_challenge_method: "S256",
+    redirect_uri: fields.redirectUri,
+    resource: fields.resource,
+    response_type: "code",
+    scope: fields.scope,
+    switch_account: "1",
+  });
+  if (fields.state) {
+    params.set("state", fields.state);
+  }
+  return `/oauth/authorize?${params.toString()}`;
+}
+
 function consentPage(
   fields: AuthorizeFields,
   client: ResolvedClient,
+  user: SessionUser,
 ): Response {
-  const host = new URL(fields.redirectUri).host;
-  const hidden = hiddenFields(fields);
-  const html = `<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="referrer" content="no-referrer" />
-    <title>MCP の接続を許可</title>
-  </head>
-  <body>
-    <h1>MCP の接続を許可</h1>
-    <p><strong>${escapeHtml(client.name)}</strong> が、このアカウントでノートを読み書きします。</p>
-    <p>戻る先: <code>${escapeHtml(host)}</code></p>
-    <form method="POST" action="/oauth/authorize">
-      ${hidden}
-      <button type="submit" name="decision" value="allow">許可する</button>
-      <button type="submit" name="decision" value="deny">拒否する</button>
-    </form>
-  </body>
-</html>`;
+  const html = consentPageHtml({
+    clientName: client.name,
+    hiddenFields: hiddenFields(fields),
+    redirectHost: new URL(fields.redirectUri).host,
+    switchAccountHref: switchAccountHref(fields),
+    user,
+  });
   return new Response(html, {
     headers: {
       "Cache-Control": "no-store",

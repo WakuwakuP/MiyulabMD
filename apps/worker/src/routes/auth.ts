@@ -116,6 +116,11 @@ function accessFailurePage(reason: string): Response {
   });
 }
 
+function logoutReturnPath(request: Request): string {
+  const resume = new URL(request.url).searchParams.get("resume");
+  return resume === "login" ? "/auth/login" : "/";
+}
+
 function logoutResponse(
   request: Request,
   env: Env,
@@ -124,9 +129,10 @@ function logoutResponse(
   const headers = new Headers({
     "Set-Cookie": clearSessionCookieHeader(requestIsHttps(request)),
   });
+  const returnPath = logoutReturnPath(request);
 
   if (isAccessConfigured(env)) {
-    const returnTo = new URL("/", request.url).toString();
+    const returnTo = new URL(returnPath, request.url).toString();
     const logout = new URL(`https://${teamDomain(env)}/cdn-cgi/access/logout`);
     logout.searchParams.set("returnTo", returnTo);
     headers.set("Location", logout.toString());
@@ -134,7 +140,7 @@ function logoutResponse(
   }
 
   if (preferRedirect) {
-    headers.set("Location", "/");
+    headers.set("Location", returnPath);
     return new Response(null, { headers, status: 302 });
   }
 
