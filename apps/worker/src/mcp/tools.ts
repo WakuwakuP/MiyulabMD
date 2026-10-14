@@ -14,6 +14,10 @@ import {
 } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
+import {
+  catalogListRequest,
+  catalogObjectName,
+} from "../durable-objects/catalog-list.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import {
   actorFromAgent,
@@ -110,39 +114,30 @@ function textError(message: string) {
 }
 
 async function listNotesForTool(
-  notes: ReturnType<typeof createNoteService>,
   user: SessionUser,
   options: {
     folderId?: string;
     query?: string;
     recursive: boolean;
   },
-): Promise<
-  { notes: Awaited<ReturnType<typeof notes.listForUser>> } | { error: string }
-> {
-  let list: Awaited<ReturnType<typeof notes.listForUser>>;
-  if (options.folderId) {
-    const result = await notes.listFolderNotes(
-      user,
-      options.folderId,
-      options.recursive,
-    );
-    if (result.kind === "not_found") {
-      return { error: "Not found" };
-    }
-    if (result.kind === "denied") {
-      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
-    }
-    list = result.notes;
-  } else {
-    list = await notes.listForUser(user);
+): Promise<{ notes: unknown[] } | { error: string }> {
+  const response = await env.CATALOG.get(
+    env.CATALOG.idFromName(catalogObjectName(user)),
+  ).fetch(
+    catalogListRequest(user, {
+      folderId: options.folderId,
+      query: options.query,
+      recursive: options.recursive,
+    }),
+  );
+  const payload = (await response.json()) as {
+    error?: string;
+    notes?: unknown[];
+  };
+  if (!response.ok || payload.error) {
+    return { error: payload.error ?? "Invalid request" };
   }
-  const trimmedQuery = options.query?.trim();
-  if (trimmedQuery) {
-    const needle = trimmedQuery.toLowerCase();
-    list = list.filter((note) => note.title.toLowerCase().includes(needle));
-  }
-  return { notes: list };
+  return { notes: payload.notes ?? [] };
 }
 
 function medallionToolError(
@@ -640,7 +635,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
         if ("error" in target) {
           return textError(target.error);
         }
-        const result = await listNotesForTool(notes, user, {
+        const result = await listNotesForTool(user, {
           folderId: target.folderId,
           query,
           recursive: recursive ?? false,
