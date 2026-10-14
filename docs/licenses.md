@@ -14,7 +14,7 @@ MiyulabMD 本体は [GNU Affero General Public License v3.0 or later](../LICENSE
 
 ## 本番依存の許可
 
-`pnpm licenses:check` が本番ツリー（`pnpm licenses list --prod`）を見る。
+`pnpm licenses:check` が本番ツリー（`pnpm licenses list --prod --recursive`）を見る。
 
 許可する SPDX の例:
 

@@ -21,7 +21,8 @@ const LICENSE_FILE_RE = /^li[cs]en[cs]e/i;
  */
 function readPnpmLicenseReport() {
   return new Promise((resolve, reject) => {
-    const args = ["licenses", "list", "--prod", "--json"];
+    // pnpm 12 lists only the current project unless --recursive is set.
+    const args = ["licenses", "list", "--prod", "--json", "--recursive"];
     const shell = process.platform === "win32";
     // Windows の pnpm.cmd はシェル経由で起動する。外部入力を含まない固定コマンド。
     // shell:true に別途 args を渡さず、Node.js の DEP0190 も避ける。
@@ -49,7 +50,7 @@ function readPnpmLicenseReport() {
       if (code !== 0) {
         reject(
           new Error(
-            `pnpm licenses list --prod --json failed (${code})\n${stderr}`,
+            `pnpm licenses list --prod --json --recursive failed (${code})\n${stderr}`,
           ),
         );
         return;
