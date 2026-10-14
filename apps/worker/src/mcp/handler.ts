@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createMcpHandler } from "agents/mcp/server";
 
+import { wwwAuthenticate } from "../auth/oauth-policy.ts";
 import { authenticateBearer } from "../auth/tokens.ts";
 import { createMcpServerFactory } from "./tools.ts";
 
@@ -19,8 +20,15 @@ type McpExecutionContext = ExecutionContext & {
 export async function handleMcp(request: Request): Promise<Response> {
   const user = await authenticateBearer(request, env);
   if (!user) {
+    const origin = new URL(request.url).origin;
+    const invalidToken = Boolean(
+      request.headers.get("Authorization")?.startsWith("Bearer "),
+    );
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "WWW-Authenticate": wwwAuthenticate(origin, invalidToken),
+      },
       status: 401,
     });
   }

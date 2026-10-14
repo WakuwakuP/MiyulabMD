@@ -5,6 +5,7 @@ import {
   verifyAccessJwt,
 } from "../auth/access.ts";
 import { withApiSessionIdentity } from "../auth/api-response.ts";
+import { clearOAuthNextCookie, readOAuthNext } from "../auth/oauth-policy.ts";
 import {
   clearSessionCookieHeader,
   createSessionToken,
@@ -355,12 +356,15 @@ export async function handleEstablishSession(
     return new Response("Invalid session token", { status: 401 });
   }
 
-  return new Response(null, {
-    headers: {
-      "Cache-Control": "no-store",
-      Location: "/",
-      "Set-Cookie": sessionCookieFromToken(token, requestIsHttps(request)),
-    },
-    status: 302,
+  const secure = requestIsHttps(request);
+  const next = readOAuthNext(request);
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    Location: next ?? "/",
   });
+  headers.append("Set-Cookie", sessionCookieFromToken(token, secure));
+  if (request.headers.get("Cookie")?.includes("miyulabmd_oauth_next=")) {
+    headers.append("Set-Cookie", clearOAuthNextCookie(secure));
+  }
+  return new Response(null, { headers, status: 302 });
 }
