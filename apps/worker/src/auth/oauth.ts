@@ -640,7 +640,7 @@ function leaveConsent(
   }
   const headers = new Headers({
     "Cache-Control": "no-store",
-    Location: user ? "/auth/logout" : "/auth/login",
+    Location: user ? "/auth/logout?resume=login" : "/auth/login",
   });
   const returnPath = authorizeReturnPath(url);
   if (returnPath) {

@@ -145,7 +145,7 @@ test("dynamic registration, consent, PKCE exchange, and refresh", async (t) => {
     env,
   );
   assert.equal(switching.status, 302);
-  assert.equal(switching.headers.get("Location"), "/auth/logout");
+  assert.equal(switching.headers.get("Location"), "/auth/logout?resume=login");
   const nextCookie = switching.headers.get("Set-Cookie") ?? "";
   assert.match(nextCookie, /miyulabmd_oauth_next=/);
   assert.equal(nextCookie.includes("switch_account"), false);
