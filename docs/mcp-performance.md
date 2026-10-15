@@ -57,7 +57,9 @@ Workers Free の HTTP CPU 制限は 1 リクエスト 10 ms。代表的な読み
 
 `initialize` / `notifications/initialized` / `ping` と Modern の `server/discover` はツールを実行しないため、同じ `tools.listChanged` capability を宣言した新しい `Server` だけを作り、ツール登録と機能設定の DB 読み取りを省く。認証はその前の `handleMcp` で毎回行い、プロトコルの入力検証・応答・終了処理は SDK に委譲する。
 
-`tools/list` は `tool-catalog.ts` の不変な説明・入力スキーマから一覧を返す。公開 API の `Server.setRequestHandler("tools/list", ...)` を使い、実行コールバックやノートサービスを作らない。機能設定は毎回 DB から読み、現在のユーザーに対して有効なツールだけを抽出する。最大 38 回の `registerTool` が 0 回になり、登録時のスキーマ走査も省ける。説明・スキーマ・順序・capability は従来の全登録と一致することを、全 8 通りの機能設定と Legacy / Modern 両方の実 SDK 応答で差分検証している。
+本番の `handleMcp` では、妥当な Legacy の `initialize` / `ping` / 通知 / `tools/list` は SDK のサーバー構築前に返す。`tools/list` の説明・スキーマ・順序は `tool-catalog.ts` をその経路と共有する。Modern と、fast path が検証に落とすリクエストは factory の catalog / bootstrap サーバーに進む。
+
+`tools/list` は `tool-catalog.ts` の不変な説明・入力スキーマから一覧を返す。SDK 経路では公開 API の `Server.setRequestHandler("tools/list", ...)` を使い、実行コールバックやノートサービスを作らない。機能設定は毎回 DB から読み、現在のユーザーに対して有効なツールだけを抽出する。最大 38 回の `registerTool` が 0 回になり、登録時のスキーマ走査も省ける。説明・スキーマ・順序・capability は従来の全登録と一致することを、全 8 通りの機能設定と Legacy / Modern 両方の実 SDK 応答で差分検証している。
 
 小さく既知の `tools/call` は、最大 38 ツールのうち呼び出し対象だけを SDK に登録する。通常の 26 ツールは機能設定によって利用可否が変わらないため、機能設定の照会も省く。共通部分の D1 呼び出しは認証の 1 回になり、実際のツール内で行う DB / 権限確認は従来どおり実行する。
 
