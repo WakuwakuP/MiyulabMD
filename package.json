@@ -18,7 +18,7 @@
     "lint:fix": "biome lint --write .",
     "setup:deploy": "node scripts/setup-deploy.mjs",
     "storybook": "pnpm --filter @miyulabmd/web storybook",
-    "test": "pnpm -r --if-present test && node --test scripts/setup-deploy/*.test.mjs scripts/check-licenses/*.test.mjs",
+    "test": "pnpm -r --if-present test && node --test scripts/setup-deploy/*.test.mjs scripts/check-licenses/*.test.mjs scripts/lsmcp-tsc.test.mjs",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
