@@ -9,16 +9,18 @@ import {
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
+import {
+  catalogObjectName,
+  catalogReadRequest,
+} from "../durable-objects/catalog-list.ts";
 import { instanceFlags } from "../env.ts";
 import {
   buildAccessSnapshot,
   createOwnedFolder,
   deleteFolderPolicy,
-  ensureFolderRow,
   folderViewFlags,
   getFolderById,
   listFolderChildren,
-  listOwnedFolders,
   listPublicSharedFolders,
   listSharedFolders,
   parentFolderPath,
@@ -203,15 +205,18 @@ async function resolveCreateFolderPath(
 }
 
 export const folderRoutes = new Elysia({ prefix: "/api/folders" })
-  .get("/tree", async ({ request, set }) => {
+  .get("/tree", async ({ request }) => {
     const user = await readSession(request, env);
     if (!user) {
-      set.status = 401;
-      return { error: "Unauthorized" };
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        headers: { "content-type": "application/json" },
+        status: 401,
+      });
     }
-    await ensureFolderRow(env, user.id, "");
-    const folders = await listOwnedFolders(env, user.id);
-    return { folders };
+    const id = env.CATALOG.idFromName(catalogObjectName(user));
+    return env.CATALOG.get(id).fetch(
+      catalogReadRequest(user, request, "/tree"),
+    );
   })
   .get("/shared", async ({ request, set }) => {
     const user = await readSession(request, env);
