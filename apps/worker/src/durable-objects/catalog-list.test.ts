@@ -4,9 +4,31 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
 import { createNoteService } from "../services/notes.ts";
-import { catalogListRequest, handleCatalogList } from "./catalog-list.ts";
+import {
+  catalogListRequest,
+  catalogObjectName,
+  catalogQueryName,
+  handleCatalogList,
+} from "./catalog-list.ts";
 import { handleCatalogSearch, handleCatalogTree } from "./catalog-read.ts";
 import { handleCatalogTool } from "./catalog-tool.ts";
+
+test("catalog query objects stay off the shared guest list", () => {
+  const user = {
+    displayName: null,
+    email: "owner@example.com",
+    id: "11111111-1111-1111-1111-111111111111",
+  };
+  assert.equal(catalogObjectName(user), user.id);
+  assert.equal(catalogQueryName(user), `${user.id}:query`);
+  const guestNames = new Set(
+    Array.from({ length: 64 }, () => catalogQueryName(null)),
+  );
+  for (const name of guestNames) {
+    assert.match(name, /^guest:query:([0-9]|1[0-5])$/);
+  }
+  assert.ok(guestNames.size > 1);
+});
 
 const MIGRATIONS = [
   "0001_init.sql",

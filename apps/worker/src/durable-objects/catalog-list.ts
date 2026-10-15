@@ -15,6 +15,20 @@ export function catalogObjectName(user: SessionUser | null): string {
   return user?.id ?? CATALOG_GUEST_NAME;
 }
 
+/**
+ * 検索と MCP の読み取りは一覧とは別オブジェクトにする。
+ * ゲストは 16 分割し、公開一覧を止めたまま検索同士も直列にしない。
+ */
+export function catalogQueryName(user: SessionUser | null): string {
+  if (user) {
+    return `${user.id}:query`;
+  }
+  const bytes = new Uint8Array(1);
+  crypto.getRandomValues(bytes);
+  const shard = (bytes[0] ?? 0) & 15;
+  return `${CATALOG_GUEST_NAME}:query:${shard}`;
+}
+
 function catalogUserHeaders(user: SessionUser | null): Headers {
   const headers = new Headers();
   if (user) {

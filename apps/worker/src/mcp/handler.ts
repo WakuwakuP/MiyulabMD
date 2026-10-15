@@ -4,7 +4,7 @@ import { createMcpHandler } from "agents/mcp/server";
 import { wwwAuthenticate } from "../auth/oauth-policy.ts";
 import { authenticateBearer } from "../auth/tokens.ts";
 import {
-  catalogObjectName,
+  catalogQueryName,
   catalogToolRequest,
 } from "../durable-objects/catalog-list.ts";
 import { OFFLOAD_BODY_LIMIT, offloadToolName } from "./offload-classify.ts";
@@ -86,7 +86,7 @@ async function dispatchReadTool(
   if (buffered.overflow || !offloadToolName(buffered.raw, request.headers)) {
     return replay(request, buffered.raw);
   }
-  return env.CATALOG.get(env.CATALOG.idFromName(catalogObjectName(user))).fetch(
+  return env.CATALOG.get(env.CATALOG.idFromName(catalogQueryName(user))).fetch(
     catalogToolRequest(user, buffered.raw),
   );
 }

@@ -14,6 +14,10 @@ import {
 } from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
+import {
+  catalogQueryName,
+  catalogToolRequest,
+} from "../durable-objects/catalog-list.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import {
   actorFromAgent,
@@ -65,7 +69,6 @@ import {
 } from "../services/schemes.ts";
 
 import { featureConfig } from "./feature-config.ts";
-import { runReadTool } from "./read-tools.ts";
 import { getMcpRequestTarget } from "./request-target.ts";
 import { toolDefinitions } from "./tool-definitions.ts";
 import { withToolTiming } from "./tool-timing.ts";
@@ -562,7 +565,26 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
     if (!user) {
       return textError("Unauthorized");
     }
-    return await runReadTool(env, user, name, args);
+    // SDK に落ちたときも一覧・検索の CPU は CatalogRoom に残す。
+    const raw = JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: { arguments: args, name },
+    });
+    const response = await env.CATALOG.get(
+      env.CATALOG.idFromName(catalogQueryName(user)),
+    ).fetch(catalogToolRequest(user, raw));
+    const line = (await response.text())
+      .split("\n")
+      .find((item) => item.startsWith("data: "));
+    if (!line) {
+      return textError("Invalid request");
+    }
+    const payload = JSON.parse(line.slice("data: ".length)) as {
+      result?: ReturnType<typeof textResult>;
+    };
+    return payload.result ?? textError("Invalid request");
   }
 
   registerTool(

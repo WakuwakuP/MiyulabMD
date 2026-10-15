@@ -4,7 +4,7 @@ import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
 import {
-  catalogObjectName,
+  catalogQueryName,
   catalogReadRequest,
 } from "../durable-objects/catalog-list.ts";
 
@@ -21,7 +21,7 @@ function forwardSearch(
   user: Parameters<typeof catalogReadRequest>[0],
   path: string,
 ) {
-  const id = env.CATALOG.idFromName(catalogObjectName(user));
+  const id = env.CATALOG.idFromName(catalogQueryName(user));
   return env.CATALOG.get(id).fetch(catalogReadRequest(user, request, path));
 }
 
