@@ -15,10 +15,21 @@ export function catalogObjectName(user: SessionUser | null): string {
   return user?.id ?? CATALOG_GUEST_NAME;
 }
 
-export function catalogListRequest(
-  user: SessionUser | null,
-  query?: CatalogListQuery,
-): Request {
+/**
+ * 検索と MCP の読み取りは一覧とは別オブジェクトにする。
+ * ゲストは 16 分割し、公開一覧を止めたまま検索同士も直列にしない。
+ */
+export function catalogQueryName(user: SessionUser | null): string {
+  if (user) {
+    return `${user.id}:query`;
+  }
+  const bytes = new Uint8Array(1);
+  crypto.getRandomValues(bytes);
+  const shard = (bytes[0] ?? 0) & 15;
+  return `${CATALOG_GUEST_NAME}:query:${shard}`;
+}
+
+function catalogUserHeaders(user: SessionUser | null): Headers {
   const headers = new Headers();
   if (user) {
     headers.set(
@@ -29,6 +40,14 @@ export function catalogListRequest(
       }),
     );
   }
+  return headers;
+}
+
+export function catalogListRequest(
+  user: SessionUser | null,
+  query?: CatalogListQuery,
+): Request {
+  const headers = catalogUserHeaders(user);
   if (!query) {
     return new Request("https://catalog.internal/list", { headers });
   }
@@ -40,7 +59,33 @@ export function catalogListRequest(
   });
 }
 
-function readCatalogUser(request: Request): SessionUser | null | "invalid" {
+/** 入口がバッファした tools/call 本文を、結果を Worker で組まずに実行する。 */
+export function catalogToolRequest(user: SessionUser, raw: string): Request {
+  const headers = catalogUserHeaders(user);
+  headers.set("content-type", "application/json");
+  return new Request("https://catalog.internal/tool", {
+    body: raw,
+    headers,
+    method: "POST",
+  });
+}
+
+/** GET の検索・フォルダツリー。クエリは URL のまま渡し、本文は Worker で組まない。 */
+export function catalogReadRequest(
+  user: SessionUser | null,
+  request: Request,
+  path: string,
+): Request {
+  const inbound = new URL(request.url);
+  return new Request(`https://catalog.internal${path}${inbound.search}`, {
+    headers: catalogUserHeaders(user),
+    method: "GET",
+  });
+}
+
+export function readCatalogUser(
+  request: Request,
+): SessionUser | null | "invalid" {
   const raw = request.headers.get(CATALOG_USER_HEADER);
   if (!raw) {
     return null;
@@ -87,7 +132,7 @@ function readListQuery(value: unknown): CatalogListQuery | "invalid" {
   };
 }
 
-async function listForCatalog(
+export async function queryCatalogNotes(
   env: Env,
   user: SessionUser,
   query: CatalogListQuery,
@@ -180,7 +225,7 @@ export async function handleCatalogList(
   if (query instanceof Response) {
     return query;
   }
-  const result = await listForCatalog(env, user, query);
+  const result = await queryCatalogNotes(env, user, query);
   if ("error" in result) {
     return Response.json(
       { error: result.error },

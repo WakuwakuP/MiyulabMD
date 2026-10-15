@@ -4,7 +4,31 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
 import { createNoteService } from "../services/notes.ts";
-import { catalogListRequest, handleCatalogList } from "./catalog-list.ts";
+import {
+  catalogListRequest,
+  catalogObjectName,
+  catalogQueryName,
+  handleCatalogList,
+} from "./catalog-list.ts";
+import { handleCatalogSearch, handleCatalogTree } from "./catalog-read.ts";
+import { handleCatalogTool } from "./catalog-tool.ts";
+
+test("catalog query objects stay off the shared guest list", () => {
+  const user = {
+    displayName: null,
+    email: "owner@example.com",
+    id: "11111111-1111-1111-1111-111111111111",
+  };
+  assert.equal(catalogObjectName(user), user.id);
+  assert.equal(catalogQueryName(user), `${user.id}:query`);
+  const guestNames = new Set(
+    Array.from({ length: 64 }, () => catalogQueryName(null)),
+  );
+  for (const name of guestNames) {
+    assert.match(name, /^guest:query:([0-9]|1[0-5])$/);
+  }
+  assert.ok(guestNames.size > 1);
+});
 
 const MIGRATIONS = [
   "0001_init.sql",
@@ -215,4 +239,114 @@ test("catalog list rejects a bad user header and a guest tool query", async (t) 
     }),
   );
   assert.equal(guestTool.status, 401);
+});
+
+function userHeader(user: { email: string; id: string }) {
+  return {
+    "content-type": "application/json",
+    "x-catalog-user": JSON.stringify({ email: user.email, id: user.id }),
+  };
+}
+
+function toolCall(name: string, args: object, id: number | string = 7) {
+  return JSON.stringify({
+    id,
+    jsonrpc: "2.0",
+    method: "tools/call",
+    params: { arguments: args, name },
+  });
+}
+
+function rpcText(body: string): {
+  result?: { content?: { text: string }[]; isError?: boolean };
+} {
+  const line = body.split("\n").find((item) => item.startsWith("data: "));
+  assert.ok(line);
+  return JSON.parse(line.slice("data: ".length));
+}
+
+test("catalog tool returns list_notes as SSE without a worker parse", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+
+  const response = await handleCatalogTool(
+    env,
+    new Request("https://catalog.internal/tool", {
+      body: toolCall("list_notes", { query: "public" }),
+      headers: userHeader(owner),
+      method: "POST",
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/event-stream");
+  const payload = rpcText(await response.text());
+  const notes = JSON.parse(payload.result?.content?.[0]?.text ?? "{}") as {
+    notes: { title: string }[];
+  };
+  assert.deepEqual(
+    notes.notes.map((note) => note.title),
+    ["Public"],
+  );
+
+  const hidden = await handleCatalogTool(
+    env,
+    new Request("https://catalog.internal/tool", {
+      body: toolCall("list_notes", {}),
+      headers: userHeader(viewer),
+      method: "POST",
+    }),
+  );
+  const viewerNotes = JSON.parse(
+    rpcText(await hidden.text()).result?.content?.[0]?.text ?? "{}",
+  ) as { notes: { title: string }[] };
+  assert.deepEqual(
+    viewerNotes.notes.map((note) => note.title),
+    ["Public"],
+  );
+});
+
+test("catalog tool keeps validation errors inside the tool result", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const response = await handleCatalogTool(
+    env,
+    new Request("https://catalog.internal/tool", {
+      body: toolCall("list_folder_entries", { limit: 0 }),
+      headers: userHeader(owner),
+      method: "POST",
+    }),
+  );
+  const payload = rpcText(await response.text());
+  assert.equal(payload.result?.isError, true);
+  assert.match(
+    payload.result?.content?.[0]?.text ?? "",
+    /Input validation error/,
+  );
+});
+
+test("catalog search and tree run for the header user", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const search = await handleCatalogSearch(
+    env,
+    new Request(
+      "https://catalog.internal/search/notes?query=Public&scope=title",
+      {
+        headers: userHeader(owner),
+      },
+    ),
+  );
+  assert.equal(search.status, 200);
+  const body = (await search.json()) as { notes: { title: string }[] };
+  assert.ok(body.notes.some((note) => note.title === "Public"));
+
+  const tree = await handleCatalogTree(
+    env,
+    new Request("https://catalog.internal/tree", {
+      headers: userHeader(owner),
+    }),
+  );
+  assert.equal(tree.status, 200);
+  const folders = (await tree.json()) as { folders: unknown[] };
+  assert.ok(folders.folders.length > 0);
 });

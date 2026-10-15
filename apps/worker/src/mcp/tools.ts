@@ -15,8 +15,8 @@ import {
 import { getMcpAuthContext } from "agents/mcp/server";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
 import {
-  catalogListRequest,
-  catalogObjectName,
+  catalogQueryName,
+  catalogToolRequest,
 } from "../durable-objects/catalog-list.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
 import {
@@ -28,14 +28,6 @@ import {
   markdownOutline,
   numberMarkdownLines,
 } from "../durable-objects/markdown-edit.ts";
-import {
-  buildAccessSnapshot,
-  ensureFolderRow,
-  folderViewFlags,
-  getFolderById,
-  getFolderByPath,
-  listFolderChildren,
-} from "../services/access.ts";
 import {
   type DeleteEmptyFolderOutcome,
   deleteEmptyFolder,
@@ -68,7 +60,6 @@ import {
 import { paraArchiveProject, paraList } from "../services/para.ts";
 import {
   createSchemeChild,
-  folderIdsForSchemeId,
   jdAllocateId,
   jdListCategory,
   type SchemeError,
@@ -113,33 +104,6 @@ function textError(message: string) {
   };
 }
 
-async function listNotesForTool(
-  user: SessionUser,
-  options: {
-    folderId?: string;
-    query?: string;
-    recursive: boolean;
-  },
-): Promise<{ notes: unknown[] } | { error: string }> {
-  const response = await env.CATALOG.get(
-    env.CATALOG.idFromName(catalogObjectName(user)),
-  ).fetch(
-    catalogListRequest(user, {
-      folderId: options.folderId,
-      query: options.query,
-      recursive: options.recursive,
-    }),
-  );
-  const payload = (await response.json()) as {
-    error?: string;
-    notes?: unknown[];
-  };
-  if (!response.ok || payload.error) {
-    return { error: payload.error ?? "Invalid request" };
-  }
-  return { notes: payload.notes ?? [] };
-}
-
 function medallionToolError(
   result: Exclude<MedallionResult<unknown>, { kind: "ok" }>,
 ) {
@@ -165,31 +129,6 @@ function deniedToolError(result: { status: number; code?: string }) {
     );
   }
   return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
-}
-
-/** folder_id か scheme_id（`15.22` 等）から対象フォルダ UUID を決める。 */
-async function folderIdArg(
-  user: SessionUser,
-  folderId: string | undefined,
-  schemeId: string | undefined,
-): Promise<{ folderId?: string } | { error: string }> {
-  if (!schemeId) {
-    return { folderId };
-  }
-  if (folderId) {
-    return { error: "Specify either folder_id or scheme_id, not both" };
-  }
-  const resolved = await folderIdsForSchemeId(env, user.id, schemeId);
-  if (resolved.length === 0) {
-    return { error: "Not found" };
-  }
-  if (resolved.length > 1) {
-    return {
-      error:
-        "scheme_id is ambiguous across multiple scheme roots; specify folder_id instead",
-    };
-  }
-  return { folderId: resolved[0] };
 }
 
 const MOVE_OVERLOAD_MESSAGE =
@@ -621,86 +560,44 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
     }
   }
 
+  async function readTool(name: string, args: object) {
+    const user = requireUser();
+    if (!user) {
+      return textError("Unauthorized");
+    }
+    // SDK に落ちたときも一覧・検索の CPU は CatalogRoom に残す。
+    const raw = JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: { arguments: args, name },
+    });
+    const response = await env.CATALOG.get(
+      env.CATALOG.idFromName(catalogQueryName(user)),
+    ).fetch(catalogToolRequest(user, raw));
+    const line = (await response.text())
+      .split("\n")
+      .find((item) => item.startsWith("data: "));
+    if (!line) {
+      return textError("Invalid request");
+    }
+    const payload = JSON.parse(line.slice("data: ".length)) as {
+      result?: ReturnType<typeof textResult>;
+    };
+    return payload.result ?? textError("Invalid request");
+  }
+
   registerTool(
     "list_notes",
     toolDefinitions.list_notes,
-    withToolTiming(
-      "list_notes",
-      async ({ folder_id, query, recursive, scheme_id }) => {
-        const user = requireUser();
-        if (!user) {
-          return textError("Unauthorized");
-        }
-        const target = await folderIdArg(user, folder_id, scheme_id);
-        if ("error" in target) {
-          return textError(target.error);
-        }
-        const result = await listNotesForTool(user, {
-          folderId: target.folderId,
-          query,
-          recursive: recursive ?? false,
-        });
-        if ("error" in result) {
-          return textError(result.error);
-        }
-        return textResult({ notes: result.notes });
-      },
-    ),
+    withToolTiming("list_notes", async (args) => readTool("list_notes", args)),
   );
 
   registerTool(
     "list_folder_entries",
     toolDefinitions.list_folder_entries,
-    withToolTiming(
-      "list_folder_entries",
-      async ({ cursor, folder_id, limit }) => {
-        const user = requireUser();
-        if (!user) {
-          return textError("Unauthorized");
-        }
-
-        let ownerId = user.id;
-        let folderPath = "";
-        let currentId: string | null;
-        if (folder_id) {
-          const rec = await getFolderById(env, folder_id);
-          if (!rec) {
-            return textError("Not found");
-          }
-          ownerId = rec.owner_id;
-          folderPath = rec.folder;
-          currentId = rec.id;
-        } else {
-          const root = await getFolderByPath(env, user.id, "");
-          currentId = root?.id ?? (await ensureFolderRow(env, user.id, ""));
-        }
-
-        const snapshot =
-          user.id === ownerId
-            ? undefined
-            : await buildAccessSnapshot(env, [ownerId]);
-        const flags = await folderViewFlags(
-          env,
-          ownerId,
-          folderPath,
-          user,
-          snapshot,
-        );
-        if (!flags.canView) {
-          return textError("Not found");
-        }
-        return textResult(
-          await listFolderChildren(
-            env,
-            ownerId,
-            folderPath,
-            currentId,
-            user,
-            { cursor, includeNoteCounts: false, limit },
-            snapshot,
-          ),
-        );
-      },
+    withToolTiming("list_folder_entries", async (args) =>
+      readTool("list_folder_entries", args),
     ),
   );
 
@@ -932,102 +829,15 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
   registerTool(
     "search_notes",
     toolDefinitions.search_notes,
-    withToolTiming(
-      "search_notes",
-      async ({ query, scope, folder_id, layer, limit, cursor, scheme_id }) => {
-        const user = requireUser();
-        if (!user) {
-          return textError("Unauthorized");
-        }
-
-        const trimmedQuery = query.trim();
-        if (!trimmedQuery) {
-          return textError("query is required");
-        }
-        const target = await folderIdArg(user, folder_id, scheme_id);
-        if ("error" in target) {
-          return textError(target.error);
-        }
-
-        const result = await notes.searchNotes(user, {
-          cursor,
-          folderIds: target.folderId ? [target.folderId] : undefined,
-          layer,
-          limit,
-          query: trimmedQuery,
-          scope,
-        });
-        if (result.kind === "not_found") {
-          return textError("Not found");
-        }
-        return textResult({
-          next_cursor: result.nextCursor,
-          notes: result.notes,
-          query: trimmedQuery,
-        });
-      },
+    withToolTiming("search_notes", async (args) =>
+      readTool("search_notes", args),
     ),
   );
 
   registerTool(
     "grep_notes",
     toolDefinitions.grep_notes,
-    withToolTiming(
-      "grep_notes",
-      async ({
-        pattern,
-        case_sensitive,
-        context_after,
-        context_before,
-        fixed_string,
-        folder_id,
-        glob_title,
-        max_matches_per_note,
-        max_notes,
-        scheme_id,
-      }) => {
-        const user = requireUser();
-        if (!user) {
-          return textError("Unauthorized");
-        }
-        const target = await folderIdArg(user, folder_id, scheme_id);
-        if ("error" in target) {
-          return textError(target.error);
-        }
-
-        const result = await notes.grep(user, {
-          caseSensitive: case_sensitive,
-          contextAfter: context_after,
-          contextBefore: context_before,
-          fixedString: fixed_string,
-          folderIds: target.folderId ? [target.folderId] : undefined,
-          globTitle: glob_title,
-          maxMatchesPerNote: max_matches_per_note,
-          maxNotes: max_notes,
-          pattern,
-        });
-        if (result.kind === "not_found") {
-          return textError("Not found");
-        }
-        if (result.kind === "bad_request") {
-          return textError(result.error);
-        }
-        return textResult({
-          matches: result.matches.map((match) => ({
-            after: match.after,
-            before: match.before,
-            column: match.column,
-            line: match.line,
-            note_id: match.noteId,
-            snapshot_updated_at: match.snapshotUpdatedAt,
-            text: match.text,
-            title: match.title,
-          })),
-          scanned_notes: result.scannedNotes,
-          truncated: result.truncated,
-        });
-      },
-    ),
+    withToolTiming("grep_notes", async (args) => readTool("grep_notes", args)),
   );
 
   registerTool(
