@@ -8,7 +8,7 @@ args = [
   "exec",
   "lsmcp",
   "--bin",
-  "tsc --lsp --stdio",
+  "node scripts/lsmcp-tsc.mjs",
   "--files",
   "**/*.ts,**/*.tsx,**/*.d.ts",
 ]

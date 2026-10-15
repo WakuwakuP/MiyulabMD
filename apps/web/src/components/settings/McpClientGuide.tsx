@@ -52,7 +52,7 @@ export function McpClientGuide({ origin, token }: Props) {
           ))}
         </ul>
       )}
-      {!token && (
+      {guide.requiresToken && !token && (
         <MutedText className="mt-2">
           トークンは発行直後に一度だけ表示されます。下の{" "}
           <code className="font-mono">{MCP_TOKEN_PLACEHOLDER}</code>{" "}

@@ -4,6 +4,7 @@ import { Elysia } from "elysia";
 import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { isAccessConfigured } from "./auth/access.ts";
 import { withApiSessionIdentity } from "./auth/api-response.ts";
+import { handleOAuthHttp } from "./auth/oauth.ts";
 import { readSession } from "./auth/session.ts";
 import { envTruthy } from "./env.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
@@ -33,6 +34,7 @@ import {
   notePageId,
 } from "./ssr/inject-note-page.ts";
 
+export { CatalogRoom } from "./durable-objects/CatalogRoom.ts";
 export { DocumentRoom } from "./durable-objects/DocumentRoom.ts";
 
 const api = new Elysia({ adapter: CloudflareAdapter })
@@ -70,6 +72,15 @@ const api = new Elysia({ adapter: CloudflareAdapter })
 function noteIdFromWsPath(pathname: string): string | null {
   const match = /^\/ws\/notes\/([^/]+)$/.exec(pathname);
   return match?.[1] ?? null;
+}
+
+function isOAuthPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/.well-known/oauth-") ||
+    pathname === "/oauth/authorize" ||
+    pathname === "/oauth/token" ||
+    pathname === "/oauth/register"
+  );
 }
 
 function isElysiaPath(pathname: string): boolean {
@@ -257,6 +268,10 @@ export default {
 
     if (isElysiaPath(pathname)) {
       return api.fetch(request);
+    }
+
+    if (isOAuthPath(pathname)) {
+      return handleOAuthHttp(request, env);
     }
 
     return env.ASSETS.fetch(request);

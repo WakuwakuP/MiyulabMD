@@ -111,6 +111,15 @@ test("mcpAgentGuide covers every client with endpoint and token", () => {
     assert.equal(guide.id, id);
     assert.ok(guide.snippets.length > 0);
     assert.ok(guide.snippets.some((snippet) => snippet.value.includes(origin)));
-    assert.ok(guide.snippets.some((snippet) => snippet.value.includes(token)));
+    if (guide.requiresToken) {
+      assert.ok(
+        guide.snippets.some((snippet) => snippet.value.includes(token)),
+      );
+    } else {
+      assert.equal(
+        guide.snippets.some((snippet) => snippet.value.includes(token)),
+        false,
+      );
+    }
   }
 });
