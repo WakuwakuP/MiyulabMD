@@ -1,4 +1,5 @@
 const OFFLOAD_TOOLS = new Set([
+  "get_note",
   "grep_notes",
   "list_folder_entries",
   "list_notes",

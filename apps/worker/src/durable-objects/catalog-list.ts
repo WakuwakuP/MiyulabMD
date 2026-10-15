@@ -32,15 +32,20 @@ export function catalogQueryName(user: SessionUser | null): string {
 function catalogUserHeaders(user: SessionUser | null): Headers {
   const headers = new Headers();
   if (user) {
-    headers.set(
-      CATALOG_USER_HEADER,
-      JSON.stringify({
-        email: user.email,
-        id: user.id,
-      }),
-    );
+    headers.set(CATALOG_USER_HEADER, JSON.stringify(catalogUserPayload(user)));
   }
   return headers;
+}
+
+function catalogUserPayload(user: SessionUser) {
+  const payload: { displayName?: string; email: string; id: string } = {
+    email: user.email,
+    id: user.id,
+  };
+  if (user.displayName) {
+    payload.displayName = encodeURIComponent(user.displayName);
+  }
+  return payload;
 }
 
 export function catalogListRequest(
@@ -104,11 +109,21 @@ export function readCatalogUser(
     return "invalid";
   }
   return {
-    displayName:
-      typeof candidate.displayName === "string" ? candidate.displayName : null,
+    displayName: decodeDisplayName(candidate.displayName),
     email: candidate.email,
     id: candidate.id,
   };
+}
+
+function decodeDisplayName(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }
 
 function readListQuery(value: unknown): CatalogListQuery | "invalid" {

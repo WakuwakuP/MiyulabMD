@@ -1,6 +1,10 @@
 import type { SessionUser } from "@miyulabmd/shared";
 import { queryCatalogNotes } from "../durable-objects/catalog-list.ts";
 import {
+  markdownOutline,
+  numberMarkdownLines,
+} from "../durable-objects/markdown-edit.ts";
+import {
   buildAccessSnapshot,
   ensureFolderRow,
   folderViewFlags,
@@ -228,6 +232,41 @@ async function grepNotes(
   });
 }
 
+async function getNote(
+  env: Env,
+  user: SessionUser,
+  args: Readonly<Record<string, unknown>>,
+): Promise<ReadToolResult> {
+  const id = stringField(args, "id");
+  if (!id) {
+    return textError("Not found");
+  }
+  const notes = createNoteService(env);
+  const result = await notes.get(id, user);
+  if (result.kind === "not_found") {
+    return textError("Not found");
+  }
+  if (result.kind === "denied") {
+    return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
+  }
+  if (result.kind !== "ok") {
+    return textError("Not found");
+  }
+  const note = result.note;
+  const markdown = await env.DOCUMENT_ROOM.get(
+    env.DOCUMENT_ROOM.idFromName(note.id),
+  ).readForAgent(note.id, {
+    displayName: user.displayName?.trim() || user.email,
+    userId: user.id,
+  });
+  const numbered = booleanField(args, "numbered");
+  return textResult({
+    note: { ...note, markdown },
+    outline: markdownOutline(markdown),
+    ...(numbered ? { numberedMarkdown: numberMarkdownLines(markdown) } : {}),
+  });
+}
+
 export async function runReadTool(
   env: Env,
   user: SessionUser,
@@ -244,6 +283,8 @@ export async function runReadTool(
       return await searchNotes(env, user, record);
     case "grep_notes":
       return await grepNotes(env, user, record);
+    case "get_note":
+      return await getNote(env, user, record);
     default:
       return textError("Not found");
   }

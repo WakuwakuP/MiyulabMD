@@ -23,11 +23,7 @@ import {
   actorFromAgent,
   actorFromSessionUser,
 } from "../durable-objects/history-edit.ts";
-import {
-  type InsertPosition,
-  markdownOutline,
-  numberMarkdownLines,
-} from "../durable-objects/markdown-edit.ts";
+import type { InsertPosition } from "../durable-objects/markdown-edit.ts";
 import {
   type DeleteEmptyFolderOutcome,
   deleteEmptyFolder,
@@ -604,35 +600,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
   registerTool(
     "get_note",
     toolDefinitions.get_note,
-    withToolTiming("get_note", async ({ id, numbered }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      const result = await notes.get(id, user);
-      if (result.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (result.kind === "denied") {
-        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
-      }
-
-      const note = result.note;
-      const markdown = await documentRoom(note.id).readForAgent(
-        note.id,
-        agentOf(user),
-      );
-      const live = { ...note, markdown };
-
-      return textResult({
-        note: live,
-        outline: markdownOutline(markdown),
-        ...(numbered
-          ? { numberedMarkdown: numberMarkdownLines(markdown) }
-          : {}),
-      });
-    }),
+    withToolTiming("get_note", async (args) => readTool("get_note", args)),
   );
 
   registerTool(
