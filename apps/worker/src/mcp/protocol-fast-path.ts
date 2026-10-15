@@ -2,8 +2,11 @@ import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/server";
 
 import { toolDefinitions } from "./tool-definitions.ts";
 
+const FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28";
+const PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
+
 const LEGACY_PROTOCOL_VERSIONS = SUPPORTED_PROTOCOL_VERSIONS.filter(
-  (version) => version < "2026-07-28",
+  (version) => version < FIRST_MODERN_PROTOCOL_VERSION,
 );
 const PREFERRED_PROTOCOL_VERSION = LEGACY_PROTOCOL_VERSIONS[0] ?? "2025-11-25";
 
@@ -163,7 +166,7 @@ function decideMessage(
 function handledResponse(
   body: Record<string, unknown>,
 ): FastMcpDecision | null {
-  if (typeof body.method !== "string") {
+  if (typeof body.method !== "string" || hasModernClaim(body.params)) {
     return null;
   }
   if (!("id" in body)) {
@@ -224,6 +227,9 @@ function initializeResult(params: unknown): {
     return null;
   }
   if (typeof params.protocolVersion !== "string") {
+    return null;
+  }
+  if (params.protocolVersion >= FIRST_MODERN_PROTOCOL_VERSION) {
     return null;
   }
   if (!(isRecord(params.capabilities) && isClientInfo(params.clientInfo))) {
@@ -305,9 +311,23 @@ function isMetaObject(params: unknown): boolean {
   return params === undefined || isRecord(params);
 }
 
+function hasModernClaim(params: unknown): boolean {
+  if (!isRecord(params)) {
+    return false;
+  }
+  if (
+    typeof params.protocolVersion === "string" &&
+    params.protocolVersion >= FIRST_MODERN_PROTOCOL_VERSION
+  ) {
+    return true;
+  }
+  const meta = params._meta;
+  return isRecord(meta) && PROTOCOL_VERSION_META_KEY in meta;
+}
+
 function modernProtocol(headers: Headers): boolean {
   const version = headers.get("mcp-protocol-version")?.trim() ?? "";
-  return version >= "2026-07-28";
+  return version >= FIRST_MODERN_PROTOCOL_VERSION;
 }
 
 function unsupportedProtocol(headers: Headers): Response | null {

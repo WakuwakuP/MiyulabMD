@@ -150,6 +150,36 @@ test("invalid initialize and modern requests stay on the SDK", () => {
     headers({ "MCP-Protocol-Version": "2026-07-28" }),
   );
   assert.equal(modern.kind, "passthrough");
+
+  const bodyOnly = decideFastMcp(
+    message(
+      "initialize",
+      {
+        capabilities: {},
+        clientInfo: { name: "Cursor", version: "1" },
+        protocolVersion: "2026-07-28",
+      },
+      1,
+    ),
+    new Headers({
+      Accept: "application/json, text/event-stream",
+    }),
+  );
+  assert.equal(bodyOnly.kind, "passthrough");
+
+  const enveloped = decideFastMcp(
+    message(
+      "tools/list",
+      {
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        },
+      },
+      1,
+    ),
+    headers(),
+  );
+  assert.equal(enveloped.kind, "passthrough");
 });
 
 test("client notifications are accepted without the SDK", () => {
