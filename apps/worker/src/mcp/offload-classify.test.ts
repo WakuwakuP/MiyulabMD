@@ -23,7 +23,7 @@ test("offload accepts the measured read tools and leaves everything else", () =>
   const entries = call.replace("list_notes", "list_folder_entries");
   assert.equal(offloadToolName(entries, headers()), "list_folder_entries");
   const getNote = call.replace("list_notes", "get_note");
-  assert.equal(offloadToolName(getNote, headers()), null);
+  assert.equal(offloadToolName(getNote, headers()), "get_note");
 });
 
 test("offload refuses a mismatched modern tool name", () => {

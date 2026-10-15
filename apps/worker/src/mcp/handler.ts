@@ -7,7 +7,9 @@ import {
   catalogQueryName,
   catalogToolRequest,
 } from "../durable-objects/catalog-list.ts";
+import { featureConfig } from "./feature-config.ts";
 import { OFFLOAD_BODY_LIMIT, offloadToolName } from "./offload-classify.ts";
+import { decideFastMcp, toolsListResponse } from "./protocol-fast-path.ts";
 import { createMcpServerFactory } from "./tools.ts";
 
 const mcpHandler = createMcpHandler(createMcpServerFactory, {
@@ -65,6 +67,7 @@ function concatChunks(chunks: Uint8Array[]): Uint8Array {
 
 /**
  * 重い読み取りは CatalogRoom が組んだ SSE をそのまま返す。
+ * セッション開始と tools/list は SDK を通さず返す。
  * それ以外は本文を戻して SDK に渡す。
  */
 async function dispatchReadTool(
@@ -83,12 +86,22 @@ async function dispatchReadTool(
     return request;
   }
   const buffered = await bufferedBody(request);
-  if (buffered.overflow || !offloadToolName(buffered.raw, request.headers)) {
+  if (buffered.overflow) {
     return replay(request, buffered.raw);
   }
-  return env.CATALOG.get(env.CATALOG.idFromName(catalogQueryName(user))).fetch(
-    catalogToolRequest(user, buffered.raw),
-  );
+  if (offloadToolName(buffered.raw, request.headers)) {
+    return env.CATALOG.get(
+      env.CATALOG.idFromName(catalogQueryName(user)),
+    ).fetch(catalogToolRequest(user, buffered.raw));
+  }
+  const decision = decideFastMcp(buffered.raw, request.headers);
+  if (decision.kind === "response") {
+    return decision.response;
+  }
+  if (decision.kind === "tools-list") {
+    return toolsListResponse(decision.id, await featureConfig(env, user));
+  }
+  return replay(request, buffered.raw);
 }
 
 /**

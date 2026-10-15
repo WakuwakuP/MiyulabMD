@@ -9,6 +9,7 @@ import {
   catalogObjectName,
   catalogQueryName,
   handleCatalogList,
+  readCatalogUser,
 } from "./catalog-list.ts";
 import { handleCatalogSearch, handleCatalogTree } from "./catalog-read.ts";
 import { handleCatalogTool } from "./catalog-tool.ts";
@@ -205,7 +206,7 @@ test("catalog list uses listForUser for the header user and listForGuest otherwi
   assert.deepEqual(titles(await asGuest.json()), ["Public"]);
 });
 
-test("catalog list request drops display names that headers cannot carry", () => {
+test("catalog user header carries a percent-encoded display name", () => {
   const request = catalogListRequest({
     displayName: "宮",
     email: "owner@example.com",
@@ -214,9 +215,13 @@ test("catalog list request drops display names that headers cannot carry", () =>
   const raw = request.headers.get("x-catalog-user");
   assert.equal(typeof raw, "string");
   assert.deepEqual(JSON.parse(raw ?? ""), {
+    displayName: encodeURIComponent("宮"),
     email: "owner@example.com",
     id: "11111111-1111-1111-1111-111111111111",
   });
+  const user = readCatalogUser(request);
+  assert.ok(user && user !== "invalid");
+  assert.equal(user.displayName, "宮");
 });
 
 test("catalog list rejects a bad user header and a guest tool query", async (t) => {
@@ -322,6 +327,73 @@ test("catalog tool keeps validation errors inside the tool result", async (t) =>
     payload.result?.content?.[0]?.text ?? "",
     /Input validation error/,
   );
+});
+
+test("catalog tool reads get_note from the document room", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const rows = sqlite.prepare("SELECT id, title FROM notes").all() as {
+    id: string;
+    title: string;
+  }[];
+  const visible = rows.find((row) => row.title === "Public");
+  const secret = rows.find((row) => row.title === "Secret");
+  assert.ok(visible);
+  assert.ok(secret);
+  const seen: { displayName: string; userId: string }[] = [];
+  Object.assign(env, {
+    DOCUMENT_ROOM: {
+      get: () => ({
+        readForAgent: (
+          _noteId: string,
+          agent: { displayName: string; userId: string },
+        ) => {
+          seen.push(agent);
+          return Promise.resolve("# Public\n");
+        },
+      }),
+      idFromName: (name: string) => name,
+    },
+  });
+
+  const response = await handleCatalogTool(
+    env,
+    new Request("https://catalog.internal/tool", {
+      body: toolCall("get_note", { id: visible.id, numbered: true }),
+      headers: {
+        "content-type": "application/json",
+        "x-catalog-user": JSON.stringify({
+          displayName: encodeURIComponent("宮"),
+          email: owner.email,
+          id: owner.id,
+        }),
+      },
+      method: "POST",
+    }),
+  );
+  const payload = rpcText(await response.text());
+  const text = payload.result?.content?.[0]?.text ?? "";
+  const body = JSON.parse(text) as {
+    note: { markdown: string };
+    numberedMarkdown: string;
+    outline: { text: string }[];
+  };
+  assert.equal(body.note.markdown, "# Public\n");
+  assert.equal(body.outline[0]?.text, "Public");
+  assert.match(body.numberedMarkdown, /1\|# Public/);
+  assert.deepEqual(seen, [{ displayName: "宮", userId: owner.id }]);
+
+  const hidden = await handleCatalogTool(
+    env,
+    new Request("https://catalog.internal/tool", {
+      body: toolCall("get_note", { id: secret.id }),
+      headers: userHeader(viewer),
+      method: "POST",
+    }),
+  );
+  const denied = rpcText(await hidden.text());
+  assert.equal(denied.result?.isError, true);
+  assert.equal(denied.result?.content?.[0]?.text, "Forbidden");
 });
 
 test("catalog search and tree run for the header user", async (t) => {
