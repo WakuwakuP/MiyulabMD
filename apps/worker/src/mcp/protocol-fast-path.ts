@@ -1,6 +1,6 @@
 import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/server";
 
-import { toolDefinitions } from "./tool-definitions.ts";
+import { listToolsForFeatures } from "./tool-catalog.ts";
 
 const FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28";
 const PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
@@ -29,81 +29,6 @@ type FeatureFlag = "hasMedallion" | "hasPara" | "hasSchemes";
 
 export type McpFeatureFlags = Record<FeatureFlag, boolean>;
 
-const GATED: Partial<Record<keyof typeof toolDefinitions, FeatureFlag>> = {
-  jd_allocate_id: "hasSchemes",
-  jd_create_id_folder: "hasSchemes",
-  jd_get: "hasSchemes",
-  jd_list_category: "hasSchemes",
-  jd_validate_tree: "hasSchemes",
-  medallion_assign_folder: "hasMedallion",
-  medallion_list_sets: "hasMedallion",
-  medallion_unassign_folder: "hasMedallion",
-  para_archive_project: "hasPara",
-  para_list: "hasPara",
-  scheme_get: "hasSchemes",
-  set_folder_scheme: "hasSchemes",
-};
-
-const TOOL_ORDER = [
-  "list_notes",
-  "list_folder_entries",
-  "get_note",
-  "create_note",
-  "replace_in_note",
-  "insert_in_note",
-  "update_note",
-  "delete_note",
-  "set_note_access",
-  "invite_collaborator",
-  "search_notes",
-  "grep_notes",
-  "list_note_links",
-  "list_backlinks",
-  "list_broken_links",
-  "resolve_wikilink",
-  "agent_join",
-  "agent_leave",
-  "list_note_history",
-  "get_revision",
-  "restore_revision",
-  "delete_folder",
-  "move_folder",
-  "move_folder_contents",
-  "move_notes",
-  "para_list",
-  "para_archive_project",
-  "set_folder_scheme",
-  "scheme_get",
-  "jd_allocate_id",
-  "jd_create_id_folder",
-  "jd_get",
-  "jd_list_category",
-  "jd_validate_tree",
-  "set_edit_lock",
-  "medallion_list_sets",
-  "medallion_assign_folder",
-  "medallion_unassign_folder",
-] as const satisfies readonly (keyof typeof toolDefinitions)[];
-
-type ListedTool = {
-  description: string;
-  gate?: FeatureFlag;
-  inputSchema: unknown;
-  name: (typeof TOOL_ORDER)[number];
-};
-
-const LISTED_TOOLS: ListedTool[] = TOOL_ORDER.map((name) => {
-  const definition = toolDefinitions[name];
-  return {
-    description: definition.description,
-    gate: GATED[name],
-    inputSchema: definition.inputSchema["~standard"].jsonSchema.input({
-      target: "draft-2020-12",
-    }),
-    name,
-  };
-});
-
 export type FastMcpDecision =
   | { kind: "passthrough" }
   | { kind: "response"; response: Response }
@@ -129,14 +54,7 @@ export function toolsListResponse(
   id: string | number,
   features: McpFeatureFlags,
 ): Response {
-  const tools = LISTED_TOOLS.filter(
-    (tool) => !tool.gate || features[tool.gate],
-  ).map((tool) => ({
-    description: tool.description,
-    inputSchema: tool.inputSchema,
-    name: tool.name,
-  }));
-  return rpcResult(id, { tools });
+  return rpcResult(id, { tools: listToolsForFeatures(features) });
 }
 
 function decideMessage(
