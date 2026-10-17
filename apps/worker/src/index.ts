@@ -8,6 +8,7 @@ import { handleOAuthHttp } from "./auth/oauth.ts";
 import { readSession } from "./auth/session.ts";
 import { envTruthy } from "./env.ts";
 import { mcpRoutes } from "./mcp/routes.ts";
+import { documentRoomWsHeaders } from "./note-websocket.ts";
 import { openApiDocument } from "./openapi.ts";
 import { articleSourceRoutes } from "./routes/article-sources.ts";
 import { articleRoutes } from "./routes/articles.ts";
@@ -155,17 +156,6 @@ async function handleNotePage(
   return response;
 }
 
-function applyWsUserHeaders(
-  headers: Headers,
-  user: { id: string; displayName: string | null; email: string },
-): void {
-  headers.set("X-User-Id", user.id);
-  headers.set("X-User-Email", user.email);
-  if (user.displayName) {
-    headers.set("X-Display-Name", user.displayName);
-  }
-}
-
 async function handleNoteWebSocket(
   request: Request,
   env: Env,
@@ -193,18 +183,8 @@ async function handleNoteWebSocket(
 
   const note = result.note;
   const id = env.DOCUMENT_ROOM.idFromName(note.id);
-  const headers = new Headers(request.headers);
-  headers.set("X-Note-Id", note.id);
-  headers.set(
-    "X-Can-Edit",
-    note.access.flags.canEdit && !note.editLocked ? "true" : "false",
-  );
-  if (user) {
-    applyWsUserHeaders(headers, user);
-  }
-
   const doRequest = new Request(request.url, {
-    headers,
+    headers: documentRoomWsHeaders(request, note, user),
     method: request.method,
   });
   return env.DOCUMENT_ROOM.get(id).fetch(doRequest);
