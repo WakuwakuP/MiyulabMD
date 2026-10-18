@@ -70,6 +70,7 @@ export function historyActorKey(
   return `guest:${sessionKey ?? "anon"}`;
 }
 
+/** `userId` は Worker が検証済みセッションからだけ付ける。ゲストは空。 */
 export function actorFromWsAttachment(attachment: {
   userId?: string;
   displayName?: string;
