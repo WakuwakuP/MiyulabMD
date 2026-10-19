@@ -99,6 +99,7 @@ function ShareResult({
         </p>
       )}
       <FolderBreadcrumbs
+        className="px-5 pt-3"
         crumbs={result.data.crumbs ?? []}
         readonly={true}
         showRootCrumb={isOwner}

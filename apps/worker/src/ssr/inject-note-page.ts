@@ -1,5 +1,5 @@
-import type { Note } from "@miyulabmd/shared";
-import { titleFromMarkdown } from "@miyulabmd/shared";
+import type { FolderCrumb, Note } from "@miyulabmd/shared";
+import { folderUrl, MY_DRIVE_NAME, titleFromMarkdown } from "@miyulabmd/shared";
 
 export function jsonForScript(value: unknown): string {
   return JSON.stringify(value)
@@ -16,14 +16,42 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+/** Match client FolderBreadcrumbs so first paint does not jump when React mounts. */
+export function ssrFolderCrumbsHtml(
+  crumbs: readonly FolderCrumb[],
+  showRootCrumb = false,
+): string {
+  if (!(showRootCrumb || crumbs.length > 0)) {
+    return "";
+  }
+  const parts: string[] = [];
+  if (showRootCrumb) {
+    parts.push(`<a href="/">${escapeHtml(MY_DRIVE_NAME)}</a>`);
+  }
+  for (const [index, crumb] of crumbs.entries()) {
+    if (showRootCrumb || index > 0) {
+      parts.push('<span aria-hidden="true"> / </span>');
+    }
+    parts.push(
+      `<a href="${escapeHtml(folderUrl(crumb.id))}">${escapeHtml(crumb.name)}</a>`,
+    );
+  }
+  return `<nav aria-label="フォルダ" class="ssr-folder-crumbs">${parts.join("")}</nav>`;
+}
+
 export function injectNotePage(
   indexHtml: string,
   note: Note,
   previewHtml: string,
   ogCards: Record<string, unknown> = {},
+  options: { showRootCrumb?: boolean } = {},
 ): string {
   const title = titleFromMarkdown(note.markdown) || note.title || "MiyulabMD";
-  const preview = `<div id="ssr-preview" class="document-view-shell" data-note-id="${escapeHtml(note.id)}" data-short-id="${escapeHtml(note.shortId)}"><article class="markdown-preview document-prose document-view-column">${previewHtml}</article></div>`;
+  const crumbs = ssrFolderCrumbsHtml(
+    note.crumbs ?? [],
+    options.showRootCrumb === true,
+  );
+  const preview = `<div id="ssr-preview" data-note-id="${escapeHtml(note.id)}" data-short-id="${escapeHtml(note.shortId)}">${crumbs}<div class="document-view-shell"><article class="markdown-preview document-prose document-view-column">${previewHtml}</article></div></div>`;
   const bootstrap = `<script type="application/json" id="note-bootstrap">${jsonForScript(note)}</script>`;
   const ogBootstrap =
     Object.keys(ogCards).length > 0

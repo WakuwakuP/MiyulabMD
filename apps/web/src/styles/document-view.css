@@ -36,9 +36,26 @@
 /* #ssr-preview sits outside #root / AppShell, so it needs the header offset. */
 #ssr-preview {
   min-height: 100dvh;
+  padding-top: var(--header-height);
   background: var(--color-canvas);
 }
 
-#ssr-preview.document-view-shell {
-  padding-top: calc(var(--header-height) + 1rem);
+/* Align with client FolderBreadcrumbs (px-5 pt-3) before React mounts. */
+#ssr-preview .ssr-folder-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  align-items: center;
+  padding: 0.75rem 1.25rem 0;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+#ssr-preview .ssr-folder-crumbs a {
+  color: inherit;
+  text-decoration: none;
+}
+
+#ssr-preview .document-view-shell {
+  padding-top: 1rem;
 }

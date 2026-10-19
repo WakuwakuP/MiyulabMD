@@ -114,6 +114,38 @@ test("injectNotePage writes og-bootstrap when cards exist", () => {
   assert.match(html, /norotororo/);
 });
 
+test("injectNotePage renders discoverable folder crumbs before the article", () => {
+  const html = injectNotePage(
+    '<html><head><title>MiyulabMD</title></head><body><div id="root"></div></body></html>',
+    sampleNote({
+      crumbs: [
+        { id: "folder-work", name: "work" },
+        { id: "folder-docs", name: "docs" },
+      ],
+    }),
+    "<p>body</p>",
+    {},
+    { showRootCrumb: true },
+  );
+  assert.match(html, /aria-label="フォルダ"/);
+  assert.match(html, /class="ssr-folder-crumbs"/);
+  assert.match(html, /href="\/">マイドライブ<\/a>/);
+  assert.match(html, /href="\/f\/folder-work">work<\/a>/);
+  assert.match(html, /href="\/f\/folder-docs">docs<\/a>/);
+  const crumbsAt = html.indexOf('class="ssr-folder-crumbs"');
+  const articleAt = html.indexOf("markdown-preview");
+  assert.ok(crumbsAt >= 0 && articleAt > crumbsAt);
+});
+
+test("injectNotePage omits crumbs when none are visible", () => {
+  const html = injectNotePage(
+    '<html><head><title>MiyulabMD</title></head><body><div id="root"></div></body></html>',
+    sampleNote(),
+    "<p>body</p>",
+  );
+  assert.doesNotMatch(html, /ssr-folder-crumbs/);
+});
+
 test("jsonForScript escapes HTML delimiters", () => {
   assert.equal(jsonForScript("<br>"), '"\\u003cbr\\u003e"');
 });

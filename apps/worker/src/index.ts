@@ -136,7 +136,9 @@ async function handleNotePage(
   }
   const previewHtml = renderMarkdownHtml(result.note.markdown, ogCards);
   const ogRecord = Object.fromEntries(ogCards);
-  const body = injectNotePage(indexHtml, result.note, previewHtml, ogRecord);
+  const body = injectNotePage(indexHtml, result.note, previewHtml, ogRecord, {
+    showRootCrumb: user?.id === result.note.ownerId,
+  });
   const publicCache =
     isPublicGuestCacheable(result.note, Boolean(user)) &&
     missingOg.length === 0;
