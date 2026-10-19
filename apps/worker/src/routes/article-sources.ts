@@ -43,10 +43,15 @@ export const articleSourceRoutes = new Elysia({
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    const folderId = new URL(request.url).searchParams.get("folderId") ?? "";
-    const target = folderId
-      ? await articles.dispatchTarget(user, folderId)
-      : null;
+    const params = new URL(request.url).searchParams;
+    const folderId = params.get("folderId")?.trim() ?? "";
+    const noteId = params.get("noteId")?.trim() ?? "";
+    const target =
+      folderId || noteId
+        ? await articles.dispatchTarget(user, {
+            ...(folderId ? { folderId } : { noteId }),
+          })
+        : null;
     return { target };
   })
   .post("/", async ({ request, set }) => {

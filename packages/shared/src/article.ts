@@ -37,6 +37,30 @@ export function canDispatchArticleSource(input: {
   return input.canView && input.readScope !== "public";
 }
 
+/**
+ * 開いている場所が公開なら、祖先のサイトでも更新させない。
+ * 公開の子フォルダからソース ID を渡さないため。
+ */
+export function canOfferArticleDispatch(input: {
+  isOwner: boolean;
+  openedCanView: boolean;
+  openedReadScope: AccessScope;
+  sourceCanView: boolean;
+  sourceReadScope: AccessScope;
+}): boolean {
+  if (input.isOwner) {
+    return true;
+  }
+  if (!(input.openedCanView && input.openedReadScope !== "public")) {
+    return false;
+  }
+  return canDispatchArticleSource({
+    canView: input.sourceCanView,
+    isOwner: false,
+    readScope: input.sourceReadScope,
+  });
+}
+
 export type ArticleSourceInput = {
   name: string;
   folder: string;

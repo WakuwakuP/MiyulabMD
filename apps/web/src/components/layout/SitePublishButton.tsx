@@ -15,6 +15,7 @@ type Props = {
   user: SessionUser | null;
   folder?: string | null;
   folderId?: string | null;
+  noteId?: string | null;
 };
 
 type PublishTarget = {
@@ -38,6 +39,7 @@ function useSitePublish(
   user: SessionUser | null,
   folder: string | null | undefined,
   folderId: string | null | undefined,
+  noteId: string | null | undefined,
 ): SitePublish {
   const [sources, setSources] = useState<ArticleSource[]>([]);
   const [sharedTarget, setSharedTarget] = useState<PublishTarget | null>(null);
@@ -80,16 +82,19 @@ function useSitePublish(
   const pathTarget = user ? matchingSiteSource(folder, sources) : null;
   const pathId = pathTarget?.id ?? null;
   const folderKey = folderId?.trim() ? folderId : null;
+  const noteKey = noteId?.trim() ? noteId : null;
   const userId = user?.id ?? null;
 
   useEffect(() => {
-    if (!userId || pathId || !folderKey) {
+    if (!userId || pathId || !(folderKey || noteKey)) {
       setSharedTarget(null);
       return;
     }
     let current = true;
     setSharedTarget(null);
-    void fetchArticleDispatchTarget(folderKey).then((result) => {
+    void fetchArticleDispatchTarget(
+      folderKey ? { folderId: folderKey } : { noteId: noteKey ?? "" },
+    ).then((result) => {
       if (!current) {
         return;
       }
@@ -98,7 +103,7 @@ function useSitePublish(
     return () => {
       current = false;
     };
-  }, [userId, pathId, folderKey]);
+  }, [userId, pathId, folderKey, noteKey]);
 
   const matched = pathTarget ?? sharedTarget;
   const matchedId = matched?.id ?? null;
@@ -138,11 +143,12 @@ function useSitePublish(
   return { busy, error, matched, publish };
 }
 
-export function SitePublishButton({ user, folder, folderId }: Props) {
+export function SitePublishButton({ user, folder, folderId, noteId }: Props) {
   const { busy, error, matched, publish } = useSitePublish(
     user,
     folder,
     folderId,
+    noteId,
   );
 
   if (!matched) {
@@ -172,11 +178,12 @@ export function SitePublishButton({ user, folder, folderId }: Props) {
  * 「⋯ ノート」メニュー内の「サイトを更新」項目（§3.2: <900px はメニューへ退避）。
  * 一致する記事ソースがないときは描画しない。
  */
-export function SitePublishMenuItem({ user, folder, folderId }: Props) {
+export function SitePublishMenuItem({ user, folder, folderId, noteId }: Props) {
   const { busy, error, matched, publish } = useSitePublish(
     user,
     folder,
     folderId,
+    noteId,
   );
 
   if (!matched) {

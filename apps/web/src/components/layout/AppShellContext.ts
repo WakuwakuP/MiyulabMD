@@ -22,6 +22,8 @@ export type AppShellContext = {
       folder?: string | null;
       /** 共有先がパスを持たないときのサイト更新判定に使うフォルダ ID。 */
       folderId?: string | null;
+      /** リンク共有ノートは folderId を隠すので、ノート ID で更新可否を聞く。 */
+      noteId?: string | null;
     } | null,
   ) => void;
 };

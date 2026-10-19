@@ -16,6 +16,7 @@ export {
   articleEditUrl,
   articleSlug,
   canDispatchArticleSource,
+  canOfferArticleDispatch,
   coerceArticleValue,
   folderMatchesSource,
   isArticleFieldType,

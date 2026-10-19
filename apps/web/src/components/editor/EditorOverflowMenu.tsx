@@ -175,6 +175,7 @@ export function EditorOverflowMenu({
                 <SitePublishMenuItem
                   folder={folder}
                   folderId={folderId}
+                  noteId={note.id}
                   user={user}
                 />
               </div>

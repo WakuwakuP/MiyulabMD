@@ -6,6 +6,7 @@ import {
   articleEditUrl,
   articleSlug,
   canDispatchArticleSource,
+  canOfferArticleDispatch,
   isArticleSourceDirty,
   matchArticleSource,
   mergeArticleData,
@@ -136,6 +137,26 @@ test("site update follows share settings except public viewers", () => {
       canView: false,
       isOwner: true,
       readScope: "public",
+    }),
+    true,
+  );
+  assert.equal(
+    canOfferArticleDispatch({
+      isOwner: false,
+      openedCanView: true,
+      openedReadScope: "public",
+      sourceCanView: true,
+      sourceReadScope: "link",
+    }),
+    false,
+  );
+  assert.equal(
+    canOfferArticleDispatch({
+      isOwner: false,
+      openedCanView: true,
+      openedReadScope: "link",
+      sourceCanView: true,
+      sourceReadScope: "link",
     }),
     true,
   );

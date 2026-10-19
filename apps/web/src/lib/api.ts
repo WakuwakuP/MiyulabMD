@@ -1105,10 +1105,15 @@ export async function deleteArticleSource(
 }
 
 export async function fetchArticleDispatchTarget(
-  folderId: string,
+  input: { folderId?: string; noteId?: string },
   options: ReadOptions = {},
 ): Promise<ApiResult<ArticleDispatchTarget | null>> {
-  const params = new URLSearchParams({ folderId });
+  const params = new URLSearchParams();
+  if (input.folderId) {
+    params.set("folderId", input.folderId);
+  } else if (input.noteId) {
+    params.set("noteId", input.noteId);
+  }
   const res = await fetch(
     `/api/article-sources/dispatch-target?${params}`,
     { ...fetchOpts, signal: options.signal },
