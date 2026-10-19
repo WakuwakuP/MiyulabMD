@@ -17,7 +17,7 @@ function escapeHtml(value: string): string {
 }
 
 /** Match client FolderBreadcrumbs so first paint does not jump when React mounts. */
-export function ssrFolderCrumbsHtml(
+function ssrFolderCrumbsHtml(
   crumbs: readonly FolderCrumb[],
   showRootCrumb = false,
 ): string {
