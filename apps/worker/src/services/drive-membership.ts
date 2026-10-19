@@ -107,7 +107,7 @@ function missingTable(error: unknown): boolean {
 }
 
 /** The host after @, lowercased. Subdomains stay distinct. */
-export function emailDomain(email: string): string | null {
+function emailDomain(email: string): string | null {
   const at = email.lastIndexOf("@");
   if (at <= 0 || at === email.length - 1) {
     return null;
