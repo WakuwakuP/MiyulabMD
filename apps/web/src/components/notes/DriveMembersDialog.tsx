@@ -322,13 +322,13 @@ function DomainsPanel({
   canManage,
   domains,
   driveId,
-  failed,
+  loadError,
   onDomains,
 }: {
   canManage: boolean;
   domains: SharedDriveDomain[];
   driveId: string;
-  failed: boolean;
+  loadError: string | null;
   onDomains: (domains: SharedDriveDomain[]) => void;
 }) {
   const [domain, setDomain] = useState("");
@@ -355,9 +355,9 @@ function DomainsPanel({
       <MutedText className="mb-3">
         ログインすると、このドメインの人がメンバーになります。招待済みの役割は変わりません。外した人は、再招待するまで戻りません。
       </MutedText>
-      {error && <ErrorText>{error}</ErrorText>}
+      {(error ?? loadError) && <ErrorText>{error ?? loadError}</ErrorText>}
       <ul className="m-0 max-h-[min(14rem,32dvh)] list-none divide-y divide-border overflow-y-auto p-0">
-        {domains.length === 0 && !failed ? (
+        {domains.length === 0 && !loadError ? (
           <li className="py-6 text-center text-muted text-sm">
             ドメインは未登録です
           </li>
@@ -513,7 +513,7 @@ export function DriveMembersDialog({
   const [members, setMembers] = useState<SharedDriveMember[]>([]);
   const [domains, setDomains] = useState<SharedDriveDomain[]>([]);
   const [domainsReady, setDomainsReady] = useState(false);
-  const [domainsFailed, setDomainsFailed] = useState(false);
+  const [domainLoadError, setDomainLoadError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>("members");
   const [error, setError] = useState<string | null>(null);
 
@@ -540,10 +540,9 @@ export function DriveMembersDialog({
       }
       if (domainList.ok) {
         setDomains(domainList.data);
-        setDomainsFailed(false);
+        setDomainLoadError(null);
       } else {
-        setDomainsFailed(true);
-        setError(domainList.error);
+        setDomainLoadError(domainList.error);
       }
       setDomainsReady(true);
     });
@@ -558,7 +557,7 @@ export function DriveMembersDialog({
   ];
   if (showDomains) {
     tabs.push({
-      count: domainsReady && !domainsFailed ? domains.length : undefined,
+      count: domainsReady && !domainLoadError ? domains.length : undefined,
       id: "domains",
       label: "ドメイン",
     });
@@ -622,10 +621,10 @@ export function DriveMembersDialog({
               canManage={canManage}
               domains={domains}
               driveId={driveId}
-              failed={domainsFailed}
+              loadError={domainLoadError}
               onDomains={(next) => {
                 setDomains(next);
-                setDomainsFailed(false);
+                setDomainLoadError(null);
               }}
             />
           ) : (
