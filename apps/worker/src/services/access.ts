@@ -740,7 +740,8 @@ function snapshotFolderRow(
   return snapshot?.foldersByPath.get(ownerId)?.get(folder) ?? null;
 }
 
-async function visibleCrumbs(
+/** Discoverable ancestor crumbs for a folder path (suffix after hidden parents). */
+export async function visibleCrumbs(
   env: Env,
   ownerId: string,
   folder: string,

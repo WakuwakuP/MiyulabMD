@@ -55,6 +55,7 @@ import {
   resolveFolderAccess,
   resolveNoteAccess,
   resolveNoteAccessSnapshot,
+  visibleCrumbs,
 } from "./access.ts";
 import {
   createArticleService,
@@ -172,6 +173,7 @@ async function toNote(
   row: NoteRow,
   user?: SessionUser | null,
   snapshot?: AccessSnapshot,
+  options: { includeCrumbs?: boolean } = {},
 ): Promise<Note> {
   const access = snapshot
     ? resolveNoteAccessSnapshot(env, accessFields(row), user, snapshot)
@@ -189,11 +191,17 @@ async function toNote(
   const { folderSchemeId, folderSchemeTitle } = visibleFolderId
     ? await folderSchemeMeta(env, visibleFolderId, snapshot)
     : { folderSchemeId: null, folderSchemeTitle: null };
+  // パンくずも folderId と同じ発見可能性。一覧では辿らない。
+  const crumbs =
+    options.includeCrumbs && visibleFolderId && folder
+      ? await visibleCrumbs(env, row.owner_id, folder, user, snapshot)
+      : [];
   return {
     access: isOwner ? access : { ...access, grants: [], sourceFolder: null },
     alias: row.alias,
     articleMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
     createdAt: row.created_at,
+    crumbs,
     editLocked: row.edit_locked === 1,
     folder: isOwner ? folder : "",
     folderId: visibleFolderId,
@@ -216,7 +224,7 @@ export async function toSummary(
   snapshot?: AccessSnapshot,
 ): Promise<NoteSummary> {
   const note = await toNote(env, row, user, snapshot);
-  const { markdown: _markdown, ...summary } = note;
+  const { crumbs: _crumbs, markdown: _markdown, ...summary } = note;
   return summary;
 }
 
@@ -1259,7 +1267,9 @@ export function createNoteService(env: Env) {
         throw new Error("note insert failed");
       }
       await syncNoteLinks(env, row);
-      return toNote(env, row, user ?? owner);
+      return toNote(env, row, user ?? owner, undefined, {
+        includeCrumbs: true,
+      });
     },
 
     async get(idOrShortId: string, user?: SessionUser): Promise<GetNoteResult> {
@@ -1268,7 +1278,9 @@ export function createNoteService(env: Env) {
         return { kind: "not_found" };
       }
 
-      const note = await toNote(env, row, user);
+      const note = await toNote(env, row, user, undefined, {
+        includeCrumbs: true,
+      });
       if (!note.access.flags.canView) {
         return {
           kind: "denied",
@@ -1582,7 +1594,12 @@ export function createNoteService(env: Env) {
       if (!updated) {
         throw new Error("note update failed");
       }
-      return { kind: "ok", note: await toNote(env, updated, user) };
+      return {
+        kind: "ok",
+        note: await toNote(env, updated, user, undefined, {
+          includeCrumbs: true,
+        }),
+      };
     },
 
     async updateMarkdown(
@@ -1628,7 +1645,12 @@ export function createNoteService(env: Env) {
         throw new Error("note update failed");
       }
       await syncNoteLinks(env, updated, row);
-      return { kind: "ok", note: await toNote(env, updated, user) };
+      return {
+        kind: "ok",
+        note: await toNote(env, updated, user, undefined, {
+          includeCrumbs: true,
+        }),
+      };
     },
 
     async updateMeta(
@@ -1696,7 +1718,12 @@ export function createNoteService(env: Env) {
         throw new Error("note update failed");
       }
       await syncNoteLinks(env, updated, row);
-      return { kind: "ok", note: await toNote(env, updated, user) };
+      return {
+        kind: "ok",
+        note: await toNote(env, updated, user, undefined, {
+          includeCrumbs: true,
+        }),
+      };
     },
   };
 }

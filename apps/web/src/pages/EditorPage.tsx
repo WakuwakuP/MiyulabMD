@@ -44,6 +44,7 @@ import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ArticleFrontmatterAlert } from "../components/notes/ArticleFrontmatterAlert.tsx";
 import { draftFromNote } from "../components/notes/access-draft.ts";
+import { FolderBreadcrumbs } from "../components/notes/FolderBreadcrumbs.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
 import { ShareIcon } from "../components/ui/icons.tsx";
@@ -323,10 +324,17 @@ function EditorWorkspace({
   const showSource = viewMode === "split" || viewMode === "source";
   const showPreview = viewMode === "split" || viewMode === "preview";
   const showRich = viewMode === "rich";
+  const crumbs = note.crumbs ?? [];
   return (
     <section
       className={cn("flex flex-col", usesInternalScroll && "h-full min-h-0")}
     >
+      <FolderBreadcrumbs
+        className="px-5 pt-3"
+        crumbs={crumbs}
+        readonly={true}
+        showRootCrumb={isOwner}
+      />
       {saveError && <ErrorText className="px-5 py-4">{saveError}</ErrorText>}
       {articleSource && <ArticleFrontmatterAlert issues={articleIssues} />}
       {(showSource || showRich) && <TabIndentHint />}
