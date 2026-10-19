@@ -1100,7 +1100,12 @@ function bindEditorHeader(input: {
   setLinksOpen: (open: boolean) => void;
 }) {
   if (!input.note) {
-    input.setHeader({ folder: null, layout: "editor" });
+    input.setHeader({
+      folder: null,
+      folderId: null,
+      layout: "editor",
+      noteId: null,
+    });
     return;
   }
   const note = input.note;
@@ -1166,6 +1171,8 @@ function bindEditorHeader(input: {
         />
       ),
     folder: input.folder,
+    folderId: note.folderId,
     layout: "editor",
+    noteId: note.id,
   });
 }

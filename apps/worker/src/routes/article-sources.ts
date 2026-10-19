@@ -37,6 +37,23 @@ export const articleSourceRoutes = new Elysia({
     }
     return articles.status(user.id);
   })
+  .get("/dispatch-target", async ({ request, set }) => {
+    const user = await readSession(request, env);
+    if (!user) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+    const params = new URL(request.url).searchParams;
+    const folderId = params.get("folderId")?.trim() ?? "";
+    const noteId = params.get("noteId")?.trim() ?? "";
+    const target =
+      folderId || noteId
+        ? await articles.dispatchTarget(user, {
+            ...(folderId ? { folderId } : { noteId }),
+          })
+        : null;
+    return { target };
+  })
   .post("/", async ({ request, set }) => {
     const user = await readSession(request, env);
     if (!user) {
@@ -58,7 +75,7 @@ export const articleSourceRoutes = new Elysia({
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    const result = await articles.dispatch(user.id, params.id);
+    const result = await articles.dispatch(user, params.id);
     if (!result) {
       set.status = 404;
       return { error: "Not found" };

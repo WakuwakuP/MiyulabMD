@@ -17,6 +17,8 @@ type Props = {
   cachedUser?: SessionUser | null;
   end?: ReactNode;
   folder?: string | null;
+  folderId?: string | null;
+  noteId?: string | null;
   /** サーバーと疎通できずローカルキャッシュで表示しているとき true。 */
   offline?: boolean;
   user: SessionUser | null;
@@ -30,6 +32,8 @@ export function AppHeader({
   cachedUser,
   end,
   folder,
+  folderId,
+  noteId,
   offline,
   user,
   loading,
@@ -99,7 +103,12 @@ export function AppHeader({
           actions ? "col-start-3" : "col-start-2",
         )}
       >
-        <SitePublishButton folder={folder} user={user} />
+        <SitePublishButton
+          folder={folder}
+          folderId={folderId}
+          noteId={noteId}
+          user={user}
+        />
         {end}
         {loading ? (
           <MutedText className="m-0">…</MutedText>

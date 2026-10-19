@@ -172,7 +172,12 @@ export function EditorOverflowMenu({
                 />
               </MenuItem>
               <div className={menuItemTierClass("siteUpdate")}>
-                <SitePublishMenuItem folder={folder} user={user} />
+                <SitePublishMenuItem
+                  folder={folder}
+                  folderId={folderId}
+                  noteId={note.id}
+                  user={user}
+                />
               </div>
               {peers.length > 0 && (
                 <div className={menuItemTierClass("presence")}>

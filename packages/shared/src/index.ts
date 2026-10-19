@@ -15,6 +15,8 @@ export {
   ARTICLE_LIST_MAX_PER_PAGE,
   articleEditUrl,
   articleSlug,
+  canDispatchArticleSource,
+  canOfferArticleDispatch,
   coerceArticleValue,
   folderMatchesSource,
   isArticleFieldType,

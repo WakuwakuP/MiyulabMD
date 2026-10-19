@@ -1,4 +1,5 @@
 import {
+  type AccessScope,
   type ArticleCollection,
   type ArticleEntry,
   type ArticleEntryPage,
@@ -8,16 +9,26 @@ import {
   articleEditUrl,
   articleMetaFromNote,
   articleSlug,
+  canDispatchArticleSource,
+  canOfferArticleDispatch,
   folderMatchesSource,
+  isAccessScope,
   isArticleSourceDirty,
+  matchArticleSource,
   mergeArticleData,
   parseArticleSchema,
   readArticleFrontmatter,
   resolveArticleListFolder,
+  type SessionUser,
 } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
-import { ensureFolderRow, getFolderById } from "./access.ts";
+import {
+  ensureFolderRow,
+  folderViewerShare,
+  getFolderById,
+  resolveNoteAccess,
+} from "./access.ts";
 import { folderSubtreeFilter } from "./folder-path-sql.ts";
 
 type SourceRow = {
@@ -138,6 +149,30 @@ function loadSource(
     .prepare("SELECT * FROM article_sources WHERE id = ? AND owner_id = ?")
     .bind(id, ownerId)
     .first<SourceRow>();
+}
+
+function loadSourceById(env: Env, id: string): Promise<SourceRow | null> {
+  return db(env)
+    .prepare("SELECT * FROM article_sources WHERE id = ?")
+    .bind(id)
+    .first<SourceRow>();
+}
+
+function storedScope(value: string | null): AccessScope | null {
+  return value && isAccessScope(value) ? value : null;
+}
+
+async function userCanDispatchSource(
+  env: Env,
+  user: SessionUser,
+  row: SourceRow,
+): Promise<boolean> {
+  const share = await folderViewerShare(env, row.owner_id, row.folder, user);
+  return canDispatchArticleSource({
+    canView: share.canView,
+    isOwner: user.id === row.owner_id,
+    readScope: share.readScope,
+  });
 }
 
 type SourceWriteError = { error: string; status: number };
@@ -309,6 +344,89 @@ function toEntry(
   return entry;
 }
 
+async function dispatchTargetForFolder(
+  env: Env,
+  user: SessionUser,
+  ownerId: string,
+  folder: string,
+): Promise<{ id: string; name: string } | null> {
+  const opened = await folderViewerShare(env, ownerId, folder, user);
+  if (!opened.canView) {
+    return null;
+  }
+  const rows = await db(env)
+    .prepare("SELECT * FROM article_sources WHERE owner_id = ?")
+    .bind(ownerId)
+    .all<SourceRow>();
+  const match = matchArticleSource(
+    folder,
+    (rows.results ?? []).map(presentSource),
+  );
+  if (!match) {
+    return null;
+  }
+  const row = (rows.results ?? []).find((item) => item.id === match.id);
+  if (!row) {
+    return null;
+  }
+  const source = await folderViewerShare(env, row.owner_id, row.folder, user);
+  if (
+    !canOfferArticleDispatch({
+      isOwner: user.id === row.owner_id,
+      openedCanView: opened.canView,
+      openedReadScope: opened.readScope,
+      sourceCanView: source.canView,
+      sourceReadScope: source.readScope,
+    })
+  ) {
+    return null;
+  }
+  return { id: match.id, name: match.name };
+}
+
+async function dispatchTargetForNote(
+  env: Env,
+  user: SessionUser,
+  noteId: string,
+): Promise<{ id: string; name: string } | null> {
+  const row = await db(env)
+    .prepare(
+      `SELECT id, owner_id, folder, read_scope, write_scope
+       FROM notes WHERE id = ?`,
+    )
+    .bind(noteId)
+    .first<{
+      id: string;
+      owner_id: string;
+      folder: string;
+      read_scope: string | null;
+      write_scope: string | null;
+    }>();
+  if (!row) {
+    return null;
+  }
+  const access = await resolveNoteAccess(
+    env,
+    {
+      folder: row.folder,
+      id: row.id,
+      ownerId: row.owner_id,
+      readScope: storedScope(row.read_scope),
+      writeScope: storedScope(row.write_scope),
+    },
+    user,
+  );
+  if (
+    !(
+      access.flags.canView &&
+      (user.id === row.owner_id || access.effectiveReadScope !== "public")
+    )
+  ) {
+    return null;
+  }
+  return dispatchTargetForFolder(env, user, row.owner_id, row.folder);
+}
+
 export function createArticleService(env: Env) {
   return {
     async createSource(
@@ -387,11 +505,15 @@ export function createArticleService(env: Env) {
     },
 
     async dispatch(
-      ownerId: string,
+      user: SessionUser,
       id: string,
     ): Promise<{ ok: true } | { error: string; status: number } | null> {
-      const row = await loadSource(env, ownerId, id);
+      const row = await loadSourceById(env, id);
       if (!row) {
+        return null;
+      }
+      const allowed = await userCanDispatchSource(env, user, row);
+      if (!allowed) {
         return null;
       }
       if (!row.webhook_url) {
@@ -437,6 +559,23 @@ export function createArticleService(env: Env) {
         .bind(Date.now(), Date.now(), id)
         .run();
       return { ok: true };
+    },
+
+    async dispatchTarget(
+      user: SessionUser,
+      input: { folderId?: string; noteId?: string },
+    ): Promise<{ id: string; name: string } | null> {
+      if (input.noteId) {
+        return dispatchTargetForNote(env, user, input.noteId);
+      }
+      if (!input.folderId) {
+        return null;
+      }
+      const rec = await getFolderById(env, input.folderId);
+      if (!rec?.folder) {
+        return null;
+      }
+      return dispatchTargetForFolder(env, user, rec.owner_id, rec.folder);
     },
 
     async getEntry(

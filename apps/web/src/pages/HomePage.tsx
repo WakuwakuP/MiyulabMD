@@ -149,6 +149,7 @@ function useHomeHeader(
         />
       ),
       folder: headerFolder,
+      folderId: visibleFolder?.id ?? null,
     });
     return () => setHeader(null);
   }, [
