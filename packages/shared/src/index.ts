@@ -29,6 +29,19 @@ export {
   resolveArticleListFolder,
 } from "./article.ts";
 export type {
+  DriveRole,
+  OwnerKind,
+  SharedDriveMember,
+  SharedDriveSummary,
+} from "./drive.ts";
+export {
+  DRIVE_ROLES,
+  flagsForDriveRole,
+  isDriveRole,
+  isOwnerKind,
+  OWNER_KINDS,
+} from "./drive.ts";
+export type {
   ArticleFrontmatterIssue,
   ArticleFrontmatterRead,
   MarkdownFrontmatterSplit,
@@ -160,19 +173,6 @@ export {
   NOTE_RESTORE_MESSAGE,
   SEARCH_SCOPES,
 } from "./note.ts";
-export type {
-  DriveRole,
-  OwnerKind,
-  SharedDriveMember,
-  SharedDriveSummary,
-} from "./drive.ts";
-export {
-  DRIVE_ROLES,
-  flagsForDriveRole,
-  isDriveRole,
-  isOwnerKind,
-  OWNER_KINDS,
-} from "./drive.ts";
 export type {
   AccessGrant,
   AccessScope,

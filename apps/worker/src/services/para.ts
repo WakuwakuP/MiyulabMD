@@ -1364,7 +1364,7 @@ export async function paraArchiveProject(
   if (!rec) {
     return { kind: "not_found" };
   }
-  if (!user || !(await canEditSubject(env, rec.owner_id, user))) {
+  if (!(user && (await canEditSubject(env, rec.owner_id, user)))) {
     return { kind: "denied", status: user === undefined ? 401 : 403 };
   }
   if (!rec.folder) {

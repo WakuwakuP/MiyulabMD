@@ -14,7 +14,6 @@ import {
   catalogReadRequest,
 } from "../durable-objects/catalog-list.ts";
 import { instanceFlags } from "../env.ts";
-import { canEditSubject, markDriveFolderKinds } from "../services/drive-membership.ts";
 import {
   buildAccessSnapshot,
   createOwnedFolder,
@@ -29,6 +28,10 @@ import {
   resolveFolderAccess,
   upsertFolderPolicy,
 } from "../services/access.ts";
+import {
+  canEditSubject,
+  markDriveFolderKinds,
+} from "../services/drive-membership.ts";
 import {
   type MoveError,
   moveFolder,
@@ -180,7 +183,7 @@ async function folderPathFromName(
   }
   const parent = await getFolderById(env, parentId);
   const actor = { displayName: null, email: "", id: userId };
-  if (!parent || !(await canEditSubject(env, parent.owner_id, actor))) {
+  if (!(parent && (await canEditSubject(env, parent.owner_id, actor)))) {
     return { error: "Not found", status: 404 };
   }
   return {
@@ -189,12 +192,33 @@ async function folderPathFromName(
   };
 }
 
+async function subjectForParentFolder(
+  userId: string,
+  folder: string,
+  parentId: string,
+): Promise<{ folder: string; ownerId: string }> {
+  const parent = await getFolderById(env, parentId);
+  const actor = { displayName: null, email: "", id: userId };
+  if (!(parent && (await canEditSubject(env, parent.owner_id, actor)))) {
+    return { folder, ownerId: userId };
+  }
+  let nextFolder = folder;
+  if (
+    parent.owner_id !== userId &&
+    parent.folder &&
+    !folder.startsWith(parent.folder)
+  ) {
+    const leaf = folder.split("/").at(-1) ?? folder;
+    nextFolder = `${parent.folder}/${leaf}`;
+  }
+  return { folder: nextFolder, ownerId: parent.owner_id };
+}
+
 async function resolveCreateFolderPath(
   userId: string,
   body: { folder?: string; name?: string; parentId?: string } | null,
 ): Promise<
-  | { folder: string; ownerId: string }
-  | { error: string; status: number }
+  { folder: string; ownerId: string } | { error: string; status: number }
 > {
   let folder = normalizeFolder(body?.folder ?? "");
   let ownerId = userId;
@@ -211,17 +235,9 @@ async function resolveCreateFolderPath(
     ownerId = resolved.ownerId ?? userId;
   }
   if (body?.parentId && folder) {
-    const parent = await getFolderById(env, body.parentId);
-    if (parent && (await canEditSubject(env, parent.owner_id, {
-      displayName: null,
-      email: "",
-      id: userId,
-    }))) {
-      ownerId = parent.owner_id;
-      if (parent.owner_id !== userId && !folder.startsWith(parent.folder)) {
-        folder = parent.folder ? `${parent.folder}/${folder.split("/").at(-1)}` : folder;
-      }
-    }
+    const aligned = await subjectForParentFolder(userId, folder, body.parentId);
+    folder = aligned.folder;
+    ownerId = aligned.ownerId;
   }
   if (!folder) {
     return { error: "マイドライブ自体は作成できません", status: 400 };
@@ -418,7 +434,7 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
     let ownerId = user.id;
     if (body.folderId) {
       const rec = await getFolderById(env, body.folderId);
-      if (!rec || !(await canEditSubject(env, rec.owner_id, user))) {
+      if (!(rec && (await canEditSubject(env, rec.owner_id, user)))) {
         set.status = 404;
         return { error: "Not found" };
       }

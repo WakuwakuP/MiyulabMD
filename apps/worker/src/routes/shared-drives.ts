@@ -4,8 +4,8 @@ import { Elysia } from "elysia";
 import { readSession } from "../auth/session.ts";
 import {
   createSharedDrive,
-  deleteSharedDrive,
   type DriveError,
+  deleteSharedDrive,
   getSharedDrive,
   inviteDriveMember,
   listDriveMembers,
@@ -47,11 +47,7 @@ export const sharedDriveRoutes = new Elysia({ prefix: "/api/drives" })
   .post("/", async ({ request, set }) => {
     const user = await readSession(request, env);
     const body = await parseJsonBody<{ name?: string }>(request);
-    const created = await createSharedDrive(
-      env,
-      user ?? undefined,
-      body?.name,
-    );
+    const created = await createSharedDrive(env, user ?? undefined, body?.name);
     if (created.kind !== "ok") {
       return driveError(set, created);
     }

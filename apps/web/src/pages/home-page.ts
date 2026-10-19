@@ -563,6 +563,7 @@ export function handleItemMenu(
     onArchive: (id: string, name: string) => void;
     onScheme: (id: string, name: string, scheme: string | null) => void;
     onMedallion?: (id: string, name: string, path?: string) => void;
+    onMove?: (target: MoveTarget) => void;
     projectsPaths: string[];
   },
 ) {

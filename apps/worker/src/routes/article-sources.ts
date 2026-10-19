@@ -3,13 +3,13 @@ import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
 import {
-  canEditSubject,
-  seesSubjectTree,
-} from "../services/drive-membership.ts";
-import {
   type ArticleSourceWrite,
   createArticleService,
 } from "../services/articles.ts";
+import {
+  canEditSubject,
+  seesSubjectTree,
+} from "../services/drive-membership.ts";
 
 const articles = createArticleService(env);
 
@@ -31,10 +31,7 @@ export const articleSourceRoutes = new Elysia({
       return { error: "Unauthorized" };
     }
     const ownerId = new URL(request.url).searchParams.get("ownerId") ?? user.id;
-    if (
-      ownerId !== user.id &&
-      !(await seesSubjectTree(env, ownerId, user))
-    ) {
+    if (ownerId !== user.id && !(await seesSubjectTree(env, ownerId, user))) {
       set.status = 403;
       return { error: "Forbidden" };
     }
@@ -73,8 +70,7 @@ export const articleSourceRoutes = new Elysia({
       return { error: "Unauthorized" };
     }
     const body = await parseJsonBody<ArticleSourceWrite>(request);
-    const ownerId =
-      (body as { ownerId?: string } | null)?.ownerId ?? user.id;
+    const ownerId = (body as { ownerId?: string } | null)?.ownerId ?? user.id;
     if (ownerId !== user.id && !(await canEditSubject(env, ownerId, user))) {
       set.status = 403;
       return { error: "Forbidden" };
