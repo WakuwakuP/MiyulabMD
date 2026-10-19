@@ -612,3 +612,42 @@ test("removing a domain member keeps them out until they are invited again", asy
   const back = await listSharedDrives(env, joined);
   assert.equal(back.find((drive) => drive.id === driveId)?.role, "viewer");
 });
+
+test("removal stays in force when a matching domain is added later", async (t) => {
+  const { env, owner, sqlite, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const created = await createSharedDrive(env, owner, "研究室");
+  assert.equal(created.kind, "ok");
+  if (created.kind !== "ok") {
+    return;
+  }
+  const driveId = created.result.id;
+  assert.equal(
+    (await inviteDriveMember(env, driveId, viewer.email, "editor", owner)).kind,
+    "ok",
+  );
+  const members = await listDriveMembers(env, driveId, owner);
+  assert.equal(members.kind, "ok");
+  if (members.kind !== "ok") {
+    return;
+  }
+  const row = members.result.find((member) => member.email === viewer.email);
+  assert.ok(row);
+  if (!row) {
+    return;
+  }
+  assert.equal(
+    (await removeDriveMember(env, driveId, row.id, owner)).kind,
+    "ok",
+  );
+  assert.equal(
+    (await addDriveDomain(env, driveId, "example.com", "editor", owner)).kind,
+    "ok",
+  );
+  await upsertUserByEmail(env, viewer.email, "Viewer");
+  const drives = await listSharedDrives(env, viewer);
+  assert.equal(
+    drives.some((drive) => drive.id === driveId),
+    false,
+  );
+});

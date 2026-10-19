@@ -9,11 +9,7 @@ import {
 
 import { db } from "../db/client.ts";
 import { findUserByEmail } from "../db/users.ts";
-import {
-  claimDriveMemberships,
-  driveRoleFor,
-  emailDomain,
-} from "./drive-membership.ts";
+import { claimDriveMemberships, driveRoleFor } from "./drive-membership.ts";
 import { createNoteService } from "./notes.ts";
 
 const NAME_MAX = 80;
@@ -348,29 +344,30 @@ export async function inviteDriveMember(
     return { error: "メールか役割が不正です", kind: "invalid", status: 400 };
   }
   const existing = await findUserByEmail(env, normalized);
+  const d1 = db(env);
   try {
-    await db(env)
-      .prepare(
-        `DELETE FROM shared_drive_domain_exclusions
-          WHERE drive_id = ? AND email = ?`,
-      )
-      .bind(driveId, normalized)
-      .run();
-    await db(env)
-      .prepare(
-        `INSERT INTO shared_drive_members
-           (id, drive_id, email, user_id, role, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        crypto.randomUUID(),
-        driveId,
-        normalized,
-        existing?.id ?? null,
-        role,
-        Date.now(),
-      )
-      .run();
+    await d1.batch([
+      d1
+        .prepare(
+          `INSERT INTO shared_drive_members
+             (id, drive_id, email, user_id, role, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          driveId,
+          normalized,
+          existing?.id ?? null,
+          role,
+          Date.now(),
+        ),
+      d1
+        .prepare(
+          `DELETE FROM shared_drive_domain_exclusions
+            WHERE drive_id = ? AND email = ?`,
+        )
+        .bind(driveId, normalized),
+    ]);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("UNIQUE")) {
@@ -467,32 +464,19 @@ export async function removeDriveMember(
       status: 409,
     };
   }
-  await db(env)
-    .prepare("DELETE FROM shared_drive_members WHERE id = ? AND drive_id = ?")
-    .bind(memberId, driveId)
-    .run();
-  await rememberDomainExclusion(env, driveId, target.email);
+  const d1 = db(env);
+  await d1.batch([
+    d1
+      .prepare("DELETE FROM shared_drive_members WHERE id = ? AND drive_id = ?")
+      .bind(memberId, driveId),
+    d1
+      .prepare(
+        `INSERT OR IGNORE INTO shared_drive_domain_exclusions (drive_id, email)
+         VALUES (?, ?)`,
+      )
+      .bind(driveId, target.email),
+  ]);
   return { kind: "ok", result: await memberRows(env, driveId) };
-}
-
-async function rememberDomainExclusion(
-  env: Env,
-  driveId: string,
-  email: string,
-): Promise<void> {
-  const domain = emailDomain(email);
-  if (!domain) {
-    return;
-  }
-  await db(env)
-    .prepare(
-      `INSERT OR IGNORE INTO shared_drive_domain_exclusions (drive_id, email)
-       SELECT drive_id, ?
-         FROM shared_drive_domains
-        WHERE drive_id = ? AND domain = ?`,
-    )
-    .bind(email, driveId, domain)
-    .run();
 }
 
 async function domainRows(
