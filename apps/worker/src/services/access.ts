@@ -740,7 +740,8 @@ function snapshotFolderRow(
   return snapshot?.foldersByPath.get(ownerId)?.get(folder) ?? null;
 }
 
-async function visibleCrumbs(
+/** Discoverable ancestor crumbs for a folder path (suffix after hidden parents). */
+export async function visibleCrumbs(
   env: Env,
   ownerId: string,
   folder: string,
@@ -1300,34 +1301,36 @@ export async function listFolderChildren(
   };
 }
 
+/**
+ * Include these statements in the same D1 batch as the note/path mutation.
+ * A separate ensure followed by a write lets an empty-folder deletion remove
+ * the destination in between. Existing rows retain their UUIDs and metadata.
+ */
+export function ensureFolderStatements(
+  env: Env,
+  ownerId: string,
+  folder: string,
+): D1PreparedStatement[] {
+  const now = Date.now();
+  return folderAncestors(folder)
+    .reverse()
+    .map((path) =>
+      db(env)
+        .prepare(
+          `INSERT INTO folders (id, owner_id, folder, created_at)
+         VALUES (?, ?, ?, ?) ON CONFLICT (owner_id, folder) DO NOTHING`,
+        )
+        .bind(crypto.randomUUID(), ownerId, path, now),
+    );
+}
+
 export async function ensureFolderRow(
   env: Env,
   ownerId: string,
   folder: string,
 ): Promise<string | null> {
-  const parent = parentFolderPath(folder);
-  if (folder && parent !== folder) {
-    await ensureFolderRow(env, ownerId, parent);
-  }
-
-  const existing = await getFolderByPath(env, ownerId, folder);
-  if (existing) {
-    return existing.id;
-  }
-
-  const id = crypto.randomUUID();
-  try {
-    await db(env)
-      .prepare(
-        "INSERT INTO folders (id, owner_id, folder, created_at) VALUES (?, ?, ?, ?)",
-      )
-      .bind(id, ownerId, folder, Date.now())
-      .run();
-    return id;
-  } catch {
-    const raced = await getFolderByPath(env, ownerId, folder);
-    return raced?.id ?? null;
-  }
+  await db(env).batch(ensureFolderStatements(env, ownerId, folder));
+  return (await getFolderByPath(env, ownerId, folder))?.id ?? null;
 }
 
 export async function listOwnedFolders(

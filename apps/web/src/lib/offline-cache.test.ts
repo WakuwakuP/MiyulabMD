@@ -502,6 +502,7 @@ function note(id: string, ownerId: string): Note {
     alias: null,
     articleMeta: {},
     createdAt: 1,
+    crumbs: [],
     editLocked: false,
     folder: "",
     folderId: null,
@@ -535,7 +536,7 @@ function folder(id: string | null): FolderAccess {
 }
 
 function summary(id: string, ownerId: string): NoteSummary {
-  const { markdown: _markdown, ...rest } = note(id, ownerId);
+  const { crumbs: _crumbs, markdown: _markdown, ...rest } = note(id, ownerId);
   return rest;
 }
 

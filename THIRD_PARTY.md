@@ -2,7 +2,7 @@
 
 MiyulabMD 本体は [AGPL-3.0-or-later](LICENSE)。このファイルは、帰属が必要、または MIT 以外の第三者成果物をまとめる。
 
-本番依存の全件は `pnpm licenses list --prod`。許可 SPDX は [`scripts/check-licenses/policy.mjs`](scripts/check-licenses/policy.mjs)。方針は [docs/licenses.md](docs/licenses.md)。
+本番依存の全件は `pnpm licenses list --prod --recursive`。許可 SPDX は [`scripts/check-licenses/policy.mjs`](scripts/check-licenses/policy.mjs)。方針は [docs/licenses.md](docs/licenses.md)。
 
 ## ブランド
 

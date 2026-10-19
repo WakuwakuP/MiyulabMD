@@ -2,6 +2,7 @@ export const MCP_TOKEN_PLACEHOLDER = "YOUR_TOKEN";
 
 export const MCP_AGENT_IDS = [
   "cursor",
+  "chatgpt",
   "claude-code",
   "claude-desktop",
   "vscode",
@@ -21,6 +22,8 @@ export type McpAgentGuide = {
   label: string;
   intro: string;
   paths: string[];
+  /** PAT を設定に埋め込まないクライアント（ChatGPT の OAuth など）。 */
+  requiresToken: boolean;
   snippets: McpAgentSnippet[];
 };
 
@@ -134,6 +137,10 @@ const builders: Record<
   McpAgentId,
   (origin: string, token: string) => McpAgentSnippet[]
 > = {
+  chatgpt: (origin) => [
+    { label: "サーバー URL", value: `${mcpEndpointUrl(origin)}\n` },
+    { label: "認証", value: "OAuth\n" },
+  ],
   "claude-code": (origin, token) => [
     { label: "コマンド", value: mcpClaudeCodeCommand(origin, token) },
     { label: ".mcp.json", value: mcpClaudeCodeConfig(origin, token) },
@@ -159,12 +166,21 @@ const builders: Record<
 };
 
 const catalog: Record<McpAgentId, Omit<McpAgentGuide, "snippets">> = {
+  chatgpt: {
+    id: "chatgpt",
+    intro:
+      "ChatGPT のカスタム MCP は OAuth が必須です。PAT は使いません。プラグイン追加でサーバー URL にエンドポイントを入れ、認証は OAuth を選んでください。ブラウザのログインでこのアカウントを許可すると接続できます。",
+    label: "ChatGPT",
+    paths: [],
+    requiresToken: false,
+  },
   "claude-code": {
     id: "claude-code",
     intro:
       "ターミナルでコマンドを実行するか、プロジェクトの .mcp.json / ユーザー設定に貼ってください。接続後は /mcp で確認できます。",
     label: "Claude Code",
     paths: [".mcp.json", "~/.claude.json"],
+    requiresToken: true,
   },
   "claude-desktop": {
     id: "claude-desktop",
@@ -175,6 +191,7 @@ const catalog: Record<McpAgentId, Omit<McpAgentGuide, "snippets">> = {
       "~/Library/Application Support/Claude/claude_desktop_config.json",
       "%APPDATA%\\Claude\\claude_desktop_config.json",
     ],
+    requiresToken: true,
   },
   codex: {
     id: "codex",
@@ -182,6 +199,7 @@ const catalog: Record<McpAgentId, Omit<McpAgentGuide, "snippets">> = {
       "~/.codex/config.toml またはプロジェクトの .codex/config.toml に追記し、Codex を再起動してください。CLI / IDE / ChatGPT デスクトップで共有されます。",
     label: "Codex",
     paths: ["~/.codex/config.toml", ".codex/config.toml"],
+    requiresToken: true,
   },
   cursor: {
     id: "cursor",
@@ -189,6 +207,7 @@ const catalog: Record<McpAgentId, Omit<McpAgentGuide, "snippets">> = {
       "設定 → MCP に追加するか、次のファイルに貼って MCP を再読み込みしてください。",
     label: "Cursor",
     paths: ["~/.cursor/mcp.json", ".cursor/mcp.json"],
+    requiresToken: true,
   },
   vscode: {
     id: "vscode",
@@ -196,6 +215,7 @@ const catalog: Record<McpAgentId, Omit<McpAgentGuide, "snippets">> = {
       "コマンドパレットの「MCP: Add Server」を使うか、次のファイルに貼ってください。Copilot は Agent モードで使います。ルートキーは servers です。",
     label: "VS Code",
     paths: [".vscode/mcp.json"],
+    requiresToken: true,
   },
   windsurf: {
     id: "windsurf",
@@ -203,6 +223,7 @@ const catalog: Record<McpAgentId, Omit<McpAgentGuide, "snippets">> = {
       "Cascade → Manage MCPs から追加するか、次のファイルに貼って Refresh してください。リモートは serverUrl です（url ではありません）。",
     label: "Windsurf",
     paths: ["~/.codeium/windsurf/mcp_config.json"],
+    requiresToken: true,
   },
 };
 

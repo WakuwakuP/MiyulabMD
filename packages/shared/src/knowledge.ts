@@ -19,11 +19,24 @@ export const DEFAULT_KNOWLEDGE_SETTINGS: KnowledgeSettings = {
   schemes: true,
 };
 
+/** Empty-folder deletion protection, independent of knowledge feature flags. */
+export type FolderDeletionSettings = {
+  protectedFolderIds: string[];
+  protectedPathPatterns: string[];
+};
+
+export const DEFAULT_FOLDER_DELETION_SETTINGS: FolderDeletionSettings = {
+  protectedFolderIds: [],
+  protectedPathPatterns: [],
+};
+
 export type UserSettings = {
+  folderDeletion: FolderDeletionSettings;
   knowledge: KnowledgeSettings;
 };
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
+  folderDeletion: DEFAULT_FOLDER_DELETION_SETTINGS,
   knowledge: DEFAULT_KNOWLEDGE_SETTINGS,
 };
 
@@ -37,6 +50,33 @@ export function isKnowledgeFeatureKey(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [
+    ...new Set(
+      value
+        .filter(
+          (item): item is string =>
+            typeof item === "string" && item.trim().length > 0,
+        )
+        .map((item) => item.trim()),
+    ),
+  ];
+}
+
+/** Read older/malformed settings without mutating the shared defaults. */
+export function normalizeFolderDeletionSettings(
+  value: unknown,
+): FolderDeletionSettings {
+  const raw = isRecord(value) ? value : {};
+  return {
+    protectedFolderIds: normalizeStringList(raw.protectedFolderIds),
+    protectedPathPatterns: normalizeStringList(raw.protectedPathPatterns),
+  };
 }
 
 /**
@@ -74,5 +114,8 @@ export function parseUserSettingsObject(
 export function userSettingsFromObject(
   raw: Record<string, unknown>,
 ): UserSettings {
-  return { knowledge: normalizeKnowledgeSettings(raw.knowledge) };
+  return {
+    folderDeletion: normalizeFolderDeletionSettings(raw.folderDeletion),
+    knowledge: normalizeKnowledgeSettings(raw.knowledge),
+  };
 }

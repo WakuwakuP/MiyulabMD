@@ -218,6 +218,51 @@ CREATE INDEX access_grants_owner_id_idx ON access_grants (owner_id);
 CREATE INDEX notes_updated_at_idx ON notes (updated_at);
 CREATE INDEX images_note_id_idx ON images (note_id);
 CREATE INDEX api_tokens_user_id_idx ON api_tokens (user_id);
+
+CREATE TABLE oauth_clients (
+  id TEXT PRIMARY KEY,
+  client_name TEXT,
+  redirect_uris TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE oauth_authorization_codes (
+  code_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  consumed_at INTEGER
+);
+
+CREATE TABLE oauth_access_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+
+CREATE INDEX oauth_access_tokens_user_id_idx ON oauth_access_tokens (user_id);
+
+CREATE TABLE oauth_refresh_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  rotated_at INTEGER
+);
+
+CREATE INDEX oauth_refresh_tokens_user_id_idx ON oauth_refresh_tokens (user_id);
 CREATE INDEX note_links_dest_idx ON note_links (dest_note_id);
 CREATE INDEX note_links_src_status_idx ON note_links (src_note_id, dest_status);
 CREATE INDEX notes_owner_layer_idx ON notes (owner_id, layer);

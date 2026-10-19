@@ -12,13 +12,14 @@ interface __BaseEnv_Env {
 	ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com";
 	DEV_AUTH: "false";
 	DOCUMENT_ROOM: DurableObjectNamespace<import("./src/index").DocumentRoom>;
+	CATALOG: DurableObjectNamespace<import("./src/index").CatalogRoom>;
 	OG_FETCH: Fetcher /* miyulabmd-og-fetch */;
 	DIAGRAM_CHECK: Fetcher /* miyulabmd-diagram-check */;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "DocumentRoom";
+		durableNamespaces: "DocumentRoom" | "CatalogRoom";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

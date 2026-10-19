@@ -133,7 +133,8 @@ export function McpSettingsPage() {
       <p>
         Cursor / Claude Code / VS Code などの MCP クライアントから{" "}
         <code className="font-mono">/mcp</code>{" "}
-        に接続するためのトークンです。同じトークンで記事 API（
+        に接続するためのトークンです。ChatGPT のカスタム MCP は OAuth
+        なので、このトークンは使いません。同じトークンで記事 API（
         <code className="font-mono">/api/articles</code>、
         <code className="font-mono">/openapi.json</code>
         ）も使えます。発行時に接続先とクライアント別の設定を一度だけ表示します。ノートのブラウザ

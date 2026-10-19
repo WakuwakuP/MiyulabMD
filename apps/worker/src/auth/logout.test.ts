@@ -28,6 +28,36 @@ test("logout preparation reports the incoming verified actor without following A
   assert.deepEqual(await response.json(), { ok: true });
 });
 
+test("switch-account logout returns to login and ignores other resume values", async () => {
+  const login = await handleAuthRequest(
+    new Request("https://notes.test/auth/logout?resume=login"),
+    env,
+  );
+  assert.equal(login?.status, 302);
+  assert.equal(
+    login.headers.get("Location"),
+    "https://logout-test.cloudflareaccess.com/cdn-cgi/access/logout?returnTo=https%3A%2F%2Fnotes.test%2Fauth%2Flogin",
+  );
+
+  const other = await handleAuthRequest(
+    new Request("https://notes.test/auth/logout?resume=https://evil.example"),
+    env,
+  );
+  assert.equal(
+    other?.headers.get("Location"),
+    "https://logout-test.cloudflareaccess.com/cdn-cgi/access/logout?returnTo=https%3A%2F%2Fnotes.test%2F",
+  );
+
+  const plain = await handleAuthRequest(
+    new Request("https://notes.test/auth/logout?resume=login"),
+    {
+      SESSION_SECRET: "logout-test-secret-not-a-production-credential",
+    } as Env,
+  );
+  assert.equal(plain?.status, 302);
+  assert.equal(plain.headers.get("Location"), "/auth/login");
+});
+
 test("native GET and ordinary POST keep Access redirects and cookie deletion", async () => {
   for (const method of ["GET", "POST"]) {
     const response = await handleAuthRequest(

@@ -46,15 +46,18 @@ export {
   withClosedFrontmatter,
 } from "./frontmatter.ts";
 export type {
+  FolderDeletionSettings,
   KnowledgeFeatureKey,
   KnowledgeSettings,
   UserSettings,
 } from "./knowledge.ts";
 export {
+  DEFAULT_FOLDER_DELETION_SETTINGS,
   DEFAULT_KNOWLEDGE_SETTINGS,
   DEFAULT_USER_SETTINGS,
   isKnowledgeFeatureKey,
   KNOWLEDGE_FEATURE_KEYS,
+  normalizeFolderDeletionSettings,
   normalizeKnowledgeSettings,
   parseUserSettingsObject,
   userSettingsFromObject,

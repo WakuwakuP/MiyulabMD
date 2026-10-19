@@ -39,7 +39,10 @@ function userWith(knowledge: unknown): SessionUser {
     displayName: null,
     email: "a@example.com",
     id: "user-a",
-    settings: { knowledge: knowledge as never },
+    settings: {
+      folderDeletion: { protectedFolderIds: [], protectedPathPatterns: [] },
+      knowledge: knowledge as never,
+    },
   };
 }
 

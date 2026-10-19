@@ -20,6 +20,7 @@ export const MCP_TOOLS = [
   "list_note_history",
   "get_revision",
   "restore_revision",
+  "delete_folder",
   "move_folder",
   "move_folder_contents",
   "move_notes",

@@ -1,6 +1,7 @@
 import type { SessionUser } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
+import { authenticateOAuthBearer } from "./oauth.ts";
 
 export type ApiTokenSummary = {
   id: string;
@@ -52,7 +53,7 @@ function generatePlainToken(): string {
   return `mlb_${random}`;
 }
 
-/** Personal Access Token (Bearer) を SHA-256 照合する。MCP / 自動化用。 */
+/** PAT (`mlb_`) または MCP OAuth アクセストークン (`mlo_`) を照合する。 */
 export async function authenticateBearer(
   request: Request,
   env: Env,
@@ -66,26 +67,36 @@ export async function authenticateBearer(
   if (!plaintext) {
     return null;
   }
+  if (plaintext.startsWith("mlo_")) {
+    return authenticateOAuthBearer(request, env, plaintext);
+  }
 
   const tokenHash = await hashToken(plaintext);
-  const row = await db(env)
-    .prepare(
-      `SELECT t.id, t.user_id, u.email, u.display_name
+  const database = db(env);
+  // Keep validation live on every request; batch the lookup and usage update
+  // into one round trip and transaction. Revoked tokens are never cached.
+  const [lookup] = await database.batch<TokenUserRow>([
+    database
+      .prepare(
+        `SELECT t.id, t.user_id, u.email, u.display_name
        FROM api_tokens t
        INNER JOIN users u ON u.id = t.user_id
        WHERE t.token_hash = ?`,
-    )
-    .bind(tokenHash)
-    .first<TokenUserRow>();
+      )
+      .bind(tokenHash),
+    database
+      .prepare(
+        `UPDATE api_tokens SET last_used_at = ?
+       WHERE token_hash = ?
+         AND EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.user_id)`,
+      )
+      .bind(Date.now(), tokenHash),
+  ]);
+  const row = lookup?.results[0];
 
   if (!row) {
     return null;
   }
-
-  await db(env)
-    .prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?")
-    .bind(Date.now(), row.id)
-    .run();
 
   return {
     displayName: row.display_name,

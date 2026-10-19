@@ -215,7 +215,7 @@ sequenceDiagram
 - セッション Cookie: `HttpOnly`, `Secure`, `SameSite=Lax`。中身は署名付き JWT（ユーザー ID / email / 期限）
 - Access JWT の検証は JWKS（チームドメインの certs）で行う。email をユーザーの安定キーにする
 
-MCP と自動化はブラウザの Access を使えない。ユーザーが設定画面で Personal Access Token を発行し、SHA-256 ハッシュだけを D1 に保存する。`Authorization: Bearer` で Worker がユーザーに紐付ける。
+MCP と自動化はブラウザの Access を使えない。Cursor などは設定画面の Personal Access Token を使い、SHA-256 ハッシュだけを D1 に保存する。ChatGPT のカスタム MCP は OAuth 2.1（PKCE、S256）で同じユーザーに紐付く。認可サーバーはこの Worker 自身で、ログインは既存の Access セッションを使う。アクセストークンもハッシュだけを保存し、`Authorization: Bearer` で照合する。
 
 管理用のマシンアクセスが必要なら、Access Service Token を追加で受けられるようにする（フェーズ 2）。
 
@@ -403,7 +403,11 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 
 同一 Worker の `/mcp` を Elysia ルートとして持ち、中で Cloudflare Agents SDK の `createMcpHandler` に `Request` を渡す。MCP 2026-07-28 の stateless Streamable HTTP を正面に据える。セッション用 Durable Object は持たない。
 
-認証: `Authorization: Bearer <personal_access_token>`。トークンのユーザーで `canView` / `canEdit` / `canAdmin` を評価する。トークン無しは 401。ゲスト権限での MCP は提供しない。
+認証: `Authorization: Bearer` の Personal Access Token、または OAuth アクセストークン。トークンのユーザーで `canView` / `canEdit` / `canAdmin` を評価する。トークン無し・無効は 401 と `WWW-Authenticate`（protected resource metadata）を返す。ゲスト権限での MCP は提供しない。
+
+OAuth は認可コード + PKCE（S256）のみ。公開クライアント（`token_endpoint_auth_method=none`）に限り、Client ID Metadata Documents と Dynamic Client Registration を受け付ける。`resource` は `{origin}/mcp` に固定する。同意画面はブラウザセッションが無いとき `/auth/login` に戻り、許可後だけ認可コードを返す。発行したアクセストークンは `/mcp` 以外では受け付けない。
+
+CPU 使用量とツールごとの所要時間の調べ方は [MCP の処理時間と CPU 使用量](mcp-performance.md) を参照。
 
 ### ツール
 
@@ -416,6 +420,7 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 | `insert_in_note`      | `canEdit`        | `at` / `after` / `before` のいずれか 1 つで挿入                              |
 | `update_note`         | `canEdit`        | Markdown 全置換（最終手段）。`applyTextDiff` 経由                            |
 | `delete_note`         | `canAdmin`       | メタ・画像・DO 状態を削除                                                    |
+| `delete_folder`       | 所有者のみ       | 空フォルダ 1 件だけを削除。dry_run 推奨。保護フォルダ・非空は拒否し、監査ログを残す。大量の連続実行・503 の同一呼び出しのリトライは禁止 |
 | `set_note_access`     | `canAdmin`       | 公開範囲を変更                                                               |
 | `invite_collaborator` | `canAdmin`       | email + role                                                                 |
 | `search_notes`        | ログインユーザー | title / snapshot の部分一致                                                  |
@@ -426,6 +431,14 @@ CodiMD はアップロード画像を権限外に公開してしまう。Miyulab
 | `restore_revision`    | `canEdit`        | 指定リビジョンの全文を現行 Yjs に載せる                                      |
 
 ブラウザのノート URL は `{origin}/n/{id}`（UUID）。`/{shortId}` では開けない。`/n/{shortId}` は解決する。MCP はツール結果に `url` を載せず、この規則を `list_notes` / `get_note` / `create_note` の description に書く。
+
+`delete_folder` は `services/folder-delete.ts` の `deleteEmptyFolder` を呼ぶ薄いラッパーで、既存 UI / REST の再帰削除とは別の経路。`folder_id`（UUID、推奨）か自分のドライブ内の `path` が必須で、両方指定した場合は同じフォルダを指す必要がある。`expected_path` には走査時のパスをそのまま渡し、移動・改名後の誤削除を防ぐ。最初に `dry_run: true` を使う。dry run はフォルダと policy / grants / scheme / medallion のメタデータを返すだけで、設定の遅延移行や監査ログを含め書き込みを行わない。
+
+成功レスポンスの dry run は `deleted: false` / `dryRun: true` / `canDelete: true` / `auditId: null` とし、`removed` は実績ではなく削除予定件数を表す。実際に削除が完了した場合は `deleted: true` / `dryRun: false` と実在する監査ログの `auditId` を返す。
+
+「空」はフォルダ自身と配下の notes / article_sources が 0 件、自身以外の配下 folders が 0 件であること。非空は `folder_not_empty` と notes / subfolders / articleSources / lockedNotes の件数を返し、何も消さない。最終判定は D1 の条件付き DELETE と同じトランザクション内で行い、自フォルダの policy / grants と監査スナップショットも同じ batch で扱う。ドライブルート、PARA バケット・スペースルート、scheme の採番スコープルート、ユーザー設定の保護対象は削除できない。監査 actor は認証済み PAT 所有者からサーバー側で作る `agent` / `AI(ユーザー名)` で、入力では指定できない。
+
+1 呼び出しで扱うのは 1 フォルダだけ。大量の連続呼び出しを行わず、resource-limit / 503 の場合は同じ呼び出しをリトライしない。現在の状態を確認してから次の操作を判断する。再帰削除・一括削除・復元ツールは提供しない。監査ログの行スナップショットからの手動 / SQL 復元のみを想定する。
 
 編集・`get_note` は DocumentRoom の合成 awareness に `AI(ユーザー名)` を載せる。名前は MCP トークン所有者の displayName（なければ email）。接続中のエディタは通常の共同編集者と同じ経路でカーソルを見る。スナップショットだけを D1 に書いて DO を迂回しない。オフセット直指定の API は出さない（同時編集ですぐ腐る）。
 
@@ -454,6 +467,7 @@ Cursor 側の設定例:
 | `GET`    | `/auth/callback`                 | Access JWT                                    |
 | `POST`   | `/auth/logout`                   | セッション                                    |
 | `GET`    | `/api/me`                        | セッション任意。未ログインは `{ user: null }` |
+| `PATCH`  | `/api/me`                        | セッション。表示名・ユーザー設定の部分更新 |
 | `GET`    | `/api/notes`                     | ログイン                                      |
 | `POST`   | `/api/notes`                     | ログイン（または `ALLOW_ANONYMOUS`）          |
 | `GET`    | `/api/notes/:id`                 | `canView`                                     |
@@ -470,6 +484,23 @@ Cursor 側の設定例:
 | `POST`   | `/mcp`                           | Bearer                                        |
 
 共有ページ `/s/:id` は HTML（Vite の SPA）を返し、クライアントが `GET /api/notes/:id` する。
+
+保護フォルダの設定は `users.settings.folderDeletion` に保存する。API で設定できる形は次のとおり。
+
+```json
+{
+  "settings": {
+    "folderDeletion": {
+      "protectedFolderIds": ["folder-uuid"],
+      "protectedPathPatterns": ["Inbox", "*/_keep", "**/.keep"]
+    }
+  }
+}
+```
+
+`PATCH /api/me` は指定した配列だけを置き換え、未指定の配列・knowledge 設定・既存の未知キーは保持する。明示的な `[]` はそのリストをクリアする。配列以外や空文字列などの不正な入力は 400。既定値は両方とも `[]` で、保護機能は knowledge の opt-in に依存しない。パターンはドライブ相対のパス全体に一致させ、`*` は 1 セグメント内、独立した `**` セグメントは 0 個以上のセグメントに一致する（`**/.keep` は直下の `.keep` にも一致）。ID 保護は移動・改名後も有効で、パスパターンは削除時の現在パスに適用する。
+
+設定の更新と PARA の遅延移行は、現在の `users.settings` に対する単一の `UPDATE` / `json_patch` で行う。読み取り済み JSON の上書きはせず、並行して保存された保護リストや未指定の knowledge フラグを失わない。
 
 ## 12. フロントエンド
 
@@ -574,5 +605,5 @@ Worker が `apps/web` のビルド成果を Assets として配信する。開�
 - ゲスト作成（`ALLOW_ANONYMOUS`）を将来開けるか
 - ノート上限 / 画像容量のクォータ
 - 公開ノートの OGP をサーバーレンダリングするか
-- MCP を OAuth（Access / 独自）に上げるか。初期は PAT
+- MCP の OAuth は同一オリジンの認可サーバーに決めた。PAT は残す
 - Elysia の `CloudflareAdapter` が Experimental のままか。安定化したら構成を見直す。`waitUntil` の渡し方も実装時に確認する

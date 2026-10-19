@@ -97,9 +97,12 @@ export default defineConfig({
     host: "127.0.0.1",
     port: Number(process.env.PORT || 5173),
     proxy: {
+      "/.well-known/oauth-authorization-server": workerProxy,
+      "/.well-known/oauth-protected-resource": workerProxy,
       "/api": workerProxy,
       "/auth": workerProxy,
       "/mcp": workerProxy,
+      "/oauth": workerProxy,
       "/openapi.json": workerProxy,
       "/ws": { ...workerProxy, ws: true },
     },

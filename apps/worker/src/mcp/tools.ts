@@ -1,34 +1,34 @@
 import { env } from "cloudflare:workers";
 import { extractDiagramBlocks } from "@miyulabmd/markdown";
 import {
-  ACCESS_SCOPES,
   EDIT_LOCKED_CODE,
-  MCP_DIAGRAM_CHECK_HINT,
-  MCP_NOTE_URL_HINT,
   NOTE_RESTORE_MESSAGE,
   type Note,
   type SessionUser,
 } from "@miyulabmd/shared";
-import { McpServer } from "@modelcontextprotocol/server";
+import {
+  type McpRequestContext,
+  McpServer,
+  Server,
+  type StandardSchemaWithJSON,
+  type ToolCallback,
+} from "@modelcontextprotocol/server";
 import { getMcpAuthContext } from "agents/mcp/server";
-import { z } from "zod";
-import { db } from "../db/client.ts";
 import type { DiagramCheckResult } from "../diagram-check/validate.ts";
+import {
+  catalogQueryName,
+  catalogToolRequest,
+} from "../durable-objects/catalog-list.ts";
 import type { ApplyEditResult } from "../durable-objects/DocumentRoom.ts";
-import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import {
-  type InsertPosition,
-  markdownOutline,
-  numberMarkdownLines,
-} from "../durable-objects/markdown-edit.ts";
+  actorFromAgent,
+  actorFromSessionUser,
+} from "../durable-objects/history-edit.ts";
+import type { InsertPosition } from "../durable-objects/markdown-edit.ts";
 import {
-  buildAccessSnapshot,
-  ensureFolderRow,
-  folderViewFlags,
-  getFolderById,
-  getFolderByPath,
-  listFolderChildren,
-} from "../services/access.ts";
+  type DeleteEmptyFolderOutcome,
+  deleteEmptyFolder,
+} from "../services/folder-delete.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import {
   listBacklinks,
@@ -57,7 +57,6 @@ import {
 import { paraArchiveProject, paraList } from "../services/para.ts";
 import {
   createSchemeChild,
-  folderIdsForSchemeId,
   jdAllocateId,
   jdListCategory,
   type SchemeError,
@@ -65,6 +64,12 @@ import {
   setFolderScheme,
   validateSchemeTree,
 } from "../services/schemes.ts";
+
+import { featureConfig } from "./feature-config.ts";
+import { getMcpRequestTarget } from "./request-target.ts";
+import { listToolsForFeatures, requiredToolFeature } from "./tool-catalog.ts";
+import { toolDefinitions } from "./tool-definitions.ts";
+import { withToolTiming } from "./tool-timing.ts";
 
 function textResult(data: unknown) {
   return {
@@ -77,42 +82,6 @@ function textError(message: string) {
     content: [{ text: message, type: "text" as const }],
     isError: true as const,
   };
-}
-
-async function listNotesForTool(
-  notes: ReturnType<typeof createNoteService>,
-  user: SessionUser,
-  options: {
-    folderId?: string;
-    query?: string;
-    recursive: boolean;
-  },
-): Promise<
-  { notes: Awaited<ReturnType<typeof notes.listForUser>> } | { error: string }
-> {
-  let list: Awaited<ReturnType<typeof notes.listForUser>>;
-  if (options.folderId) {
-    const result = await notes.listFolderNotes(
-      user,
-      options.folderId,
-      options.recursive,
-    );
-    if (result.kind === "not_found") {
-      return { error: "Not found" };
-    }
-    if (result.kind === "denied") {
-      return { error: result.status === 401 ? "Unauthorized" : "Forbidden" };
-    }
-    list = result.notes;
-  } else {
-    list = await notes.listForUser(user);
-  }
-  const trimmedQuery = options.query?.trim();
-  if (trimmedQuery) {
-    const needle = trimmedQuery.toLowerCase();
-    list = list.filter((note) => note.title.toLowerCase().includes(needle));
-  }
-  return { notes: list };
 }
 
 function medallionToolError(
@@ -142,31 +111,6 @@ function deniedToolError(result: { status: number; code?: string }) {
   return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
 }
 
-/** folder_id か scheme_id（`15.22` 等）から対象フォルダ UUID を決める。 */
-async function folderIdArg(
-  user: SessionUser,
-  folderId: string | undefined,
-  schemeId: string | undefined,
-): Promise<{ folderId?: string } | { error: string }> {
-  if (!schemeId) {
-    return { folderId };
-  }
-  if (folderId) {
-    return { error: "Specify either folder_id or scheme_id, not both" };
-  }
-  const resolved = await folderIdsForSchemeId(env, user.id, schemeId);
-  if (resolved.length === 0) {
-    return { error: "Not found" };
-  }
-  if (resolved.length > 1) {
-    return {
-      error:
-        "scheme_id is ambiguous across multiple scheme roots; specify folder_id instead",
-    };
-  }
-  return { folderId: resolved[0] };
-}
-
 const MOVE_OVERLOAD_MESSAGE =
   "Do not retry the same call. Wait a few seconds; split into shallower moves (move_folder on a direct child, or move_folder_contents without include_subfolders).";
 
@@ -191,6 +135,32 @@ async function runMoveTool<T>(
     return textResult(result.result);
   } catch {
     return textError(MOVE_OVERLOAD_MESSAGE);
+  }
+}
+
+const DELETE_FOLDER_OVERLOAD_MESSAGE =
+  "Do not retry the same call. Stop bulk deletion and inspect the current folder state before deciding on a new request. Delete only one empty folder per call; do not issue repeated bulk deletion calls.";
+
+async function runDeleteFolderTool(
+  run: () => Promise<DeleteEmptyFolderOutcome>,
+): Promise<ToolTextResult> {
+  try {
+    const outcome = await run();
+    if (outcome.kind === "ok") {
+      return textResult(outcome.result);
+    }
+    // Preserve counts and currentPath so callers can act on a refusal safely.
+    return {
+      ...textResult({
+        ...outcome,
+        ...(outcome.status === 503
+          ? { guidance: DELETE_FOLDER_OVERLOAD_MESSAGE }
+          : {}),
+      }),
+      isError: true,
+    };
+  } catch {
+    return textError(DELETE_FOLDER_OVERLOAD_MESSAGE);
   }
 }
 
@@ -524,39 +494,52 @@ async function inviteCollaboratorTool(
   return mutateNoteToolResponse(result);
 }
 
-/**
- * §2.6/KM-E: tool exposure follows *configured* state, not the UI feature
- * flags. A feature's tools register only when the user already has the
- * backing configuration rows — an unconfigured feature offers no tools
- * instead of failing at call time.
- */
-async function featureConfig(env_: Env, user: SessionUser | null) {
-  if (!user) {
-    return { hasMedallion: false, hasPara: false, hasSchemes: false };
+type MetadataTarget = Extract<
+  Awaited<ReturnType<typeof getMcpRequestTarget>>,
+  { kind: "bootstrap" | "list" }
+>;
+
+async function createMetadataServer(target: MetadataTarget) {
+  // Auth remains in handleMcp; protocol/input validation remains in the SDK.
+  const server = new Server(
+    { name: "miyulabmd", version: "0.1.0" },
+    { capabilities: { tools: { listChanged: true } } },
+  );
+  if (target.kind === "list") {
+    const features = await featureConfig(env, requireUser());
+    // SDK still validates the envelope/params and serializes the response.
+    // Listing does not need executable tool registrations or note services.
+    server.setRequestHandler("tools/list", () => ({
+      tools: listToolsForFeatures(features),
+    }));
+    console.log({
+      event: "mcp_dispatch",
+      method: "tools/list",
+      registration: "catalog",
+    });
+  } else {
+    console.log({
+      event: "mcp_dispatch",
+      method: target.method,
+      registration: "bootstrap",
+    });
   }
-  const [para, medallion, scheme] = await Promise.all([
-    db(env_)
-      .prepare("SELECT 1 AS x FROM para_spaces WHERE owner_id = ? LIMIT 1")
-      .bind(user.id)
-      .first<{ x: number }>(),
-    db(env_)
-      .prepare(
-        "SELECT 1 AS x FROM medallion_sets WHERE owner_user_id = ? LIMIT 1",
-      )
-      .bind(user.id)
-      .first<{ x: number }>(),
-    db(env_)
-      .prepare(
-        "SELECT 1 AS x FROM folders WHERE owner_id = ? AND scheme IS NOT NULL LIMIT 1",
-      )
-      .bind(user.id)
-      .first<{ x: number }>(),
-  ]);
-  return {
-    hasMedallion: medallion !== null,
-    hasPara: para !== null,
-    hasSchemes: scheme !== null,
-  };
+  return server;
+}
+
+function logToolDispatch(
+  isToolCall: boolean,
+  candidate: string | undefined,
+  requestedTool: string | undefined,
+) {
+  // Fixed method labels and allow-listed tool names only. Workers Logs supplies
+  // the request ID for joining to CPU time; never log the body or raw headers.
+  console.log({
+    event: "mcp_dispatch",
+    method: isToolCall ? "tools/call" : "unclassified",
+    registration: requestedTool ? "targeted" : "full",
+    ...(candidate ? { tool: candidate } : {}),
+  });
 }
 
 /**
@@ -564,304 +547,183 @@ async function featureConfig(env_: Env, user: SessionUser | null) {
  * Async so it can read the caller's feature configuration inside the auth
  * context (createMcpHandler awaits the factory per request).
  */
-export async function createMcpServerFactory() {
+export async function createMcpServerFactory(context?: McpRequestContext) {
+  const target = await getMcpRequestTarget(context);
+  if (target && target.kind !== "tool") {
+    return createMetadataServer(target);
+  }
   const server = new McpServer({
     name: "miyulabmd",
     version: "0.1.0",
   });
   const notes = createNoteService(env);
-  const features = await featureConfig(env, requireUser());
+  const candidate =
+    target?.kind === "tool" && Object.hasOwn(toolDefinitions, target.name)
+      ? target.name
+      : undefined;
+  const requiredFeature = candidate
+    ? requiredToolFeature(candidate)
+    : undefined;
+  const features =
+    !candidate || requiredFeature
+      ? await featureConfig(env, requireUser())
+      : { hasMedallion: false, hasPara: false, hasSchemes: false };
+  // An unavailable gated tool keeps the full registry so the SDK reports the
+  // same "tool not found" error. Unknown/large/non-HTTP requests do likewise.
+  const requestedTool =
+    candidate && (!requiredFeature || features[requiredFeature])
+      ? candidate
+      : undefined;
+  logToolDispatch(target?.kind === "tool", candidate, requestedTool);
+  function registerTool<Input extends StandardSchemaWithJSON>(
+    name: string,
+    definition: { description: string; inputSchema: Input },
+    callback: ToolCallback<Input>,
+  ) {
+    if (!requestedTool || name === requestedTool) {
+      server.registerTool(name, definition, callback);
+    }
+  }
 
-  server.registerTool(
+  async function readTool(name: string, args: object) {
+    const user = requireUser();
+    if (!user) {
+      return textError("Unauthorized");
+    }
+    // SDK に落ちたときも一覧・検索の CPU は CatalogRoom に残す。
+    const raw = JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: { arguments: args, name },
+    });
+    const response = await env.CATALOG.get(
+      env.CATALOG.idFromName(catalogQueryName(user)),
+    ).fetch(catalogToolRequest(user, raw));
+    const line = (await response.text())
+      .split("\n")
+      .find((item) => item.startsWith("data: "));
+    if (!line) {
+      return textError("Invalid request");
+    }
+    const payload = JSON.parse(line.slice("data: ".length)) as {
+      result?: ReturnType<typeof textResult>;
+    };
+    return payload.result ?? textError("Invalid request");
+  }
+
+  registerTool(
     "list_notes",
-    {
-      description: `List notes owned by or shared with the authenticated user. Do not enumerate everything — browse folders with list_folder_entries first. ${MCP_NOTE_URL_HINT}`,
-      inputSchema: {
-        folder_id: z
-          .string()
-          .optional()
-          .describe("Restrict to notes inside this folder UUID"),
-        query: z
-          .string()
-          .optional()
-          .describe("Optional title filter (case-insensitive substring)"),
-        recursive: z
-          .boolean()
-          .optional()
-          .describe(
-            "With folder_id, include notes in descendant folders (default: direct children only)",
-          ),
-        scheme_id: z
-          .string()
-          .optional()
-          .describe(
-            "Restrict to the folder carrying this naming-scheme ID (e.g. `15.22`, `202609171230`); alternative to folder_id",
-          ),
-      },
-    },
-    async ({ folder_id, query, recursive, scheme_id }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const target = await folderIdArg(user, folder_id, scheme_id);
-      if ("error" in target) {
-        return textError(target.error);
-      }
-      const result = await listNotesForTool(notes, user, {
-        folderId: target.folderId,
-        query,
-        recursive: recursive ?? false,
-      });
-      if ("error" in result) {
-        return textError(result.error);
-      }
-      return textResult({ notes: result.notes });
-    },
+    toolDefinitions.list_notes,
+    withToolTiming("list_notes", async (args) => readTool("list_notes", args)),
   );
 
-  server.registerTool(
+  registerTool(
     "list_folder_entries",
-    {
-      description: `List direct children (subfolders and notes) of a folder — one level only. Do not recurse; call again on a child folder_id. If the call fails with a resource-limit error, do not retry immediately. ${MCP_NOTE_URL_HINT}`,
-      inputSchema: {
-        cursor: z
-          .string()
-          .optional()
-          .describe("Pagination cursor from a previous nextCursor"),
-        folder_id: z
-          .string()
-          .optional()
-          .describe("Folder UUID; omit for the drive root"),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(200)
-          .optional()
-          .describe("Max entries to return (default 50, max 200)"),
-      },
-    },
-    async ({ cursor, folder_id, limit }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      let ownerId = user.id;
-      let folderPath = "";
-      let currentId: string | null;
-      if (folder_id) {
-        const rec = await getFolderById(env, folder_id);
-        if (!rec) {
-          return textError("Not found");
-        }
-        ownerId = rec.owner_id;
-        folderPath = rec.folder;
-        currentId = rec.id;
-      } else {
-        const root = await getFolderByPath(env, user.id, "");
-        currentId = root?.id ?? (await ensureFolderRow(env, user.id, ""));
-      }
-
-      const snapshot =
-        user.id === ownerId
-          ? undefined
-          : await buildAccessSnapshot(env, [ownerId]);
-      const flags = await folderViewFlags(
-        env,
-        ownerId,
-        folderPath,
-        user,
-        snapshot,
-      );
-      if (!flags.canView) {
-        return textError("Not found");
-      }
-      return textResult(
-        await listFolderChildren(
-          env,
-          ownerId,
-          folderPath,
-          currentId,
-          user,
-          { cursor, includeNoteCounts: false, limit },
-          snapshot,
-        ),
-      );
-    },
+    toolDefinitions.list_folder_entries,
+    withToolTiming("list_folder_entries", async (args) =>
+      readTool("list_folder_entries", args),
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "get_note",
-    {
-      description: `Get note metadata and the live collaborative markdown (not a stale D1 snapshot). Shows an AI(username) cursor to people editing in the browser. Includes a heading outline. ${MCP_NOTE_URL_HINT}`,
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        numbered: z
-          .boolean()
-          .optional()
-          .describe("Prefix each markdown line with its 1-based line number"),
-      },
-    },
-    async ({ id, numbered }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      const result = await notes.get(id, user);
-      if (result.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (result.kind === "denied") {
-        return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
-      }
-
-      const note = result.note;
-      const markdown = await documentRoom(note.id).readForAgent(
-        note.id,
-        agentOf(user),
-      );
-      const live = { ...note, markdown };
-
-      return textResult({
-        note: live,
-        outline: markdownOutline(markdown),
-        ...(numbered
-          ? { numberedMarkdown: numberMarkdownLines(markdown) }
-          : {}),
-      });
-    },
+    toolDefinitions.get_note,
+    withToolTiming("get_note", async (args) => readTool("get_note", args)),
   );
 
-  server.registerTool(
+  registerTool(
     "create_note",
-    {
-      description: `Create a new note owned by the authenticated user. ${MCP_NOTE_URL_HINT} ${MCP_DIAGRAM_CHECK_HINT}`,
-      inputSchema: {
-        folder: z.string().optional(),
-        inheritAccess: z.boolean().optional(),
-        markdown: z.string().optional(),
-        readScope: z.enum(ACCESS_SCOPES).optional(),
-        title: z.string().optional(),
-        writeScope: z.enum(ACCESS_SCOPES).optional(),
-      },
-    },
-    async ({
-      title,
-      markdown,
-      folder,
-      inheritAccess,
-      readScope,
-      writeScope,
-    }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      const created = await notes.create(user, {
+    toolDefinitions.create_note,
+    withToolTiming(
+      "create_note",
+      async ({
+        title,
+        markdown,
         folder,
         inheritAccess,
-        markdown,
         readScope,
-        title,
         writeScope,
-      });
-      if ("error" in created) {
-        return textError(created.error);
-      }
+      }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
 
-      return textResult({
-        note: created,
-        ...(await diagramCheckFields(created.markdown)),
-      });
-    },
+        const created = await notes.create(user, {
+          folder,
+          inheritAccess,
+          markdown,
+          readScope,
+          title,
+          writeScope,
+        });
+        if ("error" in created) {
+          return textError(created.error);
+        }
+
+        return textResult({
+          note: created,
+          ...(await diagramCheckFields(created.markdown)),
+        });
+      },
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "replace_in_note",
-    {
-      description: `Replace a unique old_string with new_string in the live note. If old_string matches more than once and replace_all is not true, the call fails. Prefer this over update_note. Shows an AI(username) cursor at the edit. ${MCP_DIAGRAM_CHECK_HINT}`,
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        new_string: z.string().describe("Replacement text"),
-        old_string: z
-          .string()
-          .describe("Exact text to find. Include unique surrounding context."),
-        replace_all: z
-          .boolean()
-          .optional()
-          .describe("Replace every non-overlapping match"),
+    toolDefinitions.replace_in_note,
+    withToolTiming(
+      "replace_in_note",
+      async ({ id, old_string, new_string, replace_all }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+
+        const loaded = await notes.get(id, user);
+        if (loaded.kind === "not_found") {
+          return textError("Not found");
+        }
+        if (loaded.kind === "denied") {
+          return textError(
+            loaded.status === 401 ? "Unauthorized" : "Forbidden",
+          );
+        }
+        if (!loaded.note.access.flags.canEdit) {
+          return textError("Forbidden");
+        }
+        if (loaded.note.editLocked) {
+          return textError(
+            `${EDIT_LOCKED_CODE}: this note is edit-locked. Call set_edit_lock with locked=false first.`,
+          );
+        }
+
+        const result = await documentRoom(loaded.note.id).applyEdit({
+          agent: agentOf(user),
+          newString: new_string,
+          noteId: loaded.note.id,
+          oldString: old_string,
+          op: "replace",
+          replaceAll: replace_all,
+        });
+        return editToolResult(loaded.note.id, result);
       },
-    },
-    async ({ id, old_string, new_string, replace_all }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      const loaded = await notes.get(id, user);
-      if (loaded.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (loaded.kind === "denied") {
-        return textError(loaded.status === 401 ? "Unauthorized" : "Forbidden");
-      }
-      if (!loaded.note.access.flags.canEdit) {
-        return textError("Forbidden");
-      }
-      if (loaded.note.editLocked) {
-        return textError(
-          `${EDIT_LOCKED_CODE}: this note is edit-locked. Call set_edit_lock with locked=false first.`,
-        );
-      }
-
-      const result = await documentRoom(loaded.note.id).applyEdit({
-        agent: agentOf(user),
-        newString: new_string,
-        noteId: loaded.note.id,
-        oldString: old_string,
-        op: "replace",
-        replaceAll: replace_all,
-      });
-      return editToolResult(loaded.note.id, result);
-    },
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "insert_in_note",
-    {
-      description: `Insert text into the live note. Provide exactly one of: at (start|end), after (unique context), or before (unique context). Prefer unique surrounding text when editing the middle. Shows an AI(username) cursor at the insert. ${MCP_DIAGRAM_CHECK_HINT}`,
-      inputSchema: {
-        after: z
-          .string()
-          .optional()
-          .describe("Insert immediately after this unique text"),
-        at: z.enum(["start", "end"]).optional(),
-        before: z
-          .string()
-          .optional()
-          .describe("Insert immediately before this unique text"),
-        id: z.string().describe("Note UUID or short ID"),
-        text: z.string().describe("Text to insert, including any newlines"),
-      },
-    },
-    async ({ id, text, at, after, before }) =>
+    toolDefinitions.insert_in_note,
+    withToolTiming("insert_in_note", async ({ id, text, at, after, before }) =>
       insertInNoteTool(notes, { after, at, before, id, text }),
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "update_note",
-    {
-      description: `Last-resort full replace of the live note markdown. Concurrent human edits may be disrupted. Prefer replace_in_note or insert_in_note. Shows an AI(username) cursor. ${MCP_DIAGRAM_CHECK_HINT}`,
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        markdown: z.string().describe("Full markdown body"),
-      },
-    },
-    async ({ id, markdown }) => {
+    toolDefinitions.update_note,
+    withToolTiming("update_note", async ({ id, markdown }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -905,19 +767,13 @@ export async function createMcpServerFactory() {
         shortId: note.shortId,
         title: note.title,
       });
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "delete_note",
-    {
-      description:
-        "Delete a note (requires canAdmin). Call once per note; do not burst-delete. If a resource-limit error is returned, wait a few seconds before the next delete.",
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-      },
-    },
-    async ({ id }) => {
+    toolDefinitions.delete_note,
+    withToolTiming("delete_note", async ({ id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -935,252 +791,56 @@ export async function createMcpServerFactory() {
       }
 
       return textResult({ deleted: true, id: result.note.id });
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "set_note_access",
-    {
-      description:
-        "Change note read/write access (requires owner). inheritAccess follows the folder policy.",
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        inheritAccess: z.boolean().optional(),
-        readScope: z.enum(ACCESS_SCOPES).optional(),
-        writeScope: z.enum(ACCESS_SCOPES).optional(),
-      },
-    },
-    async ({ id, inheritAccess, readScope, writeScope }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
+    toolDefinitions.set_note_access,
+    withToolTiming(
+      "set_note_access",
+      async ({ id, inheritAccess, readScope, writeScope }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
 
-      const result = await notes.updateMeta(id, user, {
-        inheritAccess,
-        readScope,
-        writeScope,
-      });
-      return mutateNoteToolResponse(result);
-    },
+        const result = await notes.updateMeta(id, user, {
+          inheritAccess,
+          readScope,
+          writeScope,
+        });
+        return mutateNoteToolResponse(result);
+      },
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "invite_collaborator",
-    {
-      description: "Grant a user read or write access to a note by email.",
-      inputSchema: {
-        canWrite: z.boolean().optional(),
-        email: z.string().email(),
-        id: z.string().describe("Note UUID or short ID"),
-      },
-    },
-    async ({ id, email, canWrite }) =>
+    toolDefinitions.invite_collaborator,
+    withToolTiming("invite_collaborator", async ({ id, email, canWrite }) =>
       inviteCollaboratorTool(notes, { canWrite, email, id }),
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "search_notes",
-    {
-      description:
-        'Search accessible notes by title or markdown snapshot. Query supports a small DSL: `word`, `"exact phrase"`, `-excluded`, and filters `path:folder`, `tag:name`, `layer:key` or `layer:set.key` (folder medallion assignment, inherited by descendants), `scheme:`/`jd:15.22`, `para:projects`. Use scope=title for fast title-only lookup; use grep_notes for line-level body hits.',
-      inputSchema: {
-        cursor: z
-          .string()
-          .optional()
-          .describe("Pagination cursor from a previous next_cursor"),
-        folder_id: z
-          .string()
-          .optional()
-          .describe("Restrict to notes inside this folder UUID (recursive)"),
-        layer: z
-          .string()
-          .optional()
-          .describe(
-            "Restrict to a medallion layer — a layer key (`output`) or set-qualified (`set.key`)",
-          ),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(200)
-          .optional()
-          .describe("Max notes to return (default 50, max 200)"),
-        query: z.string().describe("Search query"),
-        scheme_id: z
-          .string()
-          .optional()
-          .describe(
-            "Restrict to the folder carrying this naming-scheme ID (e.g. `15.22`); alternative to folder_id",
-          ),
-        scope: z
-          .enum(["title", "body", "all"])
-          .optional()
-          .describe("Where to match (default: all)"),
-      },
-    },
-    async ({ query, scope, folder_id, layer, limit, cursor, scheme_id }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-
-      const trimmedQuery = query.trim();
-      if (!trimmedQuery) {
-        return textError("query is required");
-      }
-      const target = await folderIdArg(user, folder_id, scheme_id);
-      if ("error" in target) {
-        return textError(target.error);
-      }
-
-      const result = await notes.searchNotes(user, {
-        cursor,
-        folderIds: target.folderId ? [target.folderId] : undefined,
-        layer,
-        limit,
-        query: trimmedQuery,
-        scope,
-      });
-      if (result.kind === "not_found") {
-        return textError("Not found");
-      }
-      return textResult({
-        next_cursor: result.nextCursor,
-        notes: result.notes,
-        query: trimmedQuery,
-      });
-    },
+    toolDefinitions.search_notes,
+    withToolTiming("search_notes", async (args) =>
+      readTool("search_notes", args),
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "grep_notes",
-    {
-      description: `Line-level search over the markdown body of accessible notes — like grep. Returns 1-based line/column plus context lines so results can feed replace_in_note. Reads the D1 markdown snapshot which lags live edits by a few seconds; check snapshot_updated_at per match. pattern is a fixed string by default; set fixed_string=false for a JS regular expression. ${MCP_NOTE_URL_HINT}`,
-      inputSchema: {
-        case_sensitive: z
-          .boolean()
-          .optional()
-          .describe("Match case (default: false)"),
-        context_after: z
-          .number()
-          .int()
-          .min(0)
-          .max(5)
-          .optional()
-          .describe("Lines of context after each hit (default 1, max 5)"),
-        context_before: z
-          .number()
-          .int()
-          .min(0)
-          .max(5)
-          .optional()
-          .describe("Lines of context before each hit (default 1, max 5)"),
-        fixed_string: z
-          .boolean()
-          .optional()
-          .describe(
-            "Treat pattern as a literal string (default: true). Set false for a JS regex.",
-          ),
-        folder_id: z
-          .string()
-          .optional()
-          .describe("Restrict to notes inside this folder UUID (recursive)"),
-        glob_title: z
-          .string()
-          .optional()
-          .describe("Only scan notes whose title matches this glob (* ?)"),
-        max_matches_per_note: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
-          .optional()
-          .describe("Cap hits per note (default 10, max 50)"),
-        max_notes: z
-          .number()
-          .int()
-          .min(1)
-          .max(200)
-          .optional()
-          .describe("Cap notes with hits (default 50, max 200)"),
-        pattern: z
-          .string()
-          .min(1)
-          .max(500)
-          .describe("Text or regex to find in note bodies"),
-        scheme_id: z
-          .string()
-          .optional()
-          .describe(
-            "Restrict to the folder carrying this naming-scheme ID (e.g. `15.22`); alternative to folder_id",
-          ),
-      },
-    },
-    async ({
-      pattern,
-      case_sensitive,
-      context_after,
-      context_before,
-      fixed_string,
-      folder_id,
-      glob_title,
-      max_matches_per_note,
-      max_notes,
-      scheme_id,
-    }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      const target = await folderIdArg(user, folder_id, scheme_id);
-      if ("error" in target) {
-        return textError(target.error);
-      }
-
-      const result = await notes.grep(user, {
-        caseSensitive: case_sensitive,
-        contextAfter: context_after,
-        contextBefore: context_before,
-        fixedString: fixed_string,
-        folderIds: target.folderId ? [target.folderId] : undefined,
-        globTitle: glob_title,
-        maxMatchesPerNote: max_matches_per_note,
-        maxNotes: max_notes,
-        pattern,
-      });
-      if (result.kind === "not_found") {
-        return textError("Not found");
-      }
-      if (result.kind === "bad_request") {
-        return textError(result.error);
-      }
-      return textResult({
-        matches: result.matches.map((match) => ({
-          after: match.after,
-          before: match.before,
-          column: match.column,
-          line: match.line,
-          note_id: match.noteId,
-          snapshot_updated_at: match.snapshotUpdatedAt,
-          text: match.text,
-          title: match.title,
-        })),
-        scanned_notes: result.scannedNotes,
-        truncated: result.truncated,
-      });
-    },
+    toolDefinitions.grep_notes,
+    withToolTiming("grep_notes", async (args) => readTool("grep_notes", args)),
   );
 
-  server.registerTool(
+  registerTool(
     "list_note_links",
-    {
-      description: `List outgoing links from a note ([[wiki links]] and /n/{id} markdown links). Unresolved links have note=null. Only notes the caller can see are resolved; hidden targets look missing. ${MCP_NOTE_URL_HINT}`,
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-      },
-    },
-    async ({ id }) => {
+    toolDefinitions.list_note_links,
+    withToolTiming("list_note_links", async ({ id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -1193,18 +853,13 @@ export async function createMcpServerFactory() {
         return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
       }
       return textResult(result.result);
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_backlinks",
-    {
-      description: `List notes linking to the given note (incoming links). Only sources the caller can see are listed. ${MCP_NOTE_URL_HINT}`,
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-      },
-    },
-    async ({ id }) => {
+    toolDefinitions.list_backlinks,
+    withToolTiming("list_backlinks", async ({ id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -1217,43 +872,25 @@ export async function createMcpServerFactory() {
         return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
       }
       return textResult({ backlinks: result.backlinks });
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_broken_links",
-    {
-      description:
-        "List unresolved links (missing or ambiguous) across notes the caller can see. Use before renaming or promoting notes.",
-      inputSchema: {},
-    },
-    async () => {
+    toolDefinitions.list_broken_links,
+    withToolTiming("list_broken_links", async () => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
       }
       return textResult({ broken: await listBrokenLinks(env, user) });
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "resolve_wikilink",
-    {
-      description: `Resolve a [[wiki link]] target to a note the caller can see. Order: UUID → short_id → alias → folder/Title → same-folder title → global title. Pass context_id to scope folder-relative resolution to that note's folder. ${MCP_NOTE_URL_HINT}`,
-      inputSchema: {
-        context_id: z
-          .string()
-          .optional()
-          .describe(
-            "Source note UUID or short ID; scopes folder/title resolution",
-          ),
-        target: z
-          .string()
-          .min(1)
-          .describe("The link target text inside [[...]]"),
-      },
-    },
-    async ({ target, context_id }) => {
+    toolDefinitions.resolve_wikilink,
+    withToolTiming("resolve_wikilink", async ({ target, context_id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -1266,19 +903,13 @@ export async function createMcpServerFactory() {
         return textError(result.status === 401 ? "Unauthorized" : "Forbidden");
       }
       return textResult(result.resolution);
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "agent_join",
-    {
-      description:
-        "Show an AI(username) cursor on an open note. The name is the token owner's display name. Edit and get_note tools join automatically.",
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-      },
-    },
-    async ({ id }) => {
+    toolDefinitions.agent_join,
+    withToolTiming("agent_join", async ({ id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -1297,18 +928,13 @@ export async function createMcpServerFactory() {
         agentOf(user),
       );
       return textResult({ id: result.note.id, joined: true });
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "agent_leave",
-    {
-      description: "Hide the AI(username) cursor on a note.",
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-      },
-    },
-    async ({ id }) => {
+    toolDefinitions.agent_leave,
+    withToolTiming("agent_leave", async ({ id }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -1324,151 +950,107 @@ export async function createMcpServerFactory() {
 
       await documentRoom(result.note.id).clearAgentPresence();
       return textResult({ id: result.note.id, left: true });
-    },
+    }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_note_history",
-    {
-      description:
-        "List edit events for a note, newest first. Use before (created_at) to page.",
-      inputSchema: {
-        before: z
-          .number()
-          .optional()
-          .describe("Return events created before this epoch millisecond"),
-        id: z.string().describe("Note UUID or short ID"),
-        limit: z.number().optional().describe("Page size (default 30)"),
-      },
-    },
-    async ({ id, limit, before }) =>
+    toolDefinitions.list_note_history,
+    withToolTiming("list_note_history", async ({ id, limit, before }) =>
       listNoteHistoryTool(notes, { before, id, limit }),
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "get_revision",
-    {
-      description: "Get the markdown stored for a note revision.",
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        revisionId: z.string().describe("Revision UUID"),
-      },
-    },
-    async ({ id, revisionId }) => getRevisionTool(notes, { id, revisionId }),
+    toolDefinitions.get_revision,
+    withToolTiming("get_revision", async ({ id, revisionId }) =>
+      getRevisionTool(notes, { id, revisionId }),
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "restore_revision",
-    {
-      description: `Replace the live note with a stored revision. Concurrent edits are overwritten. Requires canEdit. ${MCP_DIAGRAM_CHECK_HINT}`,
-      inputSchema: {
-        id: z.string().describe("Note UUID or short ID"),
-        revisionId: z.string().describe("Revision UUID to restore"),
-      },
-    },
-    async ({ id, revisionId }) =>
+    toolDefinitions.restore_revision,
+    withToolTiming("restore_revision", async ({ id, revisionId }) =>
       restoreRevisionTool(notes, { id, revisionId }),
+    ),
   );
 
-  server.registerTool(
+  registerTool(
+    "delete_folder",
+    toolDefinitions.delete_folder,
+    withToolTiming(
+      "delete_folder",
+      async ({ folder_id, path, expected_path, dry_run }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        return await runDeleteFolderTool(() =>
+          deleteEmptyFolder(
+            env,
+            { dry_run, expected_path, folder_id, path },
+            user,
+            actorFromAgent(agentOf(user)),
+          ),
+        );
+      },
+    ),
+  );
+
+  registerTool(
     "move_folder",
-    {
-      description:
-        "Move a folder (with all contents) under another folder, or to the drive root. Detects cycles, conflicts, and the 500-item cap. Set dry_run first to preview counts. On resource-limit / 503: do not retry the same call; wait a few seconds and move a shallower child instead.",
-      inputSchema: {
-        dest_folder_id: z
-          .string()
-          .nullable()
-          .optional()
-          .describe("Destination folder UUID; null/omitted = drive root"),
-        dry_run: z
-          .boolean()
-          .optional()
-          .describe("Report planned counts without writing"),
-        folder_id: z.string().describe("Folder UUID to move"),
-        name: z.string().optional().describe("Rename the folder while moving"),
+    toolDefinitions.move_folder,
+    withToolTiming(
+      "move_folder",
+      async ({ folder_id, dest_folder_id, name, dry_run }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        return await runMoveTool(() =>
+          moveFolder(
+            env,
+            folder_id,
+            { destFolderId: dest_folder_id, dryRun: dry_run, name },
+            user,
+          ),
+        );
       },
-    },
-    async ({ folder_id, dest_folder_id, name, dry_run }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      return await runMoveTool(() =>
-        moveFolder(
-          env,
-          folder_id,
-          { destFolderId: dest_folder_id, dryRun: dry_run, name },
-          user,
-        ),
-      );
-    },
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "move_folder_contents",
-    {
-      description:
-        "Move the direct notes (and optionally direct subfolders with their subtrees) of a folder into another folder. The source folder itself stays. Set dry_run first. Prefer include_subfolders=false for large trees. On resource-limit / 503: do not retry the same call.",
-      inputSchema: {
-        dest_folder_id: z
-          .string()
-          .nullable()
-          .optional()
-          .describe("Destination folder UUID; null/omitted = drive root"),
-        dry_run: z
-          .boolean()
-          .optional()
-          .describe("Report planned moves without writing"),
-        folder_id: z.string().describe("Source folder UUID"),
-        include_subfolders: z
-          .boolean()
-          .optional()
-          .describe("Also move direct child folders (default false)"),
+    toolDefinitions.move_folder_contents,
+    withToolTiming(
+      "move_folder_contents",
+      async ({ folder_id, dest_folder_id, include_subfolders, dry_run }) => {
+        const user = requireUser();
+        if (!user) {
+          return textError("Unauthorized");
+        }
+        return await runMoveTool(() =>
+          moveFolderContents(
+            env,
+            folder_id,
+            {
+              destFolderId: dest_folder_id,
+              dryRun: dry_run,
+              includeSubfolders: include_subfolders,
+            },
+            user,
+          ),
+        );
       },
-    },
-    async ({ folder_id, dest_folder_id, include_subfolders, dry_run }) => {
-      const user = requireUser();
-      if (!user) {
-        return textError("Unauthorized");
-      }
-      return await runMoveTool(() =>
-        moveFolderContents(
-          env,
-          folder_id,
-          {
-            destFolderId: dest_folder_id,
-            dryRun: dry_run,
-            includeSubfolders: include_subfolders,
-          },
-          user,
-        ),
-      );
-    },
+    ),
   );
 
-  server.registerTool(
+  registerTool(
     "move_notes",
-    {
-      description:
-        "Move notes (by UUID or short ID) into a folder in the caller's own drive. Returns per-note moved/skipped/failed with reasons. Max 500 IDs per call. Set dry_run first. On resource-limit / 503: do not retry the same call.",
-      inputSchema: {
-        dry_run: z
-          .boolean()
-          .optional()
-          .describe("Report planned moves without writing"),
-        folder_id: z
-          .string()
-          .nullable()
-          .optional()
-          .describe("Destination folder UUID; null/omitted = drive root"),
-        note_ids: z
-          .array(z.string())
-          .min(1)
-          .describe("Note UUIDs or short IDs to move"),
-      },
-    },
-    async ({ note_ids, folder_id, dry_run }) => {
+    toolDefinitions.move_notes,
+    withToolTiming("move_notes", async ({ note_ids, folder_id, dry_run }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -1480,30 +1062,15 @@ export async function createMcpServerFactory() {
           user,
         ),
       );
-    },
+    }),
   );
 
   // para_* tools exist only once a PARA space is configured.
   if (features.hasPara) {
-    server.registerTool(
+    registerTool(
       "para_list",
-      {
-        description:
-          "List the caller's PARA spaces with their buckets (Projects/Areas/Resources/Archives). Buckets keep stable keys across renames. With bucket, also returns the direct children (e.g. active projects).",
-        inputSchema: {
-          bucket: z
-            .enum(["projects", "areas", "resources", "archives"])
-            .optional()
-            .describe("Return direct children of this bucket too"),
-          space: z
-            .string()
-            .optional()
-            .describe(
-              "PARA space name or id; 'default' = the rootless space. Omit = all spaces; bucket children resolve in the default space unless space is given.",
-            ),
-        },
-      },
-      async ({ bucket, space }) => {
+      toolDefinitions.para_list,
+      withToolTiming("para_list", async ({ bucket, space }) => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1516,67 +1083,38 @@ export async function createMcpServerFactory() {
           return textError(result.error);
         }
         return textResult(result.result);
-      },
+      }),
     );
 
-    server.registerTool(
+    registerTool(
       "para_archive_project",
-      {
-        description:
-          "Move a folder inside the Projects bucket into Archives. dated adds a YYYY-MM- prefix to the name. Set dry_run first. On resource-limit / 503: do not retry the same call; wait and archive a shallower folder.",
-        inputSchema: {
-          dated: z
-            .boolean()
-            .optional()
-            .describe("Prefix the archived name with YYYY-MM-"),
-          dry_run: z
-            .boolean()
-            .optional()
-            .describe("Report planned counts without writing"),
-          folder_id: z
-            .string()
-            .describe("Folder UUID inside the Projects bucket"),
-          name: z
-            .string()
-            .optional()
-            .describe("Override the archived folder name"),
+      toolDefinitions.para_archive_project,
+      withToolTiming(
+        "para_archive_project",
+        async ({ folder_id, dated, name, dry_run }) => {
+          const user = requireUser();
+          if (!user) {
+            return textError("Unauthorized");
+          }
+          return await runMoveTool(() =>
+            paraArchiveProject(
+              env,
+              folder_id,
+              { dated, dryRun: dry_run, name },
+              user,
+            ),
+          );
         },
-      },
-      async ({ folder_id, dated, name, dry_run }) => {
-        const user = requireUser();
-        if (!user) {
-          return textError("Unauthorized");
-        }
-        return await runMoveTool(() =>
-          paraArchiveProject(
-            env,
-            folder_id,
-            { dated, dryRun: dry_run, name },
-            user,
-          ),
-        );
-      },
+      ),
     );
   }
 
   // scheme_*/jd_* tools exist only once a naming-scheme folder is configured.
   if (features.hasSchemes) {
-    server.registerTool(
+    registerTool(
       "set_folder_scheme",
-      {
-        description:
-          "Opt-in naming rule for a folder's future children. 'jd' = Johnny.Decimal (10 areas / 10 categories / 100 IDs), 'zettel' = Zettelkasten UTC timestamp IDs (YYYYMMDDHHmm). Existing children keep their names — the scheme only affects new creates. Pass null to clear. Owner only.",
-        inputSchema: {
-          folder_id: z
-            .string()
-            .describe("Folder UUID that declares the naming rule"),
-          scheme: z
-            .enum(["jd", "zettel"])
-            .nullable()
-            .describe("Naming rule to apply, or null to clear"),
-        },
-      },
-      async ({ folder_id, scheme }) => {
+      toolDefinitions.set_folder_scheme,
+      withToolTiming("set_folder_scheme", async ({ folder_id, scheme }) => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1586,21 +1124,13 @@ export async function createMcpServerFactory() {
           return moveToolError(result);
         }
         return textResult(result.result);
-      },
+      }),
     );
 
-    server.registerTool(
+    registerTool(
       "scheme_get",
-      {
-        description:
-          "Resolve a naming-scheme ID (e.g. '15.22' or '202609171230') to the folder that carries it in the caller's own drive, and list its direct children.",
-        inputSchema: {
-          id: z
-            .string()
-            .describe("Scheme ID such as '15.22' or '202609171230'"),
-        },
-      },
-      async ({ id }) => {
+      toolDefinitions.scheme_get,
+      withToolTiming("scheme_get", async ({ id }) => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1610,21 +1140,13 @@ export async function createMcpServerFactory() {
           return moveToolError(result);
         }
         return textResult(result.result);
-      },
+      }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_allocate_id",
-      {
-        description:
-          "Allocate the next Johnny.Decimal ID under a JD folder without creating anything. Under a JD root returns an area ('10-19'), under an area a category ('15'), under a category an ID ('15.22'). Category-local max+1 — gaps are never reused and .00–.10 stay reserved. Errors once a category reaches 100 IDs.",
-        inputSchema: {
-          folder_id: z
-            .string()
-            .describe("JD root, area, or category folder UUID"),
-        },
-      },
-      async ({ folder_id }) => {
+      toolDefinitions.jd_allocate_id,
+      withToolTiming("jd_allocate_id", async ({ folder_id }) => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1634,58 +1156,37 @@ export async function createMcpServerFactory() {
           return moveToolError(result);
         }
         return textResult(result.result);
-      },
+      }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_create_id_folder",
-      {
-        description:
-          "Allocate a Johnny.Decimal ID and create the child folder ('15.22 Title') under a JD root/area/category. title defaults to 無題 — rename later. Pass scheme_id to claim a specific number instead of the next one.",
-        inputSchema: {
-          folder_id: z
-            .string()
-            .describe("JD root, area, or category folder UUID"),
-          scheme_id: z
-            .string()
-            .optional()
-            .describe(
-              "Explicit ID ('10-19' / '15' / '15.22') instead of auto-allocation",
-            ),
-          title: z
-            .string()
-            .optional()
-            .describe("Title after the ID (default 無題)"),
+      toolDefinitions.jd_create_id_folder,
+      withToolTiming(
+        "jd_create_id_folder",
+        async ({ folder_id, scheme_id, title }) => {
+          const user = requireUser();
+          if (!user) {
+            return textError("Unauthorized");
+          }
+          const result = await createSchemeChild(
+            env,
+            folder_id,
+            { schemeId: scheme_id, title },
+            user,
+          );
+          if (result.kind !== "ok") {
+            return moveToolError(result);
+          }
+          return textResult(result.result);
         },
-      },
-      async ({ folder_id, scheme_id, title }) => {
-        const user = requireUser();
-        if (!user) {
-          return textError("Unauthorized");
-        }
-        const result = await createSchemeChild(
-          env,
-          folder_id,
-          { schemeId: scheme_id, title },
-          user,
-        );
-        if (result.kind !== "ok") {
-          return moveToolError(result);
-        }
-        return textResult(result.result);
-      },
+      ),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_get",
-      {
-        description:
-          "Resolve a Johnny.Decimal ID such as '15.22' to its folder and list the direct children. Same resolution as scheme_get but JD-only.",
-        inputSchema: {
-          id: z.string().describe("JD ID such as '10-19', '15', or '15.22'"),
-        },
-      },
-      async ({ id }) => {
+      toolDefinitions.jd_get,
+      withToolTiming("jd_get", async ({ id }) => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1695,21 +1196,13 @@ export async function createMcpServerFactory() {
           return moveToolError(result);
         }
         return textResult(result.result);
-      },
+      }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_list_category",
-      {
-        description:
-          "List a JD container's numbered children in numeric order — areas under a JD root, categories under an area, IDs under a category.",
-        inputSchema: {
-          folder_id: z
-            .string()
-            .describe("JD root, area, or category folder UUID"),
-        },
-      },
-      async ({ folder_id }) => {
+      toolDefinitions.jd_list_category,
+      withToolTiming("jd_list_category", async ({ folder_id }) => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1719,17 +1212,13 @@ export async function createMcpServerFactory() {
           return moveToolError(result);
         }
         return textResult(result.result);
-      },
+      }),
     );
 
-    server.registerTool(
+    registerTool(
       "jd_validate_tree",
-      {
-        description:
-          "Validate the caller's naming-scheme tree: JD area/category/ID counts, naming-pattern deviations ('15.22 Title'), duplicate IDs, reserved .00–.10 usage, and IDs moved outside their expected parent. Returns a structured issue list.",
-        inputSchema: {},
-      },
-      async () => {
+      toolDefinitions.jd_validate_tree,
+      withToolTiming("jd_validate_tree", async () => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1739,30 +1228,15 @@ export async function createMcpServerFactory() {
           return moveToolError(result);
         }
         return textResult(result.result);
-      },
+      }),
     );
   }
 
   // §2.6 permanent edit lock — always available (not feature-gated).
-  server.registerTool(
+  registerTool(
     "set_edit_lock",
-    {
-      description:
-        "Lock or unlock a note for editing. While locked every mutation — body edits, metadata, folder move, delete, sharing — is rejected until explicit unlock (locked=false). There is no timed unlock. Requires canAdmin. Unlocking (locked=false) additionally requires confirm=true.",
-      inputSchema: {
-        confirm: z
-          .boolean()
-          .optional()
-          .describe(
-            "Must be true when locked=false (unlock is gated like promote_note's confirm)",
-          ),
-        id: z.string().describe("Note UUID or short ID"),
-        locked: z
-          .boolean()
-          .describe("true to lock (read-only), false to unlock"),
-      },
-    },
-    async ({ id, locked, confirm }) => {
+    toolDefinitions.set_edit_lock,
+    withToolTiming("set_edit_lock", async ({ id, locked, confirm }) => {
       const user = requireUser();
       if (!user) {
         return textError("Unauthorized");
@@ -1776,19 +1250,15 @@ export async function createMcpServerFactory() {
       }
       const result = await notes.setEditLock(id, user, locked);
       return mutateNoteToolResponse(result);
-    },
+    }),
   );
 
   // medallion_* tools exist only once a medallion set is configured.
   if (features.hasMedallion) {
-    server.registerTool(
+    registerTool(
       "medallion_list_sets",
-      {
-        description:
-          "List the caller's medallion layer sets (name + ordered key/label layers) and the folders assigned to them. Medallion layers are folder-level display labels — they do not affect editability (see set_edit_lock).",
-        inputSchema: {},
-      },
-      async () => {
+      toolDefinitions.medallion_list_sets,
+      withToolTiming("medallion_list_sets", async () => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1797,51 +1267,38 @@ export async function createMcpServerFactory() {
           assignments: await listMedallionAssignments(env, user),
           sets: await listMedallionSets(env, user),
         });
-      },
+      }),
     );
 
-    server.registerTool(
+    registerTool(
       "medallion_assign_folder",
-      {
-        description:
-          "Assign a medallion set layer to a folder. Descendant folders and their notes inherit the nearest assigned ancestor's layer. One assignment per folder; reassigning overwrites it.",
-        inputSchema: {
-          folder_id: z.string().describe("Folder UUID"),
-          layer: z
-            .string()
-            .describe("Layer key inside the set (e.g. 'output')"),
-          set_id: z.string().describe("Medallion set UUID"),
+      toolDefinitions.medallion_assign_folder,
+      withToolTiming(
+        "medallion_assign_folder",
+        async ({ folder_id, set_id, layer }) => {
+          const user = requireUser();
+          if (!user) {
+            return textError("Unauthorized");
+          }
+          const result = await assignFolderMedallion(
+            env,
+            user,
+            folder_id,
+            set_id,
+            layer,
+          );
+          if (result.kind !== "ok") {
+            return medallionToolError(result);
+          }
+          return textResult({ assignment: result.result });
         },
-      },
-      async ({ folder_id, set_id, layer }) => {
-        const user = requireUser();
-        if (!user) {
-          return textError("Unauthorized");
-        }
-        const result = await assignFolderMedallion(
-          env,
-          user,
-          folder_id,
-          set_id,
-          layer,
-        );
-        if (result.kind !== "ok") {
-          return medallionToolError(result);
-        }
-        return textResult({ assignment: result.result });
-      },
+      ),
     );
 
-    server.registerTool(
+    registerTool(
       "medallion_unassign_folder",
-      {
-        description:
-          "Clear a folder's medallion assignment. Descendants then inherit from the next assigned ancestor (or none).",
-        inputSchema: {
-          folder_id: z.string().describe("Folder UUID"),
-        },
-      },
-      async ({ folder_id }) => {
+      toolDefinitions.medallion_unassign_folder,
+      withToolTiming("medallion_unassign_folder", async ({ folder_id }) => {
         const user = requireUser();
         if (!user) {
           return textError("Unauthorized");
@@ -1851,7 +1308,7 @@ export async function createMcpServerFactory() {
           return medallionToolError(result);
         }
         return textResult({ cleared: true, folder_id });
-      },
+      }),
     );
   }
 

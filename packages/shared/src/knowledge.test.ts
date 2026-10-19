@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DEFAULT_FOLDER_DELETION_SETTINGS,
   DEFAULT_KNOWLEDGE_SETTINGS,
   DEFAULT_USER_SETTINGS,
   isKnowledgeFeatureKey,
   KNOWLEDGE_FEATURE_KEYS,
+  normalizeFolderDeletionSettings,
   normalizeKnowledgeSettings,
   parseUserSettingsObject,
   userSettingsFromObject,
@@ -73,10 +75,52 @@ test("parseUserSettingsObject tolerates missing and broken JSON", () => {
 
 test("userSettingsFromObject normalizes the knowledge section", () => {
   assert.deepEqual(userSettingsFromObject({}), {
+    folderDeletion: DEFAULT_FOLDER_DELETION_SETTINGS,
     knowledge: DEFAULT_KNOWLEDGE_SETTINGS,
   });
   assert.deepEqual(
     userSettingsFromObject({ knowledge: { para: true, schemes: false } }),
-    { knowledge: { layers: true, para: true, schemes: false } },
+    {
+      folderDeletion: DEFAULT_FOLDER_DELETION_SETTINGS,
+      knowledge: { layers: true, para: true, schemes: false },
+    },
   );
+});
+
+test("folder deletion settings normalize defaults and preserve configured protections", () => {
+  assert.deepEqual(normalizeFolderDeletionSettings(undefined), {
+    protectedFolderIds: [],
+    protectedPathPatterns: [],
+  });
+  assert.deepEqual(
+    normalizeFolderDeletionSettings({
+      protectedFolderIds: [" id-1 ", "id-1", null, 42, ""],
+      protectedPathPatterns: ["Inbox", "*/_keep", "**/.keep", "   "],
+    }),
+    {
+      protectedFolderIds: ["id-1"],
+      protectedPathPatterns: ["Inbox", "*/_keep", "**/.keep"],
+    },
+  );
+  assert.deepEqual(
+    normalizeFolderDeletionSettings({
+      protectedFolderIds: false,
+      protectedPathPatterns: "Inbox",
+    }),
+    DEFAULT_FOLDER_DELETION_SETTINGS,
+  );
+});
+
+test("normalizing folder protections does not share mutable defaults or inputs", () => {
+  const ids = ["id-1"];
+  const settings = userSettingsFromObject({
+    folderDeletion: { protectedFolderIds: ids },
+  });
+  settings.folderDeletion.protectedFolderIds.push("id-2");
+  settings.folderDeletion.protectedPathPatterns.push("Inbox");
+  assert.deepEqual(ids, ["id-1"]);
+  assert.deepEqual(DEFAULT_FOLDER_DELETION_SETTINGS, {
+    protectedFolderIds: [],
+    protectedPathPatterns: [],
+  });
 });

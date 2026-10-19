@@ -40,6 +40,7 @@ import {
   deleteFolderTree,
   derivedPermission,
   ensureFolderRow,
+  ensureFolderStatements,
   folderDiscoveryAllowed,
   folderDiscoveryAllowedSnapshot,
   folderViewFlags,
@@ -54,6 +55,7 @@ import {
   resolveFolderAccess,
   resolveNoteAccess,
   resolveNoteAccessSnapshot,
+  visibleCrumbs,
 } from "./access.ts";
 import {
   createArticleService,
@@ -171,6 +173,7 @@ async function toNote(
   row: NoteRow,
   user?: SessionUser | null,
   snapshot?: AccessSnapshot,
+  options: { includeCrumbs?: boolean } = {},
 ): Promise<Note> {
   const access = snapshot
     ? resolveNoteAccessSnapshot(env, accessFields(row), user, snapshot)
@@ -188,11 +191,17 @@ async function toNote(
   const { folderSchemeId, folderSchemeTitle } = visibleFolderId
     ? await folderSchemeMeta(env, visibleFolderId, snapshot)
     : { folderSchemeId: null, folderSchemeTitle: null };
+  // パンくずも folderId と同じ発見可能性。一覧では辿らない。
+  const crumbs =
+    options.includeCrumbs && visibleFolderId && folder
+      ? await visibleCrumbs(env, row.owner_id, folder, user, snapshot)
+      : [];
   return {
     access: isOwner ? access : { ...access, grants: [], sourceFolder: null },
     alias: row.alias,
     articleMeta: articleMetaFromNote(row.markdown_snapshot, row.article_meta),
     createdAt: row.created_at,
+    crumbs,
     editLocked: row.edit_locked === 1,
     folder: isOwner ? folder : "",
     folderId: visibleFolderId,
@@ -215,7 +224,7 @@ export async function toSummary(
   snapshot?: AccessSnapshot,
 ): Promise<NoteSummary> {
   const note = await toNote(env, row, user, snapshot);
-  const { markdown: _markdown, ...summary } = note;
+  const { crumbs: _crumbs, markdown: _markdown, ...summary } = note;
   return summary;
 }
 
@@ -1043,7 +1052,8 @@ async function deleteOwnedNotesInFolder(
 
 /**
  * フォルダ配下のパスを集合 UPDATE で書き換える。notes / folders /
- * folder_policies / access_grants / article_sources を 1 D1 batch（6 文）
+ * folder_policies / access_grants / article_sources を移動先の祖先作成と
+ * 1 D1 batch（6 UPDATE + 祖先 INSERT）
  * で原子的に prefix rewrite する。wiki-link 再索引はフォルダ移動では走らせない
  * （本文・title は変わらない。folder/Title リンクは次の本文同期で直る）。
  */
@@ -1063,6 +1073,7 @@ export async function relocateFolderTree(
   const grantRewrite = folderRewriteAssignment(from, to, "target_key");
   const grants = folderSubtreeFilter(from, "target_key");
   await d1.batch([
+    ...ensureFolderStatements(env, ownerId, parentFolderPath(to)),
     d1
       .prepare(
         `UPDATE folders SET ${rewrite.sql}
@@ -1221,40 +1232,44 @@ export function createNoteService(env: Env) {
         return resolved;
       }
       const folder = resolved.folder;
-      await ensureFolderRow(env, owner.id, folder);
       const markdown = await markdownForCreate(env, owner.id, folder, input);
       const title = titleFromMarkdown(markdown);
 
-      await db(env)
-        .prepare(
-          `INSERT INTO notes (
+      const d1 = db(env);
+      await d1.batch([
+        ...ensureFolderStatements(env, owner.id, folder),
+        d1
+          .prepare(
+            `INSERT INTO notes (
              id, short_id, alias, owner_id, title, folder, permission,
              read_scope, write_scope,
              markdown_snapshot, snapshot_updated_at, created_at, updated_at
            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          id,
-          shortId,
-          owner.id,
-          title,
-          folder,
-          scopes.permission,
-          scopes.readScope,
-          scopes.writeScope,
-          markdown,
-          now,
-          now,
-          now,
-        )
-        .run();
+          )
+          .bind(
+            id,
+            shortId,
+            owner.id,
+            title,
+            folder,
+            scopes.permission,
+            scopes.readScope,
+            scopes.writeScope,
+            markdown,
+            now,
+            now,
+            now,
+          ),
+      ]);
 
       const row = await findNoteRow(env, id);
       if (!row) {
         throw new Error("note insert failed");
       }
       await syncNoteLinks(env, row);
-      return toNote(env, row, user ?? owner);
+      return toNote(env, row, user ?? owner, undefined, {
+        includeCrumbs: true,
+      });
     },
 
     async get(idOrShortId: string, user?: SessionUser): Promise<GetNoteResult> {
@@ -1263,7 +1278,9 @@ export function createNoteService(env: Env) {
         return { kind: "not_found" };
       }
 
-      const note = await toNote(env, row, user);
+      const note = await toNote(env, row, user, undefined, {
+        includeCrumbs: true,
+      });
       if (!note.access.flags.canView) {
         return {
           kind: "denied",
@@ -1577,7 +1594,12 @@ export function createNoteService(env: Env) {
       if (!updated) {
         throw new Error("note update failed");
       }
-      return { kind: "ok", note: await toNote(env, updated, user) };
+      return {
+        kind: "ok",
+        note: await toNote(env, updated, user, undefined, {
+          includeCrumbs: true,
+        }),
+      };
     },
 
     async updateMarkdown(
@@ -1623,7 +1645,12 @@ export function createNoteService(env: Env) {
         throw new Error("note update failed");
       }
       await syncNoteLinks(env, updated, row);
-      return { kind: "ok", note: await toNote(env, updated, user) };
+      return {
+        kind: "ok",
+        note: await toNote(env, updated, user, undefined, {
+          includeCrumbs: true,
+        }),
+      };
     },
 
     async updateMeta(
@@ -1653,27 +1680,29 @@ export function createNoteService(env: Env) {
       }
 
       const next = nextMetaValues(row, input);
-      await ensureFolderRow(env, row.owner_id, next.folder);
 
       const now = Date.now();
-      await db(env)
-        .prepare(
-          `UPDATE notes
+      const d1 = db(env);
+      await d1.batch([
+        ...ensureFolderStatements(env, row.owner_id, next.folder),
+        d1
+          .prepare(
+            `UPDATE notes
            SET title = ?, folder = ?, permission = ?, alias = ?,
                read_scope = ?, write_scope = ?, updated_at = ?
            WHERE id = ?`,
-        )
-        .bind(
-          next.title,
-          next.folder,
-          scopes.permission,
-          next.alias,
-          scopes.readScope,
-          scopes.writeScope,
-          now,
-          row.id,
-        )
-        .run();
+          )
+          .bind(
+            next.title,
+            next.folder,
+            scopes.permission,
+            next.alias,
+            scopes.readScope,
+            scopes.writeScope,
+            now,
+            row.id,
+          ),
+      ]);
 
       const grantError = await replaceNoteGrantsIfNeeded(
         env,
@@ -1689,7 +1718,12 @@ export function createNoteService(env: Env) {
         throw new Error("note update failed");
       }
       await syncNoteLinks(env, updated, row);
-      return { kind: "ok", note: await toNote(env, updated, user) };
+      return {
+        kind: "ok",
+        note: await toNote(env, updated, user, undefined, {
+          includeCrumbs: true,
+        }),
+      };
     },
   };
 }

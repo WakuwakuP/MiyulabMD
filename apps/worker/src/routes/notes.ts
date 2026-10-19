@@ -11,6 +11,10 @@ import {
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
+import {
+  catalogListRequest,
+  catalogObjectName,
+} from "../durable-objects/catalog-list.ts";
 import { actorFromSessionUser } from "../durable-objects/history-edit.ts";
 import { getNoteRevision, listNoteEditEvents } from "../services/history.ts";
 import { listNoteLinks } from "../services/links.ts";
@@ -104,10 +108,8 @@ async function applyNotePatch(
 export const noteRoutes = new Elysia({ prefix: "/api/notes" })
   .get("/", async ({ request }) => {
     const user = await readSession(request, env);
-    const list = user
-      ? await notes.listForUser(user)
-      : await notes.listForGuest();
-    return { notes: list };
+    const id = env.CATALOG.idFromName(catalogObjectName(user));
+    return env.CATALOG.get(id).fetch(catalogListRequest(user));
   })
   .post("/", async ({ request, set }) => {
     const user = await readSession(request, env);

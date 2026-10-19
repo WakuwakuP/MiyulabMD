@@ -185,6 +185,8 @@ export class DocumentRoom extends DurableObject<Env> {
 
     await this.ensureInitialized(noteId);
 
+    // Identity and canEdit are set only by the Worker after session + ACL
+    // checks. Client-supplied X-User-* / X-Can-Edit are stripped first.
     const canEdit = request.headers.get("X-Can-Edit") === "true";
     const userId = request.headers.get("X-User-Id") ?? undefined;
     const displayName = request.headers.get("X-Display-Name") ?? undefined;
