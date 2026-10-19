@@ -77,6 +77,7 @@ export function AppShell() {
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
+  const [headerFolderId, setHeaderFolderId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [purgeRequest, setPurgeRequest] = useState<{
     input: PurgeGuardInput;
@@ -407,6 +408,7 @@ export function AppShell() {
       setHeaderActions(next?.actions ?? null);
       setHeaderEnd(next?.end ?? null);
       setHeaderFolder(next?.folder ?? null);
+      setHeaderFolderId(next?.folderId ?? null);
     },
     [],
   );
@@ -437,6 +439,7 @@ export function AppShell() {
         cachedUser={viewer.cachedUser ?? null}
         end={headerEnd}
         folder={headerFolder}
+        folderId={headerFolderId}
         loading={loading}
         offline={
           !loading &&

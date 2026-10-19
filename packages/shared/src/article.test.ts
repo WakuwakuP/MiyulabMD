@@ -5,6 +5,7 @@ import {
   ARTICLE_LIST_MAX_PER_PAGE,
   articleEditUrl,
   articleSlug,
+  canDispatchArticleSource,
   isArticleSourceDirty,
   matchArticleSource,
   mergeArticleData,
@@ -106,6 +107,38 @@ test("resolveArticleListFolder allows the source and its descendants", () => {
     "work/infra/db",
   );
   assert.ok("error" in resolveArticleListFolder("work", "play"));
+});
+
+test("site update follows share settings except public viewers", () => {
+  const viewer = { canView: true, isOwner: false };
+  assert.equal(
+    canDispatchArticleSource({ ...viewer, readScope: "users" }),
+    true,
+  );
+  assert.equal(
+    canDispatchArticleSource({ ...viewer, readScope: "signed_in" }),
+    true,
+  );
+  assert.equal(
+    canDispatchArticleSource({ ...viewer, readScope: "link" }),
+    true,
+  );
+  assert.equal(
+    canDispatchArticleSource({ ...viewer, readScope: "public" }),
+    false,
+  );
+  assert.equal(
+    canDispatchArticleSource({ ...viewer, canView: false, readScope: "link" }),
+    false,
+  );
+  assert.equal(
+    canDispatchArticleSource({
+      canView: false,
+      isOwner: true,
+      readScope: "public",
+    }),
+    true,
+  );
 });
 
 test("articleSlug and articleEditUrl", () => {

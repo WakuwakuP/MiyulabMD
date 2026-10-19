@@ -1,4 +1,6 @@
 import {
+  ACCESS_SCOPE_LABELS,
+  type AccessScope,
   ARTICLE_FIELD_TYPES,
   type ArticleSchemaField,
   type ArticleSource,
@@ -56,6 +58,34 @@ function draftFromSource(source: ArticleSource): Draft {
     webhookUrl: source.webhookUrl ?? "",
   };
 }
+function readScopeForFolder(
+  folders: FolderRecord[],
+  path: string,
+): AccessScope | null {
+  return folders.find((folder) => folder.folder === path)?.readScope ?? null;
+}
+
+function siteUpdateAudienceSuffix(
+  folders: FolderRecord[],
+  path: string,
+): string {
+  const audience = siteUpdateAudience(readScopeForFolder(folders, path));
+  return audience ? ` · ${audience}` : "";
+}
+
+function siteUpdateAudience(scope: AccessScope | null): string | null {
+  if (!scope) {
+    return null;
+  }
+  if (scope === "public") {
+    return "公開のため、所有者だけが押せます。";
+  }
+  if (scope === "self") {
+    return "共有設定は自分のみなので、所有者だけが押せます。";
+  }
+  return `共有設定の閲覧（${ACCESS_SCOPE_LABELS[scope]}）と同じ人が押せます。`;
+}
+
 function defaultForType(type: ArticleSchemaField["type"]): string {
   if (type === "boolean") {
     return "false";
@@ -282,7 +312,7 @@ export function SiteSettingsPage() {
         YAML frontmatter です。Astro は PAT で{" "}
         <code className="font-mono">/api/articles</code> と{" "}
         <code className="font-mono">/openapi.json</code> を読めます。Webhook
-        はヘッダーの「サイトを更新」から送ります。
+        はヘッダーの「サイトを更新」から送ります。押せる人は、そのフォルダの共有設定で閲覧できる人と同じです。公開の閲覧者は押せません。
       </p>
       {error && <ErrorText>{error}</ErrorText>}
       {loading ? (
@@ -301,7 +331,10 @@ export function SiteSettingsPage() {
             >
               <div>
                 <strong>{source.name}</strong>
-                <MutedText className="mt-1">{source.folder}</MutedText>
+                <MutedText className="mt-1">
+                  {source.folder}
+                  {siteUpdateAudienceSuffix(folders, source.folder)}
+                </MutedText>
               </div>
               <Row>
                 <Button
@@ -360,6 +393,14 @@ export function SiteSettingsPage() {
               onChange={(folder) => setDraft({ ...draft, folder })}
               value={draft.folder}
             />
+            <MutedText>
+              サイトを更新できる人は、このフォルダの共有設定に従います。公開の閲覧者は押せません。
+              {draft.folder
+                ? (siteUpdateAudience(
+                    readScopeForFolder(folders, draft.folder),
+                  ) ?? "")
+                : ""}
+            </MutedText>
           </div>
           <div>
             <p className="m-0 mb-2 text-[0.85rem] text-muted">

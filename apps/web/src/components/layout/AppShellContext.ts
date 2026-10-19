@@ -20,6 +20,8 @@ export type AppShellContext = {
       layout?: HeaderLayout;
       /** 一覧・編集中のフォルダ。未設定ならサイト更新ボタンは出さない。 */
       folder?: string | null;
+      /** 共有先がパスを持たないときのサイト更新判定に使うフォルダ ID。 */
+      folderId?: string | null;
     } | null,
   ) => void;
 };

@@ -1,4 +1,4 @@
-import { folderContains } from "./permission.ts";
+import { type AccessScope, folderContains } from "./permission.ts";
 import { normalizeFolder } from "./title.ts";
 
 export const ARTICLE_FIELD_TYPES = [
@@ -21,6 +21,21 @@ export type ArticleSchemaField = {
 };
 
 export type ArticleMeta = Record<string, unknown>;
+
+/**
+ * サイトを更新できる人。所有者に加え、フォルダの共有設定で閲覧できる人。
+ * 公開（public）の閲覧者は押せない。
+ */
+export function canDispatchArticleSource(input: {
+  isOwner: boolean;
+  canView: boolean;
+  readScope: AccessScope;
+}): boolean {
+  if (input.isOwner) {
+    return true;
+  }
+  return input.canView && input.readScope !== "public";
+}
 
 export type ArticleSourceInput = {
   name: string;

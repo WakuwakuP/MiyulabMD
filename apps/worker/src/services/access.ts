@@ -713,6 +713,20 @@ async function loadFolderAccessState(
   return folderAccessStateFromEffective(env, effective, ownerId, user);
 }
 
+/** フォルダ（祖先の共有を含む）の実効閲覧範囲と、このユーザーが見られるか。 */
+export async function folderViewerShare(
+  env: Env,
+  ownerId: string,
+  folder: string,
+  user: SessionUser,
+): Promise<{ canView: boolean; readScope: AccessScope }> {
+  const state = await loadFolderAccessState(env, ownerId, folder, user);
+  return {
+    canView: state.flags.canView,
+    readScope: state.effectiveReadScope,
+  };
+}
+
 export async function folderViewFlags(
   env: Env,
   ownerId: string,
@@ -1349,17 +1363,43 @@ export async function listOwnedFolders(
     .bind(ownerId)
     .all<FolderRow>();
   const byPath = new Map((rows.results ?? []).map((row) => [row.folder, row]));
-  return (rows.results ?? []).map((row) => ({
-    folder: row.folder,
-    id: row.id,
-    name: row.folder ? folderName(row.folder) : MY_DRIVE_NAME,
-    parentId: isDriveRootPath(row.folder)
-      ? null
-      : (byPath.get(parentFolderPath(row.folder))?.id ?? null),
-    scheme: row.scheme ?? null,
-    schemeId: row.scheme_id ?? null,
-    schemeTitle: row.scheme_title ?? null,
-  }));
+  const policyRows = await db(env)
+    .prepare(
+      `SELECT owner_id, folder, read_scope, write_scope
+       FROM folder_policies WHERE owner_id = ?`,
+    )
+    .bind(ownerId)
+    .all<FolderPolicyRow>();
+  const policies = new Map<
+    string,
+    { readScope: AccessScope; writeScope: AccessScope }
+  >();
+  for (const policy of policyRows.results ?? []) {
+    const readScope = parseScope(policy.read_scope);
+    const writeScope = parseScope(policy.write_scope);
+    if (readScope && writeScope) {
+      policies.set(policy.folder, {
+        readScope,
+        writeScope: clampWriteScope(readScope, writeScope),
+      });
+    }
+  }
+  return (rows.results ?? []).map((row) => {
+    const effective = resolveFromPolicies(row.folder, policies);
+    return {
+      folder: row.folder,
+      id: row.id,
+      name: row.folder ? folderName(row.folder) : MY_DRIVE_NAME,
+      parentId: isDriveRootPath(row.folder)
+        ? null
+        : (byPath.get(parentFolderPath(row.folder))?.id ?? null),
+      readScope: effective.effectiveReadScope,
+      scheme: row.scheme ?? null,
+      schemeId: row.scheme_id ?? null,
+      schemeTitle: row.scheme_title ?? null,
+      writeScope: effective.effectiveWriteScope,
+    };
+  });
 }
 
 export async function listSharedFolders(

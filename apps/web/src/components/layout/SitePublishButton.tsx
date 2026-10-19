@@ -1,6 +1,10 @@
 import type { ArticleSource, SessionUser } from "@miyulabmd/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dispatchArticleSource, fetchArticleSources } from "../../lib/api.ts";
+import {
+  dispatchArticleSource,
+  fetchArticleDispatchTarget,
+  fetchArticleSources,
+} from "../../lib/api.ts";
 import { ARTICLE_CHANGED_EVENT } from "../../lib/article-changed.ts";
 import { matchingSiteSource } from "../../lib/site-publish.ts";
 import { HeaderButton } from "../ui/HeaderButton.tsx";
@@ -10,13 +14,19 @@ import { MenuItem, MenuSeparator } from "../ui/Menu.tsx";
 type Props = {
   user: SessionUser | null;
   folder?: string | null;
+  folderId?: string | null;
+};
+
+type PublishTarget = {
+  id: string;
+  name: string;
 };
 
 export type SitePublish = {
   busy: boolean;
   error: string | null;
-  /** 現在フォルダに一致する記事ソース。対象外なら null。 */
-  matched: ArticleSource | null;
+  /** 現在フォルダに一致し、このユーザーが更新できる記事ソース。対象外なら null。 */
+  matched: PublishTarget | null;
   publish: () => void;
 };
 
@@ -27,8 +37,10 @@ export type SitePublish = {
 function useSitePublish(
   user: SessionUser | null,
   folder: string | null | undefined,
+  folderId: string | null | undefined,
 ): SitePublish {
   const [sources, setSources] = useState<ArticleSource[]>([]);
+  const [sharedTarget, setSharedTarget] = useState<PublishTarget | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,7 +77,30 @@ function useSitePublish(
     };
   }, [reload]);
 
-  const matched = user ? matchingSiteSource(folder, sources) : null;
+  const pathTarget = user ? matchingSiteSource(folder, sources) : null;
+  const pathId = pathTarget?.id ?? null;
+  const folderKey = folderId?.trim() ? folderId : null;
+  const userId = user?.id ?? null;
+
+  useEffect(() => {
+    if (!userId || pathId || !folderKey) {
+      setSharedTarget(null);
+      return;
+    }
+    let current = true;
+    setSharedTarget(null);
+    void fetchArticleDispatchTarget(folderKey).then((result) => {
+      if (!current) {
+        return;
+      }
+      setSharedTarget(result.ok ? result.data : null);
+    });
+    return () => {
+      current = false;
+    };
+  }, [userId, pathId, folderKey]);
+
+  const matched = pathTarget ?? sharedTarget;
   const matchedId = matched?.id ?? null;
   const matchedIdRef = useRef(matchedId);
   matchedIdRef.current = matchedId;
@@ -103,8 +138,12 @@ function useSitePublish(
   return { busy, error, matched, publish };
 }
 
-export function SitePublishButton({ user, folder }: Props) {
-  const { busy, error, matched, publish } = useSitePublish(user, folder);
+export function SitePublishButton({ user, folder, folderId }: Props) {
+  const { busy, error, matched, publish } = useSitePublish(
+    user,
+    folder,
+    folderId,
+  );
 
   if (!matched) {
     return null;
@@ -133,8 +172,12 @@ export function SitePublishButton({ user, folder }: Props) {
  * 「⋯ ノート」メニュー内の「サイトを更新」項目（§3.2: <900px はメニューへ退避）。
  * 一致する記事ソースがないときは描画しない。
  */
-export function SitePublishMenuItem({ user, folder }: Props) {
-  const { busy, error, matched, publish } = useSitePublish(user, folder);
+export function SitePublishMenuItem({ user, folder, folderId }: Props) {
+  const { busy, error, matched, publish } = useSitePublish(
+    user,
+    folder,
+    folderId,
+  );
 
   if (!matched) {
     return null;

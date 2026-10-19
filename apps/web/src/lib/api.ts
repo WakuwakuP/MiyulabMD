@@ -1037,6 +1037,11 @@ export type ArticleSourceWrite = {
   webhookAuthorization?: string | null;
 };
 
+export type ArticleDispatchTarget = {
+  id: string;
+  name: string;
+};
+
 export async function fetchArticleSources(
   options: ReadOptions = {},
 ): Promise<ApiResult<ArticleSource[]>> {
@@ -1097,6 +1102,23 @@ export async function deleteArticleSource(
   }
   notifyArticleChanged();
   return { data: undefined, ok: true };
+}
+
+export async function fetchArticleDispatchTarget(
+  folderId: string,
+  options: ReadOptions = {},
+): Promise<ApiResult<ArticleDispatchTarget | null>> {
+  const params = new URLSearchParams({ folderId });
+  const res = await fetch(
+    `/api/article-sources/dispatch-target?${params}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { target: ArticleDispatchTarget | null };
+  return { data: body.target, ok: true };
 }
 
 export async function dispatchArticleSource(
