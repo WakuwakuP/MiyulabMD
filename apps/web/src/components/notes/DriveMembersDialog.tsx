@@ -152,13 +152,17 @@ function DriveMemberRow({
 function MembersPanel({
   canManage,
   driveId,
+  loadError,
   members,
   onMembers,
+  ready,
 }: {
   canManage: boolean;
   driveId: string;
+  loadError: string | null;
   members: SharedDriveMember[];
   onMembers: (members: SharedDriveMember[]) => void;
+  ready: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<DriveRole>("editor");
@@ -206,7 +210,9 @@ function MembersPanel({
 
   return (
     <div>
-      {error && <ErrorText className="mt-0">{error}</ErrorText>}
+      {(error ?? loadError) && (
+        <ErrorText className="mt-0">{error ?? loadError}</ErrorText>
+      )}
       {showFilter && (
         <Input
           aria-label="メンバーを絞り込む"
@@ -218,24 +224,28 @@ function MembersPanel({
         />
       )}
       <ul className="m-0 max-h-[min(18rem,42dvh)] list-none divide-y divide-border overflow-y-auto py-0 ps-0 pe-2">
-        {visible.length === 0 ? (
-          <li className="py-6 text-center text-muted text-sm">
-            一致するメンバーはいません
-          </li>
+        {ready ? (
+          visible.length === 0 && !loadError ? (
+            <li className="py-6 text-center text-muted text-sm">
+              {query ? "一致するメンバーはいません" : "メンバーはいません"}
+            </li>
+          ) : (
+            visible.map((member) => (
+              <DriveMemberRow
+                busy={busy}
+                canManage={canManage}
+                driveId={driveId}
+                key={member.id}
+                lastManager={member.id === lastManagerId}
+                member={member}
+                onError={setError}
+                onMembers={onMembers}
+                setBusy={setBusy}
+              />
+            ))
+          )
         ) : (
-          visible.map((member) => (
-            <DriveMemberRow
-              busy={busy}
-              canManage={canManage}
-              driveId={driveId}
-              key={member.id}
-              lastManager={member.id === lastManagerId}
-              member={member}
-              onError={setError}
-              onMembers={onMembers}
-              setBusy={setBusy}
-            />
-          ))
+          <li className="py-6 text-center text-muted text-sm">読み込み中…</li>
         )}
       </ul>
       {canManage && (
@@ -518,6 +528,8 @@ export function DriveMembersDialog({
   const [name, setName] = useState("");
   const [canManage, setCanManage] = useState(false);
   const [members, setMembers] = useState<SharedDriveMember[]>([]);
+  const [membersReady, setMembersReady] = useState(false);
+  const [membersLoadError, setMembersLoadError] = useState<string | null>(null);
   const [domains, setDomains] = useState<SharedDriveDomain[]>([]);
   const [domainsReady, setDomainsReady] = useState(false);
   const [domainLoadError, setDomainLoadError] = useState<string | null>(null);
@@ -542,9 +554,11 @@ export function DriveMembersDialog({
       }
       if (listed.ok) {
         setMembers(listed.data);
+        setMembersLoadError(null);
       } else {
-        setError(listed.error);
+        setMembersLoadError(listed.error);
       }
+      setMembersReady(true);
       if (domainList.ok) {
         setDomains(domainList.data);
         setDomainLoadError(null);
@@ -560,7 +574,11 @@ export function DriveMembersDialog({
 
   const showDomains = canManage || domains.length > 0;
   const tabs: Array<{ count?: number; id: Panel; label: string }> = [
-    { count: members.length, id: "members", label: "メンバー" },
+    {
+      count: membersReady && !membersLoadError ? members.length : undefined,
+      id: "members",
+      label: "メンバー",
+    },
   ];
   if (showDomains) {
     tabs.push({
@@ -616,8 +634,13 @@ export function DriveMembersDialog({
           <MembersPanel
             canManage={canManage}
             driveId={driveId}
+            loadError={membersLoadError}
             members={members}
-            onMembers={setMembers}
+            onMembers={(next) => {
+              setMembers(next);
+              setMembersLoadError(null);
+            }}
+            ready={membersReady}
           />
         </div>
       )}
