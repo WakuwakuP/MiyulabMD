@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { cn } from "../../lib/cn.ts";
 import { prefetchFolder } from "../../lib/list-cache.ts";
 
-export type FolderBreadcrumbMenuTarget = {
+type FolderBreadcrumbMenuTarget = {
   id: string;
   kind: "folder";
   name: string;
