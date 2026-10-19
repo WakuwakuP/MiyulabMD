@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router";
 import { PreviewWithToc } from "../components/editor/PreviewWithToc.tsx";
 import type { AppShellContext } from "../components/layout/AppShellContext.ts";
+import { FolderBreadcrumbs } from "../components/notes/FolderBreadcrumbs.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
 import { loadOgCards } from "../lib/markdown.ts";
 import {
@@ -50,7 +51,13 @@ function ShareDeniedView({ denied }: { denied: 401 | 403 }) {
   );
 }
 
-function ShareResult({ state }: { state: ReadState | null }) {
+function ShareResult({
+  state,
+  isOwner,
+}: {
+  state: ReadState | null;
+  isOwner: boolean;
+}) {
   if (!state) {
     return <p>読み込み中…</p>;
   }
@@ -91,6 +98,11 @@ function ShareResult({ state }: { state: ReadState | null }) {
           )}
         </p>
       )}
+      <FolderBreadcrumbs
+        crumbs={result.data.crumbs ?? []}
+        readonly={true}
+        showRootCrumb={isOwner}
+      />
       <PreviewWithToc
         documentScroll={true}
         imageContext={{ source: result.source, viewer: result.viewer }}
@@ -102,7 +114,8 @@ function ShareResult({ state }: { state: ReadState | null }) {
 
 export function SharePage() {
   const { id = "" } = useParams();
-  const { viewer, userLoading, viewing } = useOutletContext<AppShellContext>();
+  const { viewer, userLoading, viewing, user } =
+    useOutletContext<AppShellContext>();
   const [state, setState] = useState<ReadState | null>(null);
   // Hide old data during the render that changes ownership, before cleanup.
   const current =
@@ -201,9 +214,13 @@ export function SharePage() {
     };
   }, [current]);
 
+  const isOwner = Boolean(
+    user && current?.result?.ok && user.id === current.result.data.ownerId,
+  );
+
   return (
     <section className="flex flex-col">
-      <ShareResult state={current} />
+      <ShareResult isOwner={isOwner} state={current} />
     </section>
   );
 }

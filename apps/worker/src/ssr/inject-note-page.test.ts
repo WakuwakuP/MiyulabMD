@@ -28,6 +28,8 @@ function sampleNote(overrides: Partial<Note> = {}): Note {
     alias: null,
     articleMeta: {},
     createdAt: 0,
+    crumbs: [],
+    editLocked: false,
     folder: "",
     folderId: null,
     id: "note-1",

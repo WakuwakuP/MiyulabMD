@@ -157,6 +157,12 @@ export type Note = {
   title: string;
   folder: string;
   folderId: string | null;
+  /**
+   * Discoverable ancestor crumbs for the containing folder (same rules as
+   * folder access). Empty when the folder is hidden or the note is at root.
+   * Omitted from list summaries — only full note fetches include this.
+   */
+  crumbs: FolderCrumb[];
   /** Scheme ID of the containing folder (e.g. `15.22`), when folderId is visible. */
   folderSchemeId?: string | null;
   /** Title part of the containing folder's scheme name. */
@@ -175,7 +181,8 @@ export type Note = {
   updatedAt: number;
 };
 
-export type NoteSummary = Omit<Note, "markdown">;
+/** List/search rows — no body and no crumb walk. */
+export type NoteSummary = Omit<Note, "markdown" | "crumbs">;
 
 export const SEARCH_SCOPES = ["title", "body", "all"] as const;
 export type SearchScope = (typeof SEARCH_SCOPES)[number];

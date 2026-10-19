@@ -610,6 +610,7 @@ test("public children never reveal unlisted ancestor IDs or grants", async (t) =
         throw new Error("expected readable note");
       }
       assert.equal(direct.note.folderId, null);
+      assert.deepEqual(direct.note.crumbs, []);
     }
     const search = await notes.searchForUser(
       viewer,
@@ -657,4 +658,53 @@ test("known link folders expose inherited children, not separately unlisted chil
       ["inherited"],
     );
   }
+});
+
+test("note get returns discoverable folder crumbs", async (t) => {
+  const { env, owner, viewer, sqlite } = await createEnvWithSeededData();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+
+  await upsertFolderPolicy(env, owner.id, "work", "self", "self");
+  await upsertFolderPolicy(env, owner.id, "work/docs", "signed_in", "self");
+  await replaceGrants(env, owner.id, "folder", "work/docs", [
+    { email: viewer.email },
+  ]);
+  const workId = await ensureFolderRow(env, owner.id, "work");
+  const docsId = await ensureFolderRow(env, owner.id, "work/docs");
+  assert.ok(workId && docsId);
+
+  const created = await notes.create(owner, {
+    folder: "work/docs",
+    inheritAccess: true,
+    markdown: "# Crumb note",
+  });
+  if ("error" in created) {
+    throw new Error(created.error);
+  }
+
+  const owned = await notes.get(created.id, owner);
+  assert.equal(owned.kind, "ok");
+  if (owned.kind !== "ok") {
+    throw new Error("expected owner read");
+  }
+  assert.deepEqual(owned.note.crumbs, [
+    { id: workId, name: "work" },
+    { id: docsId, name: "docs" },
+  ]);
+
+  const shared = await notes.get(created.id, viewer);
+  assert.equal(shared.kind, "ok");
+  if (shared.kind !== "ok") {
+    throw new Error("expected viewer read");
+  }
+  // 祖先 work は発見不可なので suffix だけ。
+  assert.equal(shared.note.folderId, docsId);
+  assert.deepEqual(shared.note.crumbs, [{ id: docsId, name: "docs" }]);
+
+  const listed = await notes.listForUser(owner);
+  assert.equal(
+    "crumbs" in (listed.find((n) => n.id === created.id) ?? {}),
+    false,
+  );
 });

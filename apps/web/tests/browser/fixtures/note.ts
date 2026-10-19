@@ -15,6 +15,7 @@ export const note: Note = {
   alias: null,
   articleMeta: {},
   createdAt: 1,
+  crumbs: [],
   editLocked: false,
   folder: "",
   folderId: null,

@@ -7,7 +7,7 @@ import type {
   NoteSummary,
   ParaSpaceSummary,
 } from "@miyulabmd/shared";
-import { folderUrl, MY_DRIVE_NAME, SHARED_PATH } from "@miyulabmd/shared";
+import { folderUrl, SHARED_PATH } from "@miyulabmd/shared";
 import type { MouseEvent, ReactNode } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -32,6 +32,7 @@ import { compareSchemeFolders } from "../../lib/scheme-sort.ts";
 import { DriveList, DriveRow } from "../ui/DriveList.tsx";
 import { FolderIcon, MarkdownIcon } from "../ui/icons.tsx";
 import { AccessScopeMeta } from "./AccessScopeMeta.tsx";
+import { FolderBreadcrumbs } from "./FolderBreadcrumbs.tsx";
 
 type LoadChildren = (
   folderId: string,
@@ -550,81 +551,6 @@ function noteSummaryRow(ctx: TreeContext, note: NoteSummary) {
   );
 }
 
-function FolderCrumbs({
-  crumbs,
-  isDriveRoot,
-  onItemMenu,
-  readonly,
-  showRootCrumb,
-}: {
-  crumbs: FolderCrumb[];
-  isDriveRoot: boolean;
-  onItemMenu: (event: MouseEvent, target: MenuTarget) => void;
-  readonly: boolean;
-  showRootCrumb: boolean;
-}) {
-  return (
-    <nav
-      aria-label="フォルダ"
-      className="mb-3 flex flex-wrap items-center gap-[0.15rem] text-[0.9rem]"
-    >
-      {showRootCrumb && (
-        <Link
-          className={cn(
-            "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
-            isDriveRoot ? "cursor-default text-muted" : "cursor-pointer",
-          )}
-          onPointerEnter={() => {
-            if (!readonly) {
-              prefetchFolder();
-            }
-          }}
-          to="/"
-        >
-          {MY_DRIVE_NAME}
-        </Link>
-      )}
-      {crumbs.map((crumb, index) => {
-        const current = index === crumbs.length - 1;
-        return (
-          <span key={crumb.id}>
-            {(showRootCrumb || index > 0) && (
-              <span aria-hidden={true}> / </span>
-            )}
-            <Link
-              className={cn(
-                "border-0 bg-transparent p-0 font-inherit text-inherit no-underline",
-                current ? "cursor-default text-muted" : "cursor-pointer",
-              )}
-              onContextMenu={
-                readonly
-                  ? undefined
-                  : (event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onItemMenu(event, {
-                        id: crumb.id,
-                        kind: "folder",
-                        name: crumb.name,
-                      });
-                    }
-              }
-              onPointerEnter={() => {
-                if (!readonly) {
-                  prefetchFolder(crumb.id);
-                }
-              }}
-              to={folderUrl(crumb.id)}
-            >
-              {crumb.name}
-            </Link>
-          </span>
-        );
-      })}
-    </nav>
-  );
-}
-
 function ParaSection({
   ctx,
   space,
@@ -782,8 +708,9 @@ export function NoteTree({
 
   return (
     <div>
-      <FolderCrumbs
+      <FolderBreadcrumbs
         crumbs={crumbs}
+        currentIsLast={true}
         isDriveRoot={isDriveRoot}
         onItemMenu={onItemMenu}
         readonly={readonly}
