@@ -598,7 +598,7 @@ export async function listAccessibleRows(
            LEFT JOIN access_grants ag
              ON ag.target_kind = 'note' AND ag.target_key = n.id
             AND (ag.user_id = ? OR ag.email = ?)
-           WHERE (n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope = 'public')${ftsClause}
+           WHERE (n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope IN ('public', 'signed_in'))${ftsClause}
            ORDER BY n.updated_at DESC`,
     )
     .bind(user.id, user.email, user.id, ...ftsBinds)

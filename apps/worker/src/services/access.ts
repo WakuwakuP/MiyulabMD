@@ -680,7 +680,10 @@ async function loadFolderEffective(
   };
 }
 
-/** 閲覧権限だけでは URL・ID の列挙に同意したことにはならない。 */
+/**
+ * 閲覧できるだけでは URL・ID の列挙に同意したことにはならない。
+ * `signed_in` はログイン済みの共有一覧に出す。`link` はリンクを知っている場合だけ。
+ */
 export function canDiscoverAccess(
   access: EffectiveAccess & { flags: PermissionFlags },
   ownerId: string,
@@ -691,6 +694,8 @@ export function canDiscoverAccess(
     access.flags.canView &&
     (actor.kind === "owner" ||
       access.effectiveReadScope === "public" ||
+      (actor.kind === "signed_in" &&
+        access.effectiveReadScope === "signed_in") ||
       grantForActor(access.grants, actor) !== null)
   );
 }
@@ -1632,7 +1637,7 @@ export async function listSharedFolderCandidates(
        UNION
        SELECT owner_id, folder AS target_key
        FROM folder_policies
-       WHERE read_scope = 'public'`,
+       WHERE read_scope IN ('public', 'signed_in')`,
     )
     .bind(user.id, user.email)
     .all<{ owner_id: string; target_key: string }>();

@@ -308,7 +308,7 @@ async function createEnvWithPublicDiscoverySeededData(
   };
 }
 
-test("listForUser excludes link and signed-in notes without an explicit grant", async (t) => {
+test("listForUser includes signed-in notes and excludes link notes without a grant", async (t) => {
   const { env, viewer, sqlite } = await createEnvWithSeededData();
   t.after(() => sqlite.close());
   const notes = createNoteService(env);
@@ -316,24 +316,36 @@ test("listForUser excludes link and signed-in notes without an explicit grant", 
   const rows = await notes.listForUser(viewer);
 
   const titles = rows.map((row) => row.title).sort();
-  assert.deepEqual(titles, ["Explicit grant note"]);
+  assert.deepEqual(titles, [
+    "Direct signed-in note",
+    "Explicit grant note",
+    "Inherited signed-in note",
+  ]);
 
   assert.equal(
     rows.every((row) => row.title !== "Self-only override note"),
     true,
   );
+  assert.equal(
+    rows.every((row) => row.title !== "Public-link-only note"),
+    true,
+  );
 });
 
-test("searchForUser excludes unlisted scopes and keeps explicit grants", async (t) => {
+test("searchForUser keeps signed-in notes and explicit grants, and hides link notes", async (t) => {
   const { env, viewer, sqlite } = await createEnvWithSeededData();
   t.after(() => sqlite.close());
   const notes = createNoteService(env);
 
   const hits = await notes.searchForUser(viewer, "shared-token");
 
-  assert.equal(hits.length, 1);
+  assert.equal(hits.length, 3);
   const hitTitles = hits.map((hit) => hit.title).sort();
-  assert.deepEqual(hitTitles, ["Explicit grant note"]);
+  assert.deepEqual(hitTitles, [
+    "Direct signed-in note",
+    "Explicit grant note",
+    "Inherited signed-in note",
+  ]);
 
   for (const hit of hits) {
     assert.equal(typeof hit.snippet, "string");
@@ -351,7 +363,7 @@ test("listSharedFolders deduplicates duplicate candidates and excludes own folde
   const folders = await listSharedFolders(env, viewer);
 
   const folderNames = folders.map((folder) => folder.name).sort();
-  assert.deepEqual(folderNames, ["team"]);
+  assert.deepEqual(folderNames, ["shared", "team"]);
   assert.equal(folders.filter((folder) => folder.name === "team").length, 1);
   assert.equal(folderNames.includes("mine"), false);
   assert.equal(
@@ -371,6 +383,7 @@ test("signed-in discovery includes public folders and inherited notes without gr
   assert.deepEqual(rows.map((row) => row.title).sort(), [
     "Direct public note",
     "Inherited public note",
+    "Signed-in override note",
   ]);
   const hits = await notes.searchForUser(viewer, "public");
   assert.deepEqual(hits.map((hit) => hit.title).sort(), [
@@ -514,7 +527,7 @@ test("a direct grant makes a link-only note discoverable to its recipient", asyn
   );
 });
 
-test("legacy signed-in presets require a URL or explicit sharing", async (t) => {
+test("legacy signed-in presets appear for signed-in users and stay hidden from guests", async (t) => {
   const { env, owner, viewer, sqlite } = await createEnvWithSeededData();
   t.after(() => sqlite.close());
   const notes = createNoteService(env);
@@ -532,21 +545,18 @@ test("legacy signed-in presets require a URL or explicit sharing", async (t) => 
       (await notes.listForUser(owner)).some((n) => n.id === created.id),
       true,
     );
-    assert.deepEqual(
-      await notes.searchForUser(viewer, `legacy-unlisted-${permission}`),
-      [],
-    );
-    assert.equal(
-      (await notes.listForUser(viewer)).some((n) => n.id === created.id),
-      false,
-    );
-    await replaceGrants(env, owner.id, "note", created.id, [
-      { email: viewer.email },
-    ]);
     assert.equal(
       (await notes.searchForUser(viewer, `legacy-unlisted-${permission}`))
         .length,
       1,
+    );
+    assert.equal(
+      (await notes.listForUser(viewer)).some((n) => n.id === created.id),
+      true,
+    );
+    assert.equal(
+      (await notes.listForGuest()).some((n) => n.id === created.id),
+      false,
     );
   }
 
@@ -564,6 +574,63 @@ test("legacy signed-in presets require a URL or explicit sharing", async (t) => 
     true,
   );
 });
+
+async function assertPublicChildAncestor(
+  env: Env,
+  notes: ReturnType<typeof createNoteService>,
+  ownerId: string,
+  user: { email: string; id: string } | undefined,
+  ids: {
+    childId: string;
+    childPath: string;
+    noteId: string;
+    parentId: string;
+    parentName: string;
+    revealParent: boolean;
+  },
+) {
+  const parentId = ids.revealParent ? ids.parentId : null;
+  const access = await resolveFolderAccess(env, ownerId, ids.childPath, user);
+  assert.equal(access.parentId, parentId);
+  assert.deepEqual(
+    access.crumbs,
+    parentId
+      ? [
+          { id: parentId, name: ids.parentName },
+          { id: ids.childId, name: "published" },
+        ]
+      : [{ id: ids.childId, name: "published" }],
+  );
+  assert.deepEqual(access.grants, []);
+  const folders = user
+    ? await listSharedFolders(env, user)
+    : await listPublicSharedFolders(env);
+  assert.equal(
+    folders.find((folder) => folder.id === ids.childId)?.parentId,
+    parentId,
+  );
+  assert.equal(
+    JSON.stringify(folders).includes(ids.parentId),
+    ids.revealParent,
+  );
+  const listed = user
+    ? await notes.listForUser(user)
+    : await notes.listForGuest();
+  assert.equal(
+    listed.find((note) => note.id === ids.noteId)?.folderId,
+    parentId,
+  );
+  const direct = await notes.get(ids.noteId, user);
+  assert.equal(direct.kind, "ok");
+  if (direct.kind !== "ok") {
+    throw new Error("expected readable note");
+  }
+  assert.equal(direct.note.folderId, parentId);
+  assert.deepEqual(
+    direct.note.crumbs,
+    parentId ? [{ id: parentId, name: ids.parentName }] : [],
+  );
+}
 
 test("public children never reveal unlisted ancestor IDs or grants", async (t) => {
   const { env, owner, viewer, sqlite } = await createEnvWithSeededData();
@@ -589,34 +656,22 @@ test("public children never reveal unlisted ancestor IDs or grants", async (t) =
       throw new Error(created.error);
     }
 
+    assert.ok(parentId && childId);
     for (const user of [undefined, viewer]) {
-      const access = await resolveFolderAccess(env, owner.id, child, user);
-      assert.equal(access.parentId, null);
-      assert.deepEqual(access.crumbs, [{ id: childId, name: "published" }]);
-      assert.deepEqual(access.grants, []);
-      const folders = user
-        ? await listSharedFolders(env, user)
-        : await listPublicSharedFolders(env);
-      assert.equal(folders.find((f) => f.id === childId)?.parentId, null);
-      assert.ok(parentId);
-      assert.equal(JSON.stringify(folders).includes(parentId), false);
-      const listed = user
-        ? await notes.listForUser(user)
-        : await notes.listForGuest();
-      assert.equal(listed.find((n) => n.id === created.id)?.folderId, null);
-      const direct = await notes.get(created.id, user);
-      assert.equal(direct.kind, "ok");
-      if (direct.kind !== "ok") {
-        throw new Error("expected readable note");
-      }
-      assert.equal(direct.note.folderId, null);
-      assert.deepEqual(direct.note.crumbs, []);
+      await assertPublicChildAncestor(env, notes, owner.id, user, {
+        childId,
+        childPath: child,
+        noteId: created.id,
+        parentId,
+        parentName: parent,
+        revealParent: user === viewer && scope === "signed_in",
+      });
     }
     const search = await notes.searchForUser(
       viewer,
       `parent-id-regression-${scope}`,
     );
-    assert.equal(search[0]?.folderId, null);
+    assert.equal(search[0]?.folderId, scope === "signed_in" ? parentId : null);
     assert.equal(
       (await resolveFolderAccess(env, owner.id, child, owner)).parentId,
       parentId,
@@ -650,14 +705,18 @@ test("known link folders expose inherited children, not separately unlisted chil
     "self",
   );
   await ensureFolderRow(env, owner.id, "known/other-login");
-  for (const user of [undefined, viewer]) {
-    const access = await resolveFolderAccess(env, owner.id, "known", user);
-    assert.equal(access.flags.canView, true);
-    assert.deepEqual(
-      access.children.map((f) => f.name),
-      ["inherited"],
-    );
-  }
+  const guest = await resolveFolderAccess(env, owner.id, "known", undefined);
+  assert.equal(guest.flags.canView, true);
+  assert.deepEqual(
+    guest.children.map((folder) => folder.name),
+    ["inherited"],
+  );
+  const signedIn = await resolveFolderAccess(env, owner.id, "known", viewer);
+  assert.equal(signedIn.flags.canView, true);
+  assert.deepEqual(
+    signedIn.children.map((folder) => folder.name),
+    ["inherited", "other-login"],
+  );
 });
 
 test("note get returns discoverable folder crumbs", async (t) => {
