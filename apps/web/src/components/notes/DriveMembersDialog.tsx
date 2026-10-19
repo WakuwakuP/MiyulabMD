@@ -608,14 +608,18 @@ export function DriveMembersDialog({
           />
         </div>
       )}
-      {active === "domains" && domains && (
+      {active === "domains" && (
         <div aria-labelledby={domainsTabId} role="tabpanel">
-          <DomainsPanel
-            canManage={canManage}
-            domains={domains}
-            driveId={driveId}
-            onDomains={setDomains}
-          />
+          {domains || error ? (
+            <DomainsPanel
+              canManage={canManage}
+              domains={domains ?? []}
+              driveId={driveId}
+              onDomains={setDomains}
+            />
+          ) : (
+            <MutedText>読み込み中…</MutedText>
+          )}
         </div>
       )}
       {active === "drive" && canManage && (
