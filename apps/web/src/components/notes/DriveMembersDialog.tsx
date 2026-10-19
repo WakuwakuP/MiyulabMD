@@ -149,6 +149,56 @@ function DriveMemberRow({
   );
 }
 
+function MemberListBody({
+  busy,
+  canManage,
+  driveId,
+  lastManagerId,
+  loadError,
+  onError,
+  onMembers,
+  query,
+  ready,
+  setBusy,
+  visible,
+}: {
+  busy: boolean;
+  canManage: boolean;
+  driveId: string;
+  lastManagerId: string | null;
+  loadError: string | null;
+  onError: (error: string | null) => void;
+  onMembers: (members: SharedDriveMember[]) => void;
+  query: string;
+  ready: boolean;
+  setBusy: (busy: boolean) => void;
+  visible: SharedDriveMember[];
+}) {
+  if (!ready) {
+    return <li className="py-6 text-center text-muted text-sm">読み込み中…</li>;
+  }
+  if (visible.length === 0 && !loadError) {
+    return (
+      <li className="py-6 text-center text-muted text-sm">
+        {query ? "一致するメンバーはいません" : "メンバーはいません"}
+      </li>
+    );
+  }
+  return visible.map((member) => (
+    <DriveMemberRow
+      busy={busy}
+      canManage={canManage}
+      driveId={driveId}
+      key={member.id}
+      lastManager={member.id === lastManagerId}
+      member={member}
+      onError={onError}
+      onMembers={onMembers}
+      setBusy={setBusy}
+    />
+  ));
+}
+
 function MembersPanel({
   canManage,
   driveId,
@@ -224,29 +274,19 @@ function MembersPanel({
         />
       )}
       <ul className="m-0 max-h-[min(18rem,42dvh)] list-none divide-y divide-border overflow-y-auto py-0 ps-0 pe-2">
-        {ready ? (
-          visible.length === 0 && !loadError ? (
-            <li className="py-6 text-center text-muted text-sm">
-              {query ? "一致するメンバーはいません" : "メンバーはいません"}
-            </li>
-          ) : (
-            visible.map((member) => (
-              <DriveMemberRow
-                busy={busy}
-                canManage={canManage}
-                driveId={driveId}
-                key={member.id}
-                lastManager={member.id === lastManagerId}
-                member={member}
-                onError={setError}
-                onMembers={onMembers}
-                setBusy={setBusy}
-              />
-            ))
-          )
-        ) : (
-          <li className="py-6 text-center text-muted text-sm">読み込み中…</li>
-        )}
+        <MemberListBody
+          busy={busy}
+          canManage={canManage}
+          driveId={driveId}
+          lastManagerId={lastManagerId}
+          loadError={loadError}
+          onError={setError}
+          onMembers={onMembers}
+          query={query}
+          ready={ready}
+          setBusy={setBusy}
+          visible={visible}
+        />
       </ul>
       {canManage && (
         <form className="mt-3" onSubmit={onInvite}>
@@ -514,6 +554,81 @@ function DriveSettings({
   );
 }
 
+function memberDialogTabs({
+  canManage,
+  domainLoadError,
+  domains,
+  domainsReady,
+  members,
+  membersLoadError,
+  membersReady,
+}: {
+  canManage: boolean;
+  domainLoadError: string | null;
+  domains: SharedDriveDomain[];
+  domainsReady: boolean;
+  members: SharedDriveMember[];
+  membersLoadError: string | null;
+  membersReady: boolean;
+}): Array<{ count?: number; id: Panel; label: string }> {
+  const tabs: Array<{ count?: number; id: Panel; label: string }> = [
+    {
+      count: membersReady && !membersLoadError ? members.length : undefined,
+      id: "members",
+      label: "メンバー",
+    },
+  ];
+  if (canManage || domains.length > 0) {
+    tabs.push({
+      count: domainsReady && !domainLoadError ? domains.length : undefined,
+      id: "domains",
+      label: "ドメイン",
+    });
+  }
+  if (canManage) {
+    tabs.push({ id: "drive", label: "ドライブ" });
+  }
+  return tabs;
+}
+
+function applyLoadedDrive(
+  drive: Awaited<ReturnType<typeof fetchSharedDrive>>,
+  listed: Awaited<ReturnType<typeof fetchDriveMembers>>,
+  domainList: Awaited<ReturnType<typeof fetchDriveDomains>>,
+  update: {
+    setCanManage: (value: boolean) => void;
+    setDomainLoadError: (value: string | null) => void;
+    setDomains: (value: SharedDriveDomain[]) => void;
+    setDomainsReady: (value: boolean) => void;
+    setError: (value: string | null) => void;
+    setMembers: (value: SharedDriveMember[]) => void;
+    setMembersLoadError: (value: string | null) => void;
+    setMembersReady: (value: boolean) => void;
+    setName: (value: string) => void;
+  },
+) {
+  if (drive.ok) {
+    update.setName(drive.data.name);
+    update.setCanManage(drive.data.role === "manager");
+  } else {
+    update.setError(drive.error);
+  }
+  if (listed.ok) {
+    update.setMembers(listed.data);
+    update.setMembersLoadError(null);
+  } else {
+    update.setMembersLoadError(listed.error);
+  }
+  update.setMembersReady(true);
+  if (domainList.ok) {
+    update.setDomains(domainList.data);
+    update.setDomainLoadError(null);
+  } else {
+    update.setDomainLoadError(domainList.error);
+  }
+  update.setDomainsReady(true);
+}
+
 export function DriveMembersDialog({
   driveId,
   onClose,
@@ -546,50 +661,32 @@ export function DriveMembersDialog({
       if (cancelled) {
         return;
       }
-      if (drive.ok) {
-        setName(drive.data.name);
-        setCanManage(drive.data.role === "manager");
-      } else {
-        setError(drive.error);
-      }
-      if (listed.ok) {
-        setMembers(listed.data);
-        setMembersLoadError(null);
-      } else {
-        setMembersLoadError(listed.error);
-      }
-      setMembersReady(true);
-      if (domainList.ok) {
-        setDomains(domainList.data);
-        setDomainLoadError(null);
-      } else {
-        setDomainLoadError(domainList.error);
-      }
-      setDomainsReady(true);
+      applyLoadedDrive(drive, listed, domainList, {
+        setCanManage,
+        setDomainLoadError,
+        setDomains,
+        setDomainsReady,
+        setError,
+        setMembers,
+        setMembersLoadError,
+        setMembersReady,
+        setName,
+      });
     });
     return () => {
       cancelled = true;
     };
   }, [driveId]);
 
-  const showDomains = canManage || domains.length > 0;
-  const tabs: Array<{ count?: number; id: Panel; label: string }> = [
-    {
-      count: membersReady && !membersLoadError ? members.length : undefined,
-      id: "members",
-      label: "メンバー",
-    },
-  ];
-  if (showDomains) {
-    tabs.push({
-      count: domainsReady && !domainLoadError ? domains.length : undefined,
-      id: "domains",
-      label: "ドメイン",
-    });
-  }
-  if (canManage) {
-    tabs.push({ id: "drive", label: "ドライブ" });
-  }
+  const tabs = memberDialogTabs({
+    canManage,
+    domainLoadError,
+    domains,
+    domainsReady,
+    members,
+    membersLoadError,
+    membersReady,
+  });
   const active = tabs.some((tab) => tab.id === panel) ? panel : "members";
   const tabIds: Record<Panel, string> = {
     domains: domainsTabId,
