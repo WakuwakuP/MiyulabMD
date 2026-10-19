@@ -3,15 +3,19 @@ import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
 import {
+  addDriveDomain,
   createSharedDrive,
   type DriveError,
   deleteSharedDrive,
   getSharedDrive,
   inviteDriveMember,
+  listDriveDomains,
   listDriveMembers,
   listSharedDrives,
+  removeDriveDomain,
   removeDriveMember,
   renameSharedDrive,
+  updateDriveDomainRole,
   updateDriveMemberRole,
 } from "../services/shared-drives.ts";
 
@@ -143,4 +147,58 @@ export const sharedDriveRoutes = new Elysia({ prefix: "/api/drives" })
       return driveError(set, removed);
     }
     return { members: removed.result };
+  })
+  .get("/:id/domains", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const domains = await listDriveDomains(env, params.id, user ?? undefined);
+    if (domains.kind !== "ok") {
+      return driveError(set, domains);
+    }
+    return { domains: domains.result };
+  })
+  .post("/:id/domains", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const body = await parseJsonBody<{ domain?: string; role?: string }>(
+      request,
+    );
+    const added = await addDriveDomain(
+      env,
+      params.id,
+      body?.domain,
+      body?.role,
+      user ?? undefined,
+    );
+    if (added.kind !== "ok") {
+      return driveError(set, added);
+    }
+    set.status = 201;
+    return { domains: added.result };
+  })
+  .patch("/:id/domains/:domainId", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const body = await parseJsonBody<{ role?: string }>(request);
+    const updated = await updateDriveDomainRole(
+      env,
+      params.id,
+      params.domainId,
+      body?.role,
+      user ?? undefined,
+    );
+    if (updated.kind !== "ok") {
+      return driveError(set, updated);
+    }
+    return { domains: updated.result };
+  })
+  .delete("/:id/domains/:domainId", async ({ params, request, set }) => {
+    const user = await readSession(request, env);
+    const removed = await removeDriveDomain(
+      env,
+      params.id,
+      params.domainId,
+      user ?? undefined,
+    );
+    if (removed.kind !== "ok") {
+      return driveError(set, removed);
+    }
+    return { domains: removed.result };
   });

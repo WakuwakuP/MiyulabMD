@@ -42,3 +42,10 @@ export type SharedDriveMember = {
   role: DriveRole;
   pending: boolean;
 };
+
+/** Email domain that becomes a member on login. */
+export type SharedDriveDomain = {
+  id: string;
+  domain: string;
+  role: DriveRole;
+};
