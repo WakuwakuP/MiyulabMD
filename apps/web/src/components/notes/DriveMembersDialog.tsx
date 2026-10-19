@@ -165,7 +165,14 @@ function MembersPanel({
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const query = filter.trim().toLowerCase();
+  const showFilter = members.length > 6;
+  const query = showFilter ? filter.trim().toLowerCase() : "";
+
+  useEffect(() => {
+    if (!showFilter) {
+      setFilter("");
+    }
+  }, [showFilter]);
   const visible = query
     ? members.filter((member) => {
         const name = member.displayName?.toLowerCase() ?? "";
@@ -200,7 +207,7 @@ function MembersPanel({
   return (
     <div>
       {error && <ErrorText className="mt-0">{error}</ErrorText>}
-      {members.length > 6 && (
+      {showFilter && (
         <Input
           aria-label="メンバーを絞り込む"
           className="mb-2 w-full"
