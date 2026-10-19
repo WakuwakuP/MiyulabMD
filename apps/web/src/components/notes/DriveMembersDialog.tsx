@@ -242,7 +242,8 @@ function MembersPanel({
   const managerIds = members
     .filter((member) => member.role === "manager" && !member.pending)
     .map((member) => member.id);
-  const lastManagerId = managerIds.length === 1 ? managerIds[0] : null;
+  const lastManagerId =
+    managerIds.length === 1 ? (managerIds[0] ?? null) : null;
 
   async function onInvite(event: FormEvent) {
     event.preventDefault();
