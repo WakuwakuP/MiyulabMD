@@ -5,6 +5,7 @@ packages:
 overrides:
   lodash-es: ^4.18.1
   '@vitest/mocker': ^4.1.11
+  miniflare>undici: 7.30.1
 
 allowBuilds:
   core-js-pure: false
