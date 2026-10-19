@@ -31,6 +31,7 @@ export {
 export type {
   DriveRole,
   OwnerKind,
+  SharedDriveDomain,
   SharedDriveMember,
   SharedDriveSummary,
 } from "./drive.ts";

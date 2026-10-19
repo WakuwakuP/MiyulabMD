@@ -30,6 +30,7 @@ import type {
   SchemeRootEntry,
   SchemeSuggestion,
   SessionUser,
+  SharedDriveDomain,
   SharedDriveMember,
   SharedDriveSummary,
   WorkspaceSearchResult,
@@ -1306,4 +1307,66 @@ export async function removeDriveMember(
   }
   const body = (await res.json()) as { members: SharedDriveMember[] };
   return { data: body.members, ok: true };
+}
+
+export async function fetchDriveDomains(
+  driveId: string,
+): Promise<ApiResult<SharedDriveDomain[]>> {
+  const res = await fetch(`/api/drives/${driveId}/domains`, fetchOpts);
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { domains: SharedDriveDomain[] };
+  return { data: body.domains, ok: true };
+}
+
+export async function addDriveDomain(
+  driveId: string,
+  domain: string,
+  role: DriveRole,
+): Promise<ApiResult<SharedDriveDomain[]>> {
+  const res = await fetch(`/api/drives/${driveId}/domains`, {
+    ...fetchOpts,
+    body: JSON.stringify({ domain, role }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { domains: SharedDriveDomain[] };
+  return { data: body.domains, ok: true };
+}
+
+export async function updateDriveDomainRole(
+  driveId: string,
+  domainId: string,
+  role: DriveRole,
+): Promise<ApiResult<SharedDriveDomain[]>> {
+  const res = await fetch(`/api/drives/${driveId}/domains/${domainId}`, {
+    ...fetchOpts,
+    body: JSON.stringify({ role }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { domains: SharedDriveDomain[] };
+  return { data: body.domains, ok: true };
+}
+
+export async function removeDriveDomain(
+  driveId: string,
+  domainId: string,
+): Promise<ApiResult<SharedDriveDomain[]>> {
+  const res = await fetch(`/api/drives/${driveId}/domains/${domainId}`, {
+    ...fetchOpts,
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { domains: SharedDriveDomain[] };
+  return { data: body.domains, ok: true };
 }

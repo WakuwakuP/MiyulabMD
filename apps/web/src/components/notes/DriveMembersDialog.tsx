@@ -1,13 +1,21 @@
-import type { DriveRole, SharedDriveMember } from "@miyulabmd/shared";
+import type {
+  DriveRole,
+  SharedDriveDomain,
+  SharedDriveMember,
+} from "@miyulabmd/shared";
 import { type FormEvent, useEffect, useId, useState } from "react";
 import { useNavigate } from "react-router";
 import {
+  addDriveDomain,
   deleteSharedDrive,
+  fetchDriveDomains,
   fetchDriveMembers,
   fetchSharedDrive,
   inviteDriveMember,
+  removeDriveDomain,
   removeDriveMember,
   renameSharedDrive,
+  updateDriveDomainRole,
   updateDriveMemberRole,
 } from "../../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
@@ -93,6 +101,166 @@ function DriveMemberRow({
         <span className="text-sm">{ROLE_LABEL[member.role]}</span>
       )}
     </li>
+  );
+}
+
+function DriveDomainRow({
+  busy,
+  canManage,
+  domain,
+  driveId,
+  onDomains,
+  onError,
+  setBusy,
+}: {
+  busy: boolean;
+  canManage: boolean;
+  domain: SharedDriveDomain;
+  driveId: string;
+  onDomains: (domains: SharedDriveDomain[]) => void;
+  onError: (error: string | null) => void;
+  setBusy: (busy: boolean) => void;
+}) {
+  function apply(result: Awaited<ReturnType<typeof updateDriveDomainRole>>) {
+    setBusy(false);
+    if (!result.ok) {
+      onError(result.error);
+      return;
+    }
+    onDomains(result.data);
+    onError(null);
+  }
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-2">
+      <span className="min-w-0 truncate">@{domain.domain}</span>
+      {canManage ? (
+        <span className="flex items-center gap-2">
+          <Select
+            aria-label={`${domain.domain}の役割`}
+            onChange={(event) => {
+              const next = event.target.value as DriveRole;
+              setBusy(true);
+              void updateDriveDomainRole(driveId, domain.id, next).then(apply);
+            }}
+            value={domain.role}
+          >
+            <option value="manager">管理者</option>
+            <option value="editor">編集者</option>
+            <option value="viewer">閲覧者</option>
+          </Select>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void removeDriveDomain(driveId, domain.id).then(apply);
+            }}
+            variant="danger"
+          >
+            外す
+          </Button>
+        </span>
+      ) : (
+        <span className="text-sm">{ROLE_LABEL[domain.role]}</span>
+      )}
+    </li>
+  );
+}
+
+function DriveDomainRules({
+  canManage,
+  driveId,
+}: {
+  canManage: boolean;
+  driveId: string;
+}) {
+  const [domains, setDomains] = useState<SharedDriveDomain[]>([]);
+  const [domain, setDomain] = useState("");
+  const [role, setRole] = useState<DriveRole>("editor");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchDriveDomains(driveId).then((listed) => {
+      if (cancelled || !listed.ok) {
+        return;
+      }
+      setDomains(listed.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [driveId]);
+
+  if (!canManage && domains.length === 0) {
+    return null;
+  }
+
+  async function onAdd(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    const result = await addDriveDomain(driveId, domain, role);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setDomain("");
+    setDomains(result.data);
+    setError(null);
+  }
+
+  return (
+    <section className="mt-4 grid gap-2">
+      <h3 className="m-0 text-sm">ドメイン</h3>
+      <p className="m-0 text-muted text-xs">
+        このドメインのメールアドレスは、ログインするとメンバーになります。すでに招待している人の役割は変わりません。外した人は、もう一度招待するまで自動では戻りません。
+      </p>
+      {error && <ErrorText>{error}</ErrorText>}
+      <ul className="m-0 grid list-none gap-2 p-0">
+        {domains.map((item) => (
+          <DriveDomainRow
+            busy={busy}
+            canManage={canManage}
+            domain={item}
+            driveId={driveId}
+            key={item.id}
+            onDomains={setDomains}
+            onError={setError}
+            setBusy={setBusy}
+          />
+        ))}
+      </ul>
+      {canManage && (
+        <form className="grid gap-2" onSubmit={onAdd}>
+          <Field htmlFor="member-domain" label="ドメインを追加">
+            <Input
+              id="member-domain"
+              onChange={(event) => setDomain(event.target.value)}
+              placeholder="example.com"
+              value={domain}
+            />
+          </Field>
+          <Select
+            aria-label="ドメインの役割"
+            onChange={(event) => setRole(event.target.value as DriveRole)}
+            value={role}
+          >
+            <option value="manager">管理者</option>
+            <option value="editor">編集者</option>
+            <option value="viewer">閲覧者</option>
+          </Select>
+          <Button
+            disabled={busy || domain.trim() === ""}
+            type="submit"
+            variant="accent"
+          >
+            追加
+          </Button>
+        </form>
+      )}
+    </section>
   );
 }
 
@@ -204,6 +372,7 @@ export function DriveMembersDialog({
           />
         ))}
       </ul>
+      <DriveDomainRules canManage={canManage} driveId={driveId} />
       {canManage && (
         <>
           <form className="mt-4 grid gap-2" onSubmit={onInvite}>

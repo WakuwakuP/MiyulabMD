@@ -371,9 +371,25 @@ shared_drive_members (
   role        TEXT NOT NULL,                 -- manager | editor | viewer
   created_at  INTEGER NOT NULL
 )
+
+shared_drive_domains (
+  id          TEXT PRIMARY KEY,
+  drive_id    TEXT NOT NULL REFERENCES shared_drives(id),
+  domain      TEXT NOT NULL,                 -- 小文字。@ は含まない
+  role        TEXT NOT NULL,                 -- manager | editor | viewer
+  created_at  INTEGER NOT NULL
+)
+
+shared_drive_domain_exclusions (
+  drive_id    TEXT NOT NULL REFERENCES shared_drives(id),
+  email       TEXT NOT NULL,
+  PRIMARY KEY (drive_id, email)
+)
 ```
 
 招待中（`user_id` が空）は木の切り替えに出さず、管理者の人数にも数えない。同じドライブの同じメールは一行だけ。ログインしたメールが一致したら、既存の grant と同じく `user_id` を結ぶ。ドライブ作成時に、作成者を `manager` にしたメンバー行と、空パスのルートフォルダを同じ主体で作る。
+
+管理者はドメインと役割を登録できる。メールの `@` より後ろが、登録したドメインと完全一致する人は、ログインするとその役割のメンバーになる。サブドメインは含めない。すでにメンバー行があるメールは、招待した役割のままにする。管理者が外したメールは、その時点でドメインがなくても記録し、あとからドメインを足しても自動では戻らない。戻すには、もう一度招待する。外す処理と再招待は、メンバー行とこの記録を同じトランザクションで更新する。
 
 役割はドライブ全体に一つ。フォルダごとの役割は置かない。ノート共同編集者の `viewer` / `editor` とは別で、こちらは主体への所属である。
 

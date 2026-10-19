@@ -63,6 +63,7 @@ import {
 } from "./articles.ts";
 import {
   canEditSubject,
+  claimDriveMemberships,
   markDriveFolderKinds,
   seesSubjectTree,
 } from "./drive-membership.ts";
@@ -597,6 +598,7 @@ export async function listAccessibleRows(
   user: SessionUser,
   ftsMatch?: string | null,
 ): Promise<AccessibleRowsResult> {
+  await claimDriveMemberships(env, user.id, user.email);
   const ftsClause = ftsMatch
     ? " AND n.id IN (SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?)"
     : "";

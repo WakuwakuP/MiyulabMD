@@ -2,13 +2,14 @@ import {
   type DriveRole,
   isDriveRole,
   type SessionUser,
+  type SharedDriveDomain,
   type SharedDriveMember,
   type SharedDriveSummary,
 } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
 import { findUserByEmail } from "../db/users.ts";
-import { driveRoleFor } from "./drive-membership.ts";
+import { claimDriveMemberships, driveRoleFor } from "./drive-membership.ts";
 import { createNoteService } from "./notes.ts";
 
 const NAME_MAX = 80;
@@ -34,6 +35,19 @@ function normalizeEmail(email: string | undefined): string | null {
     return null;
   }
   return normalized;
+}
+
+function normalizeDomain(value: string | undefined): string | null {
+  const domain = value?.trim().toLowerCase().replace(/^@/, "") ?? "";
+  if (
+    domain.length > 253 ||
+    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
+      domain,
+    )
+  ) {
+    return null;
+  }
+  return domain;
 }
 
 async function requireMember(
@@ -112,6 +126,7 @@ export async function listSharedDrives(
   if (!user) {
     return [];
   }
+  await claimDriveMemberships(env, user.id, user.email);
   const rows = await db(env)
     .prepare(
       `SELECT d.id, d.name, m.role, f.id AS root_folder_id
@@ -214,6 +229,12 @@ async function deleteDriveContent(
       .prepare("DELETE FROM medallion_sets WHERE owner_user_id = ?")
       .bind(driveId),
     d1.prepare("DELETE FROM folders WHERE owner_id = ?").bind(driveId),
+    d1
+      .prepare("DELETE FROM shared_drive_domain_exclusions WHERE drive_id = ?")
+      .bind(driveId),
+    d1
+      .prepare("DELETE FROM shared_drive_domains WHERE drive_id = ?")
+      .bind(driveId),
     d1
       .prepare("DELETE FROM shared_drive_members WHERE drive_id = ?")
       .bind(driveId),
@@ -323,22 +344,30 @@ export async function inviteDriveMember(
     return { error: "メールか役割が不正です", kind: "invalid", status: 400 };
   }
   const existing = await findUserByEmail(env, normalized);
+  const d1 = db(env);
   try {
-    await db(env)
-      .prepare(
-        `INSERT INTO shared_drive_members
-           (id, drive_id, email, user_id, role, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        crypto.randomUUID(),
-        driveId,
-        normalized,
-        existing?.id ?? null,
-        role,
-        Date.now(),
-      )
-      .run();
+    await d1.batch([
+      d1
+        .prepare(
+          `INSERT INTO shared_drive_members
+             (id, drive_id, email, user_id, role, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          driveId,
+          normalized,
+          existing?.id ?? null,
+          role,
+          Date.now(),
+        ),
+      d1
+        .prepare(
+          `DELETE FROM shared_drive_domain_exclusions
+            WHERE drive_id = ? AND email = ?`,
+        )
+        .bind(driveId, normalized),
+    ]);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("UNIQUE")) {
@@ -416,11 +445,11 @@ export async function removeDriveMember(
   }
   const target = await db(env)
     .prepare(
-      `SELECT role, user_id FROM shared_drive_members
+      `SELECT email, role, user_id FROM shared_drive_members
         WHERE id = ? AND drive_id = ?`,
     )
     .bind(memberId, driveId)
-    .first<{ role: string; user_id: string | null }>();
+    .first<{ email: string; role: string; user_id: string | null }>();
   if (!target) {
     return { kind: "not_found" };
   }
@@ -435,9 +464,161 @@ export async function removeDriveMember(
       status: 409,
     };
   }
-  await db(env)
-    .prepare("DELETE FROM shared_drive_members WHERE id = ? AND drive_id = ?")
-    .bind(memberId, driveId)
-    .run();
+  const d1 = db(env);
+  await d1.batch([
+    d1
+      .prepare("DELETE FROM shared_drive_members WHERE id = ? AND drive_id = ?")
+      .bind(memberId, driveId),
+    d1
+      .prepare(
+        `INSERT OR IGNORE INTO shared_drive_domain_exclusions (drive_id, email)
+         VALUES (?, ?)`,
+      )
+      .bind(driveId, target.email),
+  ]);
   return { kind: "ok", result: await memberRows(env, driveId) };
+}
+
+async function domainRows(
+  env: Env,
+  driveId: string,
+): Promise<SharedDriveDomain[]> {
+  const rows = await db(env)
+    .prepare(
+      `SELECT id, domain, role
+         FROM shared_drive_domains
+        WHERE drive_id = ?
+        ORDER BY domain`,
+    )
+    .bind(driveId)
+    .all<{ id: string; domain: string; role: string }>();
+  return (rows.results ?? []).flatMap((row) =>
+    isDriveRole(row.role)
+      ? [{ domain: row.domain, id: row.id, role: row.role }]
+      : [],
+  );
+}
+
+async function requireManager(
+  env: Env,
+  driveId: string,
+  user: SessionUser | undefined,
+): Promise<DriveError | null> {
+  const member = await requireMember(env, driveId, user);
+  if ("kind" in member) {
+    return member;
+  }
+  if (member.role !== "manager") {
+    return { kind: "denied", status: 403 };
+  }
+  return null;
+}
+
+export async function listDriveDomains(
+  env: Env,
+  driveId: string,
+  user: SessionUser | undefined,
+): Promise<DriveError | DriveOk<SharedDriveDomain[]>> {
+  const member = await requireMember(env, driveId, user);
+  if ("kind" in member) {
+    return member;
+  }
+  return { kind: "ok", result: await domainRows(env, driveId) };
+}
+
+export async function addDriveDomain(
+  env: Env,
+  driveId: string,
+  domain: string | undefined,
+  role: string | undefined,
+  user: SessionUser | undefined,
+): Promise<DriveError | DriveOk<SharedDriveDomain[]>> {
+  const denied = await requireManager(env, driveId, user);
+  if (denied) {
+    return denied;
+  }
+  const normalized = normalizeDomain(domain);
+  if (!(normalized && role && isDriveRole(role))) {
+    return { error: "ドメインか役割が不正です", kind: "invalid", status: 400 };
+  }
+  try {
+    await db(env)
+      .prepare(
+        `INSERT INTO shared_drive_domains (id, drive_id, domain, role, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), driveId, normalized, role, Date.now())
+      .run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("UNIQUE")) {
+      return {
+        error: "そのドメインは既に登録されています",
+        kind: "invalid",
+        status: 409,
+      };
+    }
+    throw error;
+  }
+  return { kind: "ok", result: await domainRows(env, driveId) };
+}
+
+export async function updateDriveDomainRole(
+  env: Env,
+  driveId: string,
+  domainId: string,
+  role: string | undefined,
+  user: SessionUser | undefined,
+): Promise<DriveError | DriveOk<SharedDriveDomain[]>> {
+  const denied = await requireManager(env, driveId, user);
+  if (denied) {
+    return denied;
+  }
+  if (!(role && isDriveRole(role))) {
+    return { error: "役割が不正です", kind: "invalid", status: 400 };
+  }
+  const existing = await db(env)
+    .prepare(
+      "SELECT id FROM shared_drive_domains WHERE id = ? AND drive_id = ?",
+    )
+    .bind(domainId, driveId)
+    .first<{ id: string }>();
+  if (!existing) {
+    return { kind: "not_found" };
+  }
+  await db(env)
+    .prepare(
+      `UPDATE shared_drive_domains
+          SET role = ?
+        WHERE id = ? AND drive_id = ?`,
+    )
+    .bind(role, domainId, driveId)
+    .run();
+  return { kind: "ok", result: await domainRows(env, driveId) };
+}
+
+export async function removeDriveDomain(
+  env: Env,
+  driveId: string,
+  domainId: string,
+  user: SessionUser | undefined,
+): Promise<DriveError | DriveOk<SharedDriveDomain[]>> {
+  const denied = await requireManager(env, driveId, user);
+  if (denied) {
+    return denied;
+  }
+  const existing = await db(env)
+    .prepare(
+      "SELECT id FROM shared_drive_domains WHERE id = ? AND drive_id = ?",
+    )
+    .bind(domainId, driveId)
+    .first<{ id: string }>();
+  if (!existing) {
+    return { kind: "not_found" };
+  }
+  await db(env)
+    .prepare("DELETE FROM shared_drive_domains WHERE id = ? AND drive_id = ?")
+    .bind(domainId, driveId)
+    .run();
+  return { kind: "ok", result: await domainRows(env, driveId) };
 }
