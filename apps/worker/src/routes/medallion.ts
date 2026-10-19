@@ -3,6 +3,7 @@ import type { MedallionLayer } from "@miyulabmd/shared";
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
+import { seesSubjectTree } from "../services/drive-membership.ts";
 import {
   assignFolderMedallion,
   clearFolderMedallion,
@@ -55,7 +56,12 @@ export const medallionRoutes = new Elysia({ prefix: "/api/medallion" })
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    return { sets: await listMedallionSets(env, user) };
+    const ownerId = new URL(request.url).searchParams.get("ownerId") ?? user.id;
+    if (ownerId !== user.id && !(await seesSubjectTree(env, ownerId, user))) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+    return { sets: await listMedallionSets(env, user, ownerId) };
   })
   .post("/sets/default", async ({ request, set }) => {
     // Idempotent seed of the built-in 精緻度 set (called when the feature is
@@ -119,7 +125,12 @@ export const medallionRoutes = new Elysia({ prefix: "/api/medallion" })
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    return { assignments: await listMedallionAssignments(env, user) };
+    const ownerId = new URL(request.url).searchParams.get("ownerId") ?? user.id;
+    if (ownerId !== user.id && !(await seesSubjectTree(env, ownerId, user))) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+    return { assignments: await listMedallionAssignments(env, user, ownerId) };
   })
   .get("/resolve", async ({ request, set }) => {
     const user = await readSession(request, env);
@@ -127,8 +138,14 @@ export const medallionRoutes = new Elysia({ prefix: "/api/medallion" })
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    const path = new URL(request.url).searchParams.get("path") ?? "";
-    return { medallion: await resolveMedallion(env, user, path) };
+    const url = new URL(request.url);
+    const ownerId = url.searchParams.get("ownerId") ?? user.id;
+    if (ownerId !== user.id && !(await seesSubjectTree(env, ownerId, user))) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+    const path = url.searchParams.get("path") ?? "";
+    return { medallion: await resolveMedallion(env, user, path, ownerId) };
   })
   .put("/folders/:folderId", async ({ params, request, set }) => {
     const user = await readSession(request, env);

@@ -148,6 +148,14 @@ export type MovePlan = {
   policies: number;
   grants: number;
   articleSources: number;
+  /** Attributes dropped when the move changes subject. Absent for a path move. */
+  stripped?: {
+    medallion: number;
+    para: number;
+    scheme: number;
+    policies: number;
+    grants: number;
+  };
 };
 
 export type MoveItemStatus = "moved" | "skipped" | "failed";

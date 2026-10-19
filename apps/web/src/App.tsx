@@ -24,6 +24,7 @@ export function App() {
             <Route element={<HomePage />} path="/" />
             <Route element={<SharedPage />} path="/shared" />
             <Route element={<SharedByMePage />} path="/shared-by-me" />
+            <Route element={<HomePage />} path="/d/:driveId" />
             <Route element={<HomePage />} path="/f/:folderId" />
             <Route element={<EditorPage />} path="/n/:id" />
             <Route element={<SharePage />} path="/s/:id" />

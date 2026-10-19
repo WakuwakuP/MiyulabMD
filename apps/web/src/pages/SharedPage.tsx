@@ -35,7 +35,7 @@ export function SharedPage() {
 
   useEffect(() => {
     setHeader({
-      actions: user ? <DrivePlaceNav current="shared" /> : null,
+      actions: user ? <DrivePlaceNav selection={{ kind: "shared" }} /> : null,
       folder: null,
     });
     return () => setHeader(null);

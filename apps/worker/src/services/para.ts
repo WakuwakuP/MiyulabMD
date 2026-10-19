@@ -27,6 +27,7 @@ import {
   listFolderChildren,
   parentFolderPath,
 } from "./access.ts";
+import { canEditSubject } from "./drive-membership.ts";
 import { folderSubtreeFilter } from "./folder-path-sql.ts";
 import { type MoveError, moveFolder } from "./move.ts";
 import { createNoteService } from "./notes.ts";
@@ -1363,7 +1364,7 @@ export async function paraArchiveProject(
   if (!rec) {
     return { kind: "not_found" };
   }
-  if (!user || user.id !== rec.owner_id) {
+  if (!(user && (await canEditSubject(env, rec.owner_id, user)))) {
     return { kind: "denied", status: user === undefined ? 401 : 403 };
   }
   if (!rec.folder) {

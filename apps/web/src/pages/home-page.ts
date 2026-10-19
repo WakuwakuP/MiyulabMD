@@ -60,6 +60,12 @@ export type ConfirmState =
   | { kind: "folder"; id: string; name: string }
   | { kind: "note"; id: string; name: string };
 
+export type MoveTarget = {
+  id: string;
+  kind: "folder" | "note";
+  name: string;
+};
+
 export type HomeFolderSetters = {
   setVisibleFolder: (folder: FolderAccess | null) => void;
   setPublicFolders: (folders: FolderRecord[]) => void;
@@ -107,11 +113,17 @@ export function homeListFlags(input: {
   const showPlaceholder =
     (input.userLoading || input.folderPending || waitingForFolder) &&
     !input.visibleFolder;
+  const sharedDrive = input.visibleFolder?.ownerKind === "shared_drive";
+  const canAdmin = Boolean(input.visibleFolder?.flags.canAdmin);
   return {
-    canAdmin: Boolean(input.visibleFolder?.flags.canAdmin),
+    canAdmin,
+    canMutate: sharedDrive
+      ? Boolean(input.visibleFolder?.flags.canEdit)
+      : canAdmin,
     isDriveRoot: Boolean(input.visibleFolder?.locked),
     listPending: input.folderPending && Boolean(input.visibleFolder),
     needsFolder,
+    sharedDrive,
     showPlaceholder,
     showTree:
       (!input.folderId || input.visibleFolder || showPlaceholder) &&
@@ -407,11 +419,12 @@ export async function persistHomeShare(
 export async function loadParaSpaces(
   user: SessionUser | null | undefined,
   paraEnabled: boolean,
+  ownerId?: string,
 ): Promise<ParaSpaceSummary[]> {
   if (!(user && paraEnabled)) {
     return [];
   }
-  const result = await fetchPara({ viewerId: user.id });
+  const result = await fetchPara({ ownerId, viewerId: user.id });
   return result.ok ? result.data.spaces : [];
 }
 
@@ -432,7 +445,7 @@ function menuPosition(event: MouseEvent) {
 
 function folderMenuItems(
   target: Extract<MenuTarget, { kind: "folder" }>,
-  canAdmin: boolean,
+  powers: { canMutate: boolean; sharedDrive: boolean },
   navigate: NavigateFunction,
   onShare: (id: string, name: string) => void,
   onRename: (id: string, name: string) => void,
@@ -442,14 +455,20 @@ function folderMenuItems(
     onScheme: (id: string, name: string, scheme: string | null) => void;
     /** §2.6: medallion assignment dialog (layers feature only). */
     onMedallion?: (id: string, name: string, path?: string) => void;
+    onMove?: (target: MoveTarget) => void;
     projectsPaths: string[];
   },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
     { label: "開く", onSelect: () => navigate(folderUrl(target.id)) },
-    { label: "共有", onSelect: () => onShare(target.id, target.name) },
   ];
-  if (!canAdmin) {
+  if (!powers.sharedDrive) {
+    items.push({
+      label: "共有",
+      onSelect: () => onShare(target.id, target.name),
+    });
+  }
+  if (!powers.canMutate) {
     return items;
   }
   items.push({
@@ -477,6 +496,17 @@ function folderMenuItems(
       onSelect: () => options.onArchive(target.id, target.name),
     });
   }
+  if (options.onMove) {
+    items.push({
+      label: "移動",
+      onSelect: () =>
+        options.onMove?.({
+          id: target.id,
+          kind: "folder",
+          name: target.name,
+        }),
+    });
+  }
   items.push({
     danger: true,
     label: "削除",
@@ -490,13 +520,26 @@ function noteMenuItems(
   navigate: NavigateFunction,
   onShare: (note: NoteSummary) => void,
   onDelete: (id: string, name: string) => void,
+  onMove?: (target: MoveTarget) => void,
 ): ContextMenuItem[] {
+  const sharedDrive = note.ownerKind === "shared_drive";
   const items: ContextMenuItem[] = [
     { label: "開く", onSelect: () => navigate(`/n/${note.id}`) },
-    { label: "共有", onSelect: () => onShare(note) },
   ];
-  if (!note.access.flags.canAdmin) {
+  if (!sharedDrive) {
+    items.push({ label: "共有", onSelect: () => onShare(note) });
+  }
+  const canDelete = sharedDrive
+    ? note.access.flags.canEdit
+    : note.access.flags.canAdmin;
+  if (!canDelete) {
     return items;
+  }
+  if (onMove) {
+    items.push({
+      label: "移動",
+      onSelect: () => onMove({ id: note.id, kind: "note", name: note.title }),
+    });
   }
   items.push({
     danger: true,
@@ -509,7 +552,7 @@ function noteMenuItems(
 export function handleItemMenu(
   event: MouseEvent,
   target: MenuTarget,
-  canAdmin: boolean,
+  powers: { canMutate: boolean; sharedDrive: boolean },
   navigate: NavigateFunction,
   setMenu: (menu: MenuState) => void,
   onFolderShare: (id: string, name: string) => void,
@@ -520,6 +563,7 @@ export function handleItemMenu(
     onArchive: (id: string, name: string) => void;
     onScheme: (id: string, name: string, scheme: string | null) => void;
     onMedallion?: (id: string, name: string, path?: string) => void;
+    onMove?: (target: MoveTarget) => void;
     projectsPaths: string[];
   },
 ) {
@@ -530,7 +574,7 @@ export function handleItemMenu(
       ...position,
       items: folderMenuItems(
         target,
-        canAdmin,
+        powers,
         navigate,
         onFolderShare,
         onRename,
@@ -543,8 +587,12 @@ export function handleItemMenu(
   setMenu({
     id: target.note.id,
     ...position,
-    items: noteMenuItems(target.note, navigate, onNoteShare, (id, name) =>
-      onDelete("note", id, name),
+    items: noteMenuItems(
+      target.note,
+      navigate,
+      onNoteShare,
+      (id, name) => onDelete("note", id, name),
+      options.onMove,
     ),
   });
 }

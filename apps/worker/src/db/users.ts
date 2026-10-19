@@ -1,5 +1,6 @@
 import type { SessionUser } from "@miyulabmd/shared";
 
+import { claimDriveMemberships } from "../services/drive-membership.ts";
 import { db } from "./client.ts";
 
 export type DbUser = {
@@ -48,6 +49,7 @@ export async function upsertUserByEmail(
       .bind(now, displayName ?? null, existing.id)
       .run();
 
+    await claimDriveMemberships(env, existing.id, existing.email);
     return {
       displayName: nextDisplayName,
       email: existing.email,
@@ -63,6 +65,7 @@ export async function upsertUserByEmail(
     .bind(id, normalizedEmail, displayName ?? null, now, now)
     .run();
 
+  await claimDriveMemberships(env, id, normalizedEmail);
   return {
     displayName: displayName ?? null,
     email: normalizedEmail,

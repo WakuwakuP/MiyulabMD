@@ -21,6 +21,7 @@ import { seedNoteCache } from "../lib/note-cache.ts";
 
 export function subscribeArticleSources(
   user: SessionUser | null,
+  ownerId: string | null | undefined,
   setArticleSources: (
     sources: import("@miyulabmd/shared").ArticleSource[],
   ) => void,
@@ -31,6 +32,7 @@ export function subscribeArticleSources(
   }
   const controller = new AbortController();
   void fetchArticleSources({
+    ownerId: ownerId ?? user.id,
     signal: controller.signal,
     viewerId: user.id,
   }).then(

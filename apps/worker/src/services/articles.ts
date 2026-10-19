@@ -29,6 +29,7 @@ import {
   getFolderById,
   resolveNoteAccess,
 } from "./access.ts";
+import { canEditSubject, isSharedDrive } from "./drive-membership.ts";
 import { folderSubtreeFilter } from "./folder-path-sql.ts";
 
 type SourceRow = {
@@ -167,6 +168,9 @@ async function userCanDispatchSource(
   user: SessionUser,
   row: SourceRow,
 ): Promise<boolean> {
+  if (await isSharedDrive(env, row.owner_id)) {
+    return canEditSubject(env, row.owner_id, user);
+  }
   const share = await folderViewerShare(env, row.owner_id, row.folder, user);
   return canDispatchArticleSource({
     canView: share.canView,
@@ -350,6 +354,12 @@ async function dispatchTargetForFolder(
   ownerId: string,
   folder: string,
 ): Promise<{ id: string; name: string } | null> {
+  if (
+    (await isSharedDrive(env, ownerId)) &&
+    !(await canEditSubject(env, ownerId, user))
+  ) {
+    return null;
+  }
   const opened = await folderViewerShare(env, ownerId, folder, user);
   if (!opened.canView) {
     return null;
@@ -403,6 +413,12 @@ async function dispatchTargetForNote(
       write_scope: string | null;
     }>();
   if (!row) {
+    return null;
+  }
+  if (
+    (await isSharedDrive(env, row.owner_id)) &&
+    !(await canEditSubject(env, row.owner_id, user))
+  ) {
     return null;
   }
   const access = await resolveNoteAccess(

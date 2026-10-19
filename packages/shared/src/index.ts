@@ -29,6 +29,19 @@ export {
   resolveArticleListFolder,
 } from "./article.ts";
 export type {
+  DriveRole,
+  OwnerKind,
+  SharedDriveMember,
+  SharedDriveSummary,
+} from "./drive.ts";
+export {
+  DRIVE_ROLES,
+  flagsForDriveRole,
+  isDriveRole,
+  isOwnerKind,
+  OWNER_KINDS,
+} from "./drive.ts";
+export type {
   ArticleFrontmatterIssue,
   ArticleFrontmatterRead,
   MarkdownFrontmatterSplit,

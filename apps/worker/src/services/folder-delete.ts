@@ -33,6 +33,7 @@ type Folder = {
   scheme_root: string | null;
   medallion_set_id: string | null;
   medallion_layer: string | null;
+  owner_kind: string;
 };
 type Snapshot = {
   folder: Folder;
@@ -130,7 +131,8 @@ const snapshotSql = `json_object(
   'folder', json_object('id', f.id, 'owner_id', f.owner_id, 'folder', f.folder,
     'created_at', f.created_at, 'para_bucket', f.para_bucket, 'para_space_id', f.para_space_id,
     'scheme', f.scheme, 'scheme_id', f.scheme_id, 'scheme_title', f.scheme_title,
-    'scheme_root', f.scheme_root, 'medallion_set_id', f.medallion_set_id, 'medallion_layer', f.medallion_layer),
+    'scheme_root', f.scheme_root, 'medallion_set_id', f.medallion_set_id, 'medallion_layer', f.medallion_layer,
+    'owner_kind', f.owner_kind),
   'policy', (SELECT json_object('owner_id', p.owner_id, 'folder', p.folder,
     'read_scope', p.read_scope, 'write_scope', p.write_scope, 'updated_at', p.updated_at)
     FROM folder_policies p WHERE p.owner_id = f.owner_id AND p.folder = f.folder),
@@ -152,7 +154,7 @@ async function inspect(env: Env, row: Folder) {
     u.settings,
     EXISTS(SELECT 1 FROM para_spaces WHERE root_folder_id = f.id) AS spaceRoot,
     (SELECT id FROM folders WHERE owner_id = f.owner_id AND folder = ?) AS parentId,
-    ${snapshotSql} AS snapshot FROM folders f JOIN users u ON u.id = f.owner_id
+    ${snapshotSql} AS snapshot FROM folders f LEFT JOIN users u ON u.id = f.owner_id
     WHERE f.id = ? AND f.owner_id = ? AND f.folder = ?`)
     .bind(
       row.owner_id,

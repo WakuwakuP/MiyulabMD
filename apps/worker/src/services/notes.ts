@@ -62,6 +62,11 @@ import {
   deleteArticleSourcesInFolder,
 } from "./articles.ts";
 import {
+  canEditSubject,
+  markDriveFolderKinds,
+  seesSubjectTree,
+} from "./drive-membership.ts";
+import {
   folderRewriteAssignment,
   folderSubtreeFilter,
 } from "./folder-path-sql.ts";
@@ -82,6 +87,7 @@ export type NoteRow = {
   short_id: string;
   alias: string | null;
   owner_id: string;
+  owner_kind: string;
   title: string;
   folder: string;
   permission: string;
@@ -98,10 +104,10 @@ export type NoteRow = {
 const SHORT_ID_CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const ANONYMOUS_OWNER_EMAIL = "anonymous@miyulabmd.local";
-export const NOTE_COLUMNS = `id, short_id, alias, owner_id, title, folder, permission, read_scope, write_scope,
+export const NOTE_COLUMNS = `id, short_id, alias, owner_id, owner_kind, title, folder, permission, read_scope, write_scope,
                   markdown_snapshot, snapshot_updated_at, created_at, updated_at, article_meta,
                   edit_locked`;
-const NOTE_COLUMNS_N = `n.id, n.short_id, n.alias, n.owner_id, n.title, n.folder, n.permission, n.read_scope, n.write_scope,
+const NOTE_COLUMNS_N = `n.id, n.short_id, n.alias, n.owner_id, n.owner_kind, n.title, n.folder, n.permission, n.read_scope, n.write_scope,
                   n.markdown_snapshot, n.snapshot_updated_at, n.created_at, n.updated_at, n.article_meta,
                   n.edit_locked`;
 
@@ -114,6 +120,7 @@ export function accessFields(row: NoteRow): NoteAccessFields {
     folder: row.folder ?? "",
     id: row.id,
     ownerId: row.owner_id,
+    ownerKind: row.owner_kind === "shared_drive" ? "shared_drive" : "user",
     readScope: parseStoredScope(row.read_scope),
     writeScope: parseStoredScope(row.write_scope),
   };
@@ -178,7 +185,9 @@ async function toNote(
   const access = snapshot
     ? resolveNoteAccessSnapshot(env, accessFields(row), user, snapshot)
     : await resolveNoteAccess(env, accessFields(row), user);
-  const isOwner = user?.id === row.owner_id;
+  const isOwner =
+    user?.id === row.owner_id ||
+    (row.owner_kind === "shared_drive" && access.flags.canView);
   const folder = row.folder ?? "";
   const folderId = await noteFolderId(env, row, folder, snapshot);
   const visibleFolderId =
@@ -210,6 +219,7 @@ async function toNote(
     id: row.id,
     markdown: row.markdown_snapshot,
     ownerId: row.owner_id,
+    ownerKind: row.owner_kind === "shared_drive" ? "shared_drive" : "user",
     permission: derivedPermission(access),
     shortId: row.short_id,
     title: row.title,
@@ -598,10 +608,15 @@ export async function listAccessibleRows(
            LEFT JOIN access_grants ag
              ON ag.target_kind = 'note' AND ag.target_key = n.id
             AND (ag.user_id = ? OR ag.email = ?)
-           WHERE (n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope IN ('public', 'signed_in'))${ftsClause}
+           WHERE (
+             (n.owner_kind = 'user' AND (n.owner_id = ? OR ag.id IS NOT NULL OR n.read_scope IN ('public', 'signed_in')))
+             OR (n.owner_kind = 'shared_drive' AND n.owner_id IN (
+               SELECT drive_id FROM shared_drive_members WHERE user_id = ?
+             ))
+           )${ftsClause}
            ORDER BY n.updated_at DESC`,
     )
-    .bind(user.id, user.email, user.id, ...ftsBinds)
+    .bind(user.id, user.email, user.id, user.id, ...ftsBinds)
     .all<NoteRow>();
 
   const folderGrants = await listSharedFolderCandidates(env, user);
@@ -612,7 +627,7 @@ export async function listAccessibleRows(
   for (const grant of folderGrants) {
     const rows = await db(env)
       .prepare(
-        `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ?${extraClause} ORDER BY updated_at DESC`,
+        `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_id = ? AND owner_kind = 'user'${extraClause} ORDER BY updated_at DESC`,
       )
       .bind(grant.ownerId, ...ftsBinds)
       .all<NoteRow>();
@@ -627,6 +642,7 @@ export async function listAccessibleRows(
   const snapshot = await buildAccessSnapshot(
     env,
     candidates.map((row) => row.owner_id),
+    user,
   );
   // 親の共有設定より狭い範囲を指定したノートは一覧・検索に漏らさない。
   const visible = candidates.filter((row) => {
@@ -636,6 +652,10 @@ export async function listAccessibleRows(
       user,
       snapshot,
     );
+    // 共有ドライブはメンバーであること自体が発見許可。スコープは見ない。
+    if (row.owner_kind === "shared_drive") {
+      return access.flags.canView;
+    }
     return canDiscoverAccess(access, row.owner_id, user);
   });
   return { rows: visible, snapshot };
@@ -657,7 +677,7 @@ async function listGuestRows(
   const [publicDirect, inheritedFromFolder] = await Promise.all([
     db(env)
       .prepare(
-        `SELECT ${NOTE_COLUMNS} FROM notes WHERE read_scope = 'public'${ftsClause} ORDER BY updated_at DESC`,
+        `SELECT ${NOTE_COLUMNS} FROM notes WHERE owner_kind = 'user' AND read_scope = 'public'${ftsClause} ORDER BY updated_at DESC`,
       )
       .bind(...(ftsMatch ? [ftsMatch] : []))
       .all<NoteRow>(),
@@ -871,16 +891,29 @@ async function resolveCreateFolder(
   env: Env,
   ownerId: string,
   input: CreateNoteInput,
-): Promise<{ folder: string } | { error: string; status: number }> {
+  user: SessionUser | undefined,
+): Promise<
+  | { folder: string; ownerId: string; ownerKind: "user" | "shared_drive" }
+  | { error: string; status: number }
+> {
   let folder = normalizeFolder(input.folder);
+  let subjectId = ownerId;
+  let ownerKind: "user" | "shared_drive" = "user";
   if (input.folderId) {
     const rec = await getFolderById(env, input.folderId);
     if (!rec) {
       return { error: "フォルダが見つかりません", status: 400 };
     }
-    folder = rec.owner_id === ownerId ? rec.folder : "";
+    if (rec.owner_id !== ownerId) {
+      if (!(await canEditSubject(env, rec.owner_id, user))) {
+        return { error: "フォルダが見つかりません", status: 400 };
+      }
+      subjectId = rec.owner_id;
+      ownerKind = "shared_drive";
+    }
+    folder = rec.folder;
   }
-  return { folder };
+  return { folder, ownerId: subjectId, ownerKind };
 }
 
 async function markdownForCreate(
@@ -982,12 +1015,16 @@ async function replaceNoteGrantsIfNeeded(
   return null;
 }
 
-function folderOwnerDenied(
+async function folderOwnerDenied(
+  env: Env,
   ownerId: string,
   user: SessionUser | undefined,
-): { kind: "denied"; status: 401 | 403 } | null {
-  if (!user || user.id !== ownerId) {
-    return { kind: "denied", status: user === undefined ? 401 : 403 };
+): Promise<{ kind: "denied"; status: 401 | 403 } | null> {
+  if (!user) {
+    return { kind: "denied", status: 401 };
+  }
+  if (!(await canEditSubject(env, ownerId, user))) {
+    return { kind: "denied", status: 403 };
   }
   return null;
 }
@@ -1131,7 +1168,11 @@ async function loadRemovableNote(
     return { kind: "not_found" };
   }
   const note = await toNote(env, row, user);
-  if (!note.access.flags.canAdmin) {
+  const canDelete =
+    row.owner_kind === "shared_drive"
+      ? note.access.flags.canEdit
+      : note.access.flags.canAdmin;
+  if (!canDelete) {
     return {
       kind: "denied",
       status:
@@ -1177,7 +1218,7 @@ async function validateRenameFolder(
   name: string,
   user: SessionUser | undefined,
 ): Promise<{ nextPath: string } | RenameFolderResult> {
-  const denied = folderOwnerDenied(rec.owner_id, user);
+  const denied = await folderOwnerDenied(env, rec.owner_id, user);
   if (denied) {
     return denied;
   }
@@ -1219,37 +1260,47 @@ export function createNoteService(env: Env) {
         return { error: owner.error, status: 401 };
       }
 
-      const scopes = scopesFromInput(env, input);
-      if ("error" in scopes) {
-        return { error: scopes.error, status: 400 };
+      const requestedScopes = scopesFromInput(env, input);
+      if ("error" in requestedScopes) {
+        return { error: requestedScopes.error, status: 400 };
       }
 
       const now = Date.now();
       const id = crypto.randomUUID();
       const shortId = await generateUniqueShortId(env);
-      const resolved = await resolveCreateFolder(env, owner.id, input);
+      const resolved = await resolveCreateFolder(env, owner.id, input, user);
       if ("error" in resolved) {
         return resolved;
       }
       const folder = resolved.folder;
-      const markdown = await markdownForCreate(env, owner.id, folder, input);
+      const subjectId = resolved.ownerId;
+      const scopes =
+        resolved.ownerKind === "shared_drive"
+          ? {
+              permission: "private" as const,
+              readScope: "self" as const,
+              writeScope: "self" as const,
+            }
+          : requestedScopes;
+      const markdown = await markdownForCreate(env, subjectId, folder, input);
       const title = titleFromMarkdown(markdown);
 
       const d1 = db(env);
       await d1.batch([
-        ...ensureFolderStatements(env, owner.id, folder),
+        ...ensureFolderStatements(env, subjectId, folder),
         d1
           .prepare(
             `INSERT INTO notes (
-             id, short_id, alias, owner_id, title, folder, permission,
+             id, short_id, alias, owner_id, owner_kind, title, folder, permission,
              read_scope, write_scope,
              markdown_snapshot, snapshot_updated_at, created_at, updated_at
-           ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             id,
             shortId,
-            owner.id,
+            subjectId,
+            resolved.ownerKind,
             title,
             folder,
             scopes.permission,
@@ -1266,6 +1317,7 @@ export function createNoteService(env: Env) {
       if (!row) {
         throw new Error("note insert failed");
       }
+      await markDriveFolderKinds(env, subjectId);
       await syncNoteLinks(env, row);
       return toNote(env, row, user ?? owner, undefined, {
         includeCrumbs: true,
@@ -1282,6 +1334,9 @@ export function createNoteService(env: Env) {
         includeCrumbs: true,
       });
       if (!note.access.flags.canView) {
+        if (row.owner_kind === "shared_drive") {
+          return { kind: "not_found" };
+        }
         return {
           kind: "denied",
           status: viewDeniedHttpStatus(
@@ -1358,11 +1413,12 @@ export function createNoteService(env: Env) {
             .bind(rec.owner_id, rec.folder)
             .all<NoteRow>();
 
-      const isOwner = user.id === rec.owner_id;
+      const isOwner = await seesSubjectTree(env, rec.owner_id, user);
       const noteRows = rows.results ?? [];
       const snapshot = await buildAccessSnapshot(
         env,
         noteRows.map((row) => row.owner_id),
+        user,
       );
       const summaries: NoteSummary[] = [];
       for (const row of noteRows) {
@@ -1408,7 +1464,7 @@ export function createNoteService(env: Env) {
       if (!rec) {
         return { kind: "not_found" };
       }
-      const denied = folderOwnerDenied(rec.owner_id, user);
+      const denied = await folderOwnerDenied(env, rec.owner_id, user);
       if (denied) {
         return denied;
       }

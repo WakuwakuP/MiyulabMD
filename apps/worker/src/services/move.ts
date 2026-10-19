@@ -17,10 +17,17 @@ import {
   folderName,
   getFolderById,
   getFolderByPath,
+  parentFolderPath,
   resolveNoteAccess,
 } from "./access.ts";
 import {
+  canEditSubject,
+  isSharedDrive,
+  markDriveFolderKinds,
+} from "./drive-membership.ts";
+import {
   folderDirectChildrenFilter,
+  folderRewriteAssignment,
   folderSubtreeFilter,
 } from "./folder-path-sql.ts";
 import {
@@ -39,50 +46,64 @@ export type MoveError =
 
 type MoveOk<T> = { kind: "ok"; result: T };
 
-type DestFolder = { id: string | null; folder: string; owner_id: string };
+type DestFolder = {
+  id: string | null;
+  folder: string;
+  owner_id: string;
+  owner_kind: "user" | "shared_drive";
+};
 
 function invalid(error: string, status = 400): MoveError {
   return { error, kind: "invalid", status };
 }
 
-function ownerDenied(
+async function sourceDenied(
+  env: Env,
   ownerId: string,
   user: SessionUser | undefined,
-): MoveError | null {
-  if (!user || user.id !== ownerId) {
-    return { kind: "denied", status: user === undefined ? 401 : 403 };
+): Promise<MoveError | null> {
+  if (!user) {
+    return { kind: "denied", status: 401 };
+  }
+  if (!(await canEditSubject(env, ownerId, user))) {
+    return { kind: "denied", status: 403 };
   }
   return null;
 }
 
 /**
- * Resolve the destination folder. `null`/omitted means the caller's drive root.
- * The destination must live in the same owner namespace as the moved entities.
+ * Resolve the destination folder. `null`/omitted means the caller's my-drive root.
+ * A shared drive the caller can edit is a valid destination.
  */
 async function resolveDest(
   env: Env,
   destFolderId: string | null | undefined,
-  ownerId: string,
   user: SessionUser | undefined,
 ): Promise<DestFolder | MoveError> {
+  if (!user) {
+    return { kind: "denied", status: 401 };
+  }
   if (destFolderId === null || destFolderId === undefined) {
-    if (!user || user.id !== ownerId) {
-      return { kind: "denied", status: user === undefined ? 401 : 403 };
-    }
-    return { folder: "", id: null, owner_id: ownerId };
+    return {
+      folder: "",
+      id: null,
+      owner_id: user.id,
+      owner_kind: "user",
+    };
   }
   const rec = await getFolderById(env, destFolderId);
   if (!rec) {
     return { kind: "not_found" };
   }
-  if (rec.owner_id !== ownerId) {
-    return {
-      error: "別のドライブへは移動できません",
-      kind: "invalid",
-      status: 400,
-    };
+  if (!(await canEditSubject(env, rec.owner_id, user))) {
+    return { kind: "denied", status: 403 };
   }
-  return rec;
+  return {
+    ...rec,
+    owner_kind: (await isSharedDrive(env, rec.owner_id))
+      ? "shared_drive"
+      : "user",
+  };
 }
 
 async function countQuery(
@@ -166,6 +187,153 @@ export type MoveFolderInput = {
   dryRun?: boolean;
 };
 
+async function blockedRootReason(
+  env: Env,
+  ownerId: string,
+  path: string,
+): Promise<string | null> {
+  const subtree = folderSubtreeFilter(path);
+  const space = await db(env)
+    .prepare(
+      `SELECT 1 AS ok FROM folders f
+         JOIN para_spaces p ON p.root_folder_id = f.id
+        WHERE f.owner_id = ? AND ${subtree.sql}
+        LIMIT 1`,
+    )
+    .bind(ownerId, ...subtree.binds)
+    .first<{ ok: number }>();
+  if (space) {
+    return "スペースルートは、割当を解いてから移動してください";
+  }
+  const scheme = await db(env)
+    .prepare(
+      `SELECT 1 AS ok FROM folders
+        WHERE owner_id = ? AND ${subtree.sql}
+          AND scheme IS NOT NULL
+          AND (scheme_id IS NULL OR scheme_id = '')
+        LIMIT 1`,
+    )
+    .bind(ownerId, ...subtree.binds)
+    .first<{ ok: number }>();
+  return scheme ? "採番スコープの根は、割当を解いてから移動してください" : null;
+}
+
+async function strippedCounts(env: Env, ownerId: string, path: string) {
+  const subtree = folderSubtreeFilter(path);
+  const grants = folderSubtreeFilter(path, "target_key");
+  const [medallion, para, scheme, policies, grantCount] = await Promise.all([
+    countQuery(
+      env,
+      `SELECT COUNT(*) AS c FROM folders WHERE owner_id = ? AND medallion_set_id IS NOT NULL AND ${subtree.sql}`,
+      ownerId,
+      ...subtree.binds,
+    ),
+    countQuery(
+      env,
+      `SELECT COUNT(*) AS c FROM folders WHERE owner_id = ? AND (para_bucket IS NOT NULL OR para_space_id IS NOT NULL) AND ${subtree.sql}`,
+      ownerId,
+      ...subtree.binds,
+    ),
+    countQuery(
+      env,
+      `SELECT COUNT(*) AS c FROM folders WHERE owner_id = ? AND (scheme IS NOT NULL OR scheme_id IS NOT NULL OR scheme_root IS NOT NULL) AND ${subtree.sql}`,
+      ownerId,
+      ...subtree.binds,
+    ),
+    countQuery(
+      env,
+      `SELECT COUNT(*) AS c FROM folder_policies WHERE owner_id = ? AND ${subtree.sql}`,
+      ownerId,
+      ...subtree.binds,
+    ),
+    countQuery(
+      env,
+      `SELECT COUNT(*) AS c FROM access_grants WHERE owner_id = ? AND target_kind = 'folder' AND ${grants.sql}`,
+      ownerId,
+      ...grants.binds,
+    ),
+  ]);
+  return { grants: grantCount, medallion, para, policies, scheme };
+}
+
+async function transferFolderTree(
+  env: Env,
+  srcOwner: string,
+  from: string,
+  dest: DestFolder,
+  to: string,
+): Promise<void> {
+  const d1 = db(env);
+  const subtree = folderSubtreeFilter(from);
+  const destSubtree = folderSubtreeFilter(to);
+  const rewrite = folderRewriteAssignment(from, to);
+  const grants = folderSubtreeFilter(from, "target_key");
+  await d1.batch([
+    ...ensureFolderStatements(env, dest.owner_id, parentFolderPath(to)),
+    d1
+      .prepare(
+        `DELETE FROM access_grants
+          WHERE owner_id = ? AND target_kind = 'folder' AND ${grants.sql}`,
+      )
+      .bind(srcOwner, ...grants.binds),
+    d1
+      .prepare(
+        `DELETE FROM folder_policies WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(srcOwner, ...subtree.binds),
+    d1
+      .prepare(
+        `UPDATE folders
+            SET owner_id = ?, owner_kind = ?, ${rewrite.sql},
+                medallion_set_id = NULL, medallion_layer = NULL,
+                para_bucket = NULL, para_space_id = NULL,
+                scheme = NULL, scheme_id = NULL, scheme_title = NULL,
+                scheme_root = NULL
+          WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(
+        dest.owner_id,
+        dest.owner_kind,
+        ...rewrite.binds,
+        srcOwner,
+        ...subtree.binds,
+      ),
+    d1
+      .prepare(
+        `UPDATE notes
+            SET owner_id = ?, owner_kind = ?, ${rewrite.sql},
+                read_scope = 'self', write_scope = 'self', permission = 'private',
+                updated_at = ?
+          WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(
+        dest.owner_id,
+        dest.owner_kind,
+        ...rewrite.binds,
+        Date.now(),
+        srcOwner,
+        ...subtree.binds,
+      ),
+    d1
+      .prepare(
+        `UPDATE article_sources
+            SET owner_id = ?, ${rewrite.sql}
+          WHERE owner_id = ? AND ${subtree.sql}`,
+      )
+      .bind(dest.owner_id, ...rewrite.binds, srcOwner, ...subtree.binds),
+    d1
+      .prepare(
+        `DELETE FROM access_grants
+          WHERE target_kind = 'note'
+            AND target_key IN (
+              SELECT id FROM notes WHERE owner_id = ? AND ${destSubtree.sql}
+            )`,
+      )
+      .bind(dest.owner_id, ...destSubtree.binds),
+  ]);
+  await markDriveFolderKinds(env, dest.owner_id);
+}
+
 export async function moveFolder(
   env: Env,
   folderId: string,
@@ -176,18 +344,19 @@ export async function moveFolder(
   if (!src) {
     return { kind: "not_found" };
   }
-  const denied = ownerDenied(src.owner_id, user);
+  const denied = await sourceDenied(env, src.owner_id, user);
   if (denied) {
     return denied;
   }
   if (!src.folder) {
-    return invalid("マイドライブは移動できません");
+    return invalid("ドライブルートは移動できません");
   }
-  const dest = await resolveDest(env, input.destFolderId, src.owner_id, user);
+  const dest = await resolveDest(env, input.destFolderId, user);
   if ("kind" in dest) {
     return dest;
   }
-  if (folderContains(src.folder, dest.folder)) {
+  const sameSubject = dest.owner_id === src.owner_id;
+  if (sameSubject && folderContains(src.folder, dest.folder)) {
     return invalid("移動先が移動元の配下です");
   }
 
@@ -200,24 +369,36 @@ export async function moveFolder(
   }
   const to = dest.folder ? `${dest.folder}/${name}` : name;
   const dryRun = input.dryRun ?? false;
-  if (to === src.folder) {
+  if (sameSubject && to === src.folder) {
     const plan = await countSubtree(env, src.owner_id, src.folder);
     return {
       kind: "ok",
       result: { dryRun, from: src.folder, plan, to },
     };
   }
-  if (await getFolderByPath(env, src.owner_id, to)) {
+  return commitFolderMove(env, src, dest, to, sameSubject, dryRun);
+}
+
+async function commitFolderMove(
+  env: Env,
+  src: { owner_id: string; folder: string },
+  dest: DestFolder,
+  to: string,
+  sameSubject: boolean,
+  dryRun: boolean,
+): Promise<MoveError | MoveOk<MoveFolderResult>> {
+  if (await getFolderByPath(env, dest.owner_id, to)) {
     return invalid("同じ名前のフォルダが既にあります", 409);
   }
   const plan = await countSubtree(env, src.owner_id, src.folder);
   if (exceedsLimit(plan)) {
     return limitError();
   }
-  // §2.6: a folder move relocates every note inside — refuse while any of
-  // them is edit-locked.
   if ((await lockedNotesInFolder(env, src.owner_id, src.folder)) > 0) {
     return invalid("編集ロック中のノートを含むため移動できません", 409);
+  }
+  if (!sameSubject) {
+    return transferAcrossSubjects(env, src, dest, to, dryRun, plan);
   }
   if (!dryRun) {
     await relocateFolderTree(env, src.owner_id, src.folder, to);
@@ -226,6 +407,25 @@ export async function moveFolder(
     kind: "ok",
     result: { dryRun, from: src.folder, plan, to },
   };
+}
+
+async function transferAcrossSubjects(
+  env: Env,
+  src: { owner_id: string; folder: string },
+  dest: DestFolder,
+  to: string,
+  dryRun: boolean,
+  plan: MovePlan,
+): Promise<MoveError | MoveOk<MoveFolderResult>> {
+  const blocked = await blockedRootReason(env, src.owner_id, src.folder);
+  if (blocked) {
+    return invalid(blocked, 409);
+  }
+  plan.stripped = await strippedCounts(env, src.owner_id, src.folder);
+  if (!dryRun) {
+    await transferFolderTree(env, src.owner_id, src.folder, dest, to);
+  }
+  return { kind: "ok", result: { dryRun, from: src.folder, plan, to } };
 }
 
 export type MoveFolderContentsInput = {
@@ -238,6 +438,7 @@ export type MoveFolderContentsInput = {
 async function moveOneNote(
   env: Env,
   row: NoteRow,
+  dest: DestFolder,
   destPath: string,
   dryRun: boolean,
 ): Promise<MoveNoteItem> {
@@ -250,7 +451,7 @@ async function moveOneNote(
       status: "failed",
     };
   }
-  if (row.folder === destPath) {
+  if (dest.owner_id === row.owner_id && row.folder === destPath) {
     return {
       from: row.folder,
       noteId: row.id,
@@ -260,12 +461,32 @@ async function moveOneNote(
   }
   if (!dryRun) {
     const d1 = db(env);
+    const sameSubject = dest.owner_id === row.owner_id;
     await d1.batch([
-      ...ensureFolderStatements(env, row.owner_id, destPath),
-      d1
-        .prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?")
-        .bind(destPath, Date.now(), row.id),
+      ...ensureFolderStatements(env, dest.owner_id, destPath),
+      sameSubject
+        ? d1
+            .prepare("UPDATE notes SET folder = ?, updated_at = ? WHERE id = ?")
+            .bind(destPath, Date.now(), row.id)
+        : d1
+            .prepare(
+              `UPDATE notes
+                  SET owner_id = ?, owner_kind = ?, folder = ?,
+                      read_scope = 'self', write_scope = 'self',
+                      permission = 'private', updated_at = ?
+                WHERE id = ?`,
+            )
+            .bind(dest.owner_id, dest.owner_kind, destPath, Date.now(), row.id),
     ]);
+    if (!sameSubject) {
+      await d1
+        .prepare(
+          "DELETE FROM access_grants WHERE target_kind = 'note' AND target_key = ?",
+        )
+        .bind(row.id)
+        .run();
+      await markDriveFolderKinds(env, dest.owner_id);
+    }
   }
   return { from: row.folder, noteId: row.id, status: "moved", to: destPath };
 }
@@ -296,11 +517,11 @@ export async function moveFolderContents(
   if (!src) {
     return { kind: "not_found" };
   }
-  const denied = ownerDenied(src.owner_id, user);
+  const denied = await sourceDenied(env, src.owner_id, user);
   if (denied) {
     return denied;
   }
-  const dest = await resolveDest(env, input.destFolderId, src.owner_id, user);
+  const dest = await resolveDest(env, input.destFolderId, user);
   if ("kind" in dest) {
     return dest;
   }
@@ -340,11 +561,11 @@ export async function moveFolderContents(
   const notes: MoveNoteItem[] = [];
   const folders: MoveFolderItem[] = [];
   for (const row of noteRows.results ?? []) {
-    notes.push(await moveOneNote(env, row, destPath, dryRun));
+    notes.push(await moveOneNote(env, row, dest, destPath, dryRun));
   }
   for (const child of folderRows) {
     folders.push(
-      await moveChildFolder(env, src.owner_id, child, destPath, dryRun),
+      await moveChildFolder(env, src.owner_id, child, dest, destPath, dryRun),
     );
   }
   const summary = summarizeMove([...notes, ...folders]);
@@ -380,13 +601,15 @@ async function moveChildFolder(
   env: Env,
   ownerId: string,
   child: { id: string; folder: string },
+  dest: DestFolder,
   destPath: string,
   dryRun: boolean,
 ): Promise<MoveFolderItem> {
   const to = destPath
     ? `${destPath}/${folderName(child.folder)}`
     : folderName(child.folder);
-  if (to === child.folder) {
+  const sameSubject = dest.owner_id === ownerId;
+  if (sameSubject && to === child.folder) {
     return {
       folderId: child.id,
       from: child.folder,
@@ -394,7 +617,7 @@ async function moveChildFolder(
       status: "skipped",
     };
   }
-  if (folderContains(child.folder, destPath)) {
+  if (sameSubject && folderContains(child.folder, destPath)) {
     return {
       folderId: child.id,
       from: child.folder,
@@ -402,7 +625,7 @@ async function moveChildFolder(
       status: "skipped",
     };
   }
-  if (await getFolderByPath(env, ownerId, to)) {
+  if (await getFolderByPath(env, dest.owner_id, to)) {
     return {
       folderId: child.id,
       from: child.folder,
@@ -418,6 +641,21 @@ async function moveChildFolder(
       reason: "locked",
       status: "skipped",
     };
+  }
+  if (dest.owner_id !== ownerId) {
+    const blocked = await blockedRootReason(env, ownerId, child.folder);
+    if (blocked) {
+      return {
+        folderId: child.id,
+        from: child.folder,
+        reason: "conflict",
+        status: "failed",
+      };
+    }
+    if (!dryRun) {
+      await transferFolderTree(env, ownerId, child.folder, dest, to);
+    }
+    return { folderId: child.id, from: child.folder, status: "moved", to };
   }
   if (!dryRun) {
     await relocateFolderTree(env, ownerId, child.folder, to);
@@ -446,7 +684,13 @@ async function classifyNoteForMove(
     // 権限外ノートの存在を漏らさないため not_found と同じ扱いにする。
     return { item: { noteId, reason: "not_found", status: "failed" } };
   }
-  if (row.owner_id !== destOwner) {
+  if (!(await canEditSubject(env, row.owner_id, user))) {
+    return { item: { noteId, reason: "denied", status: "failed" } };
+  }
+  if (
+    row.owner_id !== destOwner &&
+    !(await canEditSubject(env, destOwner, user))
+  ) {
     return {
       item: {
         from: row.folder,
@@ -455,9 +699,6 @@ async function classifyNoteForMove(
         status: "failed",
       },
     };
-  }
-  if (!access.flags.canAdmin) {
-    return { item: { noteId, reason: "denied", status: "failed" } };
   }
   // §2.6: edit-locked notes refuse folder moves.
   if (row.edit_locked === 1) {
@@ -483,7 +724,7 @@ export async function moveNotes(
   if (noteIds.length > MOVE_MAX_ITEMS) {
     return limitError();
   }
-  const dest = await resolveDest(env, input.destFolderId, user.id, user);
+  const dest = await resolveDest(env, input.destFolderId, user);
   if ("kind" in dest) {
     return dest;
   }
@@ -502,7 +743,7 @@ export async function moveNotes(
       items.push(classified.item);
       continue;
     }
-    items.push(await moveOneNote(env, classified.row, destPath, dryRun));
+    items.push(await moveOneNote(env, classified.row, dest, destPath, dryRun));
   }
   const summary = summarizeMove(items);
   const destFolderId = await currentDestId(env, dest, dryRun, summary.moved);

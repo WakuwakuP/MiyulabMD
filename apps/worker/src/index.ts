@@ -25,6 +25,7 @@ import { ogRoutes } from "./routes/og.ts";
 import { paraRoutes } from "./routes/para.ts";
 import { schemeRoutes } from "./routes/schemes.ts";
 import { searchRoutes } from "./routes/search.ts";
+import { sharedDriveRoutes } from "./routes/shared-drives.ts";
 import { tokenRoutes } from "./routes/tokens.ts";
 import { createNoteService } from "./services/notes.ts";
 import { peekOgCards, warmOgCards } from "./services/og.ts";
@@ -65,6 +66,7 @@ const api = new Elysia({ adapter: CloudflareAdapter })
   .use(paraRoutes)
   .use(schemeRoutes)
   .use(searchRoutes)
+  .use(sharedDriveRoutes)
   .use(tokenRoutes)
   .use(imageRoutes)
   .use(mcpRoutes)

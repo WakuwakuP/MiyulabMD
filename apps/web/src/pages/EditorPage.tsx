@@ -517,12 +517,16 @@ function EditorHeaderEnd({
         onSearch={onSearch}
         user={user}
       />
-      <HeaderButton
-        icon={<ShareIcon />}
-        label="共有"
-        onClick={onShare}
-        variant="accent"
-      />
+      {note.ownerKind === "shared_drive" ? (
+        <span className="text-muted text-sm">メンバーのみ</span>
+      ) : (
+        <HeaderButton
+          icon={<ShareIcon />}
+          label="共有"
+          onClick={onShare}
+          variant="accent"
+        />
+      )}
     </>
   );
 }
@@ -843,7 +847,10 @@ export function EditorPage() {
     };
   }, [id, userLoading, viewer, viewing]);
 
-  useEffect(() => subscribeArticleSources(user, setArticleSources), [user]);
+  useEffect(
+    () => subscribeArticleSources(user, note?.ownerId, setArticleSources),
+    [user, note?.ownerId],
+  );
 
   // §2.6: resolve the note's effective medallion from its folder ancestry.
   // Layers OFF or a network-miss both render no badge (display-only data).
@@ -854,7 +861,7 @@ export function EditorPage() {
       return;
     }
     let cancelled = false;
-    void resolveMedallion(noteFolder).then(
+    void resolveMedallion(noteFolder, { ownerId: note?.ownerId }).then(
       (result) => {
         if (!cancelled) {
           setMedallion(result.ok ? result.data.medallion : null);
@@ -869,7 +876,7 @@ export function EditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [layersEnabled, noteFolder, readSource]);
+  }, [layersEnabled, note?.ownerId, noteFolder, readSource]);
 
   useLayoutEffect(() => {
     dismissStaleSsrPreview(id);

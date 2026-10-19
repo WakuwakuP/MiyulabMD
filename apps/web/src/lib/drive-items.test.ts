@@ -47,6 +47,16 @@ test("sharedNotesForUser hides own notes that sit in my drive", () => {
   );
 });
 
+test("sharedNotesForUser hides shared-drive notes", () => {
+  const driveNote = note("drive", "drive-1", "drive-root");
+  driveNote.ownerKind = "shared_drive";
+  const shared = note("shared", "them", null);
+  assert.deepEqual(
+    sharedNotesForUser([driveNote, shared], "me").map((item) => item.id),
+    ["shared"],
+  );
+});
+
 test("sharedNotesForUser hides own notes even without a folder id", () => {
   const orphan = note("orphan", "me", null);
   assert.deepEqual(

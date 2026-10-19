@@ -14,7 +14,8 @@ CREATE TABLE notes (
   id TEXT PRIMARY KEY,
   short_id TEXT NOT NULL UNIQUE,
   alias TEXT UNIQUE,
-  owner_id TEXT NOT NULL REFERENCES users (id),
+  owner_id TEXT NOT NULL,
+  owner_kind TEXT NOT NULL DEFAULT 'user',
   title TEXT NOT NULL DEFAULT 'Untitled',
   folder TEXT NOT NULL DEFAULT '',
   permission TEXT NOT NULL,
@@ -42,7 +43,7 @@ CREATE TABLE note_collaborators (
 
 CREATE TABLE medallion_sets (
   id TEXT PRIMARY KEY,
-  owner_user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL,
   name TEXT NOT NULL,
   -- JSON array of [{key, label}] ordered top→bottom. Keys immutable.
   layers TEXT NOT NULL DEFAULT '[]',
@@ -52,6 +53,7 @@ CREATE TABLE medallion_sets (
 CREATE TABLE folders (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
+  owner_kind TEXT NOT NULL DEFAULT 'user',
   folder TEXT NOT NULL,
   para_bucket TEXT,
   para_space_id TEXT,
@@ -67,6 +69,26 @@ CREATE TABLE folders (
   medallion_layer TEXT,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE shared_drives (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE shared_drive_members (
+  id TEXT PRIMARY KEY,
+  drive_id TEXT NOT NULL REFERENCES shared_drives (id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  user_id TEXT,
+  role TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX shared_drive_members_drive_email_idx
+  ON shared_drive_members (drive_id, email);
+CREATE INDEX shared_drive_members_user_idx ON shared_drive_members (user_id);
 
 CREATE TABLE para_spaces (
   id TEXT PRIMARY KEY,

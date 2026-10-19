@@ -6,6 +6,7 @@ import {
   type Actor,
   actorFromUser,
   clampWriteScope,
+  type DriveRole,
   type EffectiveAccess,
   evaluateAccess,
   type FolderAccess,
@@ -13,6 +14,7 @@ import {
   type FolderCrumb,
   type FolderEntry,
   type FolderRecord,
+  flagsForDriveRole,
   folderAncestors,
   folderContains,
   grantForActor,
@@ -20,6 +22,7 @@ import {
   isDriveRootPath,
   MY_DRIVE_NAME,
   type NoteAccess,
+  type OwnerKind,
   type PermissionFlags,
   presetFromScopes,
   ROOT_SCOPES,
@@ -29,6 +32,13 @@ import {
 import { db } from "../db/client.ts";
 import { findUserByEmail } from "../db/users.ts";
 import { instanceFlags } from "../env.ts";
+import {
+  driveFlags,
+  driveRoleFor,
+  isSharedDrive,
+  seesSubjectTree,
+  subjectRootLabel,
+} from "./drive-membership.ts";
 import {
   folderDirectChildrenFilter,
   folderSubtreeFilter,
@@ -56,6 +66,7 @@ function applyInstanceFlags(
 export type NoteAccessFields = {
   id: string;
   ownerId: string;
+  ownerKind?: OwnerKind;
   folder: string;
   readScope: AccessScope | null;
   writeScope: AccessScope | null;
@@ -132,6 +143,8 @@ export type AccessSnapshot = {
   foldersByPath: Map<string, Map<string, FolderRow>>;
   /** folder id -> row */
   foldersById: Map<string, FolderRow>;
+  /** shared drive id -> role for the user this snapshot was built for */
+  driveRoles: Map<string, DriveRole>;
 };
 
 type SnapshotGrantRow = GrantRow & {
@@ -146,8 +159,10 @@ const SNAPSHOT_OWNER_CHUNK = 50;
 export async function buildAccessSnapshot(
   env: Env,
   ownerIds: readonly string[],
+  user?: SessionUser | null,
 ): Promise<AccessSnapshot> {
   const snapshot: AccessSnapshot = {
+    driveRoles: new Map(),
     foldersById: new Map(),
     foldersByPath: new Map(),
     grants: new Map(),
@@ -212,6 +227,21 @@ export async function buildAccessSnapshot(
   }
   for (const row of folderRows) {
     indexFolderRow(snapshot, row);
+  }
+  if (user && unique.length > 0) {
+    const roleRows = await runChunked<{ drive_id: string; role: DriveRole }>(
+      (owners) =>
+        db(env)
+          .prepare(
+            `SELECT drive_id, role FROM shared_drive_members
+              WHERE user_id = ? AND drive_id IN (${inClause(owners)})`,
+          )
+          .bind(user.id, ...owners)
+          .all<{ drive_id: string; role: DriveRole }>(),
+    );
+    for (const row of roleRows) {
+      snapshot.driveRoles.set(row.drive_id, row.role);
+    }
   }
   return snapshot;
 }
@@ -279,6 +309,23 @@ function snapshotGrants(
   return [...seen.values()].sort((a, b) => (a.email < b.email ? -1 : 1));
 }
 
+function membershipNoteAccess(
+  note: NoteAccessFields,
+  role: DriveRole | null,
+): NoteAccess {
+  return {
+    effectiveReadScope: "self",
+    effectiveWriteScope: "self",
+    flags: flagsForDriveRole(role),
+    grants: [],
+    inherit: false,
+    readScope: note.readScope,
+    source: "default",
+    sourceFolder: null,
+    writeScope: note.writeScope,
+  };
+}
+
 /** resolveNoteAccess と同じ結果をスナップショットから同期的に組み立てる。 */
 export function resolveNoteAccessSnapshot(
   env: Env,
@@ -286,6 +333,12 @@ export function resolveNoteAccessSnapshot(
   user: SessionUser | null | undefined,
   snapshot: AccessSnapshot,
 ): NoteAccess {
+  if (note.ownerKind === "shared_drive") {
+    return membershipNoteAccess(
+      note,
+      snapshot.driveRoles.get(note.ownerId) ?? null,
+    );
+  }
   const inherit = note.readScope === null && note.writeScope === null;
   const ancestors = folderAncestors(note.folder);
   const policies = snapshot.policies.get(note.ownerId) ?? EMPTY_POLICY_MAP;
@@ -541,6 +594,11 @@ export async function resolveNoteAccess(
   note: NoteAccessFields,
   user?: SessionUser | null,
 ): Promise<NoteAccess> {
+  if (note.ownerKind === "shared_drive") {
+    return driveRoleFor(env, note.ownerId, user).then((role) =>
+      membershipNoteAccess(note, role),
+    );
+  }
   const inherit = note.readScope === null && note.writeScope === null;
   const ancestors = folderAncestors(note.folder);
   const [policies, grants] = await Promise.all([
@@ -707,6 +765,22 @@ async function loadFolderAccessState(
   user?: SessionUser | null,
   snapshot?: AccessSnapshot,
 ): Promise<FolderPolicyResolved & { flags: PermissionFlags }> {
+  if (user?.id !== ownerId && (await isSharedDrive(env, ownerId))) {
+    const flags = await driveFlags(env, ownerId, user);
+    return {
+      effectiveReadScope: "self",
+      effectiveWriteScope: "self",
+      flags,
+      folder,
+      grants: [],
+      inherit: false,
+      locked: folder === "",
+      readScope: null,
+      source: "default",
+      sourceFolder: null,
+      writeScope: null,
+    };
+  }
   const effective = snapshot
     ? folderEffectiveSnapshot(ownerId, folder, snapshot)
     : await loadFolderEffective(env, ownerId, folder);
@@ -883,7 +957,7 @@ async function listVisibleChildren(
   user?: SessionUser | null,
   snapshot?: AccessSnapshot,
 ): Promise<FolderRecord[]> {
-  const isOwner = user?.id === ownerId;
+  const isOwner = await seesSubjectTree(env, ownerId, user);
   const childrenFilter = folderDirectChildrenFilter(folder);
   const rows = snapshot
     ? snapshotFolderRows(snapshot, ownerId).filter(
@@ -1013,7 +1087,7 @@ export async function resolveFolderAccess(
   const crumbs = folder
     ? await visibleCrumbs(env, ownerId, folder, user, snap)
     : [];
-  const isOwner = user?.id === ownerId;
+  const isOwner = await seesSubjectTree(env, ownerId, user);
   const parentId = await folderAccessParentId(
     env,
     snap,
@@ -1031,6 +1105,11 @@ export async function resolveFolderAccess(
     snap,
   );
   const row = await snapshotAwareFolderRow(env, snap, ownerId, folder);
+  const sharedDrive = await isSharedDrive(env, ownerId);
+  const subjectName = sharedDrive
+    ? await subjectRootLabel(env, ownerId)
+    : undefined;
+  const rootName = subjectName ?? MY_DRIVE_NAME;
 
   return presentFolderAccess(
     {
@@ -1039,11 +1118,14 @@ export async function resolveFolderAccess(
       crumbs,
       flags,
       id,
-      name: folder ? folderName(folder) : MY_DRIVE_NAME,
+      name: folder ? folderName(folder) : rootName,
+      ownerId,
+      ownerKind: sharedDrive ? "shared_drive" : "user",
       parentId,
       scheme: row?.scheme ?? null,
       schemeId: row?.scheme_id ?? null,
       schemeTitle: row?.scheme_title ?? null,
+      subjectName,
       ...(isOwner ? { folder } : { folder: undefined, sourceFolder: null }),
     },
     isOwner,
@@ -1263,7 +1345,7 @@ export async function listFolderChildren(
     ? Math.min(Math.max(Math.trunc(requested), 1), FOLDER_ENTRIES_MAX_LIMIT)
     : FOLDER_ENTRIES_DEFAULT_LIMIT;
   const offset = decodeFolderEntriesCursor(options.cursor);
-  const isOwner = user?.id === ownerId;
+  const isOwner = await seesSubjectTree(env, ownerId, user);
   const includeNoteCounts = options.includeNoteCounts ?? true;
 
   const data = await loadFolderEntryData(env, ownerId, folder);
@@ -1313,7 +1395,7 @@ export async function listFolderChildren(
     entries: page,
     folder: {
       id: currentId,
-      name: folder ? folderName(folder) : MY_DRIVE_NAME,
+      name: folder ? folderName(folder) : await subjectRootLabel(env, ownerId),
       path,
     },
     nextCursor: offset + limit < entries.length ? String(offset + limit) : null,
@@ -1533,7 +1615,9 @@ export async function listPublicFolderCandidates(
 ): Promise<Array<{ ownerId: string; folder: string }>> {
   const rows = await db(env)
     .prepare(
-      "SELECT owner_id, folder FROM folder_policies WHERE read_scope = 'public'",
+      `SELECT owner_id, folder FROM folder_policies
+        WHERE read_scope = 'public'
+          AND owner_id NOT IN (SELECT id FROM shared_drives)`,
     )
     .all<{ owner_id: string; folder: string }>();
 
@@ -1674,10 +1758,12 @@ export async function listSharedFolderCandidates(
       `SELECT owner_id, target_key
        FROM access_grants
        WHERE target_kind = 'folder' AND (user_id = ? OR email = ?)
+         AND owner_id NOT IN (SELECT id FROM shared_drives)
        UNION
        SELECT owner_id, folder AS target_key
        FROM folder_policies
-       WHERE read_scope IN ('public', 'signed_in')`,
+       WHERE read_scope IN ('public', 'signed_in')
+         AND owner_id NOT IN (SELECT id FROM shared_drives)`,
     )
     .bind(user.id, user.email)
     .all<{ owner_id: string; target_key: string }>();
