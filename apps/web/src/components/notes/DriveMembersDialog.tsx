@@ -322,11 +322,13 @@ function DomainsPanel({
   canManage,
   domains,
   driveId,
+  failed,
   onDomains,
 }: {
   canManage: boolean;
   domains: SharedDriveDomain[];
   driveId: string;
+  failed: boolean;
   onDomains: (domains: SharedDriveDomain[]) => void;
 }) {
   const [domain, setDomain] = useState("");
@@ -355,7 +357,7 @@ function DomainsPanel({
       </MutedText>
       {error && <ErrorText>{error}</ErrorText>}
       <ul className="m-0 max-h-[min(14rem,32dvh)] list-none divide-y divide-border overflow-y-auto p-0">
-        {domains.length === 0 ? (
+        {domains.length === 0 && !failed ? (
           <li className="py-6 text-center text-muted text-sm">
             ドメインは未登録です
           </li>
@@ -509,7 +511,9 @@ export function DriveMembersDialog({
   const [name, setName] = useState("");
   const [canManage, setCanManage] = useState(false);
   const [members, setMembers] = useState<SharedDriveMember[]>([]);
-  const [domains, setDomains] = useState<SharedDriveDomain[] | null>(null);
+  const [domains, setDomains] = useState<SharedDriveDomain[]>([]);
+  const [domainsReady, setDomainsReady] = useState(false);
+  const [domainsFailed, setDomainsFailed] = useState(false);
   const [panel, setPanel] = useState<Panel>("members");
   const [error, setError] = useState<string | null>(null);
 
@@ -536,22 +540,25 @@ export function DriveMembersDialog({
       }
       if (domainList.ok) {
         setDomains(domainList.data);
+        setDomainsFailed(false);
       } else {
+        setDomainsFailed(true);
         setError(domainList.error);
       }
+      setDomainsReady(true);
     });
     return () => {
       cancelled = true;
     };
   }, [driveId]);
 
-  const showDomains = canManage || (domains?.length ?? 0) > 0;
+  const showDomains = canManage || domains.length > 0;
   const tabs: Array<{ count?: number; id: Panel; label: string }> = [
     { count: members.length, id: "members", label: "メンバー" },
   ];
   if (showDomains) {
     tabs.push({
-      count: domains?.length,
+      count: domainsReady && !domainsFailed ? domains.length : undefined,
       id: "domains",
       label: "ドメイン",
     });
@@ -610,12 +617,16 @@ export function DriveMembersDialog({
       )}
       {active === "domains" && (
         <div aria-labelledby={domainsTabId} role="tabpanel">
-          {domains || error ? (
+          {domainsReady ? (
             <DomainsPanel
               canManage={canManage}
-              domains={domains ?? []}
+              domains={domains}
               driveId={driveId}
-              onDomains={setDomains}
+              failed={domainsFailed}
+              onDomains={(next) => {
+                setDomains(next);
+                setDomainsFailed(false);
+              }}
             />
           ) : (
             <MutedText>読み込み中…</MutedText>
