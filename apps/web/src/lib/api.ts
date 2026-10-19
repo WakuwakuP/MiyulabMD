@@ -4,6 +4,7 @@ import type {
   AccessScope,
   ArticleSource,
   CreateNoteInput,
+  DriveRole,
   FolderAccess,
   FolderChildrenResult,
   FolderRecord,
@@ -29,6 +30,8 @@ import type {
   SchemeRootEntry,
   SchemeSuggestion,
   SessionUser,
+  SharedDriveMember,
+  SharedDriveSummary,
   WorkspaceSearchResult,
 } from "@miyulabmd/shared";
 import { apiFetch as fetch } from "./api-fetch.ts";
@@ -59,6 +62,8 @@ export type ApiResult<T> =
 export type ReadOptions = {
   signal?: AbortSignal;
   viewerId?: string | null;
+  /** Subject whose sets, spaces, or sources to read. Omit for the signed-in user. */
+  ownerId?: string;
   /**
    * Durable purge fence captured when the read started. Forwarded to the
    * shared note transport so a post-purge read never joins a pre-purge
@@ -570,6 +575,7 @@ export async function moveNotes(
 export async function fetchPara(
   options: {
     bucket?: ParaBucketKey;
+    ownerId?: string;
     /** §2.5: space name, id, or "default". Omit = all spaces. */
     space?: string;
     signal?: AbortSignal;
@@ -582,6 +588,9 @@ export async function fetchPara(
   }
   if (options.space) {
     params.set("space", options.space);
+  }
+  if (options.ownerId) {
+    params.set("ownerId", options.ownerId);
   }
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(
@@ -809,8 +818,13 @@ export async function setNoteEditLock(
 export async function fetchMedallionSets(
   options: ReadOptions = {},
 ): Promise<ApiResult<{ sets: MedallionSet[] }>> {
+  const params = new URLSearchParams();
+  if (options.ownerId) {
+    params.set("ownerId", options.ownerId);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(
-    "/api/medallion/sets",
+    `/api/medallion/sets${suffix}`,
     { ...fetchOpts, signal: options.signal },
     options,
   );
@@ -896,8 +910,13 @@ export async function deleteMedallionSet(
 export async function fetchMedallionAssignments(
   options: ReadOptions = {},
 ): Promise<ApiResult<{ assignments: MedallionAssignment[] }>> {
+  const params = new URLSearchParams();
+  if (options.ownerId) {
+    params.set("ownerId", options.ownerId);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(
-    "/api/medallion/assignments",
+    `/api/medallion/assignments${suffix}`,
     { ...fetchOpts, signal: options.signal },
     options,
   );
@@ -914,8 +933,12 @@ export async function resolveMedallion(
   path: string,
   options: ReadOptions = {},
 ): Promise<ApiResult<{ medallion: MedallionResolution | null }>> {
+  const params = new URLSearchParams({ path });
+  if (options.ownerId) {
+    params.set("ownerId", options.ownerId);
+  }
   const res = await fetch(
-    `/api/medallion/resolve?path=${encodeURIComponent(path)}`,
+    `/api/medallion/resolve?${params.toString()}`,
     { ...fetchOpts, signal: options.signal },
     options,
   );
@@ -1045,8 +1068,13 @@ export type ArticleDispatchTarget = {
 export async function fetchArticleSources(
   options: ReadOptions = {},
 ): Promise<ApiResult<ArticleSource[]>> {
+  const params = new URLSearchParams();
+  if (options.ownerId) {
+    params.set("ownerId", options.ownerId);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(
-    "/api/article-sources",
+    `/api/article-sources${suffix}`,
     { ...fetchOpts, signal: options.signal },
     options,
   );
@@ -1148,4 +1176,134 @@ export async function revokeToken(id: string): Promise<ApiResult<void>> {
     return { error: await parseError(res), ok: false, status: res.status };
   }
   return { data: undefined, ok: true };
+}
+
+export async function fetchSharedDrives(): Promise<
+  ApiResult<SharedDriveSummary[]>
+> {
+  const res = await fetch("/api/drives", fetchOpts);
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { drives: SharedDriveSummary[] };
+  return { data: body.drives, ok: true };
+}
+
+export async function fetchSharedDrive(
+  id: string,
+): Promise<ApiResult<SharedDriveSummary>> {
+  const res = await fetch(`/api/drives/${id}`, fetchOpts);
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SharedDriveSummary, ok: true };
+}
+
+export async function createSharedDrive(
+  name: string,
+): Promise<ApiResult<SharedDriveSummary>> {
+  const res = await fetch("/api/drives", {
+    ...fetchOpts,
+    body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SharedDriveSummary, ok: true };
+}
+
+export async function renameSharedDrive(
+  id: string,
+  name: string,
+): Promise<ApiResult<SharedDriveSummary>> {
+  const res = await fetch(`/api/drives/${id}`, {
+    ...fetchOpts,
+    body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as SharedDriveSummary, ok: true };
+}
+
+export async function deleteSharedDrive(
+  id: string,
+  name: string,
+): Promise<ApiResult<{ id: string }>> {
+  const res = await fetch(`/api/drives/${id}`, {
+    ...fetchOpts,
+    body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  return { data: (await res.json()) as { id: string }, ok: true };
+}
+
+export async function fetchDriveMembers(
+  driveId: string,
+): Promise<ApiResult<SharedDriveMember[]>> {
+  const res = await fetch(`/api/drives/${driveId}/members`, fetchOpts);
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { members: SharedDriveMember[] };
+  return { data: body.members, ok: true };
+}
+
+export async function inviteDriveMember(
+  driveId: string,
+  email: string,
+  role: DriveRole,
+): Promise<ApiResult<SharedDriveMember[]>> {
+  const res = await fetch(`/api/drives/${driveId}/members`, {
+    ...fetchOpts,
+    body: JSON.stringify({ email, role }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { members: SharedDriveMember[] };
+  return { data: body.members, ok: true };
+}
+
+export async function updateDriveMemberRole(
+  driveId: string,
+  memberId: string,
+  role: DriveRole,
+): Promise<ApiResult<SharedDriveMember[]>> {
+  const res = await fetch(`/api/drives/${driveId}/members/${memberId}`, {
+    ...fetchOpts,
+    body: JSON.stringify({ role }),
+    headers: { "Content-Type": "application/json" },
+    method: "PATCH",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { members: SharedDriveMember[] };
+  return { data: body.members, ok: true };
+}
+
+export async function removeDriveMember(
+  driveId: string,
+  memberId: string,
+): Promise<ApiResult<SharedDriveMember[]>> {
+  const res = await fetch(`/api/drives/${driveId}/members/${memberId}`, {
+    ...fetchOpts,
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as { members: SharedDriveMember[] };
+  return { data: body.members, ok: true };
 }

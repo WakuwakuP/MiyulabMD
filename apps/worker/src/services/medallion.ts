@@ -13,6 +13,7 @@ import {
 } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
+import { canEditSubject } from "./drive-membership.ts";
 
 // --- rows ---------------------------------------------------------------------
 
@@ -95,26 +96,15 @@ function validateLayers(
 export async function listMedallionSets(
   env: Env,
   user: SessionUser,
+  ownerId = user.id,
 ): Promise<MedallionSet[]> {
   const { results } = await db(env)
     .prepare(
       "SELECT id, owner_user_id, name, layers, created_at FROM medallion_sets WHERE owner_user_id = ? ORDER BY created_at, id",
     )
-    .bind(user.id)
+    .bind(ownerId)
     .all<SetRow>();
   return results.map(setFromRow);
-}
-
-async function findMedallionSet(
-  env: Env,
-  user: SessionUser,
-  id: string,
-): Promise<MedallionSet | null> {
-  const row = await setById(env, id);
-  if (!row || row.owner_user_id !== user.id) {
-    return null;
-  }
-  return setFromRow(row);
 }
 
 /** Seed the built-in 精緻度 set the first time the feature is used. */
@@ -277,14 +267,14 @@ export async function assignFolderMedallion(
   if (!folder) {
     return { kind: "not_found" };
   }
-  if (folder.owner_id !== user.id) {
+  if (!(await canEditSubject(env, folder.owner_id, user))) {
     return { kind: "denied" };
   }
   const setRow = await setById(env, setId);
   if (!setRow) {
     return { kind: "not_found" };
   }
-  if (setRow.owner_user_id !== user.id) {
+  if (setRow.owner_user_id !== folder.owner_id) {
     return { kind: "denied" };
   }
   const set = setFromRow(setRow);
@@ -320,7 +310,7 @@ export async function clearFolderMedallion(
   if (!folder) {
     return { kind: "not_found" };
   }
-  if (folder.owner_id !== user.id) {
+  if (!(await canEditSubject(env, folder.owner_id, user))) {
     return { kind: "denied" };
   }
   await db(env)
@@ -335,6 +325,7 @@ export async function clearFolderMedallion(
 export async function listMedallionAssignments(
   env: Env,
   user: SessionUser,
+  ownerId = user.id,
 ): Promise<MedallionAssignment[]> {
   const { results } = await db(env)
     .prepare(
@@ -344,7 +335,7 @@ export async function listMedallionAssignments(
         WHERE f.owner_id = ? AND f.medallion_set_id IS NOT NULL
         ORDER BY f.folder`,
     )
-    .bind(user.id)
+    .bind(ownerId)
     .all<{
       folder_id: string;
       path: string;
@@ -375,17 +366,20 @@ export async function resolveMedallion(
   env: Env,
   user: SessionUser,
   path: string,
+  ownerId = user.id,
 ): Promise<MedallionResolution | null> {
   const normalized = normalizeFolder(path);
   if (!normalized) {
     return null;
   }
-  const assignments = await listMedallionAssignments(env, user);
+  const assignments = await listMedallionAssignments(env, user, ownerId);
   const best = resolveMedallionAssignment(assignments, normalized);
   if (!best) {
     return null;
   }
-  const set = await findMedallionSet(env, user, best.setId);
+  const setRow = await setById(env, best.setId);
+  const set =
+    setRow && setRow.owner_user_id === ownerId ? setFromRow(setRow) : null;
   const layerIndex =
     set?.layers.findIndex((layer) => layer.key === best.layerKey) ?? -1;
   return {

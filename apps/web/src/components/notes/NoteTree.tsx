@@ -49,6 +49,7 @@ type Props = {
   isDriveRoot?: boolean;
   showAllNotes?: boolean;
   rootHref?: string;
+  rootName?: string;
   openMenuId?: string | null;
   pending?: boolean;
   placeholder?: boolean;
@@ -383,14 +384,7 @@ function entryNoteRow(ctx: TreeContext, entry: FolderEntryNote, depth: number) {
       icon={<MarkdownIcon />}
       key={`note:${entry.id}`}
       menuOpen={ctx.openMenuId === entry.id}
-      meta={
-        summary ? (
-          <AccessScopeMeta
-            readScope={summary.access.effectiveReadScope}
-            writeScope={summary.access.effectiveWriteScope}
-          />
-        ) : undefined
-      }
+      meta={summary ? noteAccessMeta(summary) : undefined}
       name={entry.title}
       onMenu={
         target && !ctx.readonly
@@ -516,6 +510,18 @@ function entryRow(
     : entryNoteRow(ctx, entry, depth);
 }
 
+function noteAccessMeta(note: NoteSummary) {
+  if (note.ownerKind === "shared_drive") {
+    return <span className="text-xs text-muted">メンバーのみ</span>;
+  }
+  return (
+    <AccessScopeMeta
+      readScope={note.access.effectiveReadScope}
+      writeScope={note.access.effectiveWriteScope}
+    />
+  );
+}
+
 function noteSummaryRow(ctx: TreeContext, note: NoteSummary) {
   return (
     <DriveRow
@@ -523,12 +529,7 @@ function noteSummaryRow(ctx: TreeContext, note: NoteSummary) {
       icon={<MarkdownIcon />}
       key={note.id}
       menuOpen={ctx.openMenuId === note.id}
-      meta={
-        <AccessScopeMeta
-          readScope={note.access.effectiveReadScope}
-          writeScope={note.access.effectiveWriteScope}
-        />
-      }
+      meta={noteAccessMeta(note)}
       name={note.title}
       onMenu={
         ctx.readonly
@@ -668,6 +669,7 @@ export function NoteTree({
   isDriveRoot = false,
   showAllNotes = false,
   rootHref = SHARED_PATH,
+  rootName,
   openMenuId = null,
   pending = false,
   placeholder = false,
@@ -714,6 +716,8 @@ export function NoteTree({
         isDriveRoot={isDriveRoot}
         onItemMenu={onItemMenu}
         readonly={readonly}
+        rootHref={rootHref}
+        rootName={rootName}
         showRootCrumb={showRootCrumb}
       />
 

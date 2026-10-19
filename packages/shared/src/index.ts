@@ -161,6 +161,19 @@ export {
   SEARCH_SCOPES,
 } from "./note.ts";
 export type {
+  DriveRole,
+  OwnerKind,
+  SharedDriveMember,
+  SharedDriveSummary,
+} from "./drive.ts";
+export {
+  DRIVE_ROLES,
+  flagsForDriveRole,
+  isDriveRole,
+  isOwnerKind,
+  OWNER_KINDS,
+} from "./drive.ts";
+export type {
   AccessGrant,
   AccessScope,
   AccessSource,

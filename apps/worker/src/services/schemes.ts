@@ -35,6 +35,7 @@ import {
   parentFolderPath,
   resolveFolderAccess,
 } from "./access.ts";
+import { canEditSubject } from "./drive-membership.ts";
 import { folderDirectChildrenFilter } from "./folder-path-sql.ts";
 
 export type SchemeError =
@@ -334,7 +335,7 @@ async function ownedSchemeFolder(
   if (!row) {
     return notFound("Not found");
   }
-  if (row.owner_id !== user.id) {
+  if (!(await canEditSubject(env_, row.owner_id, user))) {
     return denied(403, "Forbidden");
   }
   return { row };

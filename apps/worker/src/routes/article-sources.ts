@@ -3,6 +3,10 @@ import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
 import {
+  canEditSubject,
+  seesSubjectTree,
+} from "../services/drive-membership.ts";
+import {
   type ArticleSourceWrite,
   createArticleService,
 } from "../services/articles.ts";
@@ -26,7 +30,15 @@ export const articleSourceRoutes = new Elysia({
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    const sources = await articles.listSources(user.id);
+    const ownerId = new URL(request.url).searchParams.get("ownerId") ?? user.id;
+    if (
+      ownerId !== user.id &&
+      !(await seesSubjectTree(env, ownerId, user))
+    ) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+    const sources = await articles.listSources(ownerId);
     return { sources };
   })
   .get("/status", async ({ request, set }) => {
@@ -61,7 +73,13 @@ export const articleSourceRoutes = new Elysia({
       return { error: "Unauthorized" };
     }
     const body = await parseJsonBody<ArticleSourceWrite>(request);
-    const created = await articles.createSource(user.id, body ?? {});
+    const ownerId =
+      (body as { ownerId?: string } | null)?.ownerId ?? user.id;
+    if (ownerId !== user.id && !(await canEditSubject(env, ownerId, user))) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+    const created = await articles.createSource(ownerId, body ?? {});
     if ("error" in created) {
       set.status = created.status;
       return { error: created.error };

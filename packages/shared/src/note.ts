@@ -1,4 +1,5 @@
 import type { ArticleMeta } from "./article.ts";
+import type { OwnerKind } from "./drive.ts";
 import type {
   AccessScope,
   CollaboratorRole,
@@ -154,6 +155,8 @@ export type Note = {
   shortId: string;
   alias: string | null;
   ownerId: string;
+  /** Absent on older payloads; treat as `user`. */
+  ownerKind?: OwnerKind;
   title: string;
   folder: string;
   folderId: string | null;
@@ -266,6 +269,8 @@ export type UpdateNoteMetaInput = {
 
 export type FolderAccess = EffectiveAccess & {
   id: string | null;
+  ownerId?: string;
+  ownerKind?: OwnerKind;
   name: string;
   parentId: string | null;
   folder?: string;

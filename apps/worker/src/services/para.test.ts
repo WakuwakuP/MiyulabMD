@@ -33,6 +33,7 @@ const MIGRATIONS = [
   "0016_para_spaces.sql",
   "0017_medallion_sets_edit_lock.sql",
   "0018_scheme_root.sql",
+  "0021_shared_drives.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -604,7 +605,12 @@ test("0016 backfill: existing buckets keep NULL space + default row appears", as
   const sqlite = new DatabaseSync(":memory:");
   t.after(() => sqlite.close());
   for (const migration of MIGRATIONS.filter(
-    (name) => !(name.startsWith("0016") || name.startsWith("0017")),
+    (name) =>
+      !(
+        name.startsWith("0016") ||
+        name.startsWith("0017") ||
+        name.startsWith("0021")
+      ),
   )) {
     sqlite.exec(
       readFileSync(

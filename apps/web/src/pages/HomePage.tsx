@@ -11,6 +11,7 @@ import {
   medalForLayerKey,
   resolveMedallionAssignment,
 } from "@miyulabmd/shared";
+import { UsersRound } from "lucide-react";
 import {
   type MouseEvent,
   type ReactNode,
@@ -25,7 +26,12 @@ import type { AppShellContext } from "../components/layout/AppShellContext.ts";
 import type { AccessDraft } from "../components/notes/AccessPanel.tsx";
 import { ConfirmDialog } from "../components/notes/ConfirmDialog.tsx";
 import { ContextMenu } from "../components/notes/ContextMenu.tsx";
-import { DrivePlaceNav } from "../components/notes/DrivePlaceNav.tsx";
+import { DriveMembersDialog } from "../components/notes/DriveMembersDialog.tsx";
+import { DriveMoveDialog } from "../components/notes/DriveMoveDialog.tsx";
+import {
+  DrivePlaceNav,
+  type DriveSelection,
+} from "../components/notes/DrivePlaceNav.tsx";
 import { FolderCreateModal } from "../components/notes/FolderCreateModal.tsx";
 import { MedallionDialog } from "../components/notes/MedallionDialog.tsx";
 import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
@@ -40,6 +46,7 @@ import {
   fetchMedallionAssignments,
   fetchMedallionSets,
   fetchSchemeSuggestion,
+  fetchSharedDrive,
   moveFolder,
   moveNotes,
 } from "../lib/api.ts";
@@ -70,6 +77,7 @@ import {
   loadParaSpaces,
   type MedallionDialogTarget,
   type MenuState,
+  type MoveTarget,
   openFolderShare,
   openNoteShare,
   persistFolderMedallion,
@@ -84,24 +92,38 @@ import {
 } from "./home-page.ts";
 
 function HomeHeaderEnd({
-  canAdmin,
+  canCreateFolder,
+  canCreateNote,
   creating,
+  membersOnly,
   showEnd,
   onCreateFolder,
   onCreateNote,
+  onMembers,
 }: {
-  canAdmin: boolean;
+  canCreateFolder: boolean;
+  canCreateNote: boolean;
   creating: boolean;
+  membersOnly: boolean;
   showEnd: boolean;
   onCreateFolder: () => void;
   onCreateNote: () => void;
+  onMembers: () => void;
 }) {
   if (!showEnd) {
     return null;
   }
   return (
     <>
-      {canAdmin && (
+      {membersOnly && (
+        <HeaderButton
+          icon={<UsersRound aria-hidden={true} className="size-4" />}
+          label="メンバー"
+          onClick={onMembers}
+          variant="outline"
+        />
+      )}
+      {canCreateFolder && (
         <HeaderButton
           icon={<FolderOutlineIcon />}
           label="フォルダ"
@@ -109,13 +131,15 @@ function HomeHeaderEnd({
           variant="outline"
         />
       )}
-      <HeaderButton
-        disabled={creating}
-        icon={<PlusIcon />}
-        label={creating ? "作成中…" : "新規ノート"}
-        onClick={onCreateNote}
-        variant="accent"
-      />
+      {canCreateNote && (
+        <HeaderButton
+          disabled={creating}
+          icon={<PlusIcon />}
+          label={creating ? "作成中…" : "新規ノート"}
+          onClick={onCreateNote}
+          variant="accent"
+        />
+      )}
     </>
   );
 }
@@ -126,23 +150,28 @@ function useHomeHeader(
   folderId: string | undefined,
   visibleFolder: FolderAccess | null,
   folderPending: boolean,
-  canAdmin: boolean,
+  selection: DriveSelection,
+  canCreateFolder: boolean,
+  canCreateNote: boolean,
+  membersOnly: boolean,
   creating: boolean,
   setHeader: AppShellContext["setHeader"],
   onCreateFolder: () => void,
   onCreateNote: () => void,
+  onMembers: () => void,
 ) {
   useEffect(() => {
     setHeader({
-      actions: user ? (
-        <DrivePlaceNav current={canAdmin || !folderId ? "drive" : "shared"} />
-      ) : null,
+      actions: user ? <DrivePlaceNav selection={selection} /> : null,
       end: (
         <HomeHeaderEnd
-          canAdmin={canAdmin}
+          canCreateFolder={canCreateFolder}
+          canCreateNote={canCreateNote}
           creating={creating}
+          membersOnly={membersOnly}
           onCreateFolder={onCreateFolder}
           onCreateNote={onCreateNote}
+          onMembers={onMembers}
           showEnd={Boolean(
             visibleFolder || !(folderId || user || folderPending),
           )}
@@ -157,12 +186,16 @@ function useHomeHeader(
     visibleFolder,
     folderPending,
     folderId,
-    canAdmin,
+    selection,
+    canCreateFolder,
+    canCreateNote,
+    membersOnly,
     creating,
     setHeader,
     user,
     onCreateFolder,
     onCreateNote,
+    onMembers,
   ]);
 }
 
@@ -408,6 +441,13 @@ function HomePageView({
       }),
     [user?.id],
   );
+  let treeRootHref = "/";
+  if (flags.sharedDrive) {
+    treeRootHref = `/d/${visibleFolder?.ownerId ?? ""}`;
+  } else if (user) {
+    treeRootHref = "/shared";
+  }
+  const treeRootName = flags.sharedDrive ? visibleFolder?.name : undefined;
   return (
     <section>
       {showGuestTitle && (
@@ -431,9 +471,10 @@ function HomePageView({
           parentId={visibleFolder?.parentId ?? null}
           pending={flags.listPending}
           placeholder={flags.showPlaceholder}
-          rootHref={user ? "/shared" : "/"}
+          rootHref={treeRootHref}
+          rootName={treeRootName}
           showAllNotes={!(user || folderId)}
-          showRootCrumb={flags.canAdmin}
+          showRootCrumb={flags.canAdmin || flags.sharedDrive}
         />
       ) : null}
       {dialogs}
@@ -441,9 +482,32 @@ function HomePageView({
   );
 }
 
+function folderIdForRoute(
+  driveId: string | undefined,
+  driveLookup: "idle" | "loading" | "ready" | "error",
+  driveRootId: string | null,
+  routeFolderId: string | undefined,
+): string | undefined {
+  if (!driveId) {
+    return routeFolderId;
+  }
+  if (driveLookup === "ready" && driveRootId) {
+    return driveRootId;
+  }
+  return undefined;
+}
+
 function NetworkHomePage() {
   const navigate = useNavigate();
-  const { folderId } = useParams();
+  const { folderId: routeFolderId, driveId } = useParams();
+  const [driveRootId, setDriveRootId] = useState<string | null>(null);
+  const [driveLookup, setDriveLookup] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >(driveId ? "loading" : "idle");
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const { user, userLoading, viewer, setHeader } =
     useOutletContext<AppShellContext>();
   // §2.4 opt-in: PARA UI and /api/para calls only exist while the flag is on.
@@ -466,6 +530,39 @@ function NetworkHomePage() {
   const homeReadOwnerRef = useRef<object | null>(null);
   const homeReadActiveRef = useRef(false);
   const invalidationRetryRef = useRef(false);
+  const folderId = folderIdForRoute(
+    driveId,
+    driveLookup,
+    driveRootId,
+    routeFolderId,
+  );
+
+  useEffect(() => {
+    if (!driveId) {
+      setDriveRootId(null);
+      setDriveLookup("idle");
+      return;
+    }
+    let cancelled = false;
+    setDriveLookup("loading");
+    setDriveRootId(null);
+    void fetchSharedDrive(driveId).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (!result.ok) {
+        setDriveLookup("error");
+        setError(result.error);
+        return;
+      }
+      setDriveRootId(result.data.rootFolderId);
+      setDriveLookup("ready");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [driveId]);
+
   const [share, setShare] = useState<ShareState | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -525,13 +622,17 @@ function NetworkHomePage() {
     [paraSpaces],
   );
 
+  const subjectOwnerId =
+    visibleFolder?.ownerKind === "shared_drive"
+      ? visibleFolder.ownerId
+      : undefined;
   const reloadPara = useCallback(() => {
-    void loadParaSpaces(user, paraEnabled)
+    void loadParaSpaces(user, paraEnabled, subjectOwnerId)
       .then(setParaSpaces)
       .catch(() => {
         // PARA section is optional chrome; ignore transient failures.
       });
-  }, [user, paraEnabled]);
+  }, [user, paraEnabled, subjectOwnerId]);
 
   useEffect(() => {
     if (user && paraEnabled) {
@@ -547,17 +648,23 @@ function NetworkHomePage() {
       setMedallionAssignments([]);
       return;
     }
-    void fetchMedallionSets({ viewerId: user.id }).then((result) => {
+    void fetchMedallionSets({
+      ownerId: subjectOwnerId,
+      viewerId: user.id,
+    }).then((result) => {
       if (result.ok) {
         setMedallionSets(result.data.sets);
       }
     });
-    void fetchMedallionAssignments({ viewerId: user.id }).then((result) => {
+    void fetchMedallionAssignments({
+      ownerId: subjectOwnerId,
+      viewerId: user.id,
+    }).then((result) => {
       if (result.ok) {
         setMedallionAssignments(result.data.assignments);
       }
     });
-  }, [user, layersEnabled]);
+  }, [user, layersEnabled, subjectOwnerId]);
 
   useEffect(() => {
     reloadMedallions();
@@ -640,6 +747,14 @@ function NetworkHomePage() {
 
   useEffect(() => {
     if (userLoading) {
+      return;
+    }
+    if (driveId && driveLookup !== "ready") {
+      setFolderPending(driveLookup !== "error");
+      if (driveLookup === "error") {
+        setVisibleFolder(null);
+        setNotes([]);
+      }
       return;
     }
     const controller = new AbortController();
@@ -734,7 +849,7 @@ function NetworkHomePage() {
       controller.abort();
       finishRead();
     };
-  }, [folderId, reloadRequest, userLoading, viewer]);
+  }, [driveId, driveLookup, folderId, reloadRequest, userLoading, viewer]);
 
   useEffect(() => {
     if (viewer.cacheViewerId === null) {
@@ -825,164 +940,228 @@ function NetworkHomePage() {
     void persistNewNote(visibleFolder, navigate, setCreating, setError);
   }, [visibleFolder, navigate]);
 
+  const selection = useMemo<DriveSelection>(() => {
+    if (driveId || visibleFolder?.ownerKind === "shared_drive") {
+      return {
+        id: driveId ?? visibleFolder?.ownerId ?? "",
+        kind: "drive",
+      };
+    }
+    if (flags.canAdmin || !routeFolderId) {
+      return { kind: "mine" };
+    }
+    return { kind: "shared" };
+  }, [
+    driveId,
+    flags.canAdmin,
+    routeFolderId,
+    visibleFolder?.ownerId,
+    visibleFolder?.ownerKind,
+  ]);
+  const handleMembers = useCallback(() => {
+    setMembersOpen(true);
+  }, []);
+
   useHomeHeader(
     headerFolder,
     user,
     folderId,
     visibleFolder,
     folderPending,
-    flags.canAdmin,
+    selection,
+    flags.sharedDrive ? flags.canMutate : flags.canAdmin,
+    flags.sharedDrive ? flags.canMutate : true,
+    flags.sharedDrive,
     creating,
     setHeader,
     handleCreateFolder,
     handleCreateNote,
+    handleMembers,
   );
 
   return (
     <HomePageView
       cacheWarning={cacheWarning}
       dialogs={
-        <HomePageDialogs
-          confirm={confirm}
-          confirmBusy={confirmBusy}
-          confirmError={confirmError}
-          folderCreateError={folderCreateError}
-          folderCreateOpen={folderCreateOpen}
-          folderCreating={folderCreating}
-          folderRename={folderRename}
-          folderRenameError={folderRenameError}
-          folderRenaming={folderRenaming}
-          medallionAssignments={medallionAssignments}
-          medallionBusy={medallionBusy}
-          medallionDialog={medallionDialog}
-          medallionError={medallionError}
-          medallionSets={medallionSets}
-          menu={menu}
-          onCloseConfirm={() => {
-            if (!confirmBusy) {
-              setConfirm(null);
-            }
-          }}
-          onCloseCreateFolder={() => {
-            if (!folderCreating) {
-              setFolderCreateOpen(false);
-            }
-          }}
-          onCloseMedallion={() => {
-            if (!medallionBusy) {
-              setMedallionDialog(null);
-            }
-          }}
-          onCloseMenu={() => setMenu(null)}
-          onCloseRename={() => {
-            if (!folderRenaming) {
-              setFolderRename(null);
-            }
-          }}
-          onCloseScheme={() => {
-            if (!schemeBusy) {
-              setSchemeDialog(null);
-            }
-          }}
-          onCloseShare={() => setShare(null)}
-          onConfirmDelete={() => {
-            void persistHomeDelete(
-              confirm,
-              folderId,
-              visibleFolder?.parentId,
-              user,
-              navigate,
-              {
-                setConfirm,
-                setConfirmBusy,
-                setConfirmError,
+        <>
+          <HomePageDialogs
+            confirm={confirm}
+            confirmBusy={confirmBusy}
+            confirmError={confirmError}
+            folderCreateError={folderCreateError}
+            folderCreateOpen={folderCreateOpen}
+            folderCreating={folderCreating}
+            folderRename={folderRename}
+            folderRenameError={folderRenameError}
+            folderRenaming={folderRenaming}
+            medallionAssignments={medallionAssignments}
+            medallionBusy={medallionBusy}
+            medallionDialog={medallionDialog}
+            medallionError={medallionError}
+            medallionSets={medallionSets}
+            menu={menu}
+            onCloseConfirm={() => {
+              if (!confirmBusy) {
+                setConfirm(null);
+              }
+            }}
+            onCloseCreateFolder={() => {
+              if (!folderCreating) {
+                setFolderCreateOpen(false);
+              }
+            }}
+            onCloseMedallion={() => {
+              if (!medallionBusy) {
+                setMedallionDialog(null);
+              }
+            }}
+            onCloseMenu={() => setMenu(null)}
+            onCloseRename={() => {
+              if (!folderRenaming) {
+                setFolderRename(null);
+              }
+            }}
+            onCloseScheme={() => {
+              if (!schemeBusy) {
+                setSchemeDialog(null);
+              }
+            }}
+            onCloseShare={() => setShare(null)}
+            onConfirmDelete={() => {
+              void persistHomeDelete(
+                confirm,
+                folderId,
+                visibleFolder?.parentId,
+                user,
+                navigate,
+                {
+                  setConfirm,
+                  setConfirmBusy,
+                  setConfirmError,
+                  setNotes,
+                  setVisibleFolder,
+                },
+              );
+            }}
+            onCreateFolder={(name) => {
+              void persistNewFolder(
+                name,
+                visibleFolder,
+                navigate,
+                {
+                  setFolderCreateError,
+                  setFolderCreateOpen,
+                  setFolderCreating,
+                  setShare,
+                  setShareError,
+                },
+                { useScheme: schemeSuggestion !== null },
+              );
+            }}
+            onPersistMedallion={(next) => {
+              void persistFolderMedallion(
+                medallionDialog,
+                next,
+                folderId,
+                user,
+                navigate,
+                {
+                  onMedallionsChanged: reloadMedallions,
+                  setMedallionBusy,
+                  setMedallionDialog,
+                  setMedallionError,
+                  setNotes,
+                  setVisibleFolder,
+                },
+              );
+            }}
+            onPersistScheme={(scheme) => {
+              void persistFolderScheme(
+                schemeDialog,
+                scheme,
+                folderId,
+                user,
+                navigate,
+                {
+                  setNotes,
+                  setSchemeBusy,
+                  setSchemeDialog,
+                  setSchemeError,
+                  setVisibleFolder,
+                },
+              );
+            }}
+            onPersistShare={(next) => {
+              void persistHomeShare(share, next, visibleFolder?.id, {
                 setNotes,
-                setVisibleFolder,
-              },
-            );
-          }}
-          onCreateFolder={(name) => {
-            void persistNewFolder(
-              name,
-              visibleFolder,
-              navigate,
-              {
-                setFolderCreateError,
-                setFolderCreateOpen,
-                setFolderCreating,
                 setShare,
                 setShareError,
-              },
-              { useScheme: schemeSuggestion !== null },
-            );
-          }}
-          onPersistMedallion={(next) => {
-            void persistFolderMedallion(
-              medallionDialog,
-              next,
-              folderId,
-              user,
-              navigate,
-              {
-                onMedallionsChanged: reloadMedallions,
-                setMedallionBusy,
-                setMedallionDialog,
-                setMedallionError,
-                setNotes,
                 setVisibleFolder,
-              },
-            );
-          }}
-          onPersistScheme={(scheme) => {
-            void persistFolderScheme(
-              schemeDialog,
-              scheme,
-              folderId,
-              user,
-              navigate,
-              {
-                setNotes,
-                setSchemeBusy,
-                setSchemeDialog,
-                setSchemeError,
-                setVisibleFolder,
-              },
-            );
-          }}
-          onPersistShare={(next) => {
-            void persistHomeShare(share, next, visibleFolder?.id, {
-              setNotes,
-              setShare,
-              setShareError,
-              setVisibleFolder,
-            });
-          }}
-          onRenameFolder={(name) => {
-            void persistRenameFolder(
-              folderRename,
-              name,
-              visibleFolder?.id,
-              folderId,
-              user,
-              navigate,
-              {
-                setFolderRename,
-                setFolderRenameError,
-                setFolderRenaming,
-                setNotes,
-                setVisibleFolder,
-              },
-            );
-          }}
-          schemeBusy={schemeBusy}
-          schemeDialog={schemeDialog}
-          schemeError={schemeError}
-          schemeSuggestion={schemeSuggestion}
-          share={share}
-          shareError={shareError}
-          shareLink={shareLink}
-          user={user}
-        />
+              });
+            }}
+            onRenameFolder={(name) => {
+              void persistRenameFolder(
+                folderRename,
+                name,
+                visibleFolder?.id,
+                folderId,
+                user,
+                navigate,
+                {
+                  setFolderRename,
+                  setFolderRenameError,
+                  setFolderRenaming,
+                  setNotes,
+                  setVisibleFolder,
+                },
+              );
+            }}
+            schemeBusy={schemeBusy}
+            schemeDialog={schemeDialog}
+            schemeError={schemeError}
+            schemeSuggestion={schemeSuggestion}
+            share={share}
+            shareError={shareError}
+            shareLink={shareLink}
+            user={user}
+          />
+          {membersOpen && flags.sharedDrive && visibleFolder?.ownerId && (
+            <DriveMembersDialog
+              driveId={visibleFolder.ownerId}
+              onClose={() => setMembersOpen(false)}
+            />
+          )}
+          {moveTarget && (
+            <DriveMoveDialog
+              busy={moveBusy}
+              error={moveError}
+              name={moveTarget.name}
+              onClose={() => {
+                if (!moveBusy) {
+                  setMoveTarget(null);
+                }
+              }}
+              onMove={(destFolderId) => {
+                const target = moveTarget;
+                setMoveBusy(true);
+                setMoveError(null);
+                void (async () => {
+                  const result =
+                    target.kind === "note"
+                      ? await moveNotes([target.id], destFolderId)
+                      : await moveFolder(target.id, { destFolderId });
+                  setMoveBusy(false);
+                  if (!result.ok) {
+                    setMoveError(result.error);
+                    return;
+                  }
+                  setMoveTarget(null);
+                  refreshAfterMove();
+                })();
+              }}
+            />
+          )}
+        </>
       }
       error={error}
       flags={flags}
@@ -994,7 +1173,7 @@ function NetworkHomePage() {
         handleItemMenu(
           event,
           target,
-          flags.canAdmin,
+          { canMutate: flags.canMutate, sharedDrive: flags.sharedDrive },
           navigate,
           setMenu,
           (id, name) => {
@@ -1019,6 +1198,10 @@ function NetworkHomePage() {
                   setMedallionError(null);
                 }
               : undefined,
+            onMove: (target) => {
+              setMoveTarget(target);
+              setMoveError(null);
+            },
             onScheme: (id, name, scheme) => {
               setSchemeDialog({ id, name, scheme });
               setSchemeError(null);
@@ -1029,7 +1212,7 @@ function NetworkHomePage() {
           },
         );
       }}
-      onMove={flags.canAdmin ? onTreeMove : undefined}
+      onMove={flags.canMutate ? onTreeMove : undefined}
       paraSpaces={paraEnabled && flags.isDriveRoot ? paraSpaces : EMPTY_PARA}
       publicFolders={publicFolders}
       user={user}
@@ -1040,7 +1223,7 @@ function NetworkHomePage() {
 }
 
 export function HomePage() {
-  const { folderId } = useParams();
+  const { folderId, driveId } = useParams();
   const { user, userLoading, viewer } = useOutletContext<AppShellContext>();
   const networkViewerKey = JSON.stringify([
     viewer.mode,
@@ -1048,7 +1231,7 @@ export function HomePage() {
     viewer.cacheViewerId,
   ]);
 
-  if (userLoading) {
+  if (driveId || userLoading) {
     return <NetworkHomePage key={networkViewerKey} />;
   }
   if (viewer.mode === "cached" && viewer.cacheViewerId !== null) {

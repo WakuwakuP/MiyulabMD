@@ -19,6 +19,8 @@ type Props = {
   onItemMenu?: (event: MouseEvent, target: FolderBreadcrumbMenuTarget) => void;
   readonly?: boolean;
   showRootCrumb?: boolean;
+  rootName?: string;
+  rootHref?: string;
   /** Extra classes on the nav (e.g. editor padding). */
   className?: string;
 };
@@ -34,6 +36,8 @@ export function FolderBreadcrumbs({
   onItemMenu,
   readonly = false,
   showRootCrumb = false,
+  rootName = MY_DRIVE_NAME,
+  rootHref = "/",
   className,
 }: Props) {
   if (!(showRootCrumb || crumbs.length > 0)) {
@@ -59,9 +63,9 @@ export function FolderBreadcrumbs({
               prefetchFolder();
             }
           }}
-          to="/"
+          to={rootHref}
         >
-          {MY_DRIVE_NAME}
+          {rootName}
         </Link>
       )}
       {crumbs.map((crumb, index) => {

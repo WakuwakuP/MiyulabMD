@@ -6,6 +6,8 @@ export function sharedNotesForUser(
   userId: string,
 ): NoteSummary[] {
   return notes
-    .filter((note) => note.ownerId !== userId)
+    .filter(
+      (note) => note.ownerId !== userId && note.ownerKind !== "shared_drive",
+    )
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
