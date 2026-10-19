@@ -49,6 +49,7 @@ type Props = {
   isDriveRoot?: boolean;
   showAllNotes?: boolean;
   rootHref?: string;
+  breadcrumbHref?: string;
   rootName?: string;
   openMenuId?: string | null;
   pending?: boolean;
@@ -669,6 +670,7 @@ export function NoteTree({
   isDriveRoot = false,
   showAllNotes = false,
   rootHref = SHARED_PATH,
+  breadcrumbHref = "/",
   rootName,
   openMenuId = null,
   pending = false,
@@ -716,7 +718,7 @@ export function NoteTree({
         isDriveRoot={isDriveRoot}
         onItemMenu={onItemMenu}
         readonly={readonly}
-        rootHref={rootHref}
+        rootHref={breadcrumbHref}
         rootName={rootName}
         showRootCrumb={showRootCrumb}
       />

@@ -1105,6 +1105,11 @@ export async function resolveFolderAccess(
     snap,
   );
   const row = await snapshotAwareFolderRow(env, snap, ownerId, folder);
+  const sharedDrive = await isSharedDrive(env, ownerId);
+  const subjectName = sharedDrive
+    ? await subjectRootLabel(env, ownerId)
+    : undefined;
+  const rootName = subjectName ?? MY_DRIVE_NAME;
 
   return presentFolderAccess(
     {
@@ -1113,13 +1118,14 @@ export async function resolveFolderAccess(
       crumbs,
       flags,
       id,
-      name: folder ? folderName(folder) : await subjectRootLabel(env, ownerId),
+      name: folder ? folderName(folder) : rootName,
       ownerId,
-      ownerKind: (await isSharedDrive(env, ownerId)) ? "shared_drive" : "user",
+      ownerKind: sharedDrive ? "shared_drive" : "user",
       parentId,
       scheme: row?.scheme ?? null,
       schemeId: row?.scheme_id ?? null,
       schemeTitle: row?.scheme_title ?? null,
+      subjectName,
       ...(isOwner ? { folder } : { folder: undefined, sourceFolder: null }),
     },
     isOwner,

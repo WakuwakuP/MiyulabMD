@@ -6,10 +6,7 @@ import {
   type ArticleSourceWrite,
   createArticleService,
 } from "../services/articles.ts";
-import {
-  canEditSubject,
-  seesSubjectTree,
-} from "../services/drive-membership.ts";
+import { canEditSubject } from "../services/drive-membership.ts";
 
 const articles = createArticleService(env);
 
@@ -31,7 +28,7 @@ export const articleSourceRoutes = new Elysia({
       return { error: "Unauthorized" };
     }
     const ownerId = new URL(request.url).searchParams.get("ownerId") ?? user.id;
-    if (ownerId !== user.id && !(await seesSubjectTree(env, ownerId, user))) {
+    if (ownerId !== user.id && !(await canEditSubject(env, ownerId, user))) {
       set.status = 403;
       return { error: "Forbidden" };
     }

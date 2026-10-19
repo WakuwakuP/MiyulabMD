@@ -441,13 +441,13 @@ function HomePageView({
       }),
     [user?.id],
   );
-  let treeRootHref = "/";
-  if (flags.sharedDrive) {
-    treeRootHref = `/d/${visibleFolder?.ownerId ?? ""}`;
-  } else if (user) {
-    treeRootHref = "/shared";
-  }
-  const treeRootName = flags.sharedDrive ? visibleFolder?.name : undefined;
+  const treeUpHref = user ? "/shared" : "/";
+  const breadcrumbHref = flags.sharedDrive
+    ? `/d/${visibleFolder?.ownerId ?? ""}`
+    : "/";
+  const treeRootName = flags.sharedDrive
+    ? visibleFolder?.subjectName
+    : undefined;
   return (
     <section>
       {showGuestTitle && (
@@ -457,6 +457,7 @@ function HomePageView({
       {cacheWarning && <p role="status">{cacheWarning}</p>}
       {flags.showTree ? (
         <NoteTree
+          breadcrumbHref={breadcrumbHref}
           childrenFolders={childrenFolders}
           crumbs={visibleFolder?.crumbs ?? []}
           currentFolderId={visibleFolder?.id ?? null}
@@ -471,7 +472,7 @@ function HomePageView({
           parentId={visibleFolder?.parentId ?? null}
           pending={flags.listPending}
           placeholder={flags.showPlaceholder}
-          rootHref={treeRootHref}
+          rootHref={treeUpHref}
           rootName={treeRootName}
           showAllNotes={!(user || folderId)}
           showRootCrumb={flags.canAdmin || flags.sharedDrive}

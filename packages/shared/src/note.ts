@@ -271,6 +271,8 @@ export type FolderAccess = EffectiveAccess & {
   id: string | null;
   ownerId?: string;
   ownerKind?: OwnerKind;
+  /** Shared-drive name used as the breadcrumb root. */
+  subjectName?: string;
   name: string;
   parentId: string | null;
   folder?: string;
