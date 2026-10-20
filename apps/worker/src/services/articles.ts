@@ -715,7 +715,11 @@ async function audienceForOwner(
     return audience;
   }
   const drive = await sharedDriveActor(env, ownerId, user);
-  return rejectForeignSelf(user.id, ownerId, drive, audience) ?? audience;
+  const rejected = rejectForeignSelf(user.id, ownerId, drive, audience);
+  if (rejected && value === undefined) {
+    return "editors";
+  }
+  return rejected ?? audience;
 }
 
 async function prepareNewSource(
