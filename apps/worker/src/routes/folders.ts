@@ -16,22 +16,18 @@ import {
 import { instanceFlags } from "../env.ts";
 import {
   buildAccessSnapshot,
-  createOwnedFolder,
+  createMemberFolder,
   deleteFolderPolicy,
   folderViewFlags,
   getFolderById,
   listFolderChildren,
   listPublicSharedFolders,
   listSharedFolders,
-  parentFolderPath,
   replaceGrants,
   resolveFolderAccess,
   upsertFolderPolicy,
 } from "../services/access.ts";
-import {
-  canEditSubject,
-  markDriveFolderKinds,
-} from "../services/drive-membership.ts";
+import { canEditSubject } from "../services/drive-membership.ts";
 import {
   type MoveError,
   moveFolder,
@@ -171,80 +167,6 @@ async function applyFolderAccessPatch(
   return null;
 }
 
-async function folderPathFromName(
-  userId: string,
-  name: string,
-  parentId?: string,
-): Promise<
-  { folder: string; ownerId: string } | { error: string; status: number }
-> {
-  if (!parentId) {
-    return { folder: name, ownerId: userId };
-  }
-  const parent = await getFolderById(env, parentId);
-  const actor = { displayName: null, email: "", id: userId };
-  if (!(parent && (await canEditSubject(env, parent.owner_id, actor)))) {
-    return { error: "Not found", status: 404 };
-  }
-  return {
-    folder: parent.folder ? `${parent.folder}/${name}` : name,
-    ownerId: parent.owner_id,
-  };
-}
-
-async function subjectForParentFolder(
-  userId: string,
-  folder: string,
-  parentId: string,
-): Promise<{ folder: string; ownerId: string }> {
-  const parent = await getFolderById(env, parentId);
-  const actor = { displayName: null, email: "", id: userId };
-  if (!(parent && (await canEditSubject(env, parent.owner_id, actor)))) {
-    return { folder, ownerId: userId };
-  }
-  let nextFolder = folder;
-  if (
-    parent.owner_id !== userId &&
-    parent.folder &&
-    !folder.startsWith(parent.folder)
-  ) {
-    const leaf = folder.split("/").at(-1) ?? folder;
-    nextFolder = `${parent.folder}/${leaf}`;
-  }
-  return { folder: nextFolder, ownerId: parent.owner_id };
-}
-
-async function resolveCreateFolderPath(
-  userId: string,
-  body: { folder?: string; name?: string; parentId?: string } | null,
-): Promise<
-  { folder: string; ownerId: string } | { error: string; status: number }
-> {
-  let folder = normalizeFolder(body?.folder ?? "");
-  let ownerId = userId;
-  if (!folder && body?.name) {
-    const name = normalizeFolderName(body.name);
-    if (!name) {
-      return { error: "フォルダ名が不正です", status: 400 };
-    }
-    const resolved = await folderPathFromName(userId, name, body.parentId);
-    if ("error" in resolved) {
-      return resolved;
-    }
-    folder = resolved.folder;
-    ownerId = resolved.ownerId ?? userId;
-  }
-  if (body?.parentId && folder) {
-    const aligned = await subjectForParentFolder(userId, folder, body.parentId);
-    folder = aligned.folder;
-    ownerId = aligned.ownerId;
-  }
-  if (!folder) {
-    return { error: "マイドライブ自体は作成できません", status: 400 };
-  }
-  return { folder, ownerId };
-}
-
 export const folderRoutes = new Elysia({ prefix: "/api/folders" })
   .get("/tree", async ({ request }) => {
     const user = await readSession(request, env);
@@ -377,45 +299,13 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
       set.status = 201;
       return created.result.folder;
     }
-    const resolved = await resolveCreateFolderPath(user.id, body);
-    if ("error" in resolved) {
-      set.status = resolved.status;
-      return { error: resolved.error };
+    const created = await createMemberFolder(env, user, body);
+    if (created.kind !== "ok") {
+      set.status = created.status;
+      return { error: created.error };
     }
-
-    const parent = parentFolderPath(resolved.folder);
-    if (parent) {
-      const parentAccess = await resolveFolderAccess(
-        env,
-        resolved.ownerId,
-        parent,
-        user,
-      );
-      const allowed =
-        resolved.ownerId === user.id
-          ? parentAccess.flags.canAdmin
-          : parentAccess.flags.canEdit;
-      if (!allowed) {
-        set.status = 403;
-        return { error: "このフォルダには作成権限がありません" };
-      }
-    } else if (
-      resolved.ownerId !== user.id &&
-      !(await canEditSubject(env, resolved.ownerId, user))
-    ) {
-      set.status = 403;
-      return { error: "このフォルダには作成権限がありません" };
-    }
-
-    const access = await createOwnedFolder(
-      env,
-      resolved.ownerId,
-      resolved.folder,
-      user,
-    );
-    await markDriveFolderKinds(env, resolved.ownerId);
     set.status = 201;
-    return access;
+    return created.folder;
   })
   .patch("/", async ({ request, set }) => {
     const user = await readSession(request, env);
