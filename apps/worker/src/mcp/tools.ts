@@ -25,6 +25,7 @@ import {
   actorFromSessionUser,
 } from "../durable-objects/history-edit.ts";
 import type { InsertPosition } from "../durable-objects/markdown-edit.ts";
+import { createMemberFolder } from "../services/access.ts";
 import {
   type DeleteEmptyFolderOutcome,
   deleteEmptyFolder,
@@ -64,6 +65,7 @@ import {
   setFolderScheme,
   validateSchemeTree,
 } from "../services/schemes.ts";
+import { listSharedDrives } from "../services/shared-drives.ts";
 
 import { featureConfig } from "./feature-config.ts";
 import { getMcpRequestTarget } from "./request-target.ts";
@@ -627,6 +629,18 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
   );
 
   registerTool(
+    "list_shared_drives",
+    toolDefinitions.list_shared_drives,
+    withToolTiming("list_shared_drives", async () => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      return textResult({ drives: await listSharedDrives(env, user) });
+    }),
+  );
+
+  registerTool(
     "get_note",
     toolDefinitions.get_note,
     withToolTiming("get_note", async (args) => readTool("get_note", args)),
@@ -641,6 +655,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
         title,
         markdown,
         folder,
+        folder_id,
         inheritAccess,
         readScope,
         writeScope,
@@ -652,6 +667,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
 
         const created = await notes.create(user, {
           folder,
+          folderId: folder_id,
           inheritAccess,
           markdown,
           readScope,
@@ -668,6 +684,25 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
         });
       },
     ),
+  );
+
+  registerTool(
+    "create_folder",
+    toolDefinitions.create_folder,
+    withToolTiming("create_folder", async ({ name, parent_id }) => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      const created = await createMemberFolder(env, user, {
+        name,
+        parentId: parent_id,
+      });
+      if (created.kind !== "ok") {
+        return textError(created.error);
+      }
+      return textResult({ folder: created.folder });
+    }),
   );
 
   registerTool(

@@ -59,9 +59,9 @@ Workers Free の HTTP CPU 制限は 1 リクエスト 10 ms。代表的な読み
 
 本番の `handleMcp` では、妥当な Legacy の `initialize` / `ping` / 通知 / `tools/list` は SDK のサーバー構築前に返す。`tools/list` の説明・スキーマ・順序は `tool-catalog.ts` をその経路と共有する。Modern と、fast path が検証に落とすリクエストは factory の catalog / bootstrap サーバーに進む。
 
-`tools/list` は `tool-catalog.ts` の不変な説明・入力スキーマから一覧を返す。SDK 経路では公開 API の `Server.setRequestHandler("tools/list", ...)` を使い、実行コールバックやノートサービスを作らない。機能設定は毎回 DB から読み、現在のユーザーに対して有効なツールだけを抽出する。最大 38 回の `registerTool` が 0 回になり、登録時のスキーマ走査も省ける。説明・スキーマ・順序・capability は従来の全登録と一致することを、全 8 通りの機能設定と Legacy / Modern 両方の実 SDK 応答で差分検証している。
+`tools/list` は `tool-catalog.ts` の不変な説明・入力スキーマから一覧を返す。SDK 経路では公開 API の `Server.setRequestHandler("tools/list", ...)` を使い、実行コールバックやノートサービスを作らない。機能設定は毎回 DB から読み、現在のユーザーに対して有効なツールだけを抽出する。最大 40 回の `registerTool` が 0 回になり、登録時のスキーマ走査も省ける。説明・スキーマ・順序・capability は従来の全登録と一致することを、全 8 通りの機能設定と Legacy / Modern 両方の実 SDK 応答で差分検証している。
 
-小さく既知の `tools/call` は、最大 38 ツールのうち呼び出し対象だけを SDK に登録する。通常の 26 ツールは機能設定によって利用可否が変わらないため、機能設定の照会も省く。共通部分の D1 呼び出しは認証の 1 回になり、実際のツール内で行う DB / 権限確認は従来どおり実行する。
+小さく既知の `tools/call` は、最大 40 ツールのうち呼び出し対象だけを SDK に登録する。通常の 28 ツールは機能設定によって利用可否が変わらないため、機能設定の照会も省く。共通部分の D1 呼び出しは認証の 1 回になり、実際のツール内で行う DB / 権限確認は従来どおり実行する。
 
 PARA / medallion / scheme 系の 12 ツールと `tools/list` は毎回現在のユーザー設定を DB で確認する。無効化されたツールは従来の全登録に戻し、SDK の「tool not found」応答を維持する。サーバー・認証・機能設定はキャッシュしない。未知のツール名（`__proto__` なども含む）も全登録に戻す。
 
@@ -85,7 +85,7 @@ node --experimental-strip-types scripts/benchmark-mcp.mjs --agents --modern --co
 node --experimental-strip-types scripts/benchmark-search.mjs
 ```
 
-`benchmark-mcp.mjs` は実際の MCP SDK に各メソッドを 220 回送り、20 回のウォームアップ後の 200 回について Node の CPU / 経過時間の中央値と機能設定の DB 読み取り回数を出す。38 ツールを有効にし、D1 と認証アクセサーだけをテスト用に置き換えている。ツール呼び出しは更新前の確認エラー（`set_edit_lock`）と SDK の入力検証エラー（`list_folder_entries` / `para_list`）を使い、DB・DO の実処理を含まない。タイミング wrapper は実行し、イベントの stdout 出力だけを抑制する。`--full-registration` はリクエスト情報を factory に渡さず、常に全登録する比較モード。比較対象の `tools.ts` のパスを引数に渡す方法も維持する。`firstRequestCpuMs` は同じ Node プロセスで各メソッドを最初に実行した診断値であり、独立した Workers のコールドスタート計測ではない。
+`benchmark-mcp.mjs` は実際の MCP SDK に各メソッドを 220 回送り、20 回のウォームアップ後の 200 回について Node の CPU / 経過時間の中央値と機能設定の DB 読み取り回数を出す。全ツールを有効にし、D1 と認証アクセサーだけをテスト用に置き換えている。ツール呼び出しは更新前の確認エラー（`set_edit_lock`）と SDK の入力検証エラー（`list_folder_entries` / `para_list`）を使い、DB・DO の実処理を含まない。タイミング wrapper は実行し、イベントの stdout 出力だけを抑制する。`--full-registration` はリクエスト情報を factory に渡さず、常に全登録する比較モード。比較対象の `tools.ts` のパスを引数に渡す方法も維持する。`firstRequestCpuMs` は同じ Node プロセスで各メソッドを最初に実行した診断値であり、独立した Workers のコールドスタート計測ではない。
 
 `benchmark-search.mjs` は約 135 万文字・20 ノートの固定文字列スキャンを、元の行単位 matcher と新しい indexed matcher で比較する。DB・権限・MCP・通信処理は含まない。
 
