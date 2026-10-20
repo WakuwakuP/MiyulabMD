@@ -255,7 +255,11 @@ function useHomeHeader(
   useEffect(() => {
     setHeader({
       actions: user ? (
-        <DrivePlaceNav placeSettled={placeSettled} selection={selection} />
+        <DrivePlaceNav
+          key={user.id}
+          placeSettled={placeSettled}
+          selection={selection}
+        />
       ) : null,
       end: (
         <HomeHeaderEnd

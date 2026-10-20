@@ -1,3 +1,4 @@
+import { clearDrivePlace } from "./drive-place.ts";
 import { clearEditCache, listEditCacheNoteIds } from "./edit-cache.ts";
 import { invalidateFolderCache, invalidateNotesCache } from "./list-cache.ts";
 import { invalidateNoteCache } from "./note-cache.ts";
@@ -64,6 +65,7 @@ function emit(event: IdentityEvent): void {
 
 function clearMemory(): void {
   // These older memory caches are realm-wide, not partitioned by actor.
+  clearDrivePlace();
   invalidateNoteCache();
   invalidateNotesCache();
   invalidateFolderCache();

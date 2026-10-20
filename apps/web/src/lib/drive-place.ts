@@ -6,7 +6,7 @@ export type DrivePlace =
   | { kind: "mine"; path: string }
   | { id: string; kind: "drive"; path: string };
 
-type StorageLike = Pick<Storage, "getItem" | "setItem">;
+type StorageLike = Pick<Storage, "getItem" | "removeItem" | "setItem">;
 
 let memory: DrivePlace | null = null;
 
@@ -22,6 +22,14 @@ function safeGet(storage: StorageLike | null, key: string) {
     return storage?.getItem(key) ?? null;
   } catch {
     return null;
+  }
+}
+
+function safeRemove(storage: StorageLike | null, key: string) {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    // ログアウト時に消せなくても、メモリ上の選択は捨てる。
   }
 }
 
@@ -129,6 +137,12 @@ export function writeDrivePlace(
   }
   const store = storage === undefined ? sessionStore() : storage;
   safeSet(store, STORAGE_KEY, JSON.stringify(normalized));
+}
+
+export function clearDrivePlace(storage?: StorageLike | null) {
+  memory = null;
+  const store = storage === undefined ? sessionStore() : storage;
+  safeRemove(store, STORAGE_KEY);
 }
 
 export function replaceDrivePlace(

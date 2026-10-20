@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  clearDrivePlace,
   drivePlaceFromSelection,
   drivePlacePath,
   readDrivePlace,
@@ -12,6 +13,9 @@ function memoryStorage() {
   return {
     getItem(key: string) {
       return values.get(key) ?? null;
+    },
+    removeItem(key: string) {
+      values.delete(key);
     },
     setItem(key: string, value: string) {
       values.set(key, value);
@@ -87,6 +91,16 @@ test("stale route does not replace the open shared drive", () => {
     { id: "drive-1", kind: "drive", path: "/f/folder-1" },
   );
   assert.equal(drivePlaceFromSelection({ kind: "mine" }, "/d/drive-1"), null);
+});
+
+test("clearDrivePlace drops the previous user selection", () => {
+  const storage = memoryStorage();
+  writeDrivePlace(
+    { id: "drive-1", kind: "drive", path: "/d/drive-1" },
+    storage,
+  );
+  clearDrivePlace(storage);
+  assert.deepEqual(readDrivePlace(storage), { kind: "mine", path: "/" });
 });
 
 test("drive place ignores malformed storage", () => {
