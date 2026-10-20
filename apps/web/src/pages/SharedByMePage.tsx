@@ -56,7 +56,7 @@ export function SharedByMePage() {
   useEffect(() => {
     setHeader({
       actions: user ? (
-        <DrivePlaceNav selection={{ kind: "shared-by-me" }} />
+        <DrivePlaceNav key={user.id} selection={{ kind: "shared-by-me" }} />
       ) : null,
       folder: null,
     });

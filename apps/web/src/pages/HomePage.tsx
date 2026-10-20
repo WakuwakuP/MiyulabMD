@@ -242,6 +242,7 @@ function useHomeHeader(
   visibleFolder: FolderAccess | null,
   folderPending: boolean,
   selection: DriveSelection,
+  placeSettled: boolean,
   canCreateFolder: boolean,
   canCreateNote: boolean,
   membersOnly: boolean,
@@ -253,7 +254,13 @@ function useHomeHeader(
 ) {
   useEffect(() => {
     setHeader({
-      actions: user ? <DrivePlaceNav selection={selection} /> : null,
+      actions: user ? (
+        <DrivePlaceNav
+          key={user.id}
+          placeSettled={placeSettled}
+          selection={selection}
+        />
+      ) : null,
       end: (
         <HomeHeaderEnd
           canCreateFolder={canCreateFolder}
@@ -279,6 +286,7 @@ function useHomeHeader(
     folderPending,
     folderId,
     selection,
+    placeSettled,
     canCreateFolder,
     canCreateNote,
     membersOnly,
@@ -573,6 +581,17 @@ function HomePageView({
       {dialogs}
     </section>
   );
+}
+
+function placeSettledForRoute(
+  driveId: string | undefined,
+  routeFolderId: string | undefined,
+  visibleFolderId: string | null | undefined,
+) {
+  if (driveId || !routeFolderId) {
+    return true;
+  }
+  return visibleFolderId === routeFolderId;
 }
 
 function folderIdForRoute(
@@ -1034,13 +1053,27 @@ function NetworkHomePage() {
   }, [visibleFolder, navigate]);
 
   const selection = useMemo<DriveSelection>(() => {
-    if (driveId || visibleFolder?.ownerKind === "shared_drive") {
+    if (driveId) {
       return {
-        id: driveId ?? visibleFolder?.ownerId ?? "",
+        id: driveId,
         kind: "drive",
       };
     }
-    if (flags.canAdmin || !routeFolderId) {
+    // `/` はマイドライブの根。前のフォルダ読み込みが残っていても、こちらを先に確定する。
+    if (!routeFolderId) {
+      return { kind: "mine" };
+    }
+    if (
+      visibleFolder?.id === routeFolderId &&
+      visibleFolder.ownerKind === "shared_drive" &&
+      visibleFolder.ownerId
+    ) {
+      return {
+        id: visibleFolder.ownerId,
+        kind: "drive",
+      };
+    }
+    if (flags.canAdmin || visibleFolder?.id !== routeFolderId) {
       return { kind: "mine" };
     }
     return { kind: "shared" };
@@ -1048,9 +1081,15 @@ function NetworkHomePage() {
     driveId,
     flags.canAdmin,
     routeFolderId,
+    visibleFolder?.id,
     visibleFolder?.ownerId,
     visibleFolder?.ownerKind,
   ]);
+  const placeSettled = placeSettledForRoute(
+    driveId,
+    routeFolderId,
+    visibleFolder?.id,
+  );
   const handleMembers = useCallback(() => {
     setMembersOpen(true);
   }, []);
@@ -1062,6 +1101,7 @@ function NetworkHomePage() {
     visibleFolder,
     folderPending,
     selection,
+    placeSettled,
     flags.sharedDrive ? flags.canMutate : flags.canAdmin,
     flags.sharedDrive ? flags.canMutate : true,
     flags.sharedDrive,
