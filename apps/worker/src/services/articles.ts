@@ -286,10 +286,22 @@ function audienceFromInput(
 function rejectForeignSelf(
   userId: string,
   ownerId: string,
-  sharedDrive: boolean,
+  drive: { isManager: boolean } | null,
   audience: ArticleUpdateAudience,
 ): SourceWriteError | null {
-  if (userId === ownerId || sharedDrive || audience === "editors") {
+  if (audience === "editors") {
+    return null;
+  }
+  if (drive) {
+    if (drive.isManager) {
+      return null;
+    }
+    return {
+      error: "自分のみにできるのは共有ドライブの管理者です",
+      status: 403,
+    };
+  }
+  if (userId === ownerId) {
     return null;
   }
   return {
@@ -702,7 +714,7 @@ async function audienceForOwner(
   if (isWriteError(audience)) {
     return audience;
   }
-  const drive = await isSharedDrive(env, ownerId);
+  const drive = await sharedDriveActor(env, ownerId, user);
   return rejectForeignSelf(user.id, ownerId, drive, audience) ?? audience;
 }
 
