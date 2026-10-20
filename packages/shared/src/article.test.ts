@@ -6,6 +6,8 @@ import {
   articleEditUrl,
   articleSlug,
   canDispatchArticleSource,
+  canDispatchSharedDriveSource,
+  canManageSharedDriveSource,
   canOfferArticleDispatch,
   isArticleSourceDirty,
   matchArticleSource,
@@ -13,6 +15,7 @@ import {
   parseArticleListQuery,
   parseArticleSchema,
   resolveArticleListFolder,
+  translateArticleUpdateAudience,
 } from "./article.ts";
 
 test("parseArticleSchema rejects duplicate keys and bad types", () => {
@@ -169,6 +172,64 @@ test("site update is the owner or people who can edit the folder", () => {
       sourceCanEdit: true,
     }),
     true,
+  );
+});
+
+test("shared drive webhook follows the drive role and the source setting", () => {
+  assert.equal(canManageSharedDriveSource("manager"), true);
+  assert.equal(canManageSharedDriveSource("editor"), false);
+  assert.equal(
+    canDispatchSharedDriveSource({ audience: "managers", role: "manager" }),
+    true,
+  );
+  assert.equal(
+    canDispatchSharedDriveSource({ audience: "managers", role: "editor" }),
+    false,
+  );
+  assert.equal(
+    canDispatchSharedDriveSource({
+      audience: "managers_or_editors",
+      role: "editor",
+    }),
+    true,
+  );
+  assert.equal(
+    canDispatchSharedDriveSource({
+      audience: "managers_or_editors",
+      role: "viewer",
+    }),
+    false,
+  );
+});
+
+test("article audience translates when the subject kind changes", () => {
+  assert.equal(
+    translateArticleUpdateAudience("user", "shared_drive", "self"),
+    "managers",
+  );
+  assert.equal(
+    translateArticleUpdateAudience("user", "shared_drive", "editors"),
+    "managers_or_editors",
+  );
+  assert.equal(
+    translateArticleUpdateAudience("shared_drive", "user", "managers"),
+    "self",
+  );
+  assert.equal(
+    translateArticleUpdateAudience(
+      "shared_drive",
+      "user",
+      "managers_or_editors",
+    ),
+    "editors",
+  );
+  assert.equal(
+    translateArticleUpdateAudience(
+      "shared_drive",
+      "shared_drive",
+      "managers_or_editors",
+    ),
+    "managers_or_editors",
   );
 });
 

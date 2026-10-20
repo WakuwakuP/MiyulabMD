@@ -8,6 +8,7 @@ import {
   listPublicSharedFolders,
   listSharedFolders,
 } from "./access.ts";
+import { createArticleService } from "./articles.ts";
 import { moveFolder } from "./move.ts";
 import { createNoteService } from "./notes.ts";
 import {
@@ -41,6 +42,8 @@ const MIGRATIONS = [
   "0018_scheme_root.sql",
   "0021_shared_drives.sql",
   "0022_shared_drive_domains.sql",
+  "0023_article_update_audience.sql",
+  "0024_shared_drive_article_audience.sql",
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -724,4 +727,144 @@ test("editors can add a folder and a note inside a shared drive", async (t) => {
   assert.equal(note.ownerId, created.result.id);
   assert.equal(note.ownerKind, "shared_drive");
   assert.equal(note.folder, "資料");
+});
+
+test("a manager can source the drive root and migrate a my-drive site", async (t) => {
+  const { editor, env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const notes = createNoteService(env);
+  const created = await notes.create(owner, {
+    folder: "blog",
+    markdown: "# 記事",
+  });
+  assert.ok(!("error" in created));
+  if ("error" in created) {
+    return;
+  }
+  const articles = createArticleService(env);
+  const source = await articles.createSource(owner, owner.id, {
+    folder: "blog",
+    name: "ブログ",
+    schema: [],
+    updateAudience: "editors",
+    webhookAuthorization: "Bearer secret",
+    webhookUrl: "https://example.com/hook",
+  });
+  assert.ok(!("error" in source));
+  if ("error" in source) {
+    return;
+  }
+  assert.equal(source.ownerKind, "user");
+
+  const foreign = await createSharedDrive(env, editor, "編集者のドライブ");
+  assert.equal(foreign.kind, "ok");
+  if (foreign.kind !== "ok") {
+    return;
+  }
+  assert.equal(
+    (
+      await inviteDriveMember(
+        env,
+        foreign.result.id,
+        owner.email,
+        "editor",
+        editor,
+      )
+    ).kind,
+    "ok",
+  );
+  const folderId = source.folderId;
+  assert.ok(folderId);
+  if (!folderId) {
+    return;
+  }
+  const blocked = await moveFolder(
+    env,
+    folderId,
+    { destFolderId: foreign.result.rootFolderId },
+    owner,
+  );
+  assert.equal(blocked.kind, "invalid");
+  if (blocked.kind === "invalid") {
+    assert.equal(blocked.status, 403);
+  }
+
+  const drive = await createSharedDrive(env, owner, "研究室");
+  assert.equal(drive.kind, "ok");
+  if (drive.kind !== "ok") {
+    return;
+  }
+  const dry = await moveFolder(
+    env,
+    folderId,
+    { destFolderId: drive.result.rootFolderId, dryRun: true },
+    owner,
+  );
+  assert.equal(dry.kind, "ok");
+  if (dry.kind !== "ok") {
+    return;
+  }
+  assert.deepEqual(dry.result.audienceTranslations, [
+    { from: "editors", to: "managers_or_editors" },
+  ]);
+  const moved = await moveFolder(
+    env,
+    folderId,
+    { destFolderId: drive.result.rootFolderId },
+    owner,
+  );
+  assert.equal(moved.kind, "ok");
+  const row = sqlite
+    .prepare(
+      "SELECT owner_id, folder, update_audience, webhook_url, webhook_authorization FROM article_sources WHERE id = ?",
+    )
+    .get(source.id) as {
+    folder: string;
+    owner_id: string;
+    update_audience: string;
+    webhook_authorization: string;
+    webhook_url: string;
+  };
+  assert.equal(row.owner_id, drive.result.id);
+  assert.equal(row.folder, "blog");
+  assert.equal(row.update_audience, "managers_or_editors");
+  assert.equal(row.webhook_url, "https://example.com/hook");
+  assert.equal(row.webhook_authorization, "Bearer secret");
+
+  const root = await articles.createSource(owner, drive.result.id, {
+    folderId: drive.result.rootFolderId,
+    name: "ドライブ全体",
+    schema: [],
+    updateAudience: "managers",
+  });
+  assert.ok(!("error" in root));
+  if ("error" in root) {
+    return;
+  }
+  assert.equal(root.folder, "");
+  assert.equal(root.ownerKind, "shared_drive");
+  assert.equal(root.webhookUrl, null);
+
+  const invited = await inviteDriveMember(
+    env,
+    drive.result.id,
+    editor.email,
+    "editor",
+    owner,
+  );
+  assert.equal(invited.kind, "ok");
+  const denied = await articles.createSource(editor, drive.result.id, {
+    folder: "drafts",
+    name: "下書き",
+    schema: [],
+  });
+  assert.ok("error" in denied);
+  if ("error" in denied) {
+    assert.equal(denied.status, 403);
+  }
+  const visible = await articles.listSources(drive.result.id, editor);
+  const migrated = visible.find((item) => item.id === source.id);
+  assert.equal(migrated?.canDispatch, true);
+  assert.equal(migrated?.webhookUrl, null);
+  assert.equal(migrated?.webhookAuthorizationSet, false);
 });

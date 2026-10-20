@@ -190,6 +190,8 @@ export type MoveFolderResult = {
   to: string;
   plan: MovePlan;
   dryRun: boolean;
+  /** 主体をまたいだとき、配下の記事ソースの実行範囲の読み替え。 */
+  audienceTranslations?: Array<{ from: string; to: string }>;
 };
 
 export type MoveNotesResult = {

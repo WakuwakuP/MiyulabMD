@@ -19,6 +19,7 @@ type Props = {
   folder?: string | null;
   folderId?: string | null;
   noteId?: string | null;
+  ownerId?: string | null;
   /** サーバーと疎通できずローカルキャッシュで表示しているとき true。 */
   offline?: boolean;
   user: SessionUser | null;
@@ -34,6 +35,7 @@ export function AppHeader({
   folder,
   folderId,
   noteId,
+  ownerId,
   offline,
   user,
   loading,
@@ -107,6 +109,7 @@ export function AppHeader({
           folder={folder}
           folderId={folderId}
           noteId={noteId}
+          ownerId={ownerId}
           user={user}
         />
         {end}

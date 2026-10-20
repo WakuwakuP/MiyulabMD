@@ -8,7 +8,9 @@ import {
   type MoveNotesResult,
   type MovePlan,
   normalizeFolder,
+  type OwnerKind,
   type SessionUser,
+  translateArticleUpdateAudience,
 } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
@@ -22,6 +24,7 @@ import {
 } from "./access.ts";
 import {
   canEditSubject,
+  driveRoleFor,
   isSharedDrive,
   markDriveFolderKinds,
 } from "./drive-membership.ts";
@@ -256,6 +259,47 @@ async function strippedCounts(env: Env, ownerId: string, path: string) {
   return { grants: grantCount, medallion, para, policies, scheme };
 }
 
+async function sourceOwnerKind(env: Env, ownerId: string): Promise<OwnerKind> {
+  return (await isSharedDrive(env, ownerId)) ? "shared_drive" : "user";
+}
+
+async function listAudienceTranslations(
+  env: Env,
+  srcOwner: string,
+  from: string,
+  destKind: OwnerKind,
+): Promise<Array<{ from: string; to: string }>> {
+  const srcKind = await sourceOwnerKind(env, srcOwner);
+  if (srcKind === destKind) {
+    return [];
+  }
+  const subtree = folderSubtreeFilter(from);
+  const rows = await db(env)
+    .prepare(
+      `SELECT DISTINCT update_audience AS audience
+         FROM article_sources
+        WHERE owner_id = ? AND ${subtree.sql}`,
+    )
+    .bind(srcOwner, ...subtree.binds)
+    .all<{ audience: string | null }>();
+  const seen = new Set<string>();
+  const translations: Array<{ from: string; to: string }> = [];
+  for (const row of rows.results ?? []) {
+    const next = translateArticleUpdateAudience(
+      srcKind,
+      destKind,
+      row.audience,
+    );
+    const key = `${row.audience ?? ""}:${next}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    translations.push({ from: row.audience ?? "self", to: next });
+  }
+  return translations;
+}
+
 async function transferFolderTree(
   env: Env,
   srcOwner: string,
@@ -268,6 +312,7 @@ async function transferFolderTree(
   const destSubtree = folderSubtreeFilter(to);
   const rewrite = folderRewriteAssignment(from, to);
   const grants = folderSubtreeFilter(from, "target_key");
+  const srcKind = await sourceOwnerKind(env, srcOwner);
   await d1.batch([
     ...ensureFolderStatements(env, dest.owner_id, parentFolderPath(to)),
     d1
@@ -317,10 +362,33 @@ async function transferFolderTree(
     d1
       .prepare(
         `UPDATE article_sources
-            SET owner_id = ?, ${rewrite.sql}
+            SET owner_id = ?, ${rewrite.sql},
+                update_audience = CASE
+                  WHEN ? = 'user' AND ? = 'shared_drive' THEN
+                    CASE update_audience
+                      WHEN 'editors' THEN 'managers_or_editors'
+                      ELSE 'managers'
+                    END
+                  WHEN ? = 'shared_drive' AND ? = 'user' THEN
+                    CASE
+                      WHEN update_audience IN ('managers_or_editors', 'editors')
+                        THEN 'editors'
+                      ELSE 'self'
+                    END
+                  ELSE update_audience
+                END
           WHERE owner_id = ? AND ${subtree.sql}`,
       )
-      .bind(dest.owner_id, ...rewrite.binds, srcOwner, ...subtree.binds),
+      .bind(
+        dest.owner_id,
+        ...rewrite.binds,
+        srcKind,
+        dest.owner_kind,
+        srcKind,
+        dest.owner_kind,
+        srcOwner,
+        ...subtree.binds,
+      ),
     d1
       .prepare(
         `DELETE FROM access_grants
@@ -376,7 +444,7 @@ export async function moveFolder(
       result: { dryRun, from: src.folder, plan, to },
     };
   }
-  return commitFolderMove(env, src, dest, to, sameSubject, dryRun);
+  return commitFolderMove(env, src, dest, to, sameSubject, dryRun, user);
 }
 
 async function commitFolderMove(
@@ -386,6 +454,7 @@ async function commitFolderMove(
   to: string,
   sameSubject: boolean,
   dryRun: boolean,
+  user: SessionUser | undefined,
 ): Promise<MoveError | MoveOk<MoveFolderResult>> {
   if (await getFolderByPath(env, dest.owner_id, to)) {
     return invalid("同じ名前のフォルダが既にあります", 409);
@@ -398,6 +467,13 @@ async function commitFolderMove(
     return invalid("編集ロック中のノートを含むため移動できません", 409);
   }
   if (!sameSubject) {
+    if (
+      dest.owner_kind === "shared_drive" &&
+      plan.articleSources > 0 &&
+      (await driveRoleFor(env, dest.owner_id, user)) !== "manager"
+    ) {
+      return invalid("記事ソースを共有ドライブへ移せるのは管理者です", 403);
+    }
     return transferAcrossSubjects(env, src, dest, to, dryRun, plan);
   }
   if (!dryRun) {
@@ -422,10 +498,25 @@ async function transferAcrossSubjects(
     return invalid(blocked, 409);
   }
   plan.stripped = await strippedCounts(env, src.owner_id, src.folder);
+  const audienceTranslations = await listAudienceTranslations(
+    env,
+    src.owner_id,
+    src.folder,
+    dest.owner_kind,
+  );
   if (!dryRun) {
     await transferFolderTree(env, src.owner_id, src.folder, dest, to);
   }
-  return { kind: "ok", result: { dryRun, from: src.folder, plan, to } };
+  return {
+    kind: "ok",
+    result: {
+      audienceTranslations,
+      dryRun,
+      from: src.folder,
+      plan,
+      to,
+    },
+  };
 }
 
 export type MoveFolderContentsInput = {
@@ -559,15 +650,19 @@ export async function moveFolderContents(
   }
 
   const notes: MoveNoteItem[] = [];
-  const folders: MoveFolderItem[] = [];
   for (const row of noteRows.results ?? []) {
     notes.push(await moveOneNote(env, row, dest, destPath, dryRun));
   }
-  for (const child of folderRows) {
-    folders.push(
-      await moveChildFolder(env, src.owner_id, child, dest, destPath, dryRun),
-    );
-  }
+  const folders = await moveListedChildren(
+    env,
+    src.owner_id,
+    folderRows,
+    childPlans,
+    dest,
+    destPath,
+    dryRun,
+    user,
+  );
   const summary = summarizeMove([...notes, ...folders]);
   const destFolderId = await currentDestId(env, dest, dryRun, summary.moved);
   return {
@@ -595,6 +690,43 @@ async function currentDestId(
   // A delete may have won before the first move batch recreated the path.
   // Return the current UUID so clients can still navigate to the destination.
   return (await getFolderByPath(env, dest.owner_id, dest.folder))?.id ?? null;
+}
+
+async function moveListedChildren(
+  env: Env,
+  ownerId: string,
+  children: { id: string; folder: string }[],
+  plans: Map<string, MovePlan>,
+  dest: DestFolder,
+  destPath: string,
+  dryRun: boolean,
+  user: SessionUser | undefined,
+): Promise<MoveFolderItem[]> {
+  const crossesIntoDrive =
+    dest.owner_kind === "shared_drive" && dest.owner_id !== ownerId;
+  const driveManager =
+    !crossesIntoDrive ||
+    (await driveRoleFor(env, dest.owner_id, user)) === "manager";
+  const folders: MoveFolderItem[] = [];
+  for (const child of children) {
+    if (
+      crossesIntoDrive &&
+      !driveManager &&
+      (plans.get(child.id)?.articleSources ?? 0) > 0
+    ) {
+      folders.push({
+        folderId: child.id,
+        from: child.folder,
+        reason: "denied",
+        status: "failed",
+      });
+      continue;
+    }
+    folders.push(
+      await moveChildFolder(env, ownerId, child, dest, destPath, dryRun),
+    );
+  }
+  return folders;
 }
 
 async function moveChildFolder(

@@ -24,6 +24,8 @@ export type AppShellContext = {
       folderId?: string | null;
       /** リンク共有ノートは folderId を隠すので、ノート ID で更新可否を聞く。 */
       noteId?: string | null;
+      /** 見ている主体。共有ドライブではそのドライブの記事ソースだけを対象にする。 */
+      ownerId?: string | null;
     } | null,
   ) => void;
 };
