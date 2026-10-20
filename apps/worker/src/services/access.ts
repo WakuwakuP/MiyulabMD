@@ -1726,7 +1726,7 @@ export async function createMemberFolder(
   return { folder, kind: "ok" };
 }
 
-export async function createOwnedFolder(
+async function createOwnedFolder(
   env: Env,
   ownerId: string,
   folder: string,
