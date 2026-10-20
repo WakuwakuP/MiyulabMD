@@ -1,16 +1,24 @@
+import { DurableObject } from "cloudflare:workers";
 import {
   type DiagramCheckBlock,
   validateDiagramBlocks,
 } from "./diagram-check/validate.ts";
 
-/**
- * Binding-only Worker that syntax-checks mermaid/PlantUML diagram blocks on
- * behalf of the main worker's MCP write tools. The engines are far too heavy
- * for the app worker bundle (~6 MiB compressed), so they live here behind a
- * service binding — the same pattern as miyulabmd-og-fetch.
- */
+type DiagramCheckEnv = {
+  DIAGRAM_CHECK_ROOM: DurableObjectNamespace<DiagramCheckRoom>;
+};
+
+// Stream the body through: JSON parsing and engine CPU belong to the DO.
 export default {
-  async fetch(request: Request): Promise<Response> {
+  fetch(request: Request, env: DiagramCheckEnv): Promise<Response> {
+    const id = env.DIAGRAM_CHECK_ROOM.newUniqueId();
+    return env.DIAGRAM_CHECK_ROOM.get(id).fetch(request);
+  },
+};
+
+// Each check gets its own object so unrelated notes never queue behind it.
+export class DiagramCheckRoom extends DurableObject {
+  override async fetch(request: Request): Promise<Response> {
     if (request.method !== "POST") {
       return new Response("POST only", { status: 405 });
     }
@@ -33,5 +41,5 @@ export default {
     );
     const result = await validateDiagramBlocks(clean);
     return Response.json(result);
-  },
-};
+  }
+}
