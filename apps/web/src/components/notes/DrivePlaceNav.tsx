@@ -7,10 +7,25 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import {
+  type FormEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useLocation, useNavigate } from "react-router";
 import { useDismiss } from "../../hooks/use-dismiss.ts";
 import { createSharedDrive, fetchSharedDrives } from "../../lib/api.ts";
+import {
+  type DrivePlace,
+  drivePlaceFromSelection,
+  drivePlacePath,
+  readDrivePlace,
+  replaceDrivePlace,
+  writeDrivePlace,
+} from "../../lib/drive-place.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -57,37 +72,79 @@ const grantPlaces: {
 
 export function DrivePlaceNav({ selection }: { selection: DriveSelection }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const rootRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [drives, setDrives] = useState<SharedDriveSummary[]>([]);
+  const [drivesLoaded, setDrivesLoaded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const drivePressed = selection.kind === "mine" || selection.kind === "drive";
+  const [place, setPlace] = useState<DrivePlace>(
+    () => drivePlaceFromSelection(selection, pathname) ?? readDrivePlace(),
+  );
+  const onDrivePage = selection.kind === "mine" || selection.kind === "drive";
+  const displayed = useMemo(
+    () => drivePlaceFromSelection(selection, pathname) ?? place,
+    [pathname, place, selection],
+  );
   const current = drives.find(
-    (drive) => selection.kind === "drive" && drive.id === selection.id,
+    (drive) => displayed.kind === "drive" && drive.id === displayed.id,
   );
   const driveLabel =
-    selection.kind === "drive"
+    displayed.kind === "drive"
       ? (current?.name ?? "共有ドライブ")
       : "マイドライブ";
-  const DriveIcon = selection.kind === "drive" ? HardDrive : UserRound;
+  const DriveIcon = displayed.kind === "drive" ? HardDrive : UserRound;
   useDismiss(menuOpen, () => setMenuOpen(false), rootRef);
+
+  useEffect(() => {
+    const next = drivePlaceFromSelection(selection, pathname);
+    if (!next) {
+      return;
+    }
+    setPlace((currentPlace) => replaceDrivePlace(currentPlace, next));
+    writeDrivePlace(next);
+  }, [pathname, selection]);
 
   useEffect(() => {
     let cancelled = false;
     void fetchSharedDrives().then((result) => {
-      if (!cancelled && result.ok) {
-        setDrives(result.data);
+      if (cancelled || !result.ok) {
+        return;
       }
+      setDrives(result.data);
+      setDrivesLoaded(true);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  useEffect(() => {
+    if (!(drivesLoaded && displayed.kind === "drive")) {
+      return;
+    }
+    if (drives.some((drive) => drive.id === displayed.id)) {
+      return;
+    }
+    if (selection.kind === "drive" && selection.id === displayed.id) {
+      return;
+    }
+    const next: DrivePlace = { kind: "mine", path: "/" };
+    setPlace(next);
+    writeDrivePlace(next);
+  }, [displayed, drives, drivesLoaded, selection]);
+
+  function remember(next: DrivePlace) {
+    setPlace(next);
+    writeDrivePlace(next);
+    setMenuOpen(false);
+    navigate(drivePlacePath(next));
+  }
+
   function onDriveClick() {
-    if (!drivePressed) {
+    if (!onDrivePage) {
       setMenuOpen(false);
-      navigate("/");
+      navigate(drivePlacePath(displayed));
       return;
     }
     setMenuOpen((open) => !open);
@@ -99,67 +156,83 @@ export function DrivePlaceNav({ selection }: { selection: DriveSelection }) {
   }
 
   return (
-    <div className="relative" ref={rootRef}>
+    <div className="flex items-center gap-1.5">
+      <div className="relative" ref={rootRef}>
+        <Switch
+          items={[
+            {
+              ariaLabel: "ドライブ",
+              expanded: onDrivePage && menuOpen,
+              hasPopup: onDrivePage,
+              label: (
+                <>
+                  <DriveIcon aria-hidden={true} className="size-4" />
+                  <span className="whitespace-nowrap max-[900px]:hidden">
+                    {driveLabel}
+                  </span>
+                  {onDrivePage && <ChevronDownIcon className="size-3.5" />}
+                </>
+              ),
+              onClick: onDriveClick,
+              pressed: true,
+              value: "drive",
+            },
+          ]}
+          label="ドライブ"
+          size="md"
+        />
+        {menuOpen && onDrivePage && (
+          <DriveMenu
+            drives={drives}
+            onCreate={() => {
+              setMenuOpen(false);
+              setCreateOpen(true);
+            }}
+            onSelectDrive={(id) =>
+              remember({ id, kind: "drive", path: `/d/${id}` })
+            }
+            onSelectMine={() => remember({ kind: "mine", path: "/" })}
+            selection={displayed}
+          />
+        )}
+      </div>
       <Switch
-        items={[
-          {
-            ariaLabel: "ドライブ",
-            expanded: menuOpen,
-            hasPopup: true,
-            label: (
-              <>
-                <DriveIcon aria-hidden={true} className="size-4" />
-                <span className="whitespace-nowrap max-[900px]:hidden">
-                  {driveLabel}
-                </span>
-                <ChevronDownIcon className="size-3.5" />
-              </>
-            ),
-            onClick: onDriveClick,
-            pressed: drivePressed,
-            value: "drive",
-          },
-          ...grantPlaces.map(({ icon: Icon, ...place }) => ({
-            ariaLabel: place.ariaLabel,
-            label: (
-              <>
-                <Icon aria-hidden={true} className="size-4" />
-                <span className="whitespace-nowrap max-[900px]:hidden">
-                  {place.label}
-                </span>
-              </>
-            ),
-            onClick: () => selectPlace(place.path),
-            pressed: selection.kind === place.value,
-            value: place.value,
-          })),
-        ]}
-        label="場所"
+        items={grantPlaces.map(({ icon: Icon, ...grant }) => ({
+          ariaLabel: grant.ariaLabel,
+          label: (
+            <>
+              <Icon aria-hidden={true} className="size-4" />
+              <span className="whitespace-nowrap max-[900px]:hidden">
+                {grant.label}
+              </span>
+            </>
+          ),
+          onClick: () => selectPlace(grant.path),
+          pressed: selection.kind === grant.value,
+          value: grant.value,
+        }))}
+        label="共有と管理"
         size="md"
       />
-      {menuOpen && drivePressed && (
-        <DriveMenu
-          drives={drives}
-          onCreate={() => {
-            setMenuOpen(false);
-            setCreateOpen(true);
-          }}
-          onSelectDrive={(id) => selectPlace(`/d/${id}`)}
-          onSelectMine={() => selectPlace("/")}
-          selection={selection}
-        />
-      )}
       {createOpen && (
         <CreateDriveModal
           onClose={() => setCreateOpen(false)}
           onCreated={(id) => {
             setCreateOpen(false);
+            const next: DrivePlace = {
+              id,
+              kind: "drive",
+              path: `/d/${id}`,
+            };
+            setPlace(next);
+            writeDrivePlace(next);
             void fetchSharedDrives().then((result) => {
               if (result.ok) {
                 setDrives(result.data);
+                setDrivesLoaded(true);
               }
             });
-            navigate(`/d/${id}`);
+            navigate(next.path);
           }}
         />
       )}
