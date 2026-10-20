@@ -387,6 +387,17 @@ async function resolvePlacement(
   };
 }
 
+function repeatsCurrentFolder(
+  inputFolder: string | undefined,
+  rowFolder: string,
+): boolean {
+  if (inputFolder === undefined) {
+    return true;
+  }
+  const folder = inputFolder.trim().replace(/^\/+|\/+$/g, "");
+  return folder === rowFolder || folder === folderName(rowFolder);
+}
+
 async function resolveSourcePlacementUpdate(
   env: Env,
   user: SessionUser,
@@ -403,6 +414,13 @@ async function resolveSourcePlacementUpdate(
   const foreign =
     user.id !== row.owner_id && !(await isSharedDrive(env, row.owner_id));
   if (foreign && !input.folderId) {
+    if (repeatsCurrentFolder(input.folder, row.folder)) {
+      return {
+        folder: row.folder,
+        folderId: row.folder_id,
+        ownerId: row.owner_id,
+      };
+    }
     return {
       error: "共有フォルダの変更はフォルダ ID で指定してください",
       status: 400,
