@@ -6,3 +6,20 @@ compatibility_flags = ["nodejs_compat"]
 # Binding-only: called through the DIAGRAM_CHECK service binding from the
 # main worker. No public URL.
 workers_dev = false
+
+[durable_objects]
+bindings = [
+  { name = "DIAGRAM_CHECK_ROOM", class_name = "DiagramCheckRoom" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DiagramCheckRoom"]
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
