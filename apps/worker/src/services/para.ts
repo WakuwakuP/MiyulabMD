@@ -2,6 +2,7 @@ import {
   DEFAULT_PARA_SPACE_NAME,
   folderContains,
   isParaBucketKey,
+  isReservedArticleFolderPath,
   type MoveFolderResult,
   normalizeFolder,
   PARA_BUCKETS,
@@ -589,7 +590,11 @@ async function normalizeTargetedResolution(
     return { action: "adopt", target };
   }
   const newName = normalizeFolder(resolution.newName);
-  if (!newName || newName.includes("/")) {
+  if (
+    !newName ||
+    newName.includes("/") ||
+    isReservedArticleFolderPath(newName)
+  ) {
     return invalidResolution("フォルダ名が不正です");
   }
   return { action: "rename", newName, target };

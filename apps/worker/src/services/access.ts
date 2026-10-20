@@ -20,6 +20,7 @@ import {
   grantForActor,
   isAccessScope,
   isDriveRootPath,
+  isReservedArticleFolderPath,
   MY_DRIVE_NAME,
   type NoteAccess,
   normalizeFolder,
@@ -1576,7 +1577,11 @@ export type CreateMemberFolderResult =
 
 function memberFolderName(name: string): string | null {
   const normalized = normalizeFolder(name);
-  if (!normalized || normalized.includes("/")) {
+  if (
+    !normalized ||
+    normalized.includes("/") ||
+    isReservedArticleFolderPath(normalized)
+  ) {
     return null;
   }
   return normalized;
@@ -1658,6 +1663,9 @@ async function resolveMemberFolderPath(
   }
   if (!folder) {
     return { error: "マイドライブ自体は作成できません", status: 400 };
+  }
+  if (isReservedArticleFolderPath(folder)) {
+    return { error: "フォルダ名が不正です", status: 400 };
   }
   return { folder, ownerId };
 }

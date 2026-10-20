@@ -11,6 +11,7 @@ import {
   type GrepResult,
   isAccessScope,
   isPermissionPreset,
+  isReservedArticleFolderPath,
   matchArticleSource,
   type Note,
   type NoteSearchHit,
@@ -899,6 +900,9 @@ async function resolveCreateFolder(
   | { error: string; status: number }
 > {
   let folder = normalizeFolder(input.folder);
+  if (!input.folderId && isReservedArticleFolderPath(folder)) {
+    return { error: "フォルダ名が不正です", status: 400 };
+  }
   let subjectId = ownerId;
   let ownerKind: "user" | "shared_drive" = "user";
   if (input.folderId) {
@@ -1233,6 +1237,17 @@ async function validateRenameFolder(
   }
   const parent = parentFolderPath(rec.folder);
   const nextPath = parent ? `${parent}/${name}` : name;
+  if (
+    isReservedArticleFolderPath(name) ||
+    isReservedArticleFolderPath(normalizeFolder(name)) ||
+    isReservedArticleFolderPath(nextPath)
+  ) {
+    return {
+      error: "フォルダ名が不正です",
+      kind: "invalid",
+      status: 400,
+    };
+  }
   if (nextPath === rec.folder) {
     return {
       access: await resolveFolderAccess(env, rec.owner_id, rec.folder, user),
@@ -1738,6 +1753,12 @@ export function createNoteService(env: Env) {
       }
 
       const next = nextMetaValues(row, input);
+      if (
+        input.folder !== undefined &&
+        isReservedArticleFolderPath(next.folder)
+      ) {
+        return { error: "フォルダ名が不正です", kind: "bad_request" };
+      }
 
       const now = Date.now();
       const d1 = db(env);

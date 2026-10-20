@@ -217,6 +217,60 @@ export type ArticleEntryPage = {
   hasMore: boolean;
 };
 
+const ARTICLE_DRIVE_FOLDER = /^d:([^:]+):(.*)$/;
+
+/** 共有ドライブの記事フォルダ。`d:ドライブ名:` はドライブルート。 */
+export function articleDriveFolderLabel(
+  driveName: string,
+  folder: string,
+): string {
+  return `d:${driveName}:${folder}`;
+}
+
+/** `d:名前:パス` なら分解する。通常のフォルダパスなら null。 */
+export function parseArticleDriveFolder(
+  value: string,
+): { driveName: string; folder: string } | null {
+  const match = ARTICLE_DRIVE_FOLDER.exec(value);
+  const driveName = match?.[1]?.trim() ?? "";
+  if (!(match && driveName) || driveName.includes("/")) {
+    return null;
+  }
+  return { driveName, folder: normalizeFolder(match[2] ?? "") };
+}
+
+/** マイドライブのフォルダパスに使えない。`d:名前:` で始まる形。 */
+export function isReservedArticleFolderPath(folder: string): boolean {
+  if (parseArticleDriveFolder(folder)) {
+    return true;
+  }
+  return folder
+    .split("/")
+    .some((part) => parseArticleDriveFolder(part) !== null);
+}
+
+/**
+ * 一覧の folder。共有ドライブのコレクションでは `d:名前:パス` も、
+ * ドライブ内のパスだけも受け付ける。
+ */
+export function articleFolderWithinSource(
+  sourceFolder: string,
+  requested: string | null,
+  driveName: string | null,
+): string | { error: string } {
+  if (!requested) {
+    return sourceFolder;
+  }
+  const addressed = parseArticleDriveFolder(requested);
+  if (addressed) {
+    if (addressed.driveName !== (driveName?.trim() ?? "")) {
+      return { error: "folder はこのコレクション配下である必要があります" };
+    }
+    return resolveArticleListFolder(sourceFolder, addressed.folder || null);
+  }
+  return resolveArticleListFolder(sourceFolder, requested);
+}
+
 export function parseArticleListQuery(
   searchParams: URLSearchParams,
 ):

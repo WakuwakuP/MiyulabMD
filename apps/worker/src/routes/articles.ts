@@ -14,7 +14,7 @@ export const articleRoutes = new Elysia({ prefix: "/api/articles" })
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    const collections = await articles.listCollections(user.id);
+    const collections = await articles.listCollections(user);
     return { collections };
   })
   .get("/collections/:id/entries", async ({ request, params, set }) => {
@@ -30,7 +30,7 @@ export const articleRoutes = new Elysia({ prefix: "/api/articles" })
       return { error: query.error };
     }
     const result = await articles.listEntries(
-      user.id,
+      user,
       params.id,
       url.origin,
       query,
@@ -53,7 +53,7 @@ export const articleRoutes = new Elysia({ prefix: "/api/articles" })
     }
     const origin = new URL(request.url).origin;
     const result = await articles.getEntry(
-      user.id,
+      user,
       params.id,
       params.slug,
       origin,

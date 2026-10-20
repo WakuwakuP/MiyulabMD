@@ -3,6 +3,7 @@ import {
   type AccessGrantInput,
   clampWriteScope,
   isAccessScope,
+  isReservedArticleFolderPath,
   normalizeFolder,
   type UpdateFolderAccessInput,
 } from "@miyulabmd/shared";
@@ -74,7 +75,11 @@ function moveErrorResponse(
 
 function normalizeFolderName(name: string): string | null {
   const normalized = normalizeFolder(name);
-  if (!normalized || normalized.includes("/")) {
+  if (
+    !normalized ||
+    normalized.includes("/") ||
+    isReservedArticleFolderPath(normalized)
+  ) {
     return null;
   }
   return normalized;

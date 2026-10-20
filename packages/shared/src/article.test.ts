@@ -3,15 +3,19 @@ import { test } from "node:test";
 import {
   ARTICLE_LIST_DEFAULT_PER_PAGE,
   ARTICLE_LIST_MAX_PER_PAGE,
+  articleDriveFolderLabel,
   articleEditUrl,
+  articleFolderWithinSource,
   articleSlug,
   canDispatchArticleSource,
   canDispatchSharedDriveSource,
   canManageSharedDriveSource,
   canOfferArticleDispatch,
   isArticleSourceDirty,
+  isReservedArticleFolderPath,
   matchArticleSource,
   mergeArticleData,
+  parseArticleDriveFolder,
   parseArticleListQuery,
   parseArticleSchema,
   resolveArticleListFolder,
@@ -111,6 +115,40 @@ test("resolveArticleListFolder allows the source and its descendants", () => {
     "work/infra/db",
   );
   assert.ok("error" in resolveArticleListFolder("work", "play"));
+});
+
+test("d:drive:folder addresses a shared drive and cannot be a folder path", () => {
+  assert.equal(
+    articleDriveFolderLabel("研究室", "sites/hoge"),
+    "d:研究室:sites/hoge",
+  );
+  assert.equal(articleDriveFolderLabel("研究室", ""), "d:研究室:");
+  assert.deepEqual(parseArticleDriveFolder("d:研究室:sites/hoge"), {
+    driveName: "研究室",
+    folder: "sites/hoge",
+  });
+  assert.deepEqual(parseArticleDriveFolder("d:研究室:"), {
+    driveName: "研究室",
+    folder: "",
+  });
+  assert.equal(parseArticleDriveFolder("sites/hoge"), null);
+  assert.equal(parseArticleDriveFolder("d:研究室"), null);
+  assert.equal(isReservedArticleFolderPath("d:研究室:blog"), true);
+  assert.equal(isReservedArticleFolderPath("parent/d:研究室:blog"), true);
+  assert.equal(isReservedArticleFolderPath("sites/hoge"), false);
+  assert.equal(
+    articleFolderWithinSource("blog", "d:研究室:blog/posts", "研究室"),
+    "blog/posts",
+  );
+  assert.equal(
+    articleFolderWithinSource("blog", "blog/posts", "研究室"),
+    "blog/posts",
+  );
+  assert.ok(
+    "error" in articleFolderWithinSource("blog", "d:別ドライブ:blog", "研究室"),
+  );
+  assert.equal(articleFolderWithinSource("", "d:研究室:", "研究室"), "");
+  assert.equal(articleFolderWithinSource("", null, "研究室"), "");
 });
 
 test("site update is the owner or people who can edit the folder", () => {
