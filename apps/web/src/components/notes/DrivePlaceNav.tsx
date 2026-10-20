@@ -70,7 +70,13 @@ const grantPlaces: {
   },
 ];
 
-export function DrivePlaceNav({ selection }: { selection: DriveSelection }) {
+export function DrivePlaceNav({
+  placeSettled = true,
+  selection,
+}: {
+  placeSettled?: boolean;
+  selection: DriveSelection;
+}) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -79,12 +85,14 @@ export function DrivePlaceNav({ selection }: { selection: DriveSelection }) {
   const [drivesLoaded, setDrivesLoaded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [place, setPlace] = useState<DrivePlace>(
-    () => drivePlaceFromSelection(selection, pathname) ?? readDrivePlace(),
+    () =>
+      drivePlaceFromSelection(selection, pathname, placeSettled) ??
+      readDrivePlace(),
   );
   const onDrivePage = selection.kind === "mine" || selection.kind === "drive";
   const displayed = useMemo(
-    () => drivePlaceFromSelection(selection, pathname) ?? place,
-    [pathname, place, selection],
+    () => drivePlaceFromSelection(selection, pathname, placeSettled) ?? place,
+    [pathname, place, placeSettled, selection],
   );
   const current = drives.find(
     (drive) => displayed.kind === "drive" && drive.id === displayed.id,
@@ -97,13 +105,13 @@ export function DrivePlaceNav({ selection }: { selection: DriveSelection }) {
   useDismiss(menuOpen, () => setMenuOpen(false), rootRef);
 
   useEffect(() => {
-    const next = drivePlaceFromSelection(selection, pathname);
+    const next = drivePlaceFromSelection(selection, pathname, placeSettled);
     if (!next) {
       return;
     }
     setPlace((currentPlace) => replaceDrivePlace(currentPlace, next));
     writeDrivePlace(next);
-  }, [pathname, selection]);
+  }, [pathname, placeSettled, selection]);
 
   useEffect(() => {
     let cancelled = false;

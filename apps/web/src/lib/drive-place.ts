@@ -83,22 +83,20 @@ function isFolderPath(path: string) {
 export function drivePlaceFromSelection(
   selection: { id?: string; kind: string },
   path: string,
+  settled = true,
 ): DrivePlace | null {
+  if (!settled) {
+    return null;
+  }
   if (selection.kind === "mine" && (path === "/" || isFolderPath(path))) {
     return { kind: "mine", path };
   }
   if (
     selection.kind === "drive" &&
     selection.id &&
-    (path === `/d/${selection.id}` || path === "/" || isFolderPath(path))
+    (path === `/d/${selection.id}` || isFolderPath(path))
   ) {
-    // 共有ドライブのフォルダ表示や、ルートへ移る途中の pathname は
-    // まだ前の selection のことがある。戻り先はドライブの根に固定する。
-    return {
-      id: selection.id,
-      kind: "drive",
-      path: `/d/${selection.id}`,
-    };
+    return { id: selection.id, kind: "drive", path };
   }
   return null;
 }

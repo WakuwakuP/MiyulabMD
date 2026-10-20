@@ -242,6 +242,7 @@ function useHomeHeader(
   visibleFolder: FolderAccess | null,
   folderPending: boolean,
   selection: DriveSelection,
+  placeSettled: boolean,
   canCreateFolder: boolean,
   canCreateNote: boolean,
   membersOnly: boolean,
@@ -253,7 +254,9 @@ function useHomeHeader(
 ) {
   useEffect(() => {
     setHeader({
-      actions: user ? <DrivePlaceNav selection={selection} /> : null,
+      actions: user ? (
+        <DrivePlaceNav placeSettled={placeSettled} selection={selection} />
+      ) : null,
       end: (
         <HomeHeaderEnd
           canCreateFolder={canCreateFolder}
@@ -279,6 +282,7 @@ function useHomeHeader(
     folderPending,
     folderId,
     selection,
+    placeSettled,
     canCreateFolder,
     canCreateNote,
     membersOnly,
@@ -573,6 +577,21 @@ function HomePageView({
       {dialogs}
     </section>
   );
+}
+
+function placeSettledForRoute(
+  driveId: string | undefined,
+  routeFolderId: string | undefined,
+  visibleFolderId: string | null | undefined,
+  folderPending: boolean,
+) {
+  if (driveId) {
+    return true;
+  }
+  if (routeFolderId) {
+    return visibleFolderId === routeFolderId;
+  }
+  return !folderPending;
 }
 
 function folderIdForRoute(
@@ -1051,6 +1070,12 @@ function NetworkHomePage() {
     visibleFolder?.ownerId,
     visibleFolder?.ownerKind,
   ]);
+  const placeSettled = placeSettledForRoute(
+    driveId,
+    routeFolderId,
+    visibleFolder?.id,
+    folderPending,
+  );
   const handleMembers = useCallback(() => {
     setMembersOpen(true);
   }, []);
@@ -1062,6 +1087,7 @@ function NetworkHomePage() {
     visibleFolder,
     folderPending,
     selection,
+    placeSettled,
     flags.sharedDrive ? flags.canMutate : flags.canAdmin,
     flags.sharedDrive ? flags.canMutate : true,
     flags.sharedDrive,

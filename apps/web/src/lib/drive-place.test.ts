@@ -65,14 +65,26 @@ test("drive place ignores grant pages", () => {
   );
 });
 
-test("stale root path still returns to that shared drive", () => {
-  assert.deepEqual(
+test("stale route does not replace the open shared drive", () => {
+  assert.equal(
+    drivePlaceFromSelection({ id: "drive-1", kind: "drive" }, "/", false),
+    null,
+  );
+  assert.equal(
     drivePlaceFromSelection({ id: "drive-1", kind: "drive" }, "/"),
-    { id: "drive-1", kind: "drive", path: "/d/drive-1" },
+    null,
+  );
+  assert.equal(
+    drivePlaceFromSelection(
+      { id: "drive-1", kind: "drive" },
+      "/f/folder-1",
+      false,
+    ),
+    null,
   );
   assert.deepEqual(
     drivePlaceFromSelection({ id: "drive-1", kind: "drive" }, "/f/folder-1"),
-    { id: "drive-1", kind: "drive", path: "/d/drive-1" },
+    { id: "drive-1", kind: "drive", path: "/f/folder-1" },
   );
   assert.equal(drivePlaceFromSelection({ kind: "mine" }, "/d/drive-1"), null);
 });
