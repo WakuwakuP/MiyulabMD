@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { upsertUserByEmail } from "../db/users.ts";
-import { listPublicSharedFolders, listSharedFolders } from "./access.ts";
+import {
+  createMemberFolder,
+  listPublicSharedFolders,
+  listSharedFolders,
+} from "./access.ts";
 import { moveFolder } from "./move.ts";
 import { createNoteService } from "./notes.ts";
 import {
@@ -650,4 +654,74 @@ test("removal stays in force when a matching domain is added later", async (t) =
     drives.some((drive) => drive.id === driveId),
     false,
   );
+});
+
+test("editors can add a folder and a note inside a shared drive", async (t) => {
+  const { editor, env, owner, sqlite, stranger, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const created = await createSharedDrive(env, owner, "研究室");
+  assert.equal(created.kind, "ok");
+  if (created.kind !== "ok") {
+    return;
+  }
+  assert.equal(
+    (
+      await inviteDriveMember(
+        env,
+        created.result.id,
+        editor.email,
+        "editor",
+        owner,
+      )
+    ).kind,
+    "ok",
+  );
+  assert.equal(
+    (
+      await inviteDriveMember(
+        env,
+        created.result.id,
+        viewer.email,
+        "viewer",
+        owner,
+      )
+    ).kind,
+    "ok",
+  );
+
+  const viewerFolder = await createMemberFolder(env, viewer, {
+    name: "資料",
+    parentId: created.result.rootFolderId,
+  });
+  assert.equal(viewerFolder.kind, "error");
+  const strangerFolder = await createMemberFolder(env, stranger, {
+    name: "資料",
+    parentId: created.result.rootFolderId,
+  });
+  assert.equal(strangerFolder.kind, "error");
+
+  const folder = await createMemberFolder(env, editor, {
+    name: "資料",
+    parentId: created.result.rootFolderId,
+  });
+  assert.equal(folder.kind, "ok");
+  if (folder.kind !== "ok") {
+    return;
+  }
+  assert.equal(folder.folder.ownerId, created.result.id);
+  assert.equal(folder.folder.ownerKind, "shared_drive");
+  assert.equal(folder.folder.folder, "資料");
+  assert.ok(folder.folder.id);
+
+  const note = await createNoteService(env).create(editor, {
+    folderId: folder.folder.id ?? undefined,
+    markdown: "# 共有",
+  });
+  assert.ok(!("error" in note));
+  if ("error" in note) {
+    return;
+  }
+  assert.equal(note.ownerId, created.result.id);
+  assert.equal(note.ownerKind, "shared_drive");
+  assert.equal(note.folder, "資料");
 });

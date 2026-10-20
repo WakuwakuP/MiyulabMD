@@ -111,7 +111,7 @@ test("catalog exactly matches full SDK listings for every feature combination an
       assert.deepEqual(actual, expected, `mask=${mask}, modern=${modern}`);
       assert.equal(
         actual.result?.tools.length,
-        26 +
+        28 +
           Number(configured.medallion) * 3 +
           Number(configured.para) * 2 +
           Number(configured.schemes) * 7,
@@ -298,7 +298,7 @@ test("unknown names and unknown/large body lengths retain the full registry", as
     const server = await runAs(caller, () =>
       createMcpServerFactory({ era: "legacy", requestInfo: input }),
     );
-    assert.equal(registered.mock.calls.length - start, 38);
+    assert.equal(registered.mock.calls.length - start, 40);
     assert.equal(input.bodyUsed, false);
     await server.close();
   }
@@ -411,14 +411,14 @@ test("tool lists follow each user's current configuration, including concurrent 
   ]);
   assert.ok(a.result);
   assert.ok(b.result);
-  assert.equal(a.result.tools.length, 38);
-  assert.equal(b.result.tools.length, 26);
+  assert.equal(a.result.tools.length, 40);
+  assert.equal(b.result.tools.length, 28);
   assert.ok(a.result.tools.some((tool) => tool.name === "para_list"));
   assert.ok(!b.result.tools.some((tool) => tool.name === "para_list"));
   configureFeatures(configured.id, {});
   const updated = await rpc(configured, "tools/list");
   assert.ok(updated.result);
-  assert.equal(updated.result.tools.length, 26);
+  assert.equal(updated.result.tools.length, 28);
   const first = await runAs(configured, createMcpServerFactory);
   const second = await runAs(plain, createMcpServerFactory);
   assert.notEqual(first, second);
@@ -502,10 +502,10 @@ test("bootstrap capabilities stay unchanged without feature reads; tool lists st
 
   configureFeatures(caller.id, {});
   const plain = await rpc(caller, "tools/list");
-  assert.equal(plain.result?.tools.length, 26);
+  assert.equal(plain.result?.tools.length, 28);
   configureFeatures(caller.id, { medallion: true, para: true, schemes: true });
   const enabled = await rpc(caller, "tools/list");
-  assert.equal(enabled.result?.tools.length, 38);
+  assert.equal(enabled.result?.tools.length, 40);
   assert.equal(getFeatureReadCount(), 2);
 });
 

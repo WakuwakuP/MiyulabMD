@@ -22,10 +22,37 @@ export const toolDefinitions = {
       id: z.string().describe("Note UUID or short ID"),
     }),
   },
-  create_note: {
-    description: `Create a new note owned by the authenticated user. ${MCP_NOTE_URL_HINT} ${MCP_DIAGRAM_CHECK_HINT}`,
+  create_folder: {
+    description:
+      "Create one folder. Pass name as a single path segment and parent_id as the parent folder UUID. Omit parent_id to create at the caller's my-drive root. To create inside a shared drive, pass that drive's rootFolderId from list_shared_drives, or a child folder_id from list_folder_entries. Requires edit access (shared drive: editor or manager; my drive: admin on the parent). Viewers and non-members are rejected. Slashes in name are rejected.",
     inputSchema: toolInputSchema({
-      folder: z.string().optional(),
+      name: z
+        .string()
+        .min(1)
+        .describe("Folder name. One path segment; slashes are rejected"),
+      parent_id: z
+        .string()
+        .optional()
+        .describe(
+          "Parent folder UUID. Omit for the caller's my-drive root. A shared drive rootFolderId creates inside that drive",
+        ),
+    }),
+  },
+  create_note: {
+    description: `Create a new note. Pass folder_id to place it in that folder, including a shared drive folder from list_shared_drives or list_folder_entries. folder is a path in the caller's own drive and is ignored when folder_id is set. On a shared drive the note is members-only; readScope, writeScope, and inheritAccess are ignored. ${MCP_NOTE_URL_HINT} ${MCP_DIAGRAM_CHECK_HINT}`,
+    inputSchema: toolInputSchema({
+      folder: z
+        .string()
+        .optional()
+        .describe(
+          "Path in the caller's own drive. Ignored when folder_id is set",
+        ),
+      folder_id: z
+        .string()
+        .optional()
+        .describe(
+          "Folder UUID to create in, including a shared drive folder. Preferred over folder",
+        ),
       inheritAccess: z.boolean().optional(),
       markdown: z.string().optional(),
       readScope: z.enum(ACCESS_SCOPES).optional(),
@@ -224,7 +251,7 @@ export const toolDefinitions = {
     inputSchema: toolInputSchema({}),
   },
   list_folder_entries: {
-    description: `List direct children (subfolders and notes) of a folder — one level only. Do not recurse; call again on a child folder_id. If the call fails with a resource-limit error, do not retry immediately. ${MCP_NOTE_URL_HINT}`,
+    description: `List direct children (subfolders and notes) of a folder — one level only. Do not recurse; call again on a child folder_id. Omit folder_id for the caller's my-drive root. Pass a shared drive's rootFolderId from list_shared_drives to browse that drive. If the call fails with a resource-limit error, do not retry immediately. ${MCP_NOTE_URL_HINT}`,
     inputSchema: toolInputSchema({
       cursor: z
         .string()
@@ -233,7 +260,9 @@ export const toolDefinitions = {
       folder_id: z
         .string()
         .optional()
-        .describe("Folder UUID; omit for the drive root"),
+        .describe(
+          "Folder UUID. Omit for the caller's my-drive root. A shared drive rootFolderId lists that drive",
+        ),
       limit: z
         .number()
         .int()
@@ -262,7 +291,7 @@ export const toolDefinitions = {
     }),
   },
   list_notes: {
-    description: `List notes owned by or shared with the authenticated user. Do not enumerate everything — browse folders with list_folder_entries first. ${MCP_NOTE_URL_HINT}`,
+    description: `List notes the caller can see, including shared drives they belong to. Do not enumerate everything — browse folders with list_folder_entries first. ${MCP_NOTE_URL_HINT}`,
     inputSchema: toolInputSchema({
       folder_id: z
         .string()
@@ -285,6 +314,11 @@ export const toolDefinitions = {
           "Restrict to the folder carrying this naming-scheme ID (e.g. `15.22`, `202609171230`); alternative to folder_id",
         ),
     }),
+  },
+  list_shared_drives: {
+    description:
+      "List shared drives the caller belongs to. Each entry has id, name, role (manager, editor, or viewer), and rootFolderId. Browse a drive with list_folder_entries using rootFolderId. Create notes with create_note folder_id and folders with create_folder parent_id. Viewers can read only. Membership is the only access path: scopes and invites do not apply inside a shared drive.",
+    inputSchema: toolInputSchema({}),
   },
   medallion_assign_folder: {
     description:
@@ -346,7 +380,7 @@ export const toolDefinitions = {
   },
   move_notes: {
     description:
-      "Move notes (by UUID or short ID) into a folder in the caller's own drive. Returns per-note moved/skipped/failed with reasons. Max 500 IDs per call. Set dry_run first. On resource-limit / 503: do not retry the same call.",
+      "Move notes (by UUID or short ID) into a folder the caller can edit. folder_id may be in the caller's my drive or a shared drive. null or omitted means the my-drive root. Returns per-note moved/skipped/failed with reasons. Max 500 IDs per call. Set dry_run first. On resource-limit / 503: do not retry the same call.",
     inputSchema: toolInputSchema({
       dry_run: z
         .boolean()

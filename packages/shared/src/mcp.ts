@@ -1,7 +1,9 @@
 export const MCP_TOOLS = [
   "list_notes",
+  "list_shared_drives",
   "get_note",
   "create_note",
+  "create_folder",
   "replace_in_note",
   "insert_in_note",
   "update_note",

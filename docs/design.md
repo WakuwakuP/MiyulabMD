@@ -484,9 +484,11 @@ CPU 使用量とツールごとの所要時間の調べ方は [MCP の処理時�
 
 | ツール                | 権限             | 内容                                                                         |
 | --------------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `list_notes`          | ログインユーザー | 自分が owner / collaborator のノート。任意で query                           |
+| `list_notes`          | ログインユーザー | 見えるノート。共有ドライブのメンバー分を含む。任意で query                   |
+| `list_shared_drives`  | ログインユーザー | 参加している共有ドライブ。`rootFolderId` と役割を返す                        |
 | `get_note`            | `canView`        | メタ + DO の最新 Markdown + heading outline。`AI(ユーザー名)` カーソルを出す |
-| `create_note`         | ログインユーザー | title / content / permission                                                 |
+| `create_note`         | 編集できる主体   | title / content / permission。`folder_id` で共有ドライブのフォルダへ作れる   |
+| `create_folder`       | 編集できる主体   | `parent_id` + `name`。共有ドライブは編集者以上                               |
 | `replace_in_note`     | `canEdit`        | 一意コンテキストの置換。複数ヒットは `replace_all` か失敗                    |
 | `insert_in_note`      | `canEdit`        | `at` / `after` / `before` のいずれか 1 つで挿入                              |
 | `update_note`         | `canEdit`        | Markdown 全置換（最終手段）。`applyTextDiff` 経由                            |
