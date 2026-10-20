@@ -587,15 +587,11 @@ function placeSettledForRoute(
   driveId: string | undefined,
   routeFolderId: string | undefined,
   visibleFolderId: string | null | undefined,
-  folderPending: boolean,
 ) {
-  if (driveId) {
+  if (driveId || !routeFolderId) {
     return true;
   }
-  if (routeFolderId) {
-    return visibleFolderId === routeFolderId;
-  }
-  return !folderPending;
+  return visibleFolderId === routeFolderId;
 }
 
 function folderIdForRoute(
@@ -1057,13 +1053,27 @@ function NetworkHomePage() {
   }, [visibleFolder, navigate]);
 
   const selection = useMemo<DriveSelection>(() => {
-    if (driveId || visibleFolder?.ownerKind === "shared_drive") {
+    if (driveId) {
       return {
-        id: driveId ?? visibleFolder?.ownerId ?? "",
+        id: driveId,
         kind: "drive",
       };
     }
-    if (flags.canAdmin || !routeFolderId) {
+    // `/` はマイドライブの根。前のフォルダ読み込みが残っていても、こちらを先に確定する。
+    if (!routeFolderId) {
+      return { kind: "mine" };
+    }
+    if (
+      visibleFolder?.id === routeFolderId &&
+      visibleFolder.ownerKind === "shared_drive" &&
+      visibleFolder.ownerId
+    ) {
+      return {
+        id: visibleFolder.ownerId,
+        kind: "drive",
+      };
+    }
+    if (flags.canAdmin || visibleFolder?.id !== routeFolderId) {
       return { kind: "mine" };
     }
     return { kind: "shared" };
@@ -1071,6 +1081,7 @@ function NetworkHomePage() {
     driveId,
     flags.canAdmin,
     routeFolderId,
+    visibleFolder?.id,
     visibleFolder?.ownerId,
     visibleFolder?.ownerKind,
   ]);
@@ -1078,7 +1089,6 @@ function NetworkHomePage() {
     driveId,
     routeFolderId,
     visibleFolder?.id,
-    folderPending,
   );
   const handleMembers = useCallback(() => {
     setMembersOpen(true);
