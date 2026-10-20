@@ -476,6 +476,12 @@ export function SiteSettingsPage() {
       };
     }
     setLoading(true);
+    setDraft(null);
+    setFolders([]);
+    setSources([]);
+    setSharedFolders([]);
+    setSharedSources([]);
+    setError(null);
     void reload(user.id, subjectId ?? user.id)
       .then((loaded) => {
         if (!current) {
@@ -734,10 +740,10 @@ export function SiteSettingsPage() {
           ))}
         </ul>
       )}
-      {!draft && (
+      {!(draft && !loading) && (
         <Button
           className="mt-4"
-          disabled={!canPickSourceFolder}
+          disabled={loading || !canPickSourceFolder}
           onClick={() =>
             setDraft({
               ...emptyDraft(),
@@ -750,10 +756,10 @@ export function SiteSettingsPage() {
           ソースを追加
         </Button>
       )}
-      {!(draft || canPickSourceFolder) && (
+      {!(loading || draft || canPickSourceFolder) && (
         <MutedText className="mt-2">先にフォルダを作成してください。</MutedText>
       )}
-      {draft && (
+      {draft && !loading && (
         <form
           className="mt-6 grid gap-4"
           onSubmit={(event) => void handleSave(event)}

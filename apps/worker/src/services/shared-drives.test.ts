@@ -862,6 +862,31 @@ test("a manager can source the drive root and migrate a my-drive site", async (t
   if ("error" in denied) {
     assert.equal(denied.status, 403);
   }
+  const inbox = await createMemberFolder(env, editor, { name: "受信" });
+  assert.equal(inbox.kind, "ok");
+  if (inbox.kind !== "ok") {
+    return;
+  }
+  const inboxId = inbox.folder.id;
+  assert.ok(inboxId);
+  if (!inboxId) {
+    return;
+  }
+  const taken = await moveFolder(
+    env,
+    folderId,
+    { destFolderId: inboxId },
+    editor,
+  );
+  assert.equal(taken.kind, "invalid");
+  if (taken.kind === "invalid") {
+    assert.equal(taken.status, 403);
+  }
+  const stillOnDrive = sqlite
+    .prepare("SELECT owner_id FROM article_sources WHERE id = ?")
+    .get(source.id) as { owner_id: string };
+  assert.equal(stillOnDrive.owner_id, drive.result.id);
+
   const visible = await articles.listSources(drive.result.id, editor);
   const migrated = visible.find((item) => item.id === source.id);
   assert.equal(migrated?.canDispatch, true);

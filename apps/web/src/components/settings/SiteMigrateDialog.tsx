@@ -56,6 +56,7 @@ export function SiteMigrateDialog({ drives, source, onClose, onMoved }: Props) {
     setFolders([]);
     setDestFolderId("");
     setPreview(null);
+    setError(null);
     void fetchFolderTree({ ownerId: driveId }).then((result) => {
       if (!current) {
         return;

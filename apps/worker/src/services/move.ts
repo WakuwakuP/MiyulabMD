@@ -467,12 +467,15 @@ async function commitFolderMove(
     return invalid("編集ロック中のノートを含むため移動できません", 409);
   }
   if (!sameSubject) {
-    if (
-      dest.owner_kind === "shared_drive" &&
-      plan.articleSources > 0 &&
-      (await driveRoleFor(env, dest.owner_id, user)) !== "manager"
-    ) {
-      return invalid("記事ソースを共有ドライブへ移せるのは管理者です", 403);
+    const credentialMove = await articleSourceMoveDenied(
+      env,
+      src.owner_id,
+      dest,
+      plan.articleSources,
+      user,
+    );
+    if (credentialMove) {
+      return credentialMove;
     }
     return transferAcrossSubjects(env, src, dest, to, dryRun, plan);
   }
@@ -692,6 +695,31 @@ async function currentDestId(
   return (await getFolderByPath(env, dest.owner_id, dest.folder))?.id ?? null;
 }
 
+async function articleSourceMoveDenied(
+  env: Env,
+  sourceOwnerId: string,
+  dest: DestFolder,
+  articleSources: number,
+  user: SessionUser | undefined,
+): Promise<MoveError | null> {
+  if (articleSources === 0) {
+    return null;
+  }
+  if (
+    (await isSharedDrive(env, sourceOwnerId)) &&
+    (await driveRoleFor(env, sourceOwnerId, user)) !== "manager"
+  ) {
+    return invalid("記事ソースを共有ドライブから移せるのは管理者です", 403);
+  }
+  if (
+    dest.owner_kind === "shared_drive" &&
+    (await driveRoleFor(env, dest.owner_id, user)) !== "manager"
+  ) {
+    return invalid("記事ソースを共有ドライブへ移せるのは管理者です", 403);
+  }
+  return null;
+}
+
 async function moveListedChildren(
   env: Env,
   ownerId: string,
@@ -702,17 +730,20 @@ async function moveListedChildren(
   dryRun: boolean,
   user: SessionUser | undefined,
 ): Promise<MoveFolderItem[]> {
-  const crossesIntoDrive =
-    dest.owner_kind === "shared_drive" && dest.owner_id !== ownerId;
-  const driveManager =
+  const crossesSubject = dest.owner_id !== ownerId;
+  const sourceIsDrive = crossesSubject && (await isSharedDrive(env, ownerId));
+  const sourceManager =
+    !sourceIsDrive || (await driveRoleFor(env, ownerId, user)) === "manager";
+  const crossesIntoDrive = dest.owner_kind === "shared_drive" && crossesSubject;
+  const destManager =
     !crossesIntoDrive ||
     (await driveRoleFor(env, dest.owner_id, user)) === "manager";
   const folders: MoveFolderItem[] = [];
   for (const child of children) {
+    const hasSources = (plans.get(child.id)?.articleSources ?? 0) > 0;
     if (
-      crossesIntoDrive &&
-      !driveManager &&
-      (plans.get(child.id)?.articleSources ?? 0) > 0
+      hasSources &&
+      ((sourceIsDrive && !sourceManager) || (crossesIntoDrive && !destManager))
     ) {
       folders.push({
         folderId: child.id,
