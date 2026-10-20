@@ -23,7 +23,12 @@ type DriveOk<T> = { kind: "ok"; result: T };
 
 function normalizeName(name: string | undefined): string | null {
   const trimmed = name?.trim() ?? "";
-  if (!trimmed || trimmed.length > NAME_MAX) {
+  if (
+    !trimmed ||
+    trimmed.length > NAME_MAX ||
+    trimmed.includes(":") ||
+    trimmed.includes("/")
+  ) {
     return null;
   }
   return trimmed;

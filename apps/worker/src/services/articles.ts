@@ -8,7 +8,9 @@ import {
   type ArticleSourceStatus,
   type ArticleUpdateAudience,
   type ArticleUpdateAudienceValue,
+  articleDriveFolderLabel,
   articleEditUrl,
+  articleFolderWithinSource,
   articleMetaFromNote,
   articleSlug,
   canDispatchArticleSource,
@@ -21,6 +23,7 @@ import {
   isArticleSourceDirty,
   isArticleUpdateAudience,
   isDriveArticleUpdateAudience,
+  isReservedArticleFolderPath,
   matchArticleSource,
   mergeArticleData,
   normalizeDriveAudience,
@@ -28,7 +31,6 @@ import {
   type OwnerKind,
   parseArticleSchema,
   readArticleFrontmatter,
-  resolveArticleListFolder,
   type SessionUser,
 } from "@miyulabmd/shared";
 
@@ -44,6 +46,7 @@ import {
 } from "./access.ts";
 import {
   canEditSubject,
+  claimDriveMemberships,
   driveRoleFor,
   isSharedDrive,
 } from "./drive-membership.ts";
@@ -147,9 +150,14 @@ function presentForUser(
   });
 }
 
-function presentCollection(row: SourceRow): ArticleCollection {
+function presentCollection(
+  row: SourceRow,
+  driveName?: string | null,
+): ArticleCollection {
   return {
-    folder: row.folder,
+    folder: driveName
+      ? articleDriveFolderLabel(driveName, row.folder)
+      : row.folder,
     id: row.id,
     name: row.name,
     schema: parseSchemaJson(row.schema_json),
@@ -191,6 +199,9 @@ async function resolveFolderPath(
     return { error: "folder または folderId が必要です" };
   }
   const folder = input.folder.trim().replace(/^\/+|\/+$/g, "");
+  if (isReservedArticleFolderPath(folder)) {
+    return { error: "フォルダ名が不正です" };
+  }
   if (!folder) {
     if (!drive) {
       return { error: "マイドライブは記事ソースにできません" };
@@ -217,6 +228,69 @@ function loadSourceById(env: Env, id: string): Promise<SourceRow | null> {
     .prepare("SELECT * FROM article_sources WHERE id = ?")
     .bind(id)
     .first<SourceRow>();
+}
+
+async function driveNameOf(env: Env, ownerId: string): Promise<string | null> {
+  if (!(await isSharedDrive(env, ownerId))) {
+    return null;
+  }
+  const row = await db(env)
+    .prepare("SELECT name FROM shared_drives WHERE id = ?")
+    .bind(ownerId)
+    .first<{ name: string }>();
+  return row?.name ?? null;
+}
+
+async function readableArticleSource(
+  env: Env,
+  user: SessionUser,
+  id: string,
+): Promise<SourceRow | null> {
+  const row = await loadSourceById(env, id);
+  if (!row) {
+    return null;
+  }
+  if (row.owner_id === user.id) {
+    return row;
+  }
+  if (!(await isSharedDrive(env, row.owner_id))) {
+    return null;
+  }
+  await claimDriveMemberships(env, user.id, user.email);
+  if (await driveRoleFor(env, row.owner_id, user)) {
+    return row;
+  }
+  return null;
+}
+
+async function memberDriveCollections(
+  env: Env,
+  user: SessionUser,
+): Promise<ArticleCollection[]> {
+  await claimDriveMemberships(env, user.id, user.email);
+  const drives = await db(env)
+    .prepare(
+      `SELECT d.id, d.name
+         FROM shared_drives d
+         JOIN shared_drive_members m ON m.drive_id = d.id
+        WHERE m.user_id = ?
+        ORDER BY d.name COLLATE NOCASE, d.id`,
+    )
+    .bind(user.id)
+    .all<{ id: string; name: string }>();
+  const collections: ArticleCollection[] = [];
+  for (const drive of drives.results ?? []) {
+    const rows = await db(env)
+      .prepare(
+        "SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder",
+      )
+      .bind(drive.id)
+      .all<SourceRow>();
+    for (const row of rows.results ?? []) {
+      collections.push(presentCollection(row, drive.name));
+    }
+  }
+  return collections;
 }
 
 function storedScope(value: string | null): AccessScope | null {
@@ -1066,12 +1140,12 @@ export function createArticleService(env: Env) {
     },
 
     async getEntry(
-      ownerId: string,
+      user: SessionUser,
       id: string,
       slug: string,
       origin: string,
     ): Promise<{ collection: ArticleCollection; entry: ArticleEntry } | null> {
-      const row = await loadSource(env, ownerId, id);
+      const row = await readableArticleSource(env, user, id);
       if (!row) {
         return null;
       }
@@ -1083,13 +1157,16 @@ export function createArticleService(env: Env) {
            FROM notes
            WHERE owner_id = ? AND (alias = ? OR short_id = ?)`,
         )
-        .bind(ownerId, slug, slug)
+        .bind(row.owner_id, slug, slug)
         .first<NoteArticleRow>();
       if (!(note && folderMatchesSource(row.folder, note.folder))) {
         return null;
       }
       return {
-        collection: presentCollection(row),
+        collection: presentCollection(
+          row,
+          await driveNameOf(env, row.owner_id),
+        ),
         entry: toEntry(note, schema, origin, true),
       };
     },
@@ -1104,30 +1181,36 @@ export function createArticleService(env: Env) {
         : null;
     },
 
-    async listCollections(ownerId: string): Promise<ArticleCollection[]> {
+    async listCollections(user: SessionUser): Promise<ArticleCollection[]> {
       const rows = await db(env)
         .prepare(
           "SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder",
         )
-        .bind(ownerId)
+        .bind(user.id)
         .all<SourceRow>();
-      return (rows.results ?? []).map(presentCollection);
+      const own = (rows.results ?? []).map((row) => presentCollection(row));
+      return [...own, ...(await memberDriveCollections(env, user))];
     },
     listEditableSharedSources(user: SessionUser): Promise<ArticleSource[]> {
       return loadEditableSharedSources(env, user);
     },
 
     async listEntries(
-      ownerId: string,
+      user: SessionUser,
       id: string,
       origin: string,
       query: { page: number; perPage: number; folder: string | null },
     ): Promise<ArticleEntryPage | { error: string; status: number } | null> {
-      const row = await loadSource(env, ownerId, id);
+      const row = await readableArticleSource(env, user, id);
       if (!row) {
         return null;
       }
-      const folder = resolveArticleListFolder(row.folder, query.folder);
+      const driveName = await driveNameOf(env, row.owner_id);
+      const folder = articleFolderWithinSource(
+        row.folder,
+        query.folder,
+        driveName,
+      );
       if (typeof folder !== "string") {
         return { error: folder.error, status: 400 };
       }
@@ -1138,7 +1221,7 @@ export function createArticleService(env: Env) {
           `SELECT COUNT(*) AS total FROM notes
            WHERE owner_id = ? AND ${filter.sql}`,
         )
-        .bind(ownerId, ...filter.binds)
+        .bind(row.owner_id, ...filter.binds)
         .first<{ total: number }>();
       const total = Number(countRow?.total ?? 0);
       const offset = (query.page - 1) * query.perPage;
@@ -1151,10 +1234,10 @@ export function createArticleService(env: Env) {
            ORDER BY updated_at DESC, id DESC
            LIMIT ? OFFSET ?`,
         )
-        .bind(ownerId, ...filter.binds, query.perPage, offset)
+        .bind(row.owner_id, ...filter.binds, query.perPage, offset)
         .all<NoteArticleRow>();
       return {
-        collection: presentCollection(row),
+        collection: presentCollection(row, driveName),
         entries: (notes.results ?? []).map((note) =>
           toEntry(note, schema, origin, false),
         ),

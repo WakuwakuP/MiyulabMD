@@ -116,7 +116,8 @@ export function openApiDocument() {
                   },
                 },
               },
-              description: "トークン所有者のソース",
+              description:
+                "トークン所有者のソースと、所属する共有ドライブのソース。共有ドライブの folder は d:ドライブ名:パス（ドライブルートは d:ドライブ名:）。この形はマイドライブのフォルダ名にできない",
             },
             "401": unauthorized,
           },
@@ -127,7 +128,7 @@ export function openApiDocument() {
       "/api/articles/collections/{id}/entries": {
         get: {
           description:
-            "ソースディレクトリ直下と、何階層下のノートも含む。folder で配下の特定パスに絞れる。",
+            "ソースディレクトリ直下と、何階層下のノートも含む。folder で配下の特定パスに絞れる。共有ドライブでは d:ドライブ名:パス も受け付ける。",
           parameters: [
             {
               in: "path",
@@ -156,7 +157,7 @@ export function openApiDocument() {
             },
             {
               description:
-                "コレクション配下のパス。指定するとそのディレクトリと子孫だけを返す",
+                "コレクション配下のパス。共有ドライブでは d:ドライブ名:パス も受け付ける。指定するとそのディレクトリと子孫だけを返す",
               in: "query",
               name: "folder",
               required: false,

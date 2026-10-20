@@ -893,3 +893,145 @@ test("a manager can source the drive root and migrate a my-drive site", async (t
   assert.equal(migrated?.webhookUrl, null);
   assert.equal(migrated?.webhookAuthorizationSet, false);
 });
+
+test("members read shared-drive articles as d:name:folder", async (t) => {
+  const { editor, env, owner, sqlite, stranger, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const drive = await createSharedDrive(env, owner, "研究室");
+  assert.equal(drive.kind, "ok");
+  if (drive.kind !== "ok") {
+    return;
+  }
+  const blog = await createMemberFolder(env, owner, {
+    name: "blog",
+    parentId: drive.result.rootFolderId,
+  });
+  assert.equal(blog.kind, "ok");
+  if (blog.kind !== "ok") {
+    return;
+  }
+  const note = await createNoteService(env).create(owner, {
+    folderId: blog.folder.id,
+    markdown: "# 記事\n\n本文",
+  });
+  assert.ok(!("error" in note));
+  if ("error" in note) {
+    return;
+  }
+
+  const articles = createArticleService(env);
+  const source = await articles.createSource(owner, drive.result.id, {
+    folderId: blog.folder.id,
+    name: "ブログ",
+    schema: [],
+  });
+  assert.ok(!("error" in source));
+  if ("error" in source) {
+    return;
+  }
+  const own = await articles.createSource(owner, owner.id, {
+    folder: "sites/hoge",
+    name: "自分",
+    schema: [],
+  });
+  assert.ok(!("error" in own));
+  if ("error" in own) {
+    return;
+  }
+
+  assert.equal(
+    (
+      await inviteDriveMember(
+        env,
+        drive.result.id,
+        editor.email,
+        "editor",
+        owner,
+      )
+    ).kind,
+    "ok",
+  );
+  assert.equal(
+    (
+      await inviteDriveMember(
+        env,
+        drive.result.id,
+        viewer.email,
+        "viewer",
+        owner,
+      )
+    ).kind,
+    "ok",
+  );
+
+  const listed = await articles.listCollections(editor);
+  assert.equal(
+    listed.find((item) => item.id === source.id)?.folder,
+    "d:研究室:blog",
+  );
+  const query = { folder: "d:研究室:blog", page: 1, perPage: 50 };
+  const page = await articles.listEntries(
+    editor,
+    source.id,
+    "https://example.test",
+    query,
+  );
+  assert.ok(page && "entries" in page);
+  if (!(page && "entries" in page)) {
+    return;
+  }
+  assert.equal(page.entries.length, 1);
+  assert.equal(page.collection.folder, "d:研究室:blog");
+  const entry = await articles.getEntry(
+    viewer,
+    source.id,
+    note.shortId,
+    "https://example.test",
+  );
+  assert.equal(entry?.entry.markdown.includes("本文"), true);
+
+  const outsider = await articles.listCollections(stranger);
+  assert.equal(
+    outsider.some((item) => item.id === source.id),
+    false,
+  );
+  assert.equal(
+    await articles.getEntry(
+      stranger,
+      source.id,
+      note.shortId,
+      "https://example.test",
+    ),
+    null,
+  );
+  assert.equal(
+    await articles.listEntries(
+      stranger,
+      source.id,
+      "https://example.test",
+      query,
+    ),
+    null,
+  );
+
+  const mine = await articles.listCollections(owner);
+  assert.equal(mine.find((item) => item.id === own.id)?.folder, "sites/hoge");
+  const reserved = await createMemberFolder(env, owner, {
+    name: "d:研究室:blog",
+  });
+  assert.equal(reserved.kind, "error");
+  if (reserved.kind === "error") {
+    assert.equal(reserved.status, 400);
+    assert.equal(reserved.error, "フォルダ名が不正です");
+  }
+  const spoof = await articles.createSource(owner, owner.id, {
+    folder: "d:研究室:sites",
+    name: "偽",
+    schema: [],
+  });
+  assert.ok("error" in spoof);
+  assert.equal(
+    (await createSharedDrive(env, owner, "ラボ:広報")).kind,
+    "invalid",
+  );
+});

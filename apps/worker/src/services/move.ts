@@ -1,5 +1,6 @@
 import {
   folderContains,
+  isReservedArticleFolderPath,
   MOVE_MAX_ITEMS,
   type MoveFolderContentsResult,
   type MoveFolderItem,
@@ -432,10 +433,13 @@ export async function moveFolder(
     input.name === undefined
       ? folderName(src.folder)
       : normalizeFolder(input.name);
-  if (!name || name.includes("/")) {
+  if (!name || name.includes("/") || isReservedArticleFolderPath(name)) {
     return invalid("フォルダ名が不正です");
   }
   const to = dest.folder ? `${dest.folder}/${name}` : name;
+  if (isReservedArticleFolderPath(to)) {
+    return invalid("フォルダ名が不正です");
+  }
   const dryRun = input.dryRun ?? false;
   if (sameSubject && to === src.folder) {
     const plan = await countSubtree(env, src.owner_id, src.folder);

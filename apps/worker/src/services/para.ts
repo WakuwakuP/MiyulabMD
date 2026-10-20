@@ -2,6 +2,7 @@ import {
   DEFAULT_PARA_SPACE_NAME,
   folderContains,
   isParaBucketKey,
+  isReservedArticleFolderPath,
   type MoveFolderResult,
   normalizeFolder,
   PARA_BUCKETS,
@@ -370,6 +371,13 @@ async function proposedOrExistingSpace(
   if (existing) {
     return spaceTargetForRow(env, existing);
   }
+  if (isReservedArticleFolderPath(name)) {
+    return {
+      error: "スペース名が不正です",
+      kind: "invalid",
+      status: 400,
+    };
+  }
   // A new space's proposed root is the top-level folder carrying its name;
   // resolutions.space.adopt may redirect the root to any owned folder.
   return { kind: "proposed", name, rootPath: name };
@@ -589,7 +597,11 @@ async function normalizeTargetedResolution(
     return { action: "adopt", target };
   }
   const newName = normalizeFolder(resolution.newName);
-  if (!newName || newName.includes("/")) {
+  if (
+    !newName ||
+    newName.includes("/") ||
+    isReservedArticleFolderPath(newName)
+  ) {
     return invalidResolution("フォルダ名が不正です");
   }
   return { action: "rename", newName, target };
