@@ -108,6 +108,8 @@ export type FolderRecord = {
   /** Effective scopes for list display (not a path leak). */
   readScope?: AccessScope;
   writeScope?: AccessScope;
+  /** 共有フォルダ一覧で、このユーザーが編集できるとき true。 */
+  canEdit?: boolean;
   /** Owner views only: naming rule declared for this folder's children. */
   scheme?: string | null;
   /** Owner views only: ID minted by a parent's scheme. */

@@ -27,12 +27,19 @@ export const articleSourceRoutes = new Elysia({
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    const ownerId = new URL(request.url).searchParams.get("ownerId") ?? user.id;
+    const url = new URL(request.url);
+    const ownerId = url.searchParams.get("ownerId") ?? user.id;
     if (ownerId !== user.id && !(await canEditSubject(env, ownerId, user))) {
       set.status = 403;
       return { error: "Forbidden" };
     }
     const sources = await articles.listSources(ownerId);
+    if (url.searchParams.get("shared") === "1" && ownerId === user.id) {
+      return {
+        sharedSources: await articles.listEditableSharedSources(user),
+        sources,
+      };
+    }
     return { sources };
   })
   .get("/status", async ({ request, set }) => {
@@ -72,7 +79,7 @@ export const articleSourceRoutes = new Elysia({
       set.status = 403;
       return { error: "Forbidden" };
     }
-    const created = await articles.createSource(ownerId, body ?? {});
+    const created = await articles.createSource(user, ownerId, body ?? {});
     if ("error" in created) {
       set.status = created.status;
       return { error: created.error };
@@ -108,7 +115,7 @@ export const articleSourceRoutes = new Elysia({
       set.status = 400;
       return { error: "Invalid JSON body" };
     }
-    const updated = await articles.updateSource(user.id, params.id, body);
+    const updated = await articles.updateSource(user, params.id, body);
     if (!updated) {
       set.status = 404;
       return { error: "Not found" };
@@ -125,7 +132,7 @@ export const articleSourceRoutes = new Elysia({
       set.status = 401;
       return { error: "Unauthorized" };
     }
-    const deleted = await articles.deleteSource(user.id, params.id);
+    const deleted = await articles.deleteSource(user, params.id);
     if (!deleted) {
       set.status = 404;
       return { error: "Not found" };

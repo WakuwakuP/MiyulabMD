@@ -790,20 +790,6 @@ async function loadFolderAccessState(
   return folderAccessStateFromEffective(env, effective, ownerId, user);
 }
 
-/** フォルダ（祖先の共有を含む）の実効閲覧範囲と、このユーザーが見られるか。 */
-export async function folderViewerShare(
-  env: Env,
-  ownerId: string,
-  folder: string,
-  user: SessionUser,
-): Promise<{ canView: boolean; readScope: AccessScope }> {
-  const state = await loadFolderAccessState(env, ownerId, folder, user);
-  return {
-    canView: state.flags.canView,
-    readScope: state.effectiveReadScope,
-  };
-}
-
 export async function folderViewFlags(
   env: Env,
   ownerId: string,
@@ -1527,6 +1513,7 @@ export async function listSharedFolders(
     }
     seen.add(access.id);
     folders.push({
+      canEdit: access.flags.canEdit,
       id: access.id,
       name: access.name,
       parentId: access.parentId,

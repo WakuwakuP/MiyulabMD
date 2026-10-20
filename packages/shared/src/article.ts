@@ -1,5 +1,23 @@
-import { type AccessScope, folderContains } from "./permission.ts";
+import { folderContains } from "./permission.ts";
 import { normalizeFolder } from "./title.ts";
+
+export const ARTICLE_UPDATE_AUDIENCES = ["self", "editors"] as const;
+
+export type ArticleUpdateAudience = (typeof ARTICLE_UPDATE_AUDIENCES)[number];
+
+export const ARTICLE_UPDATE_AUDIENCE_LABELS: Record<
+  ArticleUpdateAudience,
+  string
+> = {
+  editors: "編集権限が付与されている範囲",
+  self: "自分のみ",
+};
+
+export function isArticleUpdateAudience(
+  value: unknown,
+): value is ArticleUpdateAudience {
+  return value === "self" || value === "editors";
+}
 
 export const ARTICLE_FIELD_TYPES = [
   "string",
@@ -23,41 +41,37 @@ export type ArticleSchemaField = {
 export type ArticleMeta = Record<string, unknown>;
 
 /**
- * サイトを更新できる人。所有者に加え、フォルダの共有設定で閲覧できる人。
- * 公開（public）の閲覧者は押せない。
+ * サイトを更新できる人。
+ * self はフォルダの所有者だけ。editors は所有者に加え、そのフォルダを編集できる人。
  */
 export function canDispatchArticleSource(input: {
   isOwner: boolean;
-  canView: boolean;
-  readScope: AccessScope;
+  audience: ArticleUpdateAudience;
+  canEdit: boolean;
 }): boolean {
   if (input.isOwner) {
     return true;
   }
-  return input.canView && input.readScope !== "public";
+  return input.audience === "editors" && input.canEdit;
 }
 
-/**
- * 開いている場所が公開なら、祖先のサイトでも更新させない。
- * 公開の子フォルダからソース ID を渡さないため。
- */
+/** 開いている場所を見られない人には、祖先のサイト更新も出さない。 */
 export function canOfferArticleDispatch(input: {
   isOwner: boolean;
+  audience: ArticleUpdateAudience;
   openedCanView: boolean;
-  openedReadScope: AccessScope;
-  sourceCanView: boolean;
-  sourceReadScope: AccessScope;
+  sourceCanEdit: boolean;
 }): boolean {
   if (input.isOwner) {
     return true;
   }
-  if (!(input.openedCanView && input.openedReadScope !== "public")) {
+  if (!input.openedCanView) {
     return false;
   }
   return canDispatchArticleSource({
-    canView: input.sourceCanView,
+    audience: input.audience,
+    canEdit: input.sourceCanEdit,
     isOwner: false,
-    readScope: input.sourceReadScope,
   });
 }
 
@@ -67,6 +81,7 @@ export type ArticleSourceInput = {
   schema: ArticleSchemaField[];
   webhookUrl?: string | null;
   webhookAuthorization?: string | null;
+  updateAudience?: ArticleUpdateAudience;
 };
 
 export type ArticleSource = {
@@ -74,6 +89,7 @@ export type ArticleSource = {
   name: string;
   folder: string;
   folderId: string | null;
+  updateAudience: ArticleUpdateAudience;
   schema: ArticleSchemaField[];
   webhookUrl: string | null;
   webhookAuthorizationSet: boolean;

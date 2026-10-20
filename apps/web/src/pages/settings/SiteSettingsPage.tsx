@@ -4,6 +4,7 @@ import {
   ARTICLE_FIELD_TYPES,
   type ArticleSchemaField,
   type ArticleSource,
+  type ArticleUpdateAudience,
   type FolderRecord,
 } from "@miyulabmd/shared";
 import { type FormEvent, useEffect, useState } from "react";
@@ -18,8 +19,9 @@ import { ErrorText, MutedText } from "../../components/ui/Text.tsx";
 import {
   createArticleSource,
   deleteArticleSource,
-  fetchArticleSources,
+  fetchArticleSourceSettings,
   fetchFolderTree,
+  fetchSharedFolders,
   updateArticleSource,
 } from "../../lib/api.ts";
 import { hasSelectableSourceFolders } from "../../lib/folder-tree.ts";
@@ -29,6 +31,8 @@ type Draft = {
   id?: string;
   name: string;
   folder: string;
+  sharedFolderId: string;
+  updateAudience: ArticleUpdateAudience;
   schema: DraftField[];
   webhookUrl: string;
   webhookAuthorization: string;
@@ -42,48 +46,196 @@ function emptyDraft(): Draft {
     folder: "",
     name: "",
     schema: [],
+    sharedFolderId: "",
+    updateAudience: "self",
     webhookAuthorization: "",
     webhookAuthorizationSet: false,
     webhookUrl: "",
   };
 }
-function draftFromSource(source: ArticleSource): Draft {
+function draftFromSource(source: ArticleSource, shared: boolean): Draft {
   return {
     folder: source.folder,
     id: source.id,
     name: source.name,
     schema: source.schema.map((field) => ({ ...field, rowId: newRowId() })),
+    sharedFolderId: shared ? (source.folderId ?? "") : "",
+    updateAudience: source.updateAudience === "editors" ? "editors" : "self",
     webhookAuthorization: "",
     webhookAuthorizationSet: source.webhookAuthorizationSet,
     webhookUrl: source.webhookUrl ?? "",
   };
 }
-function readScopeForFolder(
+
+function audienceOf(source: ArticleSource): ArticleUpdateAudience {
+  return source.updateAudience === "editors" ? "editors" : "self";
+}
+
+function sourcePlace(source: ArticleSource, shared: boolean): string {
+  const audience =
+    audienceOf(source) === "editors" ? "編集できる人" : "自分のみ";
+  if (shared) {
+    return `${source.folder} · 共有フォルダ · ${audience}`;
+  }
+  return `${source.folder} · ${audience}`;
+}
+
+function selectedWriteScope(
   folders: FolderRecord[],
-  path: string,
+  sharedFolders: FolderRecord[],
+  draft: Draft,
 ): AccessScope | null {
-  return folders.find((folder) => folder.folder === path)?.readScope ?? null;
-}
-
-function siteUpdateAudienceSuffix(
-  folders: FolderRecord[],
-  path: string,
-): string {
-  const audience = siteUpdateAudience(readScopeForFolder(folders, path));
-  return audience ? ` · ${audience}` : "";
-}
-
-function siteUpdateAudience(scope: AccessScope | null): string | null {
-  if (!scope) {
+  if (draft.sharedFolderId) {
+    return (
+      sharedFolders.find((folder) => folder.id === draft.sharedFolderId)
+        ?.writeScope ?? null
+    );
+  }
+  if (!draft.folder) {
     return null;
   }
-  if (scope === "public") {
-    return "公開のため、所有者だけが押せます。";
+  return (
+    folders.find((folder) => folder.folder === draft.folder)?.writeScope ?? null
+  );
+}
+
+function folderFields(draft: Draft): { folder?: string; folderId?: string } {
+  if (draft.sharedFolderId) {
+    return { folderId: draft.sharedFolderId };
   }
-  if (scope === "self") {
-    return "共有設定は自分のみなので、所有者だけが押せます。";
+  if (draft.folder) {
+    return { folder: draft.folder };
   }
-  return `共有設定の閲覧（${ACCESS_SCOPE_LABELS[scope]}）と同じ人が押せます。`;
+  return {};
+}
+
+function sharedFolderOptions(
+  folders: FolderRecord[],
+  draft: Draft,
+): FolderRecord[] {
+  const editable = folders.filter((folder) => folder.canEdit);
+  if (
+    !draft.sharedFolderId ||
+    editable.some((folder) => folder.id === draft.sharedFolderId)
+  ) {
+    return editable;
+  }
+  return [
+    ...editable,
+    {
+      id: draft.sharedFolderId,
+      name: draft.folder || "共有フォルダ",
+      parentId: null,
+    },
+  ];
+}
+
+function audienceHint(
+  audience: ArticleUpdateAudience,
+  writeScope: AccessScope | null,
+  sharedFolder: boolean,
+): string {
+  const range = writeScope
+    ? `現在の編集範囲は「${ACCESS_SCOPE_LABELS[writeScope]}」です。`
+    : "";
+  if (sharedFolder || audience === "editors") {
+    return `このフォルダを編集できる人が「サイトを更新」を押せます。閲覧だけの人は押せません。${range}`;
+  }
+  return `フォルダの所有者だけが「サイトを更新」を押せます。${range}`;
+}
+
+function SourceAudienceFields({
+  draft,
+  editableShared,
+  folders,
+  onChange,
+  sharedFolders,
+}: {
+  draft: Draft;
+  editableShared: FolderRecord[];
+  folders: FolderRecord[];
+  onChange: (draft: Draft) => void;
+  sharedFolders: FolderRecord[];
+}) {
+  const showSharedPicker =
+    Boolean(draft.sharedFolderId) || (!draft.id && editableShared.length > 0);
+  return (
+    <>
+      {!draft.sharedFolderId && (
+        <div className="grid gap-[0.35rem]">
+          <span className="text-[0.85rem] text-muted">
+            ディレクトリ（マイドライブ）
+          </span>
+          <FolderHierarchySelect
+            folders={folders}
+            id="source-folder"
+            onChange={(folder) => onChange({ ...draft, folder })}
+            value={draft.folder}
+          />
+        </div>
+      )}
+      {showSharedPicker && (
+        <Field htmlFor="source-shared-folder" label="共有フォルダ">
+          <Select
+            className="w-full rounded-lg px-3 py-2.5"
+            id="source-shared-folder"
+            onChange={(event) => {
+              const sharedFolderId = event.target.value;
+              onChange({
+                ...draft,
+                folder: "",
+                sharedFolderId,
+                updateAudience: sharedFolderId
+                  ? "editors"
+                  : draft.updateAudience,
+              });
+            }}
+            value={draft.sharedFolderId}
+          >
+            {!draft.id && <option value="">使わない</option>}
+            {sharedFolderOptions(sharedFolders, draft).map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {folder.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+      <fieldset className="grid gap-2 border-0 p-0">
+        <legend className="text-[0.85rem] text-muted">
+          サイトを更新できる人
+        </legend>
+        <CheckLabel>
+          <input
+            checked={draft.updateAudience === "self"}
+            disabled={Boolean(draft.sharedFolderId)}
+            name="update-audience"
+            onChange={() => onChange({ ...draft, updateAudience: "self" })}
+            type="radio"
+            value="self"
+          />
+          自分のみ
+        </CheckLabel>
+        <CheckLabel>
+          <input
+            checked={draft.updateAudience === "editors"}
+            name="update-audience"
+            onChange={() => onChange({ ...draft, updateAudience: "editors" })}
+            type="radio"
+            value="editors"
+          />
+          編集権限が付与されている範囲
+        </CheckLabel>
+        <MutedText>
+          {audienceHint(
+            draft.updateAudience,
+            selectedWriteScope(folders, sharedFolders, draft),
+            Boolean(draft.sharedFolderId),
+          )}
+        </MutedText>
+      </fieldset>
+    </>
+  );
 }
 
 function defaultForType(type: ArticleSchemaField["type"]): string {
@@ -131,18 +283,21 @@ function defaultToInput(
 export function SiteSettingsPage() {
   const { user } = useOutletContext<AppShellContext>();
   const [sources, setSources] = useState<ArticleSource[]>([]);
+  const [sharedSources, setSharedSources] = useState<ArticleSource[]>([]);
   const [folders, setFolders] = useState<FolderRecord[]>([]);
+  const [sharedFolders, setSharedFolders] = useState<FolderRecord[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function reload(actorId: string) {
-    const [sourceResult, folderResult] = await Promise.all([
-      fetchArticleSources({ viewerId: actorId }),
+    const [sourceResult, folderResult, sharedFolderResult] = await Promise.all([
+      fetchArticleSourceSettings({ viewerId: actorId }),
       fetchFolderTree({ viewerId: actorId }),
+      fetchSharedFolders({ viewerId: actorId }),
     ]);
-    return { folderResult, sourceResult };
+    return { folderResult, sharedFolderResult, sourceResult };
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Preserve the existing request lifecycle.
@@ -156,20 +311,27 @@ export function SiteSettingsPage() {
     }
     setLoading(true);
     void reload(user.id)
-      .then(({ sourceResult, folderResult }) => {
+      .then(({ folderResult, sharedFolderResult, sourceResult }) => {
         if (!current) {
           return;
         }
         if (sourceResult.ok) {
-          setSources(sourceResult.data);
+          setSources(sourceResult.data.sources);
+          setSharedSources(sourceResult.data.shared);
         } else {
           setError(sourceResult.error);
           setSources([]);
+          setSharedSources([]);
         }
         if (folderResult.ok) {
           setFolders(folderResult.data);
         } else {
           setError(folderResult.error);
+        }
+        if (sharedFolderResult.ok) {
+          setSharedFolders(sharedFolderResult.data);
+        } else {
+          setError(sharedFolderResult.error);
         }
       })
       .catch((reason: unknown) => {
@@ -193,7 +355,9 @@ export function SiteSettingsPage() {
     if (!draft) {
       return;
     }
-    if (!(draft.name.trim() && draft.folder)) {
+    if (
+      !(draft.name.trim() && (draft.id || draft.folder || draft.sharedFolderId))
+    ) {
       setError("名前とディレクトリを入力してください。");
       return;
     }
@@ -224,10 +388,12 @@ export function SiteSettingsPage() {
         }
         return next;
       });
+    const folderInput = folderFields(draft);
     const input = {
-      folder: draft.folder,
+      ...folderInput,
       name: draft.name.trim(),
       schema,
+      updateAudience: draft.sharedFolderId ? "editors" : draft.updateAudience,
       webhookUrl: draft.webhookUrl.trim() || null,
       ...(draft.webhookAuthorization.trim()
         ? { webhookAuthorization: draft.webhookAuthorization.trim() }
@@ -247,10 +413,14 @@ export function SiteSettingsPage() {
       try {
         const refreshed = await reload(user.id);
         if (refreshed.sourceResult.ok) {
-          setSources(refreshed.sourceResult.data);
+          setSources(refreshed.sourceResult.data.sources);
+          setSharedSources(refreshed.sourceResult.data.shared);
         }
         if (refreshed.folderResult.ok) {
           setFolders(refreshed.folderResult.data);
+        }
+        if (refreshed.sharedFolderResult.ok) {
+          setSharedFolders(refreshed.sharedFolderResult.data);
         }
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -273,10 +443,14 @@ export function SiteSettingsPage() {
       try {
         const refreshed = await reload(user.id);
         if (refreshed.sourceResult.ok) {
-          setSources(refreshed.sourceResult.data);
+          setSources(refreshed.sourceResult.data.sources);
+          setSharedSources(refreshed.sourceResult.data.shared);
         }
         if (refreshed.folderResult.ok) {
           setFolders(refreshed.folderResult.data);
+        }
+        if (refreshed.sharedFolderResult.ok) {
+          setSharedFolders(refreshed.sharedFolderResult.data);
         }
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -303,7 +477,13 @@ export function SiteSettingsPage() {
       </section>
     );
   }
-  const canPickSourceFolder = hasSelectableSourceFolders(folders);
+  const editableShared = sharedFolders.filter((folder) => folder.canEdit);
+  const canPickSourceFolder =
+    hasSelectableSourceFolders(folders) || editableShared.length > 0;
+  const listed = [
+    ...sources.map((source) => ({ shared: false, source })),
+    ...sharedSources.map((source) => ({ shared: true, source })),
+  ];
   return (
     <section>
       <h2 className="m-0 text-[1.5em] font-bold">サイト設定</h2>
@@ -312,19 +492,19 @@ export function SiteSettingsPage() {
         YAML frontmatter です。Astro は PAT で{" "}
         <code className="font-mono">/api/articles</code> と{" "}
         <code className="font-mono">/openapi.json</code> を読めます。Webhook
-        はヘッダーの「サイトを更新」から送ります。押せる人は、そのフォルダの共有設定で閲覧できる人と同じです。公開の閲覧者は押せません。
+        はヘッダーの「サイトを更新」から送ります。押せる人は、自分のみか、そのフォルダを編集できる人かをソースごとに選べます。閲覧だけの人は押せません。編集できる共有フォルダも選べます。
       </p>
       {error && <ErrorText>{error}</ErrorText>}
       {loading ? (
         <p>読み込み中…</p>
       ) : (
         <ul className="list-none p-0">
-          {sources.length === 0 && (
+          {listed.length === 0 && (
             <li>
               <MutedText>記事ソースはまだありません。</MutedText>
             </li>
           )}
-          {sources.map((source) => (
+          {listed.map(({ shared, source }) => (
             <li
               className="flex justify-between gap-4 border-b border-border py-3 max-[640px]:flex-col max-[640px]:items-start"
               key={source.id}
@@ -332,13 +512,12 @@ export function SiteSettingsPage() {
               <div>
                 <strong>{source.name}</strong>
                 <MutedText className="mt-1">
-                  {source.folder}
-                  {siteUpdateAudienceSuffix(folders, source.folder)}
+                  {sourcePlace(source, shared)}
                 </MutedText>
               </div>
               <Row>
                 <Button
-                  onClick={() => setDraft(draftFromSource(source))}
+                  onClick={() => setDraft(draftFromSource(source, shared))}
                   variant="outline"
                 >
                   編集
@@ -385,23 +564,13 @@ export function SiteSettingsPage() {
               value={draft.name}
             />
           </Field>
-          <div className="grid gap-[0.35rem]">
-            <span className="text-[0.85rem] text-muted">ディレクトリ</span>
-            <FolderHierarchySelect
-              folders={folders}
-              id="source-folder"
-              onChange={(folder) => setDraft({ ...draft, folder })}
-              value={draft.folder}
-            />
-            <MutedText>
-              サイトを更新できる人は、このフォルダの共有設定に従います。公開の閲覧者は押せません。
-              {draft.folder
-                ? (siteUpdateAudience(
-                    readScopeForFolder(folders, draft.folder),
-                  ) ?? "")
-                : ""}
-            </MutedText>
-          </div>
+          <SourceAudienceFields
+            draft={draft}
+            editableShared={editableShared}
+            folders={folders}
+            onChange={setDraft}
+            sharedFolders={sharedFolders}
+          />
           <div>
             <p className="m-0 mb-2 text-[0.85rem] text-muted">
               スキーマ（新規ノートの frontmatter と形式チェック）
@@ -535,6 +704,10 @@ export function SiteSettingsPage() {
               type="url"
               value={draft.webhookUrl}
             />
+            <MutedText>
+              URL を変えたときは、Authorization
+              を入れ直してください。空のまま保存すると消えます。
+            </MutedText>
           </Field>
           <Field htmlFor="webhook-auth" label="Webhook Authorization">
             <Input
