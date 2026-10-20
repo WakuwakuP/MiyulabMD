@@ -38,8 +38,15 @@ import { type MenuTarget, NoteTree } from "../components/notes/NoteTree.tsx";
 import { SchemeDialog } from "../components/notes/SchemeDialog.tsx";
 import { ShareModal } from "../components/notes/ShareModal.tsx";
 import { HeaderButton } from "../components/ui/HeaderButton.tsx";
-import { FolderOutlineIcon, PlusIcon } from "../components/ui/icons.tsx";
+import { IconButton } from "../components/ui/IconButton.tsx";
+import {
+  FolderOutlineIcon,
+  MoreIcon,
+  PlusIcon,
+} from "../components/ui/icons.tsx";
+import { MenuItem, MenuPanel } from "../components/ui/Menu.tsx";
 import { ErrorText } from "../components/ui/Text.tsx";
+import { useDismiss } from "../hooks/use-dismiss.ts";
 import {
   archiveParaProject,
   fetchFolderChildren,
@@ -113,34 +120,118 @@ function HomeHeaderEnd({
   if (!showEnd) {
     return null;
   }
+  const hasActions = membersOnly || canCreateFolder || canCreateNote;
   return (
     <>
-      {membersOnly && (
-        <HeaderButton
-          icon={<UsersRound aria-hidden={true} className="size-4" />}
-          label="メンバー"
-          onClick={onMembers}
-          variant="outline"
-        />
-      )}
-      {canCreateFolder && (
-        <HeaderButton
-          icon={<FolderOutlineIcon />}
-          label="フォルダ"
-          onClick={onCreateFolder}
-          variant="outline"
-        />
-      )}
-      {canCreateNote && (
-        <HeaderButton
-          disabled={creating}
-          icon={<PlusIcon />}
-          label={creating ? "作成中…" : "新規ノート"}
-          onClick={onCreateNote}
-          variant="accent"
+      <div className="flex items-center gap-2 max-[900px]:hidden">
+        {membersOnly && (
+          <HeaderButton
+            icon={<UsersRound aria-hidden={true} className="size-4" />}
+            label="メンバー"
+            onClick={onMembers}
+            variant="outline"
+          />
+        )}
+        {canCreateFolder && (
+          <HeaderButton
+            icon={<FolderOutlineIcon />}
+            label="フォルダ"
+            onClick={onCreateFolder}
+            variant="outline"
+          />
+        )}
+        {canCreateNote && (
+          <HeaderButton
+            disabled={creating}
+            icon={<PlusIcon />}
+            label={creating ? "作成中…" : "新規ノート"}
+            onClick={onCreateNote}
+            variant="accent"
+          />
+        )}
+      </div>
+      {hasActions && (
+        <HomeHeaderMenu
+          canCreateFolder={canCreateFolder}
+          canCreateNote={canCreateNote}
+          creating={creating}
+          membersOnly={membersOnly}
+          onCreateFolder={onCreateFolder}
+          onCreateNote={onCreateNote}
+          onMembers={onMembers}
         />
       )}
     </>
+  );
+}
+
+function HomeHeaderMenu({
+  canCreateFolder,
+  canCreateNote,
+  creating,
+  membersOnly,
+  onCreateFolder,
+  onCreateNote,
+  onMembers,
+}: {
+  canCreateFolder: boolean;
+  canCreateNote: boolean;
+  creating: boolean;
+  membersOnly: boolean;
+  onCreateFolder: () => void;
+  onCreateNote: () => void;
+  onMembers: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useDismiss(open, () => setOpen(false), rootRef);
+
+  function choose(action: () => void) {
+    setOpen(false);
+    action();
+  }
+
+  return (
+    <div className="relative min-[900px]:hidden" ref={rootRef}>
+      <IconButton
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="操作メニュー"
+        onClick={() => setOpen((value) => !value)}
+        title="操作"
+        variant="ghost"
+      >
+        <MoreIcon />
+      </IconButton>
+      {open && (
+        <MenuPanel>
+          {membersOnly && (
+            <MenuItem onClick={() => choose(onMembers)}>
+              <span className="flex items-center gap-2">
+                <UsersRound aria-hidden={true} className="size-4" />
+                メンバー
+              </span>
+            </MenuItem>
+          )}
+          {canCreateFolder && (
+            <MenuItem onClick={() => choose(onCreateFolder)}>
+              <span className="flex items-center gap-2">
+                <FolderOutlineIcon />
+                フォルダ
+              </span>
+            </MenuItem>
+          )}
+          {canCreateNote && (
+            <MenuItem disabled={creating} onClick={() => choose(onCreateNote)}>
+              <span className="flex items-center gap-2">
+                <PlusIcon />
+                {creating ? "作成中…" : "新規ノート"}
+              </span>
+            </MenuItem>
+          )}
+        </MenuPanel>
+      )}
+    </div>
   );
 }
 
