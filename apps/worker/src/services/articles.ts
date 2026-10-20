@@ -161,8 +161,7 @@ async function resolveFolderPath(
   if (!folder) {
     return { error: "マイドライブは記事ソースにできません" };
   }
-  const folderId = await ensureFolderRow(env, ownerId, folder);
-  return { folder, folderId };
+  return { folder, folderId: null };
 }
 
 function loadSource(
@@ -376,9 +375,14 @@ async function resolvePlacement(
   if (denied) {
     return denied;
   }
+  const folderId = await ensureFolderRow(
+    env,
+    requestedOwnerId,
+    resolved.folder,
+  );
   return {
     folder: resolved.folder,
-    folderId: resolved.folderId,
+    folderId,
     ownerId: requestedOwnerId,
   };
 }
@@ -389,7 +393,7 @@ async function resolveSourcePlacementUpdate(
   row: SourceRow,
   input: ArticleSourceWrite,
 ): Promise<SourcePlacement | SourceWriteError> {
-  if (input.folder === undefined && input.folderId === undefined) {
+  if (input.folder === undefined && !input.folderId) {
     return {
       folder: row.folder,
       folderId: row.folder_id,
@@ -398,7 +402,7 @@ async function resolveSourcePlacementUpdate(
   }
   const foreign =
     user.id !== row.owner_id && !(await isSharedDrive(env, row.owner_id));
-  if (foreign && input.folderId === undefined) {
+  if (foreign && !input.folderId) {
     return {
       error: "共有フォルダの変更はフォルダ ID で指定してください",
       status: 400,
