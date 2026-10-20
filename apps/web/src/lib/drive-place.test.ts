@@ -65,6 +65,18 @@ test("drive place ignores grant pages", () => {
   );
 });
 
+test("stale root path still returns to that shared drive", () => {
+  assert.deepEqual(
+    drivePlaceFromSelection({ id: "drive-1", kind: "drive" }, "/"),
+    { id: "drive-1", kind: "drive", path: "/d/drive-1" },
+  );
+  assert.deepEqual(
+    drivePlaceFromSelection({ id: "drive-1", kind: "drive" }, "/f/folder-1"),
+    { id: "drive-1", kind: "drive", path: "/d/drive-1" },
+  );
+  assert.equal(drivePlaceFromSelection({ kind: "mine" }, "/d/drive-1"), null);
+});
+
 test("drive place ignores malformed storage", () => {
   const storage = memoryStorage();
   storage.setItem("miyulabmd:drive-place", "{");

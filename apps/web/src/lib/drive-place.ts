@@ -76,18 +76,29 @@ function parsePlace(raw: string | null): DrivePlace | null {
   return null;
 }
 
+function isFolderPath(path: string) {
+  return /^\/f\/[^/]+$/.test(path);
+}
+
 export function drivePlaceFromSelection(
   selection: { id?: string; kind: string },
   path: string,
 ): DrivePlace | null {
-  if (!isTreePath(path)) {
-    return null;
-  }
-  if (selection.kind === "mine") {
+  if (selection.kind === "mine" && (path === "/" || isFolderPath(path))) {
     return { kind: "mine", path };
   }
-  if (selection.kind === "drive" && selection.id) {
-    return { id: selection.id, kind: "drive", path };
+  if (
+    selection.kind === "drive" &&
+    selection.id &&
+    (path === `/d/${selection.id}` || path === "/" || isFolderPath(path))
+  ) {
+    // 共有ドライブのフォルダ表示や、ルートへ移る途中の pathname は
+    // まだ前の selection のことがある。戻り先はドライブの根に固定する。
+    return {
+      id: selection.id,
+      kind: "drive",
+      path: `/d/${selection.id}`,
+    };
   }
   return null;
 }
