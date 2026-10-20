@@ -298,10 +298,19 @@ export async function updateNote(
 }
 
 export async function fetchFolderTree(
-  options: { signal?: AbortSignal; viewerId?: string | null } = {},
+  options: {
+    signal?: AbortSignal;
+    viewerId?: string | null;
+    ownerId?: string;
+  } = {},
 ): Promise<ApiResult<FolderRecord[]>> {
+  const params = new URLSearchParams();
+  if (options.ownerId) {
+    params.set("ownerId", options.ownerId);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(
-    "/api/folders/tree",
+    `/api/folders/tree${suffix}`,
     { ...fetchOpts, signal: options.signal },
     options,
   );
@@ -1056,6 +1065,7 @@ export type ArticleSourceWrite = {
   name?: string;
   folder?: string;
   folderId?: string | null;
+  ownerId?: string;
   schema?: ArticleSource["schema"];
   webhookUrl?: string | null;
   webhookAuthorization?: string | null;
@@ -1180,6 +1190,25 @@ export async function fetchArticleDispatchTarget(
   }
   const body = (await res.json()) as { target: ArticleDispatchTarget | null };
   return { data: body.target, ok: true };
+}
+
+export async function migrateArticleSource(
+  id: string,
+  input: { destFolderId: string; dryRun?: boolean },
+): Promise<ApiResult<MoveFolderResult>> {
+  const res = await fetch(`/api/article-sources/${id}/migrate`, {
+    ...fetchOpts,
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  if (!input.dryRun) {
+    notifyArticleChanged();
+  }
+  return { data: (await res.json()) as MoveFolderResult, ok: true };
 }
 
 export async function dispatchArticleSource(

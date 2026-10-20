@@ -78,6 +78,7 @@ export function AppShell() {
   const [headerEnd, setHeaderEnd] = useState<ReactNode>(null);
   const [headerFolder, setHeaderFolder] = useState<string | null>(null);
   const [headerFolderId, setHeaderFolderId] = useState<string | null>(null);
+  const [headerOwnerId, setHeaderOwnerId] = useState<string | null>(null);
   const [headerNoteId, setHeaderNoteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [purgeRequest, setPurgeRequest] = useState<{
@@ -276,6 +277,7 @@ export function AppShell() {
           setHeaderActions(null);
           setHeaderEnd(null);
           setHeaderFolder(null);
+          setHeaderOwnerId(null);
           setLoading(false);
         } else if (event.phase === "failed") {
           if (pendingIdentity.has(event.id) || !peer) {
@@ -313,6 +315,7 @@ export function AppShell() {
         setHeaderActions(null);
         setHeaderEnd(null);
         setHeaderFolder(null);
+        setHeaderOwnerId(null);
         setLoading(false);
       }
       reverifyRequested = true;
@@ -411,6 +414,7 @@ export function AppShell() {
       setHeaderFolder(next?.folder ?? null);
       setHeaderFolderId(next?.folderId ?? null);
       setHeaderNoteId(next?.noteId ?? null);
+      setHeaderOwnerId(next?.ownerId ?? null);
     },
     [],
   );
@@ -451,6 +455,7 @@ export function AppShell() {
             viewer.liveCheckFailed === true)
         }
         onOpenSearch={() => setSearchOpen(true)}
+        ownerId={headerOwnerId}
         user={viewer.user}
       />
       <main

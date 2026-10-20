@@ -176,6 +176,7 @@ export function EditorOverflowMenu({
                   folder={folder}
                   folderId={folderId}
                   noteId={note.id}
+                  ownerId={note.ownerId}
                   user={user}
                 />
               </div>

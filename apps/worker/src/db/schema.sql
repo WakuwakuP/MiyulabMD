@@ -186,6 +186,7 @@ CREATE TABLE article_sources (
   schema_json TEXT NOT NULL,
   webhook_url TEXT,
   webhook_authorization TEXT,
+  update_audience TEXT NOT NULL DEFAULT 'self',
   last_dispatched_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,

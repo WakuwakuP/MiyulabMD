@@ -1,9 +1,22 @@
+import type { DriveRole, OwnerKind } from "./drive.ts";
 import { folderContains } from "./permission.ts";
 import { normalizeFolder } from "./title.ts";
 
 export const ARTICLE_UPDATE_AUDIENCES = ["self", "editors"] as const;
 
 export type ArticleUpdateAudience = (typeof ARTICLE_UPDATE_AUDIENCES)[number];
+
+export const DRIVE_ARTICLE_UPDATE_AUDIENCES = [
+  "managers",
+  "managers_or_editors",
+] as const;
+
+export type DriveArticleUpdateAudience =
+  (typeof DRIVE_ARTICLE_UPDATE_AUDIENCES)[number];
+
+export type ArticleUpdateAudienceValue =
+  | ArticleUpdateAudience
+  | DriveArticleUpdateAudience;
 
 export const ARTICLE_UPDATE_AUDIENCE_LABELS: Record<
   ArticleUpdateAudience,
@@ -13,10 +26,24 @@ export const ARTICLE_UPDATE_AUDIENCE_LABELS: Record<
   self: "自分のみ",
 };
 
+export const DRIVE_ARTICLE_UPDATE_AUDIENCE_LABELS: Record<
+  DriveArticleUpdateAudience,
+  string
+> = {
+  managers: "管理者のみ",
+  managers_or_editors: "管理者または編集者",
+};
+
 export function isArticleUpdateAudience(
   value: unknown,
 ): value is ArticleUpdateAudience {
   return value === "self" || value === "editors";
+}
+
+export function isDriveArticleUpdateAudience(
+  value: unknown,
+): value is DriveArticleUpdateAudience {
+  return value === "managers" || value === "managers_or_editors";
 }
 
 export const ARTICLE_FIELD_TYPES = [
@@ -75,13 +102,66 @@ export function canOfferArticleDispatch(input: {
   });
 }
 
+/** 共有ドライブの更新 Webhook。管理者は常に実行でき、編集者は設定が許すときだけ。 */
+export function canDispatchSharedDriveSource(input: {
+  role: DriveRole | null;
+  audience: DriveArticleUpdateAudience;
+}): boolean {
+  if (input.role === "manager") {
+    return true;
+  }
+  return input.role === "editor" && input.audience === "managers_or_editors";
+}
+
+/** 共有ドライブのサイト設定を変えられるのは管理者だけ。 */
+export function canManageSharedDriveSource(role: DriveRole | null): boolean {
+  return role === "manager";
+}
+
+/**
+ * 主体をまたぐ移動で、記事ソースの実行範囲を相手の語彙へ読み替える。
+ * 同じ種別のあいだはそのまま。
+ */
+export function translateArticleUpdateAudience(
+  from: OwnerKind,
+  to: OwnerKind,
+  value: string | null | undefined,
+): ArticleUpdateAudienceValue {
+  if (from === to) {
+    return from === "shared_drive"
+      ? normalizeDriveAudience(value)
+      : normalizeUserAudience(value);
+  }
+  if (from === "user" && to === "shared_drive") {
+    return value === "editors" ? "managers_or_editors" : "managers";
+  }
+  if (value === "managers_or_editors" || value === "editors") {
+    return "editors";
+  }
+  return "self";
+}
+
+export function normalizeUserAudience(
+  value: string | null | undefined,
+): ArticleUpdateAudience {
+  return value === "editors" ? "editors" : "self";
+}
+
+export function normalizeDriveAudience(
+  value: string | null | undefined,
+): DriveArticleUpdateAudience {
+  return value === "managers_or_editors" || value === "editors"
+    ? "managers_or_editors"
+    : "managers";
+}
+
 export type ArticleSourceInput = {
   name: string;
   folder: string;
   schema: ArticleSchemaField[];
   webhookUrl?: string | null;
   webhookAuthorization?: string | null;
-  updateAudience?: ArticleUpdateAudience;
+  updateAudience?: ArticleUpdateAudienceValue;
 };
 
 export type ArticleSource = {
@@ -89,7 +169,10 @@ export type ArticleSource = {
   name: string;
   folder: string;
   folderId: string | null;
-  updateAudience: ArticleUpdateAudience;
+  ownerKind: OwnerKind;
+  updateAudience: ArticleUpdateAudienceValue;
+  /** この応答の閲覧者が更新 Webhook を実行できるとき true。未判定なら省略。 */
+  canDispatch?: boolean;
   schema: ArticleSchemaField[];
   webhookUrl: string | null;
   webhookAuthorizationSet: boolean;

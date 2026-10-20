@@ -5,12 +5,17 @@ import {
   type ArticleSchemaField,
   type ArticleSource,
   type ArticleUpdateAudience,
+  type ArticleUpdateAudienceValue,
+  DRIVE_ARTICLE_UPDATE_AUDIENCE_LABELS,
+  type DriveArticleUpdateAudience,
   type FolderRecord,
+  type SharedDriveSummary,
 } from "@miyulabmd/shared";
 import { type FormEvent, useEffect, useState } from "react";
 import { useOutletContext } from "react-router";
 import type { AppShellContext } from "../../components/layout/AppShellContext.ts";
 import { FolderHierarchySelect } from "../../components/settings/FolderHierarchySelect.tsx";
+import { SiteMigrateDialog } from "../../components/settings/SiteMigrateDialog.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { CheckLabel, Field, Row } from "../../components/ui/Field.tsx";
 import { Input } from "../../components/ui/Input.tsx";
@@ -21,6 +26,7 @@ import {
   deleteArticleSource,
   fetchArticleSourceSettings,
   fetchFolderTree,
+  fetchSharedDrives,
   fetchSharedFolders,
   updateArticleSource,
 } from "../../lib/api.ts";
@@ -31,8 +37,9 @@ type Draft = {
   id?: string;
   name: string;
   folder: string;
+  driveRoot: boolean;
   sharedFolderId: string;
-  updateAudience: ArticleUpdateAudience;
+  updateAudience: ArticleUpdateAudienceValue;
   schema: DraftField[];
   webhookUrl: string;
   webhookAuthorization: string;
@@ -43,6 +50,7 @@ function newRowId(): string {
 }
 function emptyDraft(): Draft {
   return {
+    driveRoot: false,
     folder: "",
     name: "",
     schema: [],
@@ -53,27 +61,47 @@ function emptyDraft(): Draft {
     webhookUrl: "",
   };
 }
-function draftFromSource(source: ArticleSource, shared: boolean): Draft {
+function audienceFromSource(
+  source: ArticleSource,
+  drive: boolean,
+): ArticleUpdateAudienceValue {
+  if (drive) {
+    return source.updateAudience === "managers_or_editors"
+      ? "managers_or_editors"
+      : "managers";
+  }
+  return source.updateAudience === "editors" ? "editors" : "self";
+}
+
+function draftFromSource(
+  source: ArticleSource,
+  shared: boolean,
+  drive: boolean,
+): Draft {
   return {
+    driveRoot: drive && source.folder === "",
     folder: source.folder,
     id: source.id,
     name: source.name,
     schema: source.schema.map((field) => ({ ...field, rowId: newRowId() })),
     sharedFolderId: shared ? (source.folderId ?? "") : "",
-    updateAudience: source.updateAudience === "editors" ? "editors" : "self",
+    updateAudience: audienceFromSource(source, drive),
     webhookAuthorization: "",
     webhookAuthorizationSet: source.webhookAuthorizationSet,
     webhookUrl: source.webhookUrl ?? "",
   };
 }
 
-function audienceOf(source: ArticleSource): ArticleUpdateAudience {
-  return source.updateAudience === "editors" ? "editors" : "self";
-}
-
 function sourcePlace(source: ArticleSource, shared: boolean): string {
+  if (source.ownerKind === "shared_drive") {
+    const audience =
+      source.updateAudience === "managers_or_editors"
+        ? "管理者または編集者"
+        : "管理者のみ";
+    return `${source.folder || "ドライブ全体"} · ${audience}`;
+  }
   const audience =
-    audienceOf(source) === "editors" ? "編集できる人" : "自分のみ";
+    source.updateAudience === "editors" ? "編集できる人" : "自分のみ";
   if (shared) {
     return `${source.folder} · 共有フォルダ · ${audience}`;
   }
@@ -99,7 +127,13 @@ function selectedWriteScope(
   );
 }
 
-function folderFields(draft: Draft): { folder?: string; folderId?: string } {
+function folderFields(
+  draft: Draft,
+  driveRootId: string | null,
+): { folder?: string; folderId?: string } {
+  if (draft.driveRoot && driveRootId) {
+    return { folderId: driveRootId };
+  }
   if (draft.sharedFolderId) {
     return { folderId: draft.sharedFolderId };
   }
@@ -142,6 +176,72 @@ function audienceHint(
     return `このフォルダを編集できる人が「サイトを更新」を押せます。閲覧だけの人は押せません。${range}`;
   }
   return `フォルダの所有者だけが「サイトを更新」を押せます。${range}`;
+}
+
+function DriveAudienceFields({
+  draft,
+  folders,
+  onChange,
+}: {
+  draft: Draft;
+  folders: FolderRecord[];
+  onChange: (draft: Draft) => void;
+}) {
+  return (
+    <>
+      <CheckLabel>
+        <input
+          checked={draft.driveRoot}
+          onChange={(event) =>
+            onChange({
+              ...draft,
+              driveRoot: event.target.checked,
+              folder: "",
+              sharedFolderId: "",
+            })
+          }
+          type="checkbox"
+        />
+        ドライブ全体
+      </CheckLabel>
+      {!draft.driveRoot && (
+        <div className="grid gap-[0.35rem]">
+          <span className="text-[0.85rem] text-muted">ディレクトリ</span>
+          <FolderHierarchySelect
+            folders={folders}
+            id="source-folder"
+            onChange={(folder) => onChange({ ...draft, folder })}
+            value={draft.folder}
+          />
+        </div>
+      )}
+      <fieldset className="grid gap-2 border-0 p-0">
+        <legend className="text-[0.85rem] text-muted">
+          サイトを更新できる人
+        </legend>
+        {(
+          Object.entries(DRIVE_ARTICLE_UPDATE_AUDIENCE_LABELS) as [
+            DriveArticleUpdateAudience,
+            string,
+          ][]
+        ).map(([value, label]) => (
+          <CheckLabel key={value}>
+            <input
+              checked={draft.updateAudience === value}
+              name="update-audience"
+              onChange={() => onChange({ ...draft, updateAudience: value })}
+              type="radio"
+              value={value}
+            />
+            {label}
+          </CheckLabel>
+        ))}
+        <MutedText>
+          役割はドライブ全体です。管理者は常に実行できます。編集者は「管理者または編集者」のときだけ実行できます。
+        </MutedText>
+      </fieldset>
+    </>
+  );
 }
 
 function SourceAudienceFields({
@@ -228,7 +328,7 @@ function SourceAudienceFields({
         </CheckLabel>
         <MutedText>
           {audienceHint(
-            draft.updateAudience,
+            draft.updateAudience === "editors" ? "editors" : "self",
             selectedWriteScope(folders, sharedFolders, draft),
             Boolean(draft.sharedFolderId),
           )}
@@ -280,6 +380,50 @@ function defaultToInput(
   return String(value);
 }
 
+function applyLoadedSettings(
+  loaded: {
+    driveResult: Awaited<ReturnType<typeof fetchSharedDrives>>;
+    folderResult: Awaited<ReturnType<typeof fetchFolderTree>>;
+    sharedFolderResult:
+      | Awaited<ReturnType<typeof fetchSharedFolders>>
+      | { data: FolderRecord[]; ok: true };
+    sourceResult: Awaited<ReturnType<typeof fetchArticleSourceSettings>>;
+  },
+  apply: {
+    setDrives: (drives: SharedDriveSummary[]) => void;
+    setError: (error: string) => void;
+    setFolders: (folders: FolderRecord[]) => void;
+    setSharedFolders: (folders: FolderRecord[]) => void;
+    setSharedSources: (sources: ArticleSource[]) => void;
+    setSources: (sources: ArticleSource[]) => void;
+  },
+) {
+  if (loaded.driveResult.ok) {
+    apply.setDrives(
+      loaded.driveResult.data.filter((drive) => drive.role === "manager"),
+    );
+  }
+  if (loaded.sourceResult.ok) {
+    apply.setSources(loaded.sourceResult.data.sources);
+    apply.setSharedSources(loaded.sourceResult.data.shared);
+  } else {
+    apply.setError(loaded.sourceResult.error);
+    apply.setSources([]);
+    apply.setSharedSources([]);
+  }
+  if (loaded.folderResult.ok) {
+    apply.setFolders(loaded.folderResult.data);
+  } else {
+    apply.setError(loaded.folderResult.error);
+  }
+  if (loaded.sharedFolderResult.ok) {
+    apply.setSharedFolders(loaded.sharedFolderResult.data);
+  } else {
+    apply.setError(loaded.sharedFolderResult.error);
+  }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: 主体の切り替えと移行を同じ画面に置く。
 export function SiteSettingsPage() {
   const { user } = useOutletContext<AppShellContext>();
   const [sources, setSources] = useState<ArticleSource[]>([]);
@@ -287,17 +431,39 @@ export function SiteSettingsPage() {
   const [folders, setFolders] = useState<FolderRecord[]>([]);
   const [sharedFolders, setSharedFolders] = useState<FolderRecord[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [drives, setDrives] = useState<SharedDriveSummary[]>([]);
+  const [subjectId, setSubjectId] = useState<string | null>(null);
+  const [migrating, setMigrating] = useState<ArticleSource | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeSubject = subjectId ?? user?.id ?? "";
+  const driveSubject =
+    drives.find(
+      (drive) => drive.id === activeSubject && drive.role === "manager",
+    ) ?? null;
 
-  async function reload(actorId: string) {
-    const [sourceResult, folderResult, sharedFolderResult] = await Promise.all([
-      fetchArticleSourceSettings({ viewerId: actorId }),
-      fetchFolderTree({ viewerId: actorId }),
-      fetchSharedFolders({ viewerId: actorId }),
-    ]);
-    return { folderResult, sharedFolderResult, sourceResult };
+  async function reload(actorId: string, ownerId: string) {
+    const drive = ownerId !== actorId;
+    const [sourceResult, folderResult, sharedFolderResult, driveResult] =
+      await Promise.all([
+        fetchArticleSourceSettings({
+          ownerId: drive ? ownerId : undefined,
+          viewerId: actorId,
+        }),
+        fetchFolderTree({
+          ownerId: drive ? ownerId : undefined,
+          viewerId: actorId,
+        }),
+        drive
+          ? Promise.resolve({
+              data: [] as FolderRecord[],
+              ok: true as const,
+            })
+          : fetchSharedFolders({ viewerId: actorId }),
+        fetchSharedDrives(),
+      ]);
+    return { driveResult, folderResult, sharedFolderResult, sourceResult };
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Preserve the existing request lifecycle.
@@ -310,29 +476,25 @@ export function SiteSettingsPage() {
       };
     }
     setLoading(true);
-    void reload(user.id)
-      .then(({ folderResult, sharedFolderResult, sourceResult }) => {
+    setDraft(null);
+    setFolders([]);
+    setSources([]);
+    setSharedFolders([]);
+    setSharedSources([]);
+    setError(null);
+    void reload(user.id, subjectId ?? user.id)
+      .then((loaded) => {
         if (!current) {
           return;
         }
-        if (sourceResult.ok) {
-          setSources(sourceResult.data.sources);
-          setSharedSources(sourceResult.data.shared);
-        } else {
-          setError(sourceResult.error);
-          setSources([]);
-          setSharedSources([]);
-        }
-        if (folderResult.ok) {
-          setFolders(folderResult.data);
-        } else {
-          setError(folderResult.error);
-        }
-        if (sharedFolderResult.ok) {
-          setSharedFolders(sharedFolderResult.data);
-        } else {
-          setError(sharedFolderResult.error);
-        }
+        applyLoadedSettings(loaded, {
+          setDrives,
+          setError,
+          setFolders,
+          setSharedFolders,
+          setSharedSources,
+          setSources,
+        });
       })
       .catch((reason: unknown) => {
         if (current) {
@@ -347,7 +509,7 @@ export function SiteSettingsPage() {
     return () => {
       current = false;
     };
-  }, [user]);
+  }, [subjectId, user]);
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Preserve the existing save flow.
   async function handleSave(event: FormEvent) {
@@ -356,7 +518,10 @@ export function SiteSettingsPage() {
       return;
     }
     if (
-      !(draft.name.trim() && (draft.id || draft.folder || draft.sharedFolderId))
+      !(
+        draft.name.trim() &&
+        (draft.id || draft.folder || draft.sharedFolderId || draft.driveRoot)
+      )
     ) {
       setError("名前とディレクトリを入力してください。");
       return;
@@ -388,11 +553,14 @@ export function SiteSettingsPage() {
         }
         return next;
       });
-    const folderInput = folderFields(draft);
+    const driveRootId =
+      folders.find((folder) => folder.folder === "")?.id ?? null;
+    const folderInput = folderFields(draft, driveSubject ? driveRootId : null);
     const input = {
       ...folderInput,
       name: draft.name.trim(),
       schema,
+      ...(driveSubject ? { ownerId: driveSubject.id } : {}),
       updateAudience: draft.sharedFolderId ? "editors" : draft.updateAudience,
       webhookUrl: draft.webhookUrl.trim() || null,
       ...(draft.webhookAuthorization.trim()
@@ -411,7 +579,7 @@ export function SiteSettingsPage() {
     setSaving(false);
     if (user) {
       try {
-        const refreshed = await reload(user.id);
+        const refreshed = await reload(user.id, subjectId ?? user.id);
         if (refreshed.sourceResult.ok) {
           setSources(refreshed.sourceResult.data.sources);
           setSharedSources(refreshed.sourceResult.data.shared);
@@ -441,7 +609,7 @@ export function SiteSettingsPage() {
     }
     if (user) {
       try {
-        const refreshed = await reload(user.id);
+        const refreshed = await reload(user.id, subjectId ?? user.id);
         if (refreshed.sourceResult.ok) {
           setSources(refreshed.sourceResult.data.sources);
           setSharedSources(refreshed.sourceResult.data.shared);
@@ -478,21 +646,48 @@ export function SiteSettingsPage() {
     );
   }
   const editableShared = sharedFolders.filter((folder) => folder.canEdit);
-  const canPickSourceFolder =
-    hasSelectableSourceFolders(folders) || editableShared.length > 0;
+  const managerDrives = drives.filter((drive) => drive.role === "manager");
+  const canPickSourceFolder = driveSubject
+    ? folders.length > 0
+    : hasSelectableSourceFolders(folders) || editableShared.length > 0;
   const listed = [
     ...sources.map((source) => ({ shared: false, source })),
-    ...sharedSources.map((source) => ({ shared: true, source })),
+    ...(driveSubject
+      ? []
+      : sharedSources.map((source) => ({ shared: true, source }))),
   ];
   return (
     <section>
       <h2 className="m-0 text-[1.5em] font-bold">サイト設定</h2>
+      {managerDrives.length > 0 && (
+        <Field htmlFor="site-subject" label="主体">
+          <Select
+            className="w-full rounded-lg px-3 py-2.5"
+            id="site-subject"
+            onChange={(event) => {
+              setSubjectId(event.target.value);
+              setDraft(null);
+            }}
+            value={driveSubject?.id ?? user.id}
+          >
+            <option value={user.id}>マイドライブ</option>
+            {managerDrives.map((drive) => (
+              <option key={drive.id} value={drive.id}>
+                {drive.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
       <p>
         ディレクトリを記事コレクションとして公開します。メタデータはノート先頭の
         YAML frontmatter です。Astro は PAT で{" "}
         <code className="font-mono">/api/articles</code> と{" "}
         <code className="font-mono">/openapi.json</code> を読めます。Webhook
-        はヘッダーの「サイトを更新」から送ります。押せる人は、自分のみか、そのフォルダを編集できる人かをソースごとに選べます。閲覧だけの人は押せません。編集できる共有フォルダも選べます。
+        はヘッダーの「サイトを更新」から送ります。
+        {driveSubject
+          ? "実行できる人は、管理者だけか、管理者と編集者かをソースごとに選べます。設定を変えられるのは管理者です。ドライブ全体もソースにできます。"
+          : "押せる人は、自分のみか、そのフォルダを編集できる人かをソースごとに選べます。閲覧だけの人は押せません。編集できる共有フォルダも選べます。"}
       </p>
       {error && <ErrorText>{error}</ErrorText>}
       {loading ? (
@@ -517,11 +712,23 @@ export function SiteSettingsPage() {
               </div>
               <Row>
                 <Button
-                  onClick={() => setDraft(draftFromSource(source, shared))}
+                  onClick={() =>
+                    setDraft(
+                      draftFromSource(source, shared, Boolean(driveSubject)),
+                    )
+                  }
                   variant="outline"
                 >
                   編集
                 </Button>
+                {!(driveSubject || shared) && managerDrives.length > 0 && (
+                  <Button
+                    onClick={() => setMigrating(source)}
+                    variant="outline"
+                  >
+                    共有ドライブへ移す
+                  </Button>
+                )}
                 <Button
                   onClick={() => void handleDelete(source.id)}
                   variant="ghost"
@@ -533,20 +740,26 @@ export function SiteSettingsPage() {
           ))}
         </ul>
       )}
-      {!draft && (
+      {!(draft && !loading) && (
         <Button
           className="mt-4"
-          disabled={!canPickSourceFolder}
-          onClick={() => setDraft(emptyDraft())}
+          disabled={loading || !canPickSourceFolder}
+          onClick={() =>
+            setDraft({
+              ...emptyDraft(),
+              driveRoot: Boolean(driveSubject),
+              updateAudience: driveSubject ? "managers" : "self",
+            })
+          }
           variant="accent"
         >
           ソースを追加
         </Button>
       )}
-      {!(draft || canPickSourceFolder) && (
+      {!(loading || draft || canPickSourceFolder) && (
         <MutedText className="mt-2">先にフォルダを作成してください。</MutedText>
       )}
-      {draft && (
+      {draft && !loading && (
         <form
           className="mt-6 grid gap-4"
           onSubmit={(event) => void handleSave(event)}
@@ -564,13 +777,21 @@ export function SiteSettingsPage() {
               value={draft.name}
             />
           </Field>
-          <SourceAudienceFields
-            draft={draft}
-            editableShared={editableShared}
-            folders={folders}
-            onChange={setDraft}
-            sharedFolders={sharedFolders}
-          />
+          {driveSubject ? (
+            <DriveAudienceFields
+              draft={draft}
+              folders={folders}
+              onChange={setDraft}
+            />
+          ) : (
+            <SourceAudienceFields
+              draft={draft}
+              editableShared={editableShared}
+              folders={folders}
+              onChange={setDraft}
+              sharedFolders={sharedFolders}
+            />
+          )}
           <div>
             <p className="m-0 mb-2 text-[0.85rem] text-muted">
               スキーマ（新規ノートの frontmatter と形式チェック）
@@ -737,6 +958,18 @@ export function SiteSettingsPage() {
             </Button>
           </Row>
         </form>
+      )}
+      {migrating && managerDrives.length > 0 && (
+        <SiteMigrateDialog
+          drives={managerDrives}
+          onClose={() => setMigrating(null)}
+          onMoved={(driveId) => {
+            setMigrating(null);
+            setDraft(null);
+            setSubjectId(driveId);
+          }}
+          source={migrating}
+        />
       )}
     </section>
   );

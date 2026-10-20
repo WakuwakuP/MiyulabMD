@@ -270,6 +270,7 @@ function useHomeHeader(
       ),
       folder: headerFolder,
       folderId: visibleFolder?.id ?? null,
+      ownerId: visibleFolder?.ownerId ?? user?.id ?? null,
     });
     return () => setHeader(null);
   }, [

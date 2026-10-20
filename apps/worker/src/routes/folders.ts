@@ -21,13 +21,19 @@ import {
   folderViewFlags,
   getFolderById,
   listFolderChildren,
+  listOwnedFolders,
   listPublicSharedFolders,
   listSharedFolders,
   replaceGrants,
   resolveFolderAccess,
   upsertFolderPolicy,
 } from "../services/access.ts";
-import { canEditSubject } from "../services/drive-membership.ts";
+import {
+  canEditSubject,
+  driveRoleFor,
+  isSharedDrive,
+  subjectRootLabel,
+} from "../services/drive-membership.ts";
 import {
   type MoveError,
   moveFolder,
@@ -175,6 +181,25 @@ export const folderRoutes = new Elysia({ prefix: "/api/folders" })
         headers: { "content-type": "application/json" },
         status: 401,
       });
+    }
+    const ownerId = new URL(request.url).searchParams.get("ownerId");
+    if (ownerId && ownerId !== user.id) {
+      if (
+        !(await isSharedDrive(env, ownerId)) ||
+        (await driveRoleFor(env, ownerId, user)) !== "manager"
+      ) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { "content-type": "application/json" },
+          status: 403,
+        });
+      }
+      const folders = await listOwnedFolders(env, ownerId);
+      const rootName = await subjectRootLabel(env, ownerId);
+      return {
+        folders: folders.map((folder) =>
+          folder.folder ? folder : { ...folder, name: rootName },
+        ),
+      };
     }
     const id = env.CATALOG.idFromName(catalogObjectName(user));
     return env.CATALOG.get(id).fetch(

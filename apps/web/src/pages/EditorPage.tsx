@@ -1181,5 +1181,6 @@ function bindEditorHeader(input: {
     folderId: note.folderId,
     layout: "editor",
     noteId: note.id,
+    ownerId: note.ownerId,
   });
 }
