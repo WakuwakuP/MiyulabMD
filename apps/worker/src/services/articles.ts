@@ -6,6 +6,7 @@ import {
   type ArticleSchemaField,
   type ArticleSource,
   type ArticleSourceStatus,
+  type ArticleUpdateAudience,
   articleEditUrl,
   articleMetaFromNote,
   articleSlug,
@@ -14,6 +15,7 @@ import {
   folderMatchesSource,
   isAccessScope,
   isArticleSourceDirty,
+  isArticleUpdateAudience,
   matchArticleSource,
   mergeArticleData,
   parseArticleSchema,
@@ -25,8 +27,10 @@ import {
 import { db } from "../db/client.ts";
 import {
   ensureFolderRow,
-  folderViewerShare,
+  folderName,
+  folderViewFlags,
   getFolderById,
+  listSharedFolderCandidates,
   resolveNoteAccess,
 } from "./access.ts";
 import { canEditSubject, isSharedDrive } from "./drive-membership.ts";
@@ -41,6 +45,7 @@ type SourceRow = {
   schema_json: string;
   webhook_url: string | null;
   webhook_authorization: string | null;
+  update_audience?: string | null;
   last_dispatched_at: number | null;
   created_at: number;
   updated_at: number;
@@ -65,6 +70,7 @@ export type ArticleSourceWrite = {
   schema?: unknown;
   webhookUrl?: string | null;
   webhookAuthorization?: string | null;
+  updateAudience?: ArticleUpdateAudience;
 };
 
 function parseSchemaJson(raw: string): ArticleSchemaField[] {
@@ -76,19 +82,33 @@ function parseSchemaJson(raw: string): ArticleSchemaField[] {
   }
 }
 
-function presentSource(row: SourceRow): ArticleSource {
+function storedAudience(
+  value: string | null | undefined,
+): ArticleUpdateAudience {
+  return value === "editors" ? "editors" : "self";
+}
+
+function presentSource(row: SourceRow, folderLabel?: string): ArticleSource {
   return {
     createdAt: row.created_at,
-    folder: row.folder,
+    folder: folderLabel ?? row.folder,
     folderId: row.folder_id,
     id: row.id,
     lastDispatchedAt: row.last_dispatched_at,
     name: row.name,
     schema: parseSchemaJson(row.schema_json),
+    updateAudience: storedAudience(row.update_audience),
     updatedAt: row.updated_at,
     webhookAuthorizationSet: Boolean(row.webhook_authorization),
     webhookUrl: row.webhook_url,
   };
+}
+
+function presentForUser(row: SourceRow, userId: string): ArticleSource {
+  if (userId === row.owner_id) {
+    return presentSource(row);
+  }
+  return presentSource(row, folderName(row.folder));
 }
 
 function presentCollection(row: SourceRow): ArticleCollection {
@@ -163,7 +183,36 @@ function storedScope(value: string | null): AccessScope | null {
   return value && isAccessScope(value) ? value : null;
 }
 
+/** 共有ドライブなら編集者かどうか。マイドライブなら null。 */
+async function sharedDriveDispatch(
+  env: Env,
+  ownerId: string,
+  user: SessionUser,
+): Promise<boolean | null> {
+  if (!(await isSharedDrive(env, ownerId))) {
+    return null;
+  }
+  return canEditSubject(env, ownerId, user);
+}
+
 async function userCanDispatchSource(
+  env: Env,
+  user: SessionUser,
+  row: SourceRow,
+): Promise<boolean> {
+  const drive = await sharedDriveDispatch(env, row.owner_id, user);
+  if (drive !== null) {
+    return drive;
+  }
+  const flags = await folderViewFlags(env, row.owner_id, row.folder, user);
+  return canDispatchArticleSource({
+    audience: storedAudience(row.update_audience),
+    canEdit: flags.canEdit,
+    isOwner: user.id === row.owner_id,
+  });
+}
+
+async function canManageSource(
   env: Env,
   user: SessionUser,
   row: SourceRow,
@@ -171,12 +220,14 @@ async function userCanDispatchSource(
   if (await isSharedDrive(env, row.owner_id)) {
     return canEditSubject(env, row.owner_id, user);
   }
-  const share = await folderViewerShare(env, row.owner_id, row.folder, user);
-  return canDispatchArticleSource({
-    canView: share.canView,
-    isOwner: user.id === row.owner_id,
-    readScope: share.readScope,
-  });
+  if (user.id === row.owner_id) {
+    return true;
+  }
+  if (storedAudience(row.update_audience) !== "editors") {
+    return false;
+  }
+  const flags = await folderViewFlags(env, row.owner_id, row.folder, user);
+  return flags.canEdit;
 }
 
 type SourceWriteError = { error: string; status: number };
@@ -197,20 +248,145 @@ function createWebhookUrl(
   return { webhookUrl };
 }
 
-async function resolveSourceFolderUpdate(
-  env: Env,
-  ownerId: string,
-  row: SourceRow,
-  input: ArticleSourceWrite,
-): Promise<{ folder: string; folderId: string | null } | SourceWriteError> {
-  if (input.folder === undefined && input.folderId === undefined) {
-    return { folder: row.folder, folderId: row.folder_id };
+function isWriteError(
+  value: ArticleUpdateAudience | SourceWriteError,
+): value is SourceWriteError {
+  return typeof value !== "string";
+}
+
+function audienceFromInput(
+  value: unknown,
+  fallback: ArticleUpdateAudience,
+): ArticleUpdateAudience | SourceWriteError {
+  if (value === undefined) {
+    return fallback;
   }
-  const resolved = await resolveFolderPath(env, ownerId, input);
+  if (isArticleUpdateAudience(value)) {
+    return value;
+  }
+  return {
+    error: "updateAudience は self または editors です",
+    status: 400,
+  };
+}
+
+function rejectForeignSelf(
+  userId: string,
+  ownerId: string,
+  sharedDrive: boolean,
+  audience: ArticleUpdateAudience,
+): SourceWriteError | null {
+  if (userId === ownerId || sharedDrive || audience === "editors") {
+    return null;
+  }
+  return {
+    error: "自分のみにできるのはフォルダの所有者です",
+    status: 403,
+  };
+}
+
+async function assertCanUseFolder(
+  env: Env,
+  user: SessionUser,
+  ownerId: string,
+  folder: string,
+): Promise<SourceWriteError | null> {
+  if (user.id === ownerId) {
+    return null;
+  }
+  if (await isSharedDrive(env, ownerId)) {
+    if (await canEditSubject(env, ownerId, user)) {
+      return null;
+    }
+    return { error: "Forbidden", status: 403 };
+  }
+  const flags = await folderViewFlags(env, ownerId, folder, user);
+  if (!flags.canEdit) {
+    return { error: "フォルダが見つかりません", status: 404 };
+  }
+  return null;
+}
+
+type SourcePlacement = {
+  ownerId: string;
+  folder: string;
+  folderId: string | null;
+};
+
+async function resolvePlacement(
+  env: Env,
+  user: SessionUser,
+  requestedOwnerId: string,
+  input: { folder?: string; folderId?: string | null },
+): Promise<SourcePlacement | SourceWriteError> {
+  if (input.folderId) {
+    const rec = await getFolderById(env, input.folderId);
+    if (!rec?.folder) {
+      return { error: "フォルダが見つかりません", status: 404 };
+    }
+    const denied = await assertCanUseFolder(
+      env,
+      user,
+      rec.owner_id,
+      rec.folder,
+    );
+    if (denied) {
+      return denied;
+    }
+    if (requestedOwnerId !== user.id && requestedOwnerId !== rec.owner_id) {
+      return { error: "フォルダが見つかりません", status: 404 };
+    }
+    return { folder: rec.folder, folderId: rec.id, ownerId: rec.owner_id };
+  }
+  const resolved = await resolveFolderPath(env, requestedOwnerId, input);
   if ("error" in resolved) {
     return { error: resolved.error, status: 400 };
   }
-  return { folder: resolved.folder, folderId: resolved.folderId };
+  const denied = await assertCanUseFolder(
+    env,
+    user,
+    requestedOwnerId,
+    resolved.folder,
+  );
+  if (denied) {
+    return denied;
+  }
+  return {
+    folder: resolved.folder,
+    folderId: resolved.folderId,
+    ownerId: requestedOwnerId,
+  };
+}
+
+async function resolveSourcePlacementUpdate(
+  env: Env,
+  user: SessionUser,
+  row: SourceRow,
+  input: ArticleSourceWrite,
+): Promise<SourcePlacement | SourceWriteError> {
+  if (input.folder === undefined && input.folderId === undefined) {
+    return {
+      folder: row.folder,
+      folderId: row.folder_id,
+      ownerId: row.owner_id,
+    };
+  }
+  const foreign =
+    user.id !== row.owner_id && !(await isSharedDrive(env, row.owner_id));
+  if (foreign && input.folderId === undefined) {
+    return {
+      error: "共有フォルダの変更はフォルダ ID で指定してください",
+      status: 400,
+    };
+  }
+  const placed = await resolvePlacement(env, user, row.owner_id, input);
+  if ("error" in placed) {
+    return placed;
+  }
+  if (placed.ownerId !== row.owner_id) {
+    return { error: "別の所有者のフォルダには移せません", status: 400 };
+  }
+  return placed;
 }
 
 function resolveSourceSchemaUpdate(
@@ -354,13 +530,11 @@ async function dispatchTargetForFolder(
   ownerId: string,
   folder: string,
 ): Promise<{ id: string; name: string } | null> {
-  if (
-    (await isSharedDrive(env, ownerId)) &&
-    !(await canEditSubject(env, ownerId, user))
-  ) {
+  const drive = await sharedDriveDispatch(env, ownerId, user);
+  if (drive === false) {
     return null;
   }
-  const opened = await folderViewerShare(env, ownerId, folder, user);
+  const opened = await folderViewFlags(env, ownerId, folder, user);
   if (!opened.canView) {
     return null;
   }
@@ -370,7 +544,7 @@ async function dispatchTargetForFolder(
     .all<SourceRow>();
   const match = matchArticleSource(
     folder,
-    (rows.results ?? []).map(presentSource),
+    (rows.results ?? []).map((row) => presentSource(row)),
   );
   if (!match) {
     return null;
@@ -379,14 +553,18 @@ async function dispatchTargetForFolder(
   if (!row) {
     return null;
   }
-  const source = await folderViewerShare(env, row.owner_id, row.folder, user);
+  const sourceFlags = await folderViewFlags(
+    env,
+    row.owner_id,
+    row.folder,
+    user,
+  );
   if (
     !canOfferArticleDispatch({
-      isOwner: user.id === row.owner_id,
+      audience: storedAudience(row.update_audience),
+      isOwner: drive === true || user.id === row.owner_id,
       openedCanView: opened.canView,
-      openedReadScope: opened.readScope,
-      sourceCanView: source.canView,
-      sourceReadScope: source.readScope,
+      sourceCanEdit: sourceFlags.canEdit,
     })
   ) {
     return null;
@@ -432,50 +610,218 @@ async function dispatchTargetForNote(
     },
     user,
   );
-  if (
-    !(
-      access.flags.canView &&
-      (user.id === row.owner_id || access.effectiveReadScope !== "public")
-    )
-  ) {
+  if (!access.flags.canView) {
     return null;
   }
   return dispatchTargetForFolder(env, user, row.owner_id, row.folder);
 }
 
+async function editableSharedOwnerIds(
+  env: Env,
+  user: SessionUser,
+): Promise<string[]> {
+  const candidates = await listSharedFolderCandidates(env, user);
+  const owners = new Set<string>();
+  for (const candidate of candidates) {
+    if (candidate.ownerId === user.id || !candidate.folder) {
+      continue;
+    }
+    const flags = await folderViewFlags(
+      env,
+      candidate.ownerId,
+      candidate.folder,
+      user,
+    );
+    if (flags.canEdit) {
+      owners.add(candidate.ownerId);
+    }
+  }
+  return [...owners];
+}
+
+async function sharedSourcesForOwner(
+  env: Env,
+  user: SessionUser,
+  ownerId: string,
+): Promise<ArticleSource[]> {
+  const rows = await db(env)
+    .prepare("SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder")
+    .bind(ownerId)
+    .all<SourceRow>();
+  const sources: ArticleSource[] = [];
+  for (const row of rows.results ?? []) {
+    if (storedAudience(row.update_audience) !== "editors") {
+      continue;
+    }
+    const flags = await folderViewFlags(env, row.owner_id, row.folder, user);
+    if (flags.canEdit) {
+      sources.push(presentSource(row, folderName(row.folder)));
+    }
+  }
+  return sources;
+}
+
+type PreparedSource = {
+  audience: ArticleUpdateAudience;
+  name: string;
+  placed: SourcePlacement;
+  schemaJson: string;
+  webhookAuthorization: string | null;
+  webhookUrl: string | null;
+};
+
+async function audienceForOwner(
+  env: Env,
+  user: SessionUser,
+  ownerId: string,
+  value: unknown,
+  fallback: ArticleUpdateAudience,
+): Promise<ArticleUpdateAudience | SourceWriteError> {
+  const audience = audienceFromInput(value, fallback);
+  if (isWriteError(audience)) {
+    return audience;
+  }
+  const drive = await isSharedDrive(env, ownerId);
+  return rejectForeignSelf(user.id, ownerId, drive, audience) ?? audience;
+}
+
+async function prepareNewSource(
+  env: Env,
+  user: SessionUser,
+  requestedOwnerId: string,
+  input: ArticleSourceWrite,
+): Promise<PreparedSource | SourceWriteError> {
+  const name = input.name?.trim();
+  if (!name) {
+    return { error: "name が必要です", status: 400 };
+  }
+  const placed = await resolvePlacement(env, user, requestedOwnerId, input);
+  if ("error" in placed) {
+    return placed;
+  }
+  const schema = parseArticleSchema(input.schema ?? []);
+  if ("error" in schema) {
+    return { error: schema.error, status: 400 };
+  }
+  const webhook = createWebhookUrl(input);
+  if ("error" in webhook) {
+    return webhook;
+  }
+  const audience = await audienceForOwner(
+    env,
+    user,
+    placed.ownerId,
+    input.updateAudience,
+    "self",
+  );
+  if (isWriteError(audience)) {
+    return audience;
+  }
+  return {
+    audience,
+    name,
+    placed,
+    schemaJson: JSON.stringify(schema),
+    webhookAuthorization: input.webhookAuthorization?.trim() || null,
+    webhookUrl: webhook.webhookUrl,
+  };
+}
+
+type PreparedUpdate = {
+  audience: ArticleUpdateAudience;
+  folder: SourcePlacement;
+  name: string;
+  schemaJson: string;
+  webhookAuthorization: string | null;
+  webhookUrl: string | null;
+};
+
+async function prepareSourceUpdate(
+  env: Env,
+  user: SessionUser,
+  row: SourceRow,
+  input: ArticleSourceWrite,
+): Promise<PreparedUpdate | SourceWriteError> {
+  const folder = await resolveSourcePlacementUpdate(env, user, row, input);
+  if ("error" in folder) {
+    return folder;
+  }
+  const schema = resolveSourceSchemaUpdate(row, input);
+  if ("error" in schema) {
+    return schema;
+  }
+  const name = resolveSourceNameUpdate(row, input);
+  if ("error" in name) {
+    return name;
+  }
+  const webhook = resolveSourceWebhookUrlUpdate(row, input);
+  if ("error" in webhook) {
+    return webhook;
+  }
+  const audience = await audienceForOwner(
+    env,
+    user,
+    row.owner_id,
+    input.updateAudience,
+    storedAudience(row.update_audience),
+  );
+  if (isWriteError(audience)) {
+    return audience;
+  }
+  const conflict = await sourceFolderConflict(
+    env,
+    row.owner_id,
+    row.id,
+    folder.folder,
+    row.folder,
+  );
+  if (conflict) {
+    return conflict;
+  }
+  return {
+    audience,
+    folder,
+    name: name.name,
+    schemaJson: schema.schemaJson,
+    webhookAuthorization: resolveSourceWebhookAuthUpdate(row, input),
+    webhookUrl: webhook.webhookUrl,
+  };
+}
+
+async function loadEditableSharedSources(
+  env: Env,
+  user: SessionUser,
+): Promise<ArticleSource[]> {
+  const owners = await editableSharedOwnerIds(env, user);
+  const sources: ArticleSource[] = [];
+  for (const ownerId of owners) {
+    sources.push(...(await sharedSourcesForOwner(env, user, ownerId)));
+  }
+  return sources;
+}
+
 export function createArticleService(env: Env) {
   return {
     async createSource(
-      ownerId: string,
+      user: SessionUser,
+      requestedOwnerId: string,
       input: ArticleSourceWrite,
-    ): Promise<ArticleSource | { error: string; status: number }> {
-      const name = input.name?.trim();
-      if (!name) {
-        return { error: "name が必要です", status: 400 };
+    ): Promise<ArticleSource | SourceWriteError> {
+      const prepared = await prepareNewSource(
+        env,
+        user,
+        requestedOwnerId,
+        input,
+      );
+      if ("error" in prepared) {
+        return prepared;
       }
-
-      const folder = await resolveFolderPath(env, ownerId, input);
-      if ("error" in folder) {
-        return { error: folder.error, status: 400 };
-      }
-
-      const schema = parseArticleSchema(input.schema ?? []);
-      if ("error" in schema) {
-        return { error: schema.error, status: 400 };
-      }
-
-      const webhook = createWebhookUrl(input);
-      if ("error" in webhook) {
-        return webhook;
-      }
-      const webhookUrl = webhook.webhookUrl;
-      const webhookAuthorization = input.webhookAuthorization?.trim() || null;
-
+      const { audience, name, placed } = prepared;
       const existing = await db(env)
         .prepare(
           "SELECT id FROM article_sources WHERE owner_id = ? AND folder = ?",
         )
-        .bind(ownerId, folder.folder)
+        .bind(placed.ownerId, placed.folder)
         .first<{ id: string }>();
       if (existing) {
         return { error: "このディレクトリは既に登録されています", status: 409 };
@@ -487,35 +833,40 @@ export function createArticleService(env: Env) {
         .prepare(
           `INSERT INTO article_sources (
              id, owner_id, folder, folder_id, name, schema_json,
-             webhook_url, webhook_authorization, last_dispatched_at,
-             created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+             webhook_url, webhook_authorization, update_audience,
+             last_dispatched_at, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
         )
         .bind(
           id,
-          ownerId,
-          folder.folder,
-          folder.folderId,
+          placed.ownerId,
+          placed.folder,
+          placed.folderId,
           name,
-          JSON.stringify(schema),
-          webhookUrl,
-          webhookAuthorization,
+          prepared.schemaJson,
+          prepared.webhookUrl,
+          prepared.webhookAuthorization,
+          audience,
           now,
           now,
         )
         .run();
 
-      const created = await loadSource(env, ownerId, id);
+      const created = await loadSource(env, placed.ownerId, id);
       if (!created) {
         throw new Error("article source insert failed");
       }
-      return presentSource(created);
+      return presentForUser(created, user.id);
     },
 
-    async deleteSource(ownerId: string, id: string): Promise<boolean> {
+    async deleteSource(user: SessionUser, id: string): Promise<boolean> {
+      const row = await loadSourceById(env, id);
+      if (!(row && (await canManageSource(env, user, row)))) {
+        return false;
+      }
       const result = await db(env)
-        .prepare("DELETE FROM article_sources WHERE id = ? AND owner_id = ?")
-        .bind(id, ownerId)
+        .prepare("DELETE FROM article_sources WHERE id = ?")
+        .bind(id)
         .run();
       return result.meta.changes > 0;
     },
@@ -640,6 +991,9 @@ export function createArticleService(env: Env) {
         .all<SourceRow>();
       return (rows.results ?? []).map(presentCollection);
     },
+    listEditableSharedSources(user: SessionUser): Promise<ArticleSource[]> {
+      return loadEditableSharedSources(env, user);
+    },
 
     async listEntries(
       ownerId: string,
@@ -688,6 +1042,7 @@ export function createArticleService(env: Env) {
         total,
       };
     },
+
     async listSources(ownerId: string): Promise<ArticleSource[]> {
       const rows = await db(env)
         .prepare(
@@ -695,7 +1050,7 @@ export function createArticleService(env: Env) {
         )
         .bind(ownerId)
         .all<SourceRow>();
-      return (rows.results ?? []).map(presentSource);
+      return (rows.results ?? []).map((row) => presentSource(row));
     },
 
     async status(ownerId: string): Promise<ArticleSourceStatus> {
@@ -721,45 +1076,18 @@ export function createArticleService(env: Env) {
     },
 
     async updateSource(
-      ownerId: string,
+      user: SessionUser,
       id: string,
       input: ArticleSourceWrite,
-    ): Promise<ArticleSource | { error: string; status: number } | null> {
-      const row = await loadSource(env, ownerId, id);
-      if (!row) {
+    ): Promise<ArticleSource | SourceWriteError | null> {
+      const row = await loadSourceById(env, id);
+      if (!(row && (await canManageSource(env, user, row)))) {
         return null;
       }
 
-      const folder = await resolveSourceFolderUpdate(env, ownerId, row, input);
-      if ("error" in folder) {
-        return folder;
-      }
-
-      const schema = resolveSourceSchemaUpdate(row, input);
-      if ("error" in schema) {
-        return schema;
-      }
-
-      const name = resolveSourceNameUpdate(row, input);
-      if ("error" in name) {
-        return name;
-      }
-
-      const webhook = resolveSourceWebhookUrlUpdate(row, input);
-      if ("error" in webhook) {
-        return webhook;
-      }
-
-      const webhookAuthorization = resolveSourceWebhookAuthUpdate(row, input);
-      const conflict = await sourceFolderConflict(
-        env,
-        ownerId,
-        id,
-        folder.folder,
-        row.folder,
-      );
-      if (conflict) {
-        return conflict;
+      const prepared = await prepareSourceUpdate(env, user, row, input);
+      if ("error" in prepared) {
+        return prepared;
       }
 
       const now = Date.now();
@@ -767,23 +1095,25 @@ export function createArticleService(env: Env) {
         .prepare(
           `UPDATE article_sources
            SET folder = ?, folder_id = ?, name = ?, schema_json = ?,
-               webhook_url = ?, webhook_authorization = ?, updated_at = ?
+               webhook_url = ?, webhook_authorization = ?,
+               update_audience = ?, updated_at = ?
            WHERE id = ?`,
         )
         .bind(
-          folder.folder,
-          folder.folderId,
-          name.name,
-          schema.schemaJson,
-          webhook.webhookUrl,
-          webhookAuthorization,
+          prepared.folder.folder,
+          prepared.folder.folderId,
+          prepared.name,
+          prepared.schemaJson,
+          prepared.webhookUrl,
+          prepared.webhookAuthorization,
+          prepared.audience,
           now,
           id,
         )
         .run();
 
-      const updated = await loadSource(env, ownerId, id);
-      return updated ? presentSource(updated) : null;
+      const updated = await loadSource(env, row.owner_id, id);
+      return updated ? presentForUser(updated, user.id) : null;
     },
   };
 }

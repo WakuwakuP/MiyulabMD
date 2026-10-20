@@ -1059,12 +1059,39 @@ export type ArticleSourceWrite = {
   schema?: ArticleSource["schema"];
   webhookUrl?: string | null;
   webhookAuthorization?: string | null;
+  updateAudience?: ArticleSource["updateAudience"];
 };
 
 export type ArticleDispatchTarget = {
   id: string;
   name: string;
 };
+
+export async function fetchArticleSourceSettings(
+  options: ReadOptions = {},
+): Promise<ApiResult<{ shared: ArticleSource[]; sources: ArticleSource[] }>> {
+  const params = new URLSearchParams();
+  params.set("shared", "1");
+  if (options.ownerId) {
+    params.set("ownerId", options.ownerId);
+  }
+  const res = await fetch(
+    `/api/article-sources?${params.toString()}`,
+    { ...fetchOpts, signal: options.signal },
+    options,
+  );
+  if (!res.ok) {
+    return { error: await parseError(res), ok: false, status: res.status };
+  }
+  const body = (await res.json()) as {
+    sharedSources?: ArticleSource[];
+    sources: ArticleSource[];
+  };
+  return {
+    data: { shared: body.sharedSources ?? [], sources: body.sources },
+    ok: true,
+  };
+}
 
 export async function fetchArticleSources(
   options: ReadOptions = {},

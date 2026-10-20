@@ -110,53 +110,63 @@ test("resolveArticleListFolder allows the source and its descendants", () => {
   assert.ok("error" in resolveArticleListFolder("work", "play"));
 });
 
-test("site update follows share settings except public viewers", () => {
-  const viewer = { canView: true, isOwner: false };
+test("site update is the owner or people who can edit the folder", () => {
   assert.equal(
-    canDispatchArticleSource({ ...viewer, readScope: "users" }),
+    canDispatchArticleSource({
+      audience: "self",
+      canEdit: false,
+      isOwner: true,
+    }),
     true,
   );
   assert.equal(
-    canDispatchArticleSource({ ...viewer, readScope: "signed_in" }),
-    true,
-  );
-  assert.equal(
-    canDispatchArticleSource({ ...viewer, readScope: "link" }),
-    true,
-  );
-  assert.equal(
-    canDispatchArticleSource({ ...viewer, readScope: "public" }),
-    false,
-  );
-  assert.equal(
-    canDispatchArticleSource({ ...viewer, canView: false, readScope: "link" }),
+    canDispatchArticleSource({
+      audience: "self",
+      canEdit: true,
+      isOwner: false,
+    }),
     false,
   );
   assert.equal(
     canDispatchArticleSource({
-      canView: false,
-      isOwner: true,
-      readScope: "public",
+      audience: "editors",
+      canEdit: true,
+      isOwner: false,
     }),
     true,
   );
   assert.equal(
-    canOfferArticleDispatch({
+    canDispatchArticleSource({
+      audience: "editors",
+      canEdit: false,
       isOwner: false,
-      openedCanView: true,
-      openedReadScope: "public",
-      sourceCanView: true,
-      sourceReadScope: "link",
     }),
     false,
   );
   assert.equal(
     canOfferArticleDispatch({
+      audience: "editors",
+      isOwner: false,
+      openedCanView: false,
+      sourceCanEdit: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canOfferArticleDispatch({
+      audience: "self",
       isOwner: false,
       openedCanView: true,
-      openedReadScope: "link",
-      sourceCanView: true,
-      sourceReadScope: "link",
+      sourceCanEdit: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canOfferArticleDispatch({
+      audience: "editors",
+      isOwner: false,
+      openedCanView: true,
+      sourceCanEdit: true,
     }),
     true,
   );

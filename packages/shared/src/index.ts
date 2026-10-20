@@ -8,11 +8,14 @@ export type {
   ArticleSource,
   ArticleSourceInput,
   ArticleSourceStatus,
+  ArticleUpdateAudience,
 } from "./article.ts";
 export {
   ARTICLE_FIELD_TYPES,
   ARTICLE_LIST_DEFAULT_PER_PAGE,
   ARTICLE_LIST_MAX_PER_PAGE,
+  ARTICLE_UPDATE_AUDIENCE_LABELS,
+  ARTICLE_UPDATE_AUDIENCES,
   articleEditUrl,
   articleSlug,
   canDispatchArticleSource,
@@ -21,6 +24,7 @@ export {
   folderMatchesSource,
   isArticleFieldType,
   isArticleSourceDirty,
+  isArticleUpdateAudience,
   matchArticleSource,
   mergeArticleData,
   parseArticleListQuery,

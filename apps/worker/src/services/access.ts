@@ -1524,6 +1524,7 @@ export async function listSharedFolders(
     }
     seen.add(access.id);
     folders.push({
+      canEdit: access.flags.canEdit,
       id: access.id,
       name: access.name,
       parentId: access.parentId,
