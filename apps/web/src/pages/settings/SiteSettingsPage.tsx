@@ -704,6 +704,10 @@ export function SiteSettingsPage() {
               type="url"
               value={draft.webhookUrl}
             />
+            <MutedText>
+              URL を変えたときは、Authorization
+              を入れ直してください。空のまま保存すると消えます。
+            </MutedText>
           </Field>
           <Field htmlFor="webhook-auth" label="Webhook Authorization">
             <Input

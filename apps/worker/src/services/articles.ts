@@ -33,7 +33,11 @@ import {
   listSharedFolderCandidates,
   resolveNoteAccess,
 } from "./access.ts";
-import { canEditSubject, isSharedDrive } from "./drive-membership.ts";
+import {
+  canEditSubject,
+  driveRoleFor,
+  isSharedDrive,
+} from "./drive-membership.ts";
 import { folderSubtreeFilter } from "./folder-path-sql.ts";
 
 type SourceRow = {
@@ -183,16 +187,16 @@ function storedScope(value: string | null): AccessScope | null {
   return value && isAccessScope(value) ? value : null;
 }
 
-/** 共有ドライブなら編集者かどうか。マイドライブなら null。 */
-async function sharedDriveDispatch(
+/** 共有ドライブなら管理者かどうか。マイドライブなら null。 */
+async function sharedDriveActor(
   env: Env,
   ownerId: string,
   user: SessionUser,
-): Promise<boolean | null> {
+): Promise<{ isManager: boolean } | null> {
   if (!(await isSharedDrive(env, ownerId))) {
     return null;
   }
-  return canEditSubject(env, ownerId, user);
+  return { isManager: (await driveRoleFor(env, ownerId, user)) === "manager" };
 }
 
 async function userCanDispatchSource(
@@ -200,9 +204,13 @@ async function userCanDispatchSource(
   user: SessionUser,
   row: SourceRow,
 ): Promise<boolean> {
-  const drive = await sharedDriveDispatch(env, row.owner_id, user);
-  if (drive !== null) {
-    return drive;
+  const drive = await sharedDriveActor(env, row.owner_id, user);
+  if (drive) {
+    return canDispatchArticleSource({
+      audience: storedAudience(row.update_audience),
+      canEdit: await canEditSubject(env, row.owner_id, user),
+      isOwner: drive.isManager,
+    });
   }
   const flags = await folderViewFlags(env, row.owner_id, row.folder, user);
   return canDispatchArticleSource({
@@ -217,8 +225,13 @@ async function canManageSource(
   user: SessionUser,
   row: SourceRow,
 ): Promise<boolean> {
-  if (await isSharedDrive(env, row.owner_id)) {
-    return canEditSubject(env, row.owner_id, user);
+  const drive = await sharedDriveActor(env, row.owner_id, user);
+  if (drive) {
+    return canDispatchArticleSource({
+      audience: storedAudience(row.update_audience),
+      canEdit: await canEditSubject(env, row.owner_id, user),
+      isOwner: drive.isManager,
+    });
   }
   if (user.id === row.owner_id) {
     return true;
@@ -434,11 +447,15 @@ function resolveSourceWebhookUrlUpdate(
 function resolveSourceWebhookAuthUpdate(
   row: SourceRow,
   input: ArticleSourceWrite,
+  webhookUrl: string | null,
 ): string | null {
-  if (input.webhookAuthorization === undefined) {
-    return row.webhook_authorization;
+  if (input.webhookAuthorization !== undefined) {
+    return input.webhookAuthorization?.trim() || null;
   }
-  return input.webhookAuthorization?.trim() || null;
+  if (webhookUrl !== row.webhook_url) {
+    return null;
+  }
+  return row.webhook_authorization;
 }
 
 async function sourceFolderConflict(
@@ -530,8 +547,12 @@ async function dispatchTargetForFolder(
   ownerId: string,
   folder: string,
 ): Promise<{ id: string; name: string } | null> {
-  const drive = await sharedDriveDispatch(env, ownerId, user);
-  if (drive === false) {
+  const drive = await sharedDriveActor(env, ownerId, user);
+  if (
+    drive &&
+    !drive.isManager &&
+    !(await canEditSubject(env, ownerId, user))
+  ) {
     return null;
   }
   const opened = await folderViewFlags(env, ownerId, folder, user);
@@ -562,7 +583,7 @@ async function dispatchTargetForFolder(
   if (
     !canOfferArticleDispatch({
       audience: storedAudience(row.update_audience),
-      isOwner: drive === true || user.id === row.owner_id,
+      isOwner: Boolean(drive?.isManager) || user.id === row.owner_id,
       openedCanView: opened.canView,
       sourceCanEdit: sourceFlags.canEdit,
     })
@@ -783,7 +804,11 @@ async function prepareSourceUpdate(
     folder,
     name: name.name,
     schemaJson: schema.schemaJson,
-    webhookAuthorization: resolveSourceWebhookAuthUpdate(row, input),
+    webhookAuthorization: resolveSourceWebhookAuthUpdate(
+      row,
+      input,
+      webhook.webhookUrl,
+    ),
     webhookUrl: webhook.webhookUrl,
   };
 }
