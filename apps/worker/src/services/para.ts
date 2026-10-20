@@ -371,6 +371,13 @@ async function proposedOrExistingSpace(
   if (existing) {
     return spaceTargetForRow(env, existing);
   }
+  if (isReservedArticleFolderPath(name)) {
+    return {
+      error: "スペース名が不正です",
+      kind: "invalid",
+      status: 400,
+    };
+  }
   // A new space's proposed root is the top-level folder carrying its name;
   // resolutions.space.adopt may redirect the root to any owned folder.
   return { kind: "proposed", name, rootPath: name };

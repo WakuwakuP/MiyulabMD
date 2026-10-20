@@ -1123,6 +1123,30 @@ test("paraRenameSpace renames and enforces owner-unique names", async (t) => {
   assert.equal(conflict.kind, "invalid");
 });
 
+test("enablePara rejects a reserved article address as a space name", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+
+  const reserved = await enablePara(
+    env,
+    { space: { name: "d:研究室:blog" } },
+    owner,
+  );
+  assert.equal(reserved.kind, "invalid");
+  if (reserved.kind === "invalid") {
+    assert.equal(reserved.error, "スペース名が不正です");
+  }
+  assert.equal(folderRow(sqlite, owner.id, "d:研究室:blog"), undefined);
+
+  const colon = await enablePara(
+    env,
+    { space: { name: "会議:議事録" } },
+    owner,
+  );
+  assert.equal(colon.kind, "ok");
+  assert.ok(folderRow(sqlite, owner.id, "会議:議事録"));
+});
+
 test("paraPlan / space mutations reject another user's space", async (t) => {
   const { env, other, owner, sqlite } = await createEnv();
   t.after(() => sqlite.close());
