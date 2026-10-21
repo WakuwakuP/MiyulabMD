@@ -5,6 +5,7 @@ on:
     paths:
       - "apps/**"
       - "packages/**"
+      - ".npmrc"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -17,6 +18,7 @@ on:
     paths:
       - "apps/**"
       - "packages/**"
+      - ".npmrc"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
