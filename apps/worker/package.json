@@ -21,7 +21,7 @@
     "agents": "^0.22.0",
     "elysia": "^1.4.30",
     "fast-diff": "^1.3.0",
-    "jose": "^6.2.13",
+    "jose": "^6.2.14",
     "lib0": "^0.2.119",
     "mermaid": "12.2.0",
     "y-protocols": "^1.0.7",
@@ -30,6 +30,6 @@
   },
   "devDependencies": {
     "typescript": "7.0.2",
-    "wrangler": "^4.152.0"
+    "wrangler": "^4.156.0"
   }
 }
