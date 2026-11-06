@@ -35,11 +35,12 @@ function normalizeYamlValue(value: unknown): unknown {
     return value.map(normalizeYamlValue);
   }
   if (value && typeof value === "object") {
-    const next: ArticleMeta = {};
-    for (const [key, entry] of Object.entries(value)) {
-      next[key] = normalizeYamlValue(entry);
-    }
-    return next;
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        normalizeYamlValue(entry),
+      ]),
+    );
   }
   return value;
 }
@@ -98,6 +99,7 @@ export function articleMetaFromNote(
   return parseArticleMeta(stored);
 }
 
+/** 一般ノートにも使う任意 YAML の読み取り。記事 schema の検証はしない。 */
 export function readArticleFrontmatter(
   markdown: string,
 ): ArticleFrontmatterRead {
