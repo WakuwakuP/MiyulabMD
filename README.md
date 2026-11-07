@@ -4,6 +4,8 @@
 
 設計の詳細は [docs/design.md](docs/design.md) を参照。エージェント向けのコードグラフは [docs/code-graph.md](docs/code-graph.md)。
 
+YAML frontmatter の保持と記事の公開前チェックは [docs/frontmatter.md](docs/frontmatter.md) を参照。
+
 ```
 apps/web          フロント（React + Vite + CodeMirror 予定）
 apps/worker       fetch 分岐 + Elysia (REST / MCP) / Durable Objects

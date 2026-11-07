@@ -42,6 +42,65 @@ test("readArticleFrontmatter parses types including dates", () => {
   assert.equal(read.data.pubDate, "2026-09-04");
 });
 
+test("optional frontmatter keeps arbitrary nested keys without an article schema", () => {
+  assert.deepEqual(readArticleFrontmatter("# Note\n"), {
+    body: "# Note\n",
+    data: {},
+    issues: [],
+  });
+  const read = readArticleFrontmatter(
+    "---\ncustom:\n  labels: [one, two]\n  enabled: true\n__proto__:\n  custom: value\nconstructor: personal\n---\n\n# Note\n",
+  );
+  assert.deepEqual(read.issues, []);
+  assert.deepEqual(read.data, {
+    ["__proto__"]: { custom: "value" },
+    constructor: "personal",
+    custom: { enabled: true, labels: ["one", "two"] },
+  });
+  assert.equal(Object.getPrototypeOf(read.data), Object.prototype);
+  assert.equal(read.body, "\n# Note\n");
+});
+
+test("malformed frontmatter preserves the body and closed raw YAML on edits", () => {
+  for (const raw of ["custom: [", "- not a mapping", "custom: a\ncustom: b"]) {
+    const markdown = `---\n${raw}\n---\n\n# Body\n`;
+    const read = readArticleFrontmatter(markdown);
+    assert.ok(read.issues.length > 0);
+    assert.equal(read.body, "\n# Body\n");
+    assert.equal(markdownBody(markdown), read.body);
+    assert.equal(
+      withClosedFrontmatter(markdown, "# Edited\n"),
+      `---\n${raw}\n---\n\n# Edited\n`,
+    );
+    assert.equal(ensureArticleMarkdown(markdown, []), markdown);
+  }
+  const unclosed = "---\ncustom: value\n\n# Body\n";
+  assert.equal(readArticleFrontmatter(unclosed).body, unclosed);
+  assert.equal(markdownBody(unclosed), unclosed);
+});
+
+test("article validation checks types, enums and fixed values but preserves unknown keys", () => {
+  const schema = [
+    { key: "count", required: true, type: "number" as const },
+    { default: "news", fixed: true, key: "kind", type: "string" as const },
+    { enum: ["ja", "en"], key: "lang", type: "string" as const },
+  ];
+  const invalid = validateArticleDocument(
+    schema,
+    "---\ncount: wrong\nkind: other\nlang: xx\n---\n# Body\n",
+  );
+  assert.deepEqual(
+    invalid.issues.map((issue) => issue.key),
+    ["count", "kind", "lang"],
+  );
+  const valid = validateArticleDocument(
+    schema,
+    "---\ncount: 1\ncustom: keep\n---\n# Body\n",
+  );
+  assert.deepEqual(valid.issues, []);
+  assert.equal(valid.data.custom, "keep");
+});
+
 test("readArticleFrontmatter reports unclosed and invalid YAML", () => {
   const unclosed = readArticleFrontmatter("---\ntitle: x\n");
   assert.match(unclosed.issues[0]?.message ?? "", /閉じ/);
