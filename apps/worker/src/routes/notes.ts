@@ -11,6 +11,7 @@ import {
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
+import { noteAccessFieldsChanged } from "../durable-objects/access-recheck.ts";
 import {
   catalogListRequest,
   catalogObjectName,
@@ -81,11 +82,15 @@ async function applyNotePatch(
 ): Promise<{ error: string } | Note> {
   const { markdown, ...meta } = body;
   let latest = null as MutateNoteResult | null;
+  let revokeNoteId: string | null = null;
 
   if (patchHasMetaFields(meta)) {
     latest = await notes.updateMeta(id, user, meta);
     if (latest.kind !== "ok") {
       return mutateResultError(set, latest);
+    }
+    if (noteAccessFieldsChanged(meta)) {
+      revokeNoteId = latest.note.id;
     }
   }
 
@@ -100,6 +105,10 @@ async function applyNotePatch(
   if (latest?.kind !== "ok") {
     set.status = 400;
     return { error: "No fields to update" };
+  }
+
+  if (revokeNoteId) {
+    await documentRoom(revokeNoteId).revokeStaleSockets();
   }
 
   return latest.note;

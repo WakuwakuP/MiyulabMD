@@ -12,10 +12,11 @@ export type EditLockRow = {
 /**
  * Throttled re-check of the §2.6 edit lock for a DocumentRoom.
  *
- * `X-Can-Edit` is frozen at WebSocket connect time, so a note locked
- * mid-session would otherwise stay writable for the life of the connection.
- * The room re-reads `edit_locked` at most once per `intervalMs` and only on
- * write paths.
+ * Connect-time `X-Can-Edit` would otherwise keep a note writable for the
+ * life of the connection after a mid-session lock. The room re-reads
+ * `edit_locked` at most once per `intervalMs` and only on write paths.
+ * ACL (scope / grant / drive role) is re-checked separately by
+ * `AccessRecheck`.
  *
  * Read failures fail open: the durable boundary in
  * `persistMarkdownSnapshot` still refuses writes to a locked note,

@@ -270,6 +270,13 @@ function mutateNoteToolResponse(result: MutateNoteResult) {
   return textResult({ note: result.note });
 }
 
+async function mutateAccessToolResponse(result: MutateNoteResult) {
+  if (result.kind === "ok") {
+    await documentRoom(result.note.id).revokeStaleSockets();
+  }
+  return mutateNoteToolResponse(result);
+}
+
 function resolveInsertPosition(
   at: "start" | "end" | undefined,
   after: string | undefined,
@@ -493,7 +500,7 @@ async function inviteCollaboratorTool(
       ? undefined
       : current.note.access.effectiveWriteScope,
   });
-  return mutateNoteToolResponse(result);
+  return mutateAccessToolResponse(result);
 }
 
 type MetadataTarget = Extract<
@@ -845,7 +852,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
           readScope,
           writeScope,
         });
-        return mutateNoteToolResponse(result);
+        return mutateAccessToolResponse(result);
       },
     ),
   );

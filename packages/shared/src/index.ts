@@ -181,6 +181,8 @@ export type {
   WorkspaceSearchResult,
 } from "./note.ts";
 export {
+  ACCESS_REVOKED_WS_CLOSE_CODE,
+  ACCESS_REVOKED_WS_CLOSE_REASON,
   EDIT_LOCK_WS_CLOSE_CODE,
   EDIT_LOCK_WS_CLOSE_REASON,
   EDIT_LOCKED_CODE,
