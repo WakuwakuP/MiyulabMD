@@ -71,7 +71,7 @@ export function noteAccessFieldsChanged(input: UpdateNoteMetaInput): boolean {
  * re-check, making the note private or revoking a grant would leave the
  * existing hibernated connection readable and writable.
  *
- * Failed or superseded reads deny both viewing and editing. Previously
+ * Failed reads deny both viewing and editing. Previously
  * granted rights must not survive an ACL read failure or invalidation.
  * Failures are not cached, so a later successful read can recover access.
  */
@@ -84,6 +84,7 @@ export class AccessRecheck {
     { checkedAt: number; flags: SocketAccessFlags }
   >();
   private readonly inflight = new Map<string, Promise<SocketAccessFlags>>();
+  private readonly latest = new Map<string, Promise<SocketAccessFlags>>();
   private readonly refreshSeq = new Map<string, number>();
 
   constructor(
@@ -121,6 +122,7 @@ export class AccessRecheck {
   invalidate(): void {
     this.cached.clear();
     this.inflight.clear();
+    this.latest.clear();
     for (const [key, seq] of this.refreshSeq) {
       this.refreshSeq.set(key, seq + 1);
     }
@@ -140,24 +142,34 @@ export class AccessRecheck {
     return task;
   }
 
-  private async refresh(actorKey: string): Promise<SocketAccessFlags> {
+  private refresh(actorKey: string): Promise<SocketAccessFlags> {
     const seq = (this.refreshSeq.get(actorKey) ?? 0) + 1;
     this.refreshSeq.set(actorKey, seq);
+    const task = this.readFresh(actorKey, seq);
+    this.latest.set(actorKey, task);
+    return task;
+  }
+
+  private async readFresh(
+    actorKey: string,
+    seq: number,
+  ): Promise<SocketAccessFlags> {
+    let flags: SocketAccessFlags;
     try {
-      const flags = await this.readFlags(actorKey);
-      if (seq === this.refreshSeq.get(actorKey)) {
-        this.cached.set(actorKey, { checkedAt: this.now(), flags });
-      }
-      // An ACL mutation or newer read superseded this request. Never let
-      // its caller apply an older allow verdict to an existing socket.
-      return seq === this.refreshSeq.get(actorKey)
-        ? flags
-        : { canEdit: false, canView: false };
+      flags = await this.readFlags(actorKey);
     } catch {
+      flags = { canEdit: false, canView: false };
       if (seq === this.refreshSeq.get(actorKey)) {
         this.cached.delete(actorKey);
+        return flags;
       }
-      return { canEdit: false, canView: false };
     }
+    if (seq !== this.refreshSeq.get(actorKey)) {
+      // Join the newer verdict, never an old allow or a synthetic revoke.
+      // Invalidation clears latest; if no replacement started, read again.
+      return this.latest.get(actorKey) ?? this.refresh(actorKey);
+    }
+    this.cached.set(actorKey, { checkedAt: this.now(), flags });
+    return flags;
   }
 }

@@ -204,18 +204,40 @@ test("read failure with no cache denies both writes and viewing", async () => {
   });
 });
 
-test("invalidate rejects an older in-flight allow verdict", async () => {
+test("invalidate rechecks instead of returning an older in-flight allow verdict", async () => {
   let resolve!: (flags: SocketAccessFlags) => void;
-  const access = new AccessRecheck(
-    () =>
-      new Promise((done) => {
-        resolve = done;
-      }),
-  );
+  let calls = 0;
+  const access = new AccessRecheck(() => {
+    calls += 1;
+    if (calls > 1) {
+      return Promise.resolve({ canEdit: false, canView: false });
+    }
+    return new Promise((done) => {
+      resolve = done;
+    });
+  });
   const pending = access.flags("guest");
   access.invalidate();
   resolve({ canEdit: true, canView: true });
   assert.deepEqual(await pending, { canEdit: false, canView: false });
+  assert.equal(calls, 2);
+});
+
+test("superseded reads join the newer allow without falsely revoking an editor", async () => {
+  const releases: Array<(flags: SocketAccessFlags) => void> = [];
+  const access = new AccessRecheck(
+    () =>
+      new Promise((resolve) => {
+        releases.push(resolve);
+      }),
+  );
+  const old = access.flags("user:alice");
+  access.invalidate();
+  const latest = access.flagsNow("user:alice");
+  releases[0]?.({ canEdit: false, canView: false });
+  releases[1]?.({ canEdit: true, canView: true });
+  assert.deepEqual(await old, { canEdit: true, canView: true });
+  assert.deepEqual(await latest, { canEdit: true, canView: true });
 });
 
 test("ACL read failure after invalidation denies old rights", async () => {
@@ -237,4 +259,24 @@ test("ACL read failure after invalidation denies old rights", async () => {
     canEdit: false,
     canView: false,
   });
+});
+
+test("superseded failed read preserves a newer successful verdict", async () => {
+  let rejectOld!: (error: Error) => void;
+  let calls = 0;
+  const access = new AccessRecheck(() => {
+    calls += 1;
+    if (calls === 1) {
+      return new Promise((_resolve, reject) => {
+        rejectOld = reject;
+      });
+    }
+    return Promise.resolve({ canEdit: true, canView: true });
+  });
+  const old = access.flags("user:alice");
+  const current = await access.flagsNow("user:alice");
+  rejectOld(new Error("old D1 read failed"));
+  assert.deepEqual(await old, current);
+  assert.deepEqual(await access.flags("user:alice"), current);
+  assert.equal(calls, 2);
 });
