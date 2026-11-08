@@ -71,9 +71,9 @@ export function noteAccessFieldsChanged(input: UpdateNoteMetaInput): boolean {
  * re-check, making the note private or revoking a grant would leave the
  * existing hibernated connection readable and writable.
  *
- * Read failures reuse the last known flags when present. With no cache they
- * fail closed on writes (`canEdit: false`) and fail open on view so a
- * transient D1 error does not kick every viewer.
+ * Failed or superseded reads deny both viewing and editing. Previously
+ * granted rights must not survive an ACL read failure or invalidation.
+ * Failures are not cached, so a later successful read can recover access.
  */
 export class AccessRecheck {
   private readonly readFlags: (actorKey: string) => Promise<SocketAccessFlags>;
@@ -148,13 +148,16 @@ export class AccessRecheck {
       if (seq === this.refreshSeq.get(actorKey)) {
         this.cached.set(actorKey, { checkedAt: this.now(), flags });
       }
-      return flags;
+      // An ACL mutation or newer read superseded this request. Never let
+      // its caller apply an older allow verdict to an existing socket.
+      return seq === this.refreshSeq.get(actorKey)
+        ? flags
+        : { canEdit: false, canView: false };
     } catch {
-      const previous = this.cached.get(actorKey);
-      if (previous) {
-        return previous.flags;
+      if (seq === this.refreshSeq.get(actorKey)) {
+        this.cached.delete(actorKey);
       }
-      return { canEdit: false, canView: true };
+      return { canEdit: false, canView: false };
     }
   }
 }

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import type { SessionUser } from "@miyulabmd/shared";
 import { upsertUserByEmail } from "../db/users.ts";
 import { loadSocketAccess } from "../durable-objects/access-recheck.ts";
+import { runReadTool } from "../mcp/read-tools.ts";
 import { ensureFolderRow } from "./access.ts";
 import { createNoteService, persistMarkdownSnapshot } from "./notes.ts";
 
@@ -148,6 +149,49 @@ function snapshotRow(sqlite: DatabaseSync, id: string) {
     .prepare("SELECT markdown_snapshot, title FROM notes WHERE id = ?")
     .get(id) as { markdown_snapshot: string; title: string };
 }
+
+test("ordinary notes retain optional raw YAML through creation, snapshots, reload and MCP get_note", async (t) => {
+  const { env, owner, sqlite } = await createEnv();
+  t.after(() => sqlite.close());
+  const readForAgent = t.mock.fn(
+    async (id: string) => snapshotRow(sqlite, id).markdown_snapshot,
+  );
+  const readEnv = {
+    ...env,
+    DOCUMENT_ROOM: {
+      get: () => ({ readForAgent }),
+      idFromName: (id: string) => id,
+    },
+  } as unknown as Env;
+  const cases = [
+    "# No frontmatter\n",
+    "\uFEFF---\r\n# personal metadata\r\ncustom:\r\n  tags: [one, two]\r\n__proto__: keep\r\n...\r\n\r\n# Body\r\n",
+    "---\ncustom: [\n---\n\n# Body\n",
+    "---\ncustom: value\n\n# Unclosed body\n",
+  ];
+  for (const markdown of cases) {
+    const created = await createNote(env, owner, markdown);
+    assert.equal(created.markdown, markdown);
+    const edited = `${markdown}\nEdited.\n`;
+    assert.equal(
+      await persistMarkdownSnapshot(env, created.id, edited),
+      "persisted",
+    );
+    assert.equal(snapshotRow(sqlite, created.id).markdown_snapshot, edited);
+    const loaded = await createNoteService(env).get(created.id, owner);
+    assert.equal(loaded.kind, "ok");
+    if (loaded.kind === "ok") {
+      assert.equal(loaded.note.markdown, edited);
+    }
+    const result = await runReadTool(readEnv, owner, "get_note", {
+      id: created.id,
+    });
+    assert.notEqual(result.isError, true);
+    const response = JSON.parse(result.content[0].text);
+    assert.equal(response.note.markdown, edited);
+  }
+  assert.equal(readForAgent.mock.callCount(), cases.length);
+});
 
 test("persistMarkdownSnapshot writes for an unlocked note", async () => {
   const { env, owner, sqlite } = await createEnv();

@@ -258,17 +258,11 @@ export class DocumentRoom extends DurableObject<Env> {
         const isWrite =
           syncMessageType === syncProtocol.messageYjsSyncStep2 ||
           syncMessageType === syncProtocol.messageYjsUpdate;
-        if (isWrite) {
-          if (!canEdit) {
-            break;
-          }
-          if (await this.editLock.locked()) {
-            // Connect-time X-Can-Edit still says writable. Close those
-            // sockets with a permanent app-level code so clients flip to
-            // read-only instead of silently dropping the update.
-            this.closeLockedWriters();
-            break;
-          }
+        if (
+          isWrite &&
+          !(await this.canApplySocketUpdate(ws, attachment, canEdit))
+        ) {
+          break;
         }
 
         const encoder = encoding.createEncoder();
@@ -307,6 +301,23 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
+  private async canApplySocketUpdate(
+    ws: WebSocket,
+    attachment: WsAttachment,
+    canEdit: boolean,
+  ): Promise<boolean> {
+    if (!canEdit) {
+      return false;
+    }
+    if (await this.editLock.locked()) {
+      this.closeLockedWriters();
+      return false;
+    }
+    // The lock read yields; permission changes may have revoked this socket.
+    const current = await this.enforceSocketAccess(ws, attachment);
+    return current?.canEdit === true && ws.readyState === WebSocket.OPEN;
+  }
+
   async webSocketClose(
     ws: WebSocket,
     _code: number,
@@ -337,7 +348,7 @@ export class DocumentRoom extends DurableObject<Env> {
     const stale = owned.filter((id) => !awareness.meta.has(id));
     if (stale.length > 0) {
       const clocks = attachment?.awarenessClocks ?? {};
-      this.sendAwarenessUpdate(
+      void this.sendAwarenessUpdate(
         encodeAwarenessNullUpdate(
           stale.map((clientId) => ({
             clientId,
@@ -694,11 +705,12 @@ export class DocumentRoom extends DurableObject<Env> {
       }
       try {
         const attachment = ws.deserializeAttachment() as WsAttachment | null;
-        if (attachment) {
-          const live = await this.enforceSocketAccess(ws, attachment);
-          if (!live) {
-            continue;
-          }
+        if (!attachment) {
+          continue;
+        }
+        const live = await this.enforceSocketAccess(ws, attachment);
+        if (!live) {
+          continue;
         }
         ws.send(payload);
       } catch {
@@ -752,13 +764,13 @@ export class DocumentRoom extends DurableObject<Env> {
     const withoutMeta = clients.filter((id) => !awareness.meta.has(id));
 
     if (withMeta.length > 0) {
-      this.sendAwarenessUpdate(
+      void this.sendAwarenessUpdate(
         awarenessProtocol.encodeAwarenessUpdate(awareness, withMeta),
         origin,
       );
     }
     if (withoutMeta.length > 0) {
-      this.sendAwarenessUpdate(
+      void this.sendAwarenessUpdate(
         encodeAwarenessNullUpdate(
           withoutMeta.map((clientId) => ({
             clientId,
@@ -770,7 +782,10 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
-  private sendAwarenessUpdate(update: Uint8Array, origin: unknown): void {
+  private async sendAwarenessUpdate(
+    update: Uint8Array,
+    origin: unknown,
+  ): Promise<void> {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, MESSAGE_AWARENESS);
     encoding.writeVarUint8Array(encoder, update);
@@ -781,6 +796,10 @@ export class DocumentRoom extends DurableObject<Env> {
         continue;
       }
       try {
+        const attachment = ws.deserializeAttachment() as WsAttachment | null;
+        if (!(attachment && (await this.enforceSocketAccess(ws, attachment)))) {
+          continue;
+        }
         ws.send(payload);
       } catch {
         // 切断済み接続は無視する。

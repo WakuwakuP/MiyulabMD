@@ -1,5 +1,6 @@
 import {
   type AccessScope,
+  ARTICLE_LIST_MAX_PER_PAGE,
   type ArticleCollection,
   type ArticleEntry,
   type ArticleEntryPage,
@@ -32,6 +33,7 @@ import {
   parseArticleSchema,
   readArticleFrontmatter,
   type SessionUser,
+  validateArticleDocument,
 } from "@miyulabmd/shared";
 
 import { db } from "../db/client.ts";
@@ -646,6 +648,72 @@ async function maxNoteUpdatedAt(
   return row?.max_updated ?? null;
 }
 
+async function sourceFrontmatterError(
+  env: Env,
+  user: SessionUser,
+  source: SourceRow,
+): Promise<SourceWriteError | null> {
+  const schema = parseSchemaJson(source.schema_json);
+  const filter = sourceNoteFilter(source.folder);
+  let afterId = "";
+  while (true) {
+    const { results } = await db(env)
+      .prepare(
+        `SELECT id, short_id, title, folder, owner_kind, markdown_snapshot, read_scope, write_scope
+         FROM notes WHERE owner_id = ? AND ${filter.sql} AND id > ?
+         ORDER BY id LIMIT ?`,
+      )
+      .bind(
+        source.owner_id,
+        ...filter.binds,
+        afterId,
+        ARTICLE_LIST_MAX_PER_PAGE,
+      )
+      .all<
+        Pick<
+          NoteArticleRow,
+          "id" | "short_id" | "title" | "folder" | "markdown_snapshot"
+        > & {
+          owner_kind: OwnerKind;
+          read_scope: string | null;
+          write_scope: string | null;
+        }
+      >();
+    for (const note of results) {
+      afterId = note.id;
+      const { issues } = validateArticleDocument(
+        schema,
+        note.markdown_snapshot,
+      );
+      if (issues.length === 0) {
+        continue;
+      }
+      const access = await resolveNoteAccess(
+        env,
+        {
+          folder: note.folder,
+          id: note.id,
+          ownerId: source.owner_id,
+          ownerKind: note.owner_kind,
+          readScope: storedScope(note.read_scope),
+          writeScope: storedScope(note.write_scope),
+        },
+        user,
+      );
+      const error = "記事の frontmatter に不備があるためサイトを更新できません";
+      return {
+        error: access.flags.canView
+          ? `${error}: ${note.title} (/n/${note.short_id}) — ${issues.map((issue) => issue.message).join("、")}`
+          : `${error}。記事ソースの所有者または管理者に確認してください`,
+        status: 422,
+      };
+    }
+    if (results.length < ARTICLE_LIST_MAX_PER_PAGE) {
+      return null;
+    }
+  }
+}
+
 function toEntry(
   row: NoteArticleRow,
   schema: ArticleSchemaField[],
@@ -1076,6 +1144,10 @@ export function createArticleService(env: Env) {
       }
       if (!row.webhook_url) {
         return { error: "Webhook URL が設定されていません", status: 400 };
+      }
+      const invalid = await sourceFrontmatterError(env, user, row);
+      if (invalid) {
+        return invalid;
       }
 
       const headers: Record<string, string> = {

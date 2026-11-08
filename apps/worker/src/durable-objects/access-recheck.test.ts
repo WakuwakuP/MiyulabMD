@@ -159,7 +159,7 @@ test("a slower in-flight read cannot overwrite a fresher flagsNow() verdict", as
   releases[1]?.();
   assert.deepEqual(await fresh, { canEdit: false, canView: false });
   releases[0]?.();
-  assert.deepEqual(await slow, { canEdit: true, canView: true });
+  assert.deepEqual(await slow, { canEdit: false, canView: false });
   assert.deepEqual(await access.flags("guest"), {
     canEdit: false,
     canView: false,
@@ -167,7 +167,7 @@ test("a slower in-flight read cannot overwrite a fresher flagsNow() verdict", as
   assert.equal(calls, 2);
 });
 
-test("read failure reuses the last known flags and is not cached as success", async () => {
+test("read failure denies cached rights and retries instead of caching failure", async () => {
   let fail = false;
   let reads = 0;
   const access = new AccessRecheck(() => {
@@ -183,23 +183,58 @@ test("read failure reuses the last known flags and is not cached as success", as
   });
   fail = true;
   assert.deepEqual(await access.flagsNow("guest"), {
-    canEdit: true,
-    canView: true,
+    canEdit: false,
+    canView: false,
   });
   fail = false;
-  assert.deepEqual(await access.flagsNow("guest"), {
+  assert.deepEqual(await access.flags("guest"), {
     canEdit: true,
     canView: true,
   });
   assert.equal(reads, 3);
 });
 
-test("read failure with no cache fails closed on writes and open on view", async () => {
+test("read failure with no cache denies both writes and viewing", async () => {
   const access = new AccessRecheck(() =>
     Promise.reject(new Error("D1 unavailable")),
   );
   assert.deepEqual(await access.flags("guest"), {
     canEdit: false,
-    canView: true,
+    canView: false,
+  });
+});
+
+test("invalidate rejects an older in-flight allow verdict", async () => {
+  let resolve!: (flags: SocketAccessFlags) => void;
+  const access = new AccessRecheck(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const pending = access.flags("guest");
+  access.invalidate();
+  resolve({ canEdit: true, canView: true });
+  assert.deepEqual(await pending, { canEdit: false, canView: false });
+});
+
+test("ACL read failure after invalidation denies old rights", async () => {
+  let fail = false;
+  const access = new AccessRecheck(() => {
+    if (fail) {
+      return Promise.reject(new Error("D1 unavailable"));
+    }
+    return Promise.resolve({ canEdit: true, canView: true });
+  });
+  await access.flags("guest");
+  access.invalidate();
+  fail = true;
+  assert.deepEqual(await access.flagsNow("guest"), {
+    canEdit: false,
+    canView: false,
+  });
+  assert.deepEqual(await access.flags("guest"), {
+    canEdit: false,
+    canView: false,
   });
 });
