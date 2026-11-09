@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { MY_DRIVE_NAME, type Note } from "@miyulabmd/shared";
 import { upsertUserByEmail } from "../db/users.ts";
 import {
   createMemberFolder,
@@ -16,6 +17,7 @@ import {
   createSharedDrive,
   getSharedDrive,
   inviteDriveMember,
+  listAccessibleDrives,
   listDriveMembers,
   listSharedDrives,
   removeDriveMember,
@@ -1034,4 +1036,366 @@ test("members read shared-drive articles as d:name:folder", async (t) => {
     (await createSharedDrive(env, owner, "ラボ:広報")).kind,
     "invalid",
   );
+});
+
+function countRows(
+  sqlite: DatabaseSync,
+  sql: string,
+  ...binds: unknown[]
+): number {
+  return (sqlite.prepare(sql).get(...binds) as { c: number }).c;
+}
+
+function assertNote(result: Note | { error: string; status: number }): Note {
+  if ("error" in result) {
+    assert.fail(result.error);
+  }
+  return result;
+}
+
+test("listAccessibleDrives reports roots and who can create", async (t) => {
+  const { editor, env, owner, sqlite, stranger, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const created = await createSharedDrive(env, owner, "研究室");
+  assert.equal(created.kind, "ok");
+  if (created.kind !== "ok") {
+    return;
+  }
+  assert.equal(
+    (
+      await inviteDriveMember(
+        env,
+        created.result.id,
+        editor.email,
+        "editor",
+        owner,
+      )
+    ).kind,
+    "ok",
+  );
+  assert.equal(
+    (
+      await inviteDriveMember(
+        env,
+        created.result.id,
+        viewer.email,
+        "viewer",
+        owner,
+      )
+    ).kind,
+    "ok",
+  );
+
+  const ownerDrives = await listAccessibleDrives(env, owner);
+  assert.deepEqual(
+    ownerDrives.map((drive) => ({
+      canCreate: drive.canCreate,
+      id: drive.id,
+      kind: drive.kind,
+      name: drive.name,
+      role: drive.role,
+    })),
+    [
+      {
+        canCreate: true,
+        id: owner.id,
+        kind: "user",
+        name: MY_DRIVE_NAME,
+        role: null,
+      },
+      {
+        canCreate: true,
+        id: created.result.id,
+        kind: "shared_drive",
+        name: "研究室",
+        role: "manager",
+      },
+    ],
+  );
+  assert.equal(ownerDrives[1]?.rootFolderId, created.result.rootFolderId);
+  assert.ok(ownerDrives[0]?.rootFolderId);
+
+  const editorDrives = await listAccessibleDrives(env, editor);
+  assert.equal(editorDrives[1]?.role, "editor");
+  assert.equal(editorDrives[1]?.canCreate, true);
+  assert.equal(editorDrives[1]?.rootFolderId, created.result.rootFolderId);
+  const viewerDrives = await listAccessibleDrives(env, viewer);
+  assert.equal(viewerDrives[1]?.role, "viewer");
+  assert.equal(viewerDrives[1]?.canCreate, false);
+  const strangerDrives = await listAccessibleDrives(env, stranger);
+  assert.deepEqual(
+    strangerDrives.map((drive) => drive.id),
+    [stranger.id],
+  );
+
+  const notes = createNoteService(env);
+  const atMyRoot = await notes.create(editor, {
+    folderId: editorDrives[0]?.rootFolderId,
+    markdown: "# 自分の根",
+  });
+  assert.ok(!("error" in atMyRoot));
+  if ("error" in atMyRoot) {
+    return;
+  }
+  assert.equal(atMyRoot.ownerKind, "user");
+  assert.equal(atMyRoot.ownerId, editor.id);
+  assert.equal(atMyRoot.folder, "");
+  assert.equal(atMyRoot.folderId, editorDrives[0]?.rootFolderId);
+});
+
+test("shared-drive note creation stays on the requested subject", async (t) => {
+  const { editor, env, owner, sqlite, stranger, viewer } = await createEnv();
+  t.after(() => sqlite.close());
+  const created = await createSharedDrive(env, owner, "研究室");
+  assert.equal(created.kind, "ok");
+  if (created.kind !== "ok") {
+    return;
+  }
+  const driveId = created.result.id;
+  assert.equal(
+    (await inviteDriveMember(env, driveId, editor.email, "editor", owner)).kind,
+    "ok",
+  );
+  assert.equal(
+    (await inviteDriveMember(env, driveId, viewer.email, "viewer", owner)).kind,
+    "ok",
+  );
+
+  const notes = createNoteService(env);
+  const personal = assertNote(
+    await notes.create(owner, {
+      folder: "資料",
+      markdown: "# 個人の資料",
+      readScope: "signed_in",
+      writeScope: "self",
+    }),
+  );
+  assert.equal(personal.ownerKind, "user");
+  assert.equal(personal.ownerId, owner.id);
+  assert.equal(personal.folder, "資料");
+  assert.equal(personal.access.effectiveReadScope, "signed_in");
+  assert.ok(personal.folderId);
+
+  const sharedFolder = await createMemberFolder(env, editor, {
+    name: "資料",
+    parentId: created.result.rootFolderId,
+  });
+  assert.equal(sharedFolder.kind, "ok");
+  if (sharedFolder.kind !== "ok" || !sharedFolder.folder.id) {
+    return;
+  }
+  const sharedFolderId = sharedFolder.folder.id;
+  const editorRootId = (await listAccessibleDrives(env, editor))[0]
+    ?.rootFolderId;
+  assert.ok(editorRootId);
+  const notesBefore = countRows(sqlite, "SELECT COUNT(*) AS c FROM notes");
+
+  const rejected = [
+    () => notes.create(editor, { folderId: "missing-folder", markdown: "# x" }),
+    () =>
+      notes.create(editor, {
+        folder: "落ちない",
+        folderId: " ",
+        markdown: "# x",
+      }),
+    () =>
+      notes.create(editor, {
+        driveId: " ",
+        folder: "落ちない",
+        markdown: "# x",
+      }),
+    () =>
+      notes.create(editor, {
+        driveId: "00000000-0000-4000-8000-000000000000",
+        markdown: "# x",
+      }),
+    () =>
+      notes.create(viewer, { folderId: sharedFolderId, markdown: "# 不可" }),
+    () => notes.create(viewer, { driveId, markdown: "# 不可" }),
+    () =>
+      notes.create(stranger, { folderId: sharedFolderId, markdown: "# 不可" }),
+    () =>
+      notes.create(stranger, { driveId, folder: "資料", markdown: "# 不可" }),
+    () =>
+      notes.create(editor, {
+        folder: "別の場所",
+        folderId: sharedFolderId,
+        markdown: "# x",
+      }),
+    () =>
+      notes.create(editor, {
+        driveId: editor.id,
+        folderId: sharedFolderId,
+        markdown: "# x",
+      }),
+    () =>
+      notes.create(editor, {
+        driveId,
+        folder: "まだ無い",
+        markdown: "# x",
+      }),
+    () =>
+      notes.create(editor, {
+        driveId,
+        folderId: editorRootId,
+        markdown: "# x",
+      }),
+  ];
+  const results: { error: string; status: number }[] = [];
+  for (const attempt of rejected) {
+    const result = await attempt();
+    results.push(
+      "error" in result ? result : { error: "created", status: 500 },
+    );
+  }
+  assert.deepEqual(results, [
+    { error: "フォルダが見つかりません", status: 400 },
+    { error: "フォルダが見つかりません", status: 400 },
+    { error: "ドライブが見つかりません", status: 400 },
+    { error: "ドライブが見つかりません", status: 400 },
+    { error: "フォルダが見つかりません", status: 400 },
+    { error: "ドライブが見つかりません", status: 400 },
+    { error: "フォルダが見つかりません", status: 400 },
+    { error: "ドライブが見つかりません", status: 400 },
+    { error: "作成先の指定が矛盾しています", status: 400 },
+    { error: "作成先の指定が矛盾しています", status: 400 },
+    { error: "フォルダが見つかりません", status: 400 },
+    { error: "作成先の指定が矛盾しています", status: 400 },
+  ]);
+  assert.equal(
+    countRows(sqlite, "SELECT COUNT(*) AS c FROM notes"),
+    notesBefore,
+  );
+  assert.equal(
+    countRows(
+      sqlite,
+      "SELECT COUNT(*) AS c FROM folders WHERE folder IN ('落ちない', 'まだ無い', '別の場所')",
+    ),
+    0,
+  );
+  assert.equal(
+    countRows(
+      sqlite,
+      "SELECT COUNT(*) AS c FROM notes WHERE owner_id = ?",
+      driveId,
+    ),
+    0,
+  );
+
+  const shared = assertNote(
+    await notes.create(editor, {
+      folder: "資料",
+      folderId: sharedFolderId,
+      markdown: "# 共有",
+      readScope: "public",
+      writeScope: "public",
+    }),
+  );
+  assert.equal(shared.ownerKind, "shared_drive");
+  assert.equal(shared.ownerId, driveId);
+  assert.equal(shared.folder, "資料");
+  assert.equal(shared.folderId, sharedFolderId);
+  assert.equal(shared.id.length > 0, true);
+  assert.equal(shared.access.effectiveReadScope, "self");
+  assert.equal(shared.access.effectiveWriteScope, "self");
+  assert.equal(shared.access.flags.canEdit, true);
+  const inFolder = await notes.listFolderNotes(editor, sharedFolderId);
+  assert.equal(inFolder.kind, "ok");
+  if (inFolder.kind !== "ok") {
+    return;
+  }
+  assert.equal(
+    inFolder.notes.some((item) => item.id === shared.id),
+    true,
+  );
+  assert.equal(
+    (await notes.listForUser(editor)).some((item) => item.id === shared.id),
+    true,
+  );
+  const asViewer = await notes.get(shared.id, viewer);
+  assert.equal(asViewer.kind, "ok");
+  assert.equal(
+    asViewer.kind === "ok" && asViewer.note.access.flags.canView,
+    true,
+  );
+  assert.equal(
+    asViewer.kind === "ok" && asViewer.note.access.flags.canEdit,
+    false,
+  );
+  assert.equal((await notes.get(shared.id, stranger)).kind, "not_found");
+  assert.equal(
+    countRows(
+      sqlite,
+      "SELECT COUNT(*) AS c FROM notes WHERE owner_id = ? AND folder = '資料'",
+      owner.id,
+    ),
+    1,
+  );
+
+  const byPath = assertNote(
+    await notes.create(editor, {
+      driveId,
+      folder: "資料",
+      markdown: "# パス",
+    }),
+  );
+  assert.equal(byPath.ownerId, driveId);
+  assert.equal(byPath.ownerKind, "shared_drive");
+  assert.equal(byPath.folderId, sharedFolderId);
+
+  const atRoot = assertNote(
+    await notes.create(editor, {
+      driveId,
+      markdown: "# 根",
+      readScope: "public",
+    }),
+  );
+  assert.equal(atRoot.ownerKind, "shared_drive");
+  assert.equal(atRoot.ownerId, driveId);
+  assert.equal(atRoot.folder, "");
+  assert.equal(atRoot.folderId, created.result.rootFolderId);
+  assert.equal(atRoot.access.effectiveReadScope, "self");
+
+  const agreed = assertNote(
+    await notes.create(editor, {
+      driveId,
+      folder: "資料",
+      folderId: sharedFolderId,
+      markdown: "# 一致",
+    }),
+  );
+  assert.equal(agreed.ownerId, driveId);
+  assert.equal(agreed.folderId, sharedFolderId);
+
+  const ownPath = assertNote(
+    await notes.create(editor, {
+      folder: "資料",
+      markdown: "# 編集者の個人",
+    }),
+  );
+  assert.equal(ownPath.ownerKind, "user");
+  assert.equal(ownPath.ownerId, editor.id);
+  assert.equal(ownPath.folder, "資料");
+  assert.notEqual(ownPath.folderId, sharedFolderId);
+
+  const ownDrive = assertNote(
+    await notes.create(owner, {
+      driveId: owner.id,
+      folder: "個人だけ",
+      markdown: "# 個人",
+      readScope: "signed_in",
+      writeScope: "self",
+    }),
+  );
+  assert.equal(ownDrive.ownerKind, "user");
+  assert.equal(ownDrive.ownerId, owner.id);
+  assert.equal(ownDrive.folder, "個人だけ");
+  assert.equal(ownDrive.access.effectiveReadScope, "signed_in");
+
+  const untouched = assertNote(
+    await notes.create(owner, { markdown: "# 根の個人" }),
+  );
+  assert.equal(untouched.ownerKind, "user");
+  assert.equal(untouched.ownerId, owner.id);
+  assert.equal(untouched.folder, "");
 });

@@ -34,6 +34,17 @@ export type SharedDriveSummary = {
   rootFolderId: string;
 };
 
+/** A my drive or shared drive the caller can see, including where they may create. */
+export type AccessibleDrive = {
+  id: string;
+  name: string;
+  kind: OwnerKind;
+  rootFolderId: string;
+  /** Null on the caller's my drive. Shared drives use the membership role. */
+  role: DriveRole | null;
+  canCreate: boolean;
+};
+
 export type SharedDriveMember = {
   id: string;
   email: string;

@@ -252,6 +252,11 @@ export type CreateNoteInput = {
   markdown?: string;
   folder?: string;
   folderId?: string;
+  /**
+   * Subject to create in: the caller's user id (my drive) or a shared drive id.
+   * Omit to keep the historical my-drive path. Never used as authorization by itself.
+   */
+  driveId?: string;
   permission?: PermissionPreset;
   inheritAccess?: boolean;
   readScope?: AccessScope;

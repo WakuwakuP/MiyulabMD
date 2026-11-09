@@ -1,6 +1,8 @@
 import {
+  type AccessibleDrive,
   type DriveRole,
   isDriveRole,
+  MY_DRIVE_NAME,
   type SessionUser,
   type SharedDriveDomain,
   type SharedDriveMember,
@@ -9,6 +11,7 @@ import {
 
 import { db } from "../db/client.ts";
 import { findUserByEmail } from "../db/users.ts";
+import { ensureFolderRow, getFolderByPath } from "./access.ts";
 import { claimDriveMemberships, driveRoleFor } from "./drive-membership.ts";
 import { createNoteService } from "./notes.ts";
 
@@ -156,6 +159,40 @@ export async function listSharedDrives(
         ]
       : [],
   );
+}
+
+/** My drive first, then shared drives the caller belongs to. */
+export async function listAccessibleDrives(
+  env: Env,
+  user: SessionUser | undefined,
+): Promise<AccessibleDrive[]> {
+  if (!user) {
+    return [];
+  }
+  const root = await getFolderByPath(env, user.id, "");
+  const rootFolderId = root?.id ?? (await ensureFolderRow(env, user.id, ""));
+  if (!rootFolderId) {
+    throw new Error("my drive root folder is missing");
+  }
+  const shared = await listSharedDrives(env, user);
+  return [
+    {
+      canCreate: true,
+      id: user.id,
+      kind: "user",
+      name: MY_DRIVE_NAME,
+      role: null,
+      rootFolderId,
+    },
+    ...shared.map((drive) => ({
+      canCreate: drive.role === "manager" || drive.role === "editor",
+      id: drive.id,
+      kind: "shared_drive" as const,
+      name: drive.name,
+      role: drive.role,
+      rootFolderId: drive.rootFolderId,
+    })),
+  ];
 }
 
 export async function getSharedDrive(
