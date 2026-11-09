@@ -890,36 +890,112 @@ async function folderNoteVisibleTo(
   return inheritsKnownFolder || canDiscoverAccess(access, rec.owner_id, user);
 }
 
-async function resolveCreateFolder(
+const FOLDER_NOT_FOUND = "フォルダが見つかりません";
+const DRIVE_NOT_FOUND = "ドライブが見つかりません";
+const DESTINATION_CONFLICT = "作成先の指定が矛盾しています";
+
+/** Absent means the caller did not choose a destination id. A blank id is a bad destination. */
+function presentId(value: unknown): "absent" | "blank" | string {
+  if (typeof value !== "string") {
+    return "absent";
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : "blank";
+}
+
+type CreateDestination =
+  | { folder: string; ownerId: string; ownerKind: "user" | "shared_drive" }
+  | { error: string; status: number };
+
+function destinationError(error: string): CreateDestination {
+  return { error, status: 400 };
+}
+
+async function resolveFolderIdDestination(
+  env: Env,
+  ownerId: string,
+  folderId: string,
+  driveId: "absent" | string,
+  folderPath: string | undefined,
+  user: SessionUser | undefined,
+): Promise<CreateDestination> {
+  const rec = await getFolderById(env, folderId);
+  if (!(rec && (await canEditSubject(env, rec.owner_id, user)))) {
+    return destinationError(FOLDER_NOT_FOUND);
+  }
+  const driveMismatch = driveId !== "absent" && driveId !== rec.owner_id;
+  const pathMismatch = folderPath !== undefined && folderPath !== rec.folder;
+  if (driveMismatch || pathMismatch) {
+    return destinationError(DESTINATION_CONFLICT);
+  }
+  return {
+    folder: rec.folder,
+    ownerId: rec.owner_id,
+    ownerKind: rec.owner_id === ownerId ? "user" : "shared_drive",
+  };
+}
+
+async function resolveSharedDrivePath(
+  env: Env,
+  driveId: string,
+  folderPath: string | undefined,
+  user: SessionUser | undefined,
+): Promise<CreateDestination> {
+  if (!(await canEditSubject(env, driveId, user))) {
+    return destinationError(DRIVE_NOT_FOUND);
+  }
+  const folder = folderPath ?? "";
+  const rec = await getFolderByPath(env, driveId, folder);
+  if (!rec) {
+    return destinationError(FOLDER_NOT_FOUND);
+  }
+  return { folder: rec.folder, ownerId: driveId, ownerKind: "shared_drive" };
+}
+
+/**
+ * 作成先を決める。folder だけならマイドライブ（従来どおり、無いパスは作る）。
+ * folder_id / drive_id があるときはその主体だけを見る。権限がない、
+ * 指定先がない、ドライブとフォルダが食い違うときは何も作らず拒否する。
+ */
+function resolveCreateFolder(
   env: Env,
   ownerId: string,
   input: CreateNoteInput,
   user: SessionUser | undefined,
-): Promise<
-  | { folder: string; ownerId: string; ownerKind: "user" | "shared_drive" }
-  | { error: string; status: number }
-> {
-  let folder = normalizeFolder(input.folder);
-  if (!input.folderId && isReservedArticleFolderPath(folder)) {
+): CreateDestination | Promise<CreateDestination> {
+  const folderId = presentId(input.folderId);
+  const driveId = presentId(input.driveId);
+  const folderPath =
+    typeof input.folder === "string"
+      ? normalizeFolder(input.folder)
+      : undefined;
+  if (
+    folderId === "absent" &&
+    (driveId === "absent" || driveId === ownerId) &&
+    isReservedArticleFolderPath(folderPath ?? "")
+  ) {
     return { error: "フォルダ名が不正です", status: 400 };
   }
-  let subjectId = ownerId;
-  let ownerKind: "user" | "shared_drive" = "user";
-  if (input.folderId) {
-    const rec = await getFolderById(env, input.folderId);
-    if (!rec) {
-      return { error: "フォルダが見つかりません", status: 400 };
-    }
-    if (rec.owner_id !== ownerId) {
-      if (!(await canEditSubject(env, rec.owner_id, user))) {
-        return { error: "フォルダが見つかりません", status: 400 };
-      }
-      subjectId = rec.owner_id;
-      ownerKind = "shared_drive";
-    }
-    folder = rec.folder;
+  if (folderId === "blank") {
+    return destinationError(FOLDER_NOT_FOUND);
   }
-  return { folder, ownerId: subjectId, ownerKind };
+  if (driveId === "blank") {
+    return destinationError(DRIVE_NOT_FOUND);
+  }
+  if (folderId !== "absent") {
+    return resolveFolderIdDestination(
+      env,
+      ownerId,
+      folderId,
+      driveId,
+      folderPath,
+      user,
+    );
+  }
+  if (driveId !== "absent" && driveId !== ownerId) {
+    return resolveSharedDrivePath(env, driveId, folderPath, user);
+  }
+  return { folder: folderPath ?? "", ownerId, ownerKind: "user" };
 }
 
 async function markdownForCreate(
@@ -1277,20 +1353,13 @@ export function createNoteService(env: Env) {
         return { error: owner.error, status: 401 };
       }
 
-      const requestedScopes = scopesFromInput(env, input);
-      if ("error" in requestedScopes) {
-        return { error: requestedScopes.error, status: 400 };
-      }
-
-      const now = Date.now();
-      const id = crypto.randomUUID();
-      const shortId = await generateUniqueShortId(env);
       const resolved = await resolveCreateFolder(env, owner.id, input, user);
       if ("error" in resolved) {
         return resolved;
       }
       const folder = resolved.folder;
       const subjectId = resolved.ownerId;
+      // 共有ドライブはメンバーのみ。公開範囲の指定は見ず、不正な値でも拒否しない。
       const scopes =
         resolved.ownerKind === "shared_drive"
           ? {
@@ -1298,7 +1367,14 @@ export function createNoteService(env: Env) {
               readScope: "self" as const,
               writeScope: "self" as const,
             }
-          : requestedScopes;
+          : scopesFromInput(env, input);
+      if ("error" in scopes) {
+        return { error: scopes.error, status: 400 };
+      }
+
+      const now = Date.now();
+      const id = crypto.randomUUID();
+      const shortId = await generateUniqueShortId(env);
       const markdown = await markdownForCreate(env, subjectId, folder, input);
       const title = titleFromMarkdown(markdown);
 
