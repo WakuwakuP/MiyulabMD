@@ -445,7 +445,7 @@ export class DocumentRoom extends DurableObject<Env> {
       return null;
     }
     const lostWrite = attachment.canEdit && !flags.canEdit;
-    if (lostWrite || attachment.canView !== true) {
+    if (attachment.canEdit !== flags.canEdit || attachment.canView !== true) {
       attachment.canEdit = flags.canEdit;
       attachment.canView = true;
       socket.serializeAttachment(attachment);

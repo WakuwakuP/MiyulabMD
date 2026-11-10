@@ -275,7 +275,16 @@ function mutateNoteToolResponse(result: MutateNoteResult) {
 
 async function mutateAccessToolResponse(result: MutateNoteResult) {
   if (result.kind === "ok") {
-    await documentRoom(result.note.id).revokeStaleSockets();
+    // The access change is already stored. A socket sweep failure must not
+    // turn the tool result into an error; the next recheck still drops it.
+    try {
+      await documentRoom(result.note.id).revokeStaleSockets();
+    } catch (error) {
+      console.error(
+        `failed to revoke stale sockets for ${result.note.id}`,
+        error,
+      );
+    }
   }
   return mutateNoteToolResponse(result);
 }
