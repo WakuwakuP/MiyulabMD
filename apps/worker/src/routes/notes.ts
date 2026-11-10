@@ -11,6 +11,7 @@ import {
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
+import { noteAccessFieldsChanged } from "../durable-objects/access-recheck.ts";
 import {
   catalogListRequest,
   catalogObjectName,
@@ -81,28 +82,48 @@ async function applyNotePatch(
 ): Promise<{ error: string } | Note> {
   const { markdown, ...meta } = body;
   let latest = null as MutateNoteResult | null;
+  let revokeNoteId: string | null = null;
 
-  if (patchHasMetaFields(meta)) {
-    latest = await notes.updateMeta(id, user, meta);
-    if (latest.kind !== "ok") {
-      return mutateResultError(set, latest);
+  try {
+    if (patchHasMetaFields(meta)) {
+      latest = await notes.updateMeta(id, user, meta);
+      if (latest.kind !== "ok") {
+        return mutateResultError(set, latest);
+      }
+      if (noteAccessFieldsChanged(meta)) {
+        revokeNoteId = latest.note.id;
+      }
+    }
+
+    if (markdown !== undefined) {
+      const markdownResult = await notes.updateMarkdown(id, user, markdown);
+      if (markdownResult.kind !== "ok") {
+        return mutateResultError(set, markdownResult);
+      }
+      latest = markdownResult;
+    }
+
+    if (latest?.kind !== "ok") {
+      set.status = 400;
+      return { error: "No fields to update" };
+    }
+
+    return latest.note;
+  } finally {
+    // Meta is already committed. A later markdown failure must still drop
+    // sockets that kept the previous ACL. A revoke failure must not replace
+    // the committed response; the next recheck still drops the socket.
+    if (revokeNoteId) {
+      try {
+        await documentRoom(revokeNoteId).revokeStaleSockets();
+      } catch (error) {
+        console.error(
+          `failed to revoke stale sockets for ${revokeNoteId}`,
+          error,
+        );
+      }
     }
   }
-
-  if (markdown !== undefined) {
-    const markdownResult = await notes.updateMarkdown(id, user, markdown);
-    if (markdownResult.kind !== "ok") {
-      return mutateResultError(set, markdownResult);
-    }
-    latest = markdownResult;
-  }
-
-  if (latest?.kind !== "ok") {
-    set.status = 400;
-    return { error: "No fields to update" };
-  }
-
-  return latest.note;
 }
 
 export const noteRoutes = new Elysia({ prefix: "/api/notes" })

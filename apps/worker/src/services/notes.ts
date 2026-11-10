@@ -277,9 +277,9 @@ export async function persistMarkdownSnapshot(
   if (!before) {
     return "rejected";
   }
-  // Durable boundary for the §2.6 edit lock: X-Can-Edit is frozen at WS
-  // connect time, so a note locked mid-session must not accept snapshot
-  // writes from an already-connected session.
+  // Durable boundary for the §2.6 edit lock. Per-socket ACL is enforced in
+  // DocumentRoom (`AccessRecheck` + `revokeStaleSockets`); this writer is
+  // the room-level snapshot of already-accepted Yjs state.
   if (before.edit_locked === 1) {
     return "rejected";
   }

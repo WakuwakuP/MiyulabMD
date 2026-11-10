@@ -1,7 +1,9 @@
 import {
+  ACCESS_REVOKED_WS_CLOSE_CODE,
   EDIT_LOCK_WS_CLOSE_CODE,
   type Note,
   type SessionUser,
+  WRITE_REVOKED_WS_CLOSE_CODE,
 } from "@miyulabmd/shared";
 import type { MutableRefObject } from "react";
 import * as Y from "yjs";
@@ -109,6 +111,8 @@ export function bindEditorCollab(input: {
   warmup?: boolean;
   /** オフライン編集でローカル Y.Doc への書き込みが可能になったことを通知する。 */
   setOfflineWritable?: (writable: boolean) => void;
+  /** Server closed the socket because this viewer lost canView. */
+  onAccessRevoked?: () => void;
   /** Server revoked edit access mid-session (edit lock engaged). */
   onEditLocked?: () => void;
 }) {
@@ -148,9 +152,13 @@ export function bindEditorCollab(input: {
   };
   const onClosed = (event: { code: number; reason: string }) => {
     // A 4400-4499 close is terminal: the server will not accept writes on a
-    // reconnection either, so flip the note into its locked read-only state.
-    if (event.code === EDIT_LOCK_WS_CLOSE_CODE) {
+    // reconnection either.
+    const action = collabCloseAction(event.code);
+    if (action === "edit-locked") {
       input.onEditLocked?.();
+    }
+    if (action === "access-revoked" || action === "write-revoked") {
+      input.onAccessRevoked?.();
     }
   };
 
@@ -207,6 +215,22 @@ export function bindEditorCollab(input: {
 
 export function editorSessionWritable(session: YjsSession | null): boolean {
   return !session || (session.provider.wsconnected && session.provider.synced);
+}
+
+/** Map a DocumentRoom close code to the editor's mid-session reaction. */
+export function collabCloseAction(
+  code: number,
+): "access-revoked" | "edit-locked" | "write-revoked" | null {
+  if (code === EDIT_LOCK_WS_CLOSE_CODE) {
+    return "edit-locked";
+  }
+  if (code === ACCESS_REVOKED_WS_CLOSE_CODE) {
+    return "access-revoked";
+  }
+  if (code === WRITE_REVOKED_WS_CLOSE_CODE) {
+    return "write-revoked";
+  }
+  return null;
 }
 
 export function syncCollabUser(

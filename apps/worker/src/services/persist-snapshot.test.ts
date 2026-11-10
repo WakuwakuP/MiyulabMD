@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import type { SessionUser } from "@miyulabmd/shared";
 import { upsertUserByEmail } from "../db/users.ts";
+import { loadSocketAccess } from "../durable-objects/access-recheck.ts";
 import { runReadTool } from "../mcp/read-tools.ts";
 import { ensureFolderRow } from "./access.ts";
 import { createNoteService, persistMarkdownSnapshot } from "./notes.ts";
@@ -249,4 +250,71 @@ test("persistMarkdownSnapshot writes again after an explicit unlock", async () =
   await persistMarkdownSnapshot(env, created.id, "# 再ロック後\n\n変更。");
   const relocked = snapshotRow(sqlite, created.id);
   assert.equal(relocked.markdown_snapshot, "# 解除後\n\n変更。");
+});
+
+test("loadSocketAccess drops guest rights after the note is made private", async () => {
+  const { env, owner } = await createEnv();
+  const notes = createNoteService(env);
+  const created = await notes.create(owner, {
+    markdown: "# 共有\n\nゲスト編集。",
+    permission: "freely",
+  });
+  assert.ok(!("error" in created));
+  if ("error" in created) {
+    throw new Error("unreachable");
+  }
+
+  const before = await loadSocketAccess(env, created.id);
+  assert.deepEqual(before, { canEdit: true, canView: true });
+
+  const updated = await notes.updateMeta(created.id, owner, {
+    permission: "private",
+  });
+  assert.equal(updated.kind, "ok");
+
+  const after = await loadSocketAccess(env, created.id);
+  assert.deepEqual(after, { canEdit: false, canView: false });
+
+  const ownerStill = await loadSocketAccess(env, created.id, owner.id);
+  assert.deepEqual(ownerStill, { canEdit: true, canView: true });
+});
+
+test("loadSocketAccess drops a collaborator after their grant is removed", async () => {
+  const { env, owner } = await createEnv();
+  const notes = createNoteService(env);
+  const editor = await upsertUserByEmail(env, "editor@example.com", "Editor");
+  const created = await notes.create(owner, {
+    inheritAccess: false,
+    markdown: "# 指定ユーザー\n\n共同編集。",
+    readScope: "users",
+    writeScope: "users",
+  });
+  assert.ok(!("error" in created));
+  if ("error" in created) {
+    throw new Error("unreachable");
+  }
+
+  const granted = await notes.updateMeta(created.id, owner, {
+    grants: [{ canWrite: true, email: editor.email }],
+    inheritAccess: false,
+    readScope: "users",
+    writeScope: "users",
+  });
+  assert.equal(granted.kind, "ok");
+  assert.deepEqual(await loadSocketAccess(env, created.id, editor.id), {
+    canEdit: true,
+    canView: true,
+  });
+
+  const revoked = await notes.updateMeta(created.id, owner, {
+    grants: [],
+    inheritAccess: false,
+    readScope: "users",
+    writeScope: "users",
+  });
+  assert.equal(revoked.kind, "ok");
+  assert.deepEqual(await loadSocketAccess(env, created.id, editor.id), {
+    canEdit: false,
+    canView: false,
+  });
 });

@@ -631,6 +631,7 @@ export function EditorPage() {
   const hydratedRef = useRef(false);
   const sessionRef = useRef<YjsSession | null>(null);
   const unbindCollabRef = useRef<(() => void) | null>(null);
+  const [accessEpoch, setAccessEpoch] = useState(0);
   const [viewScope, setViewScope] = useState<{
     isCurrent: () => boolean;
   } | null>(null);
@@ -718,6 +719,7 @@ export function EditorPage() {
     viewMode === "preview" || editorSessionWritable(sessionRef.current);
 
   useLayoutEffect(() => {
+    void accessEpoch;
     hydratedRef.current = false;
     setReadState({ id, ownerViewer: viewer, phase: "pending" });
     setLoading(true);
@@ -732,9 +734,10 @@ export function EditorPage() {
     setHistoryOpen(false);
     setSaveError(null);
     setOfflineWritable(false);
-  }, [id, viewer]);
+  }, [accessEpoch, id, viewer]);
 
   useEffect(() => {
+    void accessEpoch;
     dismissStaleSsrPreview(id);
     if (userLoading) {
       return;
@@ -845,7 +848,7 @@ export function EditorPage() {
       setViewScope(null);
       scope.dispose();
     };
-  }, [id, userLoading, viewer, viewing]);
+  }, [accessEpoch, id, userLoading, viewer, viewing]);
 
   useEffect(
     () => subscribeArticleSources(user, note?.ownerId, setArticleSources),
@@ -918,6 +921,19 @@ export function EditorPage() {
       note: canEdit ? note : null,
       noteId: canEdit ? noteId : undefined,
       offlineEdit: offlineEditable,
+      onAccessRevoked: () => {
+        // Mid-session canView or canEdit loss: drop the live Yjs socket and
+        // re-read the note. A 403/404 replaces the editor; a remaining view
+        // right comes back read-only.
+        teardownCollab(
+          unbindCollabRef,
+          sessionRef,
+          setCollab,
+          setCollabReady,
+          setOfflineWritable,
+        );
+        setAccessEpoch((epoch) => epoch + 1);
+      },
       onEditLocked: () => {
         // The server closed the writable session: reflect the lock so the
         // body flips to read-only and the lock banner appears.

@@ -182,6 +182,8 @@ export type {
   WorkspaceSearchResult,
 } from "./note.ts";
 export {
+  ACCESS_REVOKED_WS_CLOSE_CODE,
+  ACCESS_REVOKED_WS_CLOSE_REASON,
   EDIT_LOCK_WS_CLOSE_CODE,
   EDIT_LOCK_WS_CLOSE_REASON,
   EDIT_LOCKED_CODE,
@@ -192,6 +194,8 @@ export {
   NOTE_HISTORY_ACTOR_KINDS,
   NOTE_RESTORE_MESSAGE,
   SEARCH_SCOPES,
+  WRITE_REVOKED_WS_CLOSE_CODE,
+  WRITE_REVOKED_WS_CLOSE_REASON,
 } from "./note.ts";
 export type {
   AccessGrant,

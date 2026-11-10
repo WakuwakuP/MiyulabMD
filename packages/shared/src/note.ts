@@ -79,10 +79,14 @@ export const NOTE_RESTORE_MESSAGE =
 export const EDIT_LOCKED_CODE = "edit_locked";
 
 /**
- * WebSocket close code DocumentRoom uses when the edit lock engages
- * mid-session. The 4400-4499 range is the app-level "permanent" convention:
- * clients must treat the note as read-only instead of retrying the write.
+ * WebSocket close codes DocumentRoom uses when a live session loses access.
+ * The 4400-4499 range is the app-level "permanent" convention: clients must
+ * not retry the write and should re-fetch the note instead.
  */
+export const ACCESS_REVOKED_WS_CLOSE_CODE = 4401;
+export const ACCESS_REVOKED_WS_CLOSE_REASON = "access_revoked";
+export const WRITE_REVOKED_WS_CLOSE_CODE = 4402;
+export const WRITE_REVOKED_WS_CLOSE_REASON = "write_revoked";
 export const EDIT_LOCK_WS_CLOSE_CODE = 4403;
 export const EDIT_LOCK_WS_CLOSE_REASON = "edit_locked";
 

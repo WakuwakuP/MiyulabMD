@@ -1,9 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import type { TaskCheckboxUpdate } from "@miyulabmd/markdown";
 import {
+  ACCESS_REVOKED_WS_CLOSE_CODE,
+  ACCESS_REVOKED_WS_CLOSE_REASON,
   EDIT_LOCK_WS_CLOSE_CODE,
   EDIT_LOCK_WS_CLOSE_REASON,
   type NoteHistoryActor,
+  WRITE_REVOKED_WS_CLOSE_CODE,
+  WRITE_REVOKED_WS_CLOSE_REASON,
 } from "@miyulabmd/shared";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -14,6 +18,13 @@ import * as Y from "yjs";
 import { db } from "../db/client.ts";
 import { recordNoteEditEvent } from "../services/history.ts";
 import { persistMarkdownSnapshot } from "../services/notes.ts";
+import {
+  AccessRecheck,
+  loadSocketAccess,
+  type SocketAccessFlags,
+  socketActorKey,
+  userIdFromActorKey,
+} from "./access-recheck.ts";
 import {
   AGENT_IDLE_MS,
   type AgentPresenceInput,
@@ -68,6 +79,7 @@ const STORAGE_NOTE_ID_KEY = "note-id";
 
 type WsAttachment = {
   canEdit: boolean;
+  canView: boolean;
   userId?: string;
   displayName?: string;
   email?: string;
@@ -147,9 +159,13 @@ export class DocumentRoom extends DurableObject<Env> {
       }
     },
   );
-  // X-Can-Edit is fixed at connect time; this re-checks the §2.6 edit
-  // lock against D1 so a mid-session lock/unlock takes effect.
+  // Connect-time X-Can-Edit / view rights are a snapshot. These re-check
+  // D1 so a mid-session lock, grant revoke, or private-scope change takes
+  // effect on the hibernated socket instead of lasting for the connection.
   private readonly editLock = new EditLockRecheck(() => this.readEditLockRow());
+  private readonly access = new AccessRecheck((actorKey) =>
+    this.readSocketAccess(actorKey),
+  );
   private agentIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private historyPending = new Map<string, PendingHistorySession>();
   private historyMarkdown = new Map<string, string>();
@@ -201,6 +217,7 @@ export class DocumentRoom extends DurableObject<Env> {
       awarenessClientIds: [],
       awarenessClocks: {},
       canEdit,
+      canView: true,
       displayName,
       email,
       historySessionId: crypto.randomUUID(),
@@ -218,7 +235,14 @@ export class DocumentRoom extends DurableObject<Env> {
     await this.ensureInitialized();
 
     const attachment = ws.deserializeAttachment() as WsAttachment | null;
-    const canEdit = attachment?.canEdit ?? false;
+    if (!attachment) {
+      return;
+    }
+    const live = await this.enforceSocketAccess(ws, attachment);
+    if (!live) {
+      return;
+    }
+    const canEdit = live.canEdit;
 
     const data =
       typeof message === "string"
@@ -236,17 +260,11 @@ export class DocumentRoom extends DurableObject<Env> {
         const isWrite =
           syncMessageType === syncProtocol.messageYjsSyncStep2 ||
           syncMessageType === syncProtocol.messageYjsUpdate;
-        if (isWrite) {
-          if (!canEdit) {
-            break;
-          }
-          if (await this.editLock.locked()) {
-            // X-Can-Edit is frozen at connect time, so the client still
-            // believes it can edit. Close writable sockets with a permanent
-            // app-level code instead of silently dropping the update.
-            this.closeLockedWriters();
-            break;
-          }
+        if (
+          isWrite &&
+          !(await this.canApplySocketUpdate(ws, attachment, canEdit))
+        ) {
+          break;
         }
 
         const encoder = encoding.createEncoder();
@@ -285,6 +303,23 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
+  private async canApplySocketUpdate(
+    ws: WebSocket,
+    attachment: WsAttachment,
+    canEdit: boolean,
+  ): Promise<boolean> {
+    if (!canEdit) {
+      return false;
+    }
+    if (await this.editLock.locked()) {
+      this.closeLockedWriters();
+      return false;
+    }
+    // The lock read yields; permission changes may have revoked this socket.
+    const current = await this.enforceSocketAccess(ws, attachment);
+    return current?.canEdit === true && ws.readyState === WebSocket.OPEN;
+  }
+
   async webSocketClose(
     ws: WebSocket,
     _code: number,
@@ -315,7 +350,7 @@ export class DocumentRoom extends DurableObject<Env> {
     const stale = owned.filter((id) => !awareness.meta.has(id));
     if (stale.length > 0) {
       const clocks = attachment?.awarenessClocks ?? {};
-      this.sendAwarenessUpdate(
+      void this.sendAwarenessUpdate(
         encodeAwarenessNullUpdate(
           stale.map((clientId) => ({
             clientId,
@@ -329,6 +364,16 @@ export class DocumentRoom extends DurableObject<Env> {
 
   async webSocketError(_ws: WebSocket, _error: unknown): Promise<void> {
     // 接続エラーは webSocketClose で後処理する。
+  }
+
+  /**
+   * Re-evaluate every live socket against current ACL. Called from REST/MCP
+   * after a permission change so idle viewers are kicked without waiting
+   * for the next Yjs frame.
+   */
+  async revokeStaleSockets(): Promise<void> {
+    this.access.invalidate();
+    await this.sweepSockets(true);
   }
 
   /**
@@ -347,6 +392,80 @@ export class DocumentRoom extends DurableObject<Env> {
         attachment.canEdit = false;
         socket.serializeAttachment(attachment);
         socket.close(EDIT_LOCK_WS_CLOSE_CODE, EDIT_LOCK_WS_CLOSE_REASON);
+      } catch {
+        // A socket already tearing down needs no revocation.
+      }
+    }
+  }
+
+  private async readSocketAccess(actorKey: string): Promise<SocketAccessFlags> {
+    const noteId = await this.ctx.storage.get<string>(STORAGE_NOTE_ID_KEY);
+    if (!noteId) {
+      return { canEdit: false, canView: false };
+    }
+    return loadSocketAccess(this.env, noteId, userIdFromActorKey(actorKey));
+  }
+
+  /**
+   * Refresh this socket's attachable ACL. Returns the live flags, or null
+   * when the socket lost canView and was closed.
+   * A throttled read that throws keeps the current attachment: a D1 blip
+   * must not look like a revoke.
+   */
+  private async enforceSocketAccess(
+    socket: WebSocket,
+    attachment: WsAttachment,
+    fresh = false,
+  ): Promise<SocketAccessFlags | null> {
+    const actorKey = socketActorKey(attachment.userId);
+    const flags = fresh
+      ? await this.access.flagsNow(actorKey)
+      : await this.access.flags(actorKey);
+    if (!flags) {
+      return attachment.canView
+        ? { canEdit: attachment.canEdit, canView: true }
+        : null;
+    }
+    return this.applySocketAccess(socket, attachment, flags);
+  }
+
+  private applySocketAccess(
+    socket: WebSocket,
+    attachment: WsAttachment,
+    flags: SocketAccessFlags,
+  ): SocketAccessFlags | null {
+    if (!flags.canView) {
+      attachment.canEdit = false;
+      attachment.canView = false;
+      socket.serializeAttachment(attachment);
+      socket.close(
+        ACCESS_REVOKED_WS_CLOSE_CODE,
+        ACCESS_REVOKED_WS_CLOSE_REASON,
+      );
+      return null;
+    }
+    const lostWrite = attachment.canEdit && !flags.canEdit;
+    if (lostWrite || attachment.canView !== true) {
+      attachment.canEdit = flags.canEdit;
+      attachment.canView = true;
+      socket.serializeAttachment(attachment);
+    }
+    if (lostWrite) {
+      socket.close(WRITE_REVOKED_WS_CLOSE_CODE, WRITE_REVOKED_WS_CLOSE_REASON);
+      return null;
+    }
+    return flags;
+  }
+
+  private async sweepSockets(fresh = false): Promise<void> {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        const attachment =
+          socket.deserializeAttachment() as WsAttachment | null;
+        if (!attachment) {
+          continue;
+        }
+        await this.enforceSocketAccess(socket, attachment, fresh);
       } catch {
         // A socket already tearing down needs no revocation.
       }
@@ -577,7 +696,7 @@ export class DocumentRoom extends DurableObject<Env> {
     }
 
     await this.persistYjsState(doc);
-    this.broadcastSyncUpdate(update, origin);
+    await this.broadcastSyncUpdate(update, origin);
   }
 
   private async persistYjsState(doc: Y.Doc): Promise<void> {
@@ -585,7 +704,10 @@ export class DocumentRoom extends DurableObject<Env> {
     await this.snapshots.persist(merged, doc.getText("markdown").toString());
   }
 
-  private broadcastSyncUpdate(update: Uint8Array, origin: unknown): void {
+  private async broadcastSyncUpdate(
+    update: Uint8Array,
+    origin: unknown,
+  ): Promise<void> {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, MESSAGE_SYNC);
     syncProtocol.writeUpdate(encoder, update);
@@ -596,6 +718,14 @@ export class DocumentRoom extends DurableObject<Env> {
         continue;
       }
       try {
+        const attachment = ws.deserializeAttachment() as WsAttachment | null;
+        if (!attachment) {
+          continue;
+        }
+        const live = await this.enforceSocketAccess(ws, attachment);
+        if (!live) {
+          continue;
+        }
         ws.send(payload);
       } catch {
         // 切断済み接続は無視する。
@@ -648,13 +778,13 @@ export class DocumentRoom extends DurableObject<Env> {
     const withoutMeta = clients.filter((id) => !awareness.meta.has(id));
 
     if (withMeta.length > 0) {
-      this.sendAwarenessUpdate(
+      void this.sendAwarenessUpdate(
         awarenessProtocol.encodeAwarenessUpdate(awareness, withMeta),
         origin,
       );
     }
     if (withoutMeta.length > 0) {
-      this.sendAwarenessUpdate(
+      void this.sendAwarenessUpdate(
         encodeAwarenessNullUpdate(
           withoutMeta.map((clientId) => ({
             clientId,
@@ -666,7 +796,10 @@ export class DocumentRoom extends DurableObject<Env> {
     }
   }
 
-  private sendAwarenessUpdate(update: Uint8Array, origin: unknown): void {
+  private async sendAwarenessUpdate(
+    update: Uint8Array,
+    origin: unknown,
+  ): Promise<void> {
     const encoder = encoding.createEncoder();
     encoding.writeVarUint(encoder, MESSAGE_AWARENESS);
     encoding.writeVarUint8Array(encoder, update);
@@ -677,6 +810,10 @@ export class DocumentRoom extends DurableObject<Env> {
         continue;
       }
       try {
+        const attachment = ws.deserializeAttachment() as WsAttachment | null;
+        if (!(attachment && (await this.enforceSocketAccess(ws, attachment)))) {
+          continue;
+        }
         ws.send(payload);
       } catch {
         // 切断済み接続は無視する。
@@ -714,6 +851,7 @@ export class DocumentRoom extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     await this.flushSnapshotToD1();
+    await this.sweepSockets();
   }
 
   private async flushSnapshotToD1(): Promise<void> {
