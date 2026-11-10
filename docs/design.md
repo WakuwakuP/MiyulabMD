@@ -487,9 +487,10 @@ CPU 使用量とツールごとの所要時間の調べ方は [MCP の処理時�
 | ツール                | 権限             | 内容                                                                         |
 | --------------------- | ---------------- | ---------------------------------------------------------------------------- |
 | `list_notes`          | ログインユーザー | 見えるノート。共有ドライブのメンバー分を含む。任意で query                   |
+| `list_drives`         | ログインユーザー | マイドライブと参加中の共有ドライブ。種別、ルート、作成可否を返す             |
 | `list_shared_drives`  | ログインユーザー | 参加している共有ドライブ。`rootFolderId` と役割を返す                        |
 | `get_note`            | `canView`        | メタ + DO の最新 Markdown + heading outline。`AI(ユーザー名)` カーソルを出す |
-| `create_note`         | 編集できる主体   | title / content / permission。`folder_id` で共有ドライブのフォルダへ作れる   |
+| `create_note`         | 編集できる主体   | `folder_id` または `drive_id` で共有ドライブへ作れる。矛盾する指定は拒否     |
 | `create_folder`       | 編集できる主体   | `parent_id` + `name`。共有ドライブは編集者以上                               |
 | `replace_in_note`     | `canEdit`        | 一意コンテキストの置換。複数ヒットは `replace_all` か失敗                    |
 | `insert_in_note`      | `canEdit`        | `at` / `after` / `before` のいずれか 1 つで挿入                              |
@@ -506,6 +507,8 @@ CPU 使用量とツールごとの所要時間の調べ方は [MCP の処理時�
 | `restore_revision`    | `canEdit`        | 指定リビジョンの全文を現行 Yjs に載せる                                      |
 
 ブラウザのノート URL は `{origin}/n/{id}`（UUID）。`/{shortId}` では開けない。`/n/{shortId}` は解決する。MCP はツール結果に `url` を載せず、この規則を `list_notes` / `get_note` / `create_note` の description に書く。
+
+共有ドライブへノートを作るときは、`list_drives` で `id`、`kind`、`rootFolderId`、`canCreate` を見て、`list_folder_entries` でフォルダを選ぶ。`create_note` の作成先は `folder_id`、または `drive_id` とそのドライブ内の既存 `folder` パスである。`folder` だけのときは従来どおりマイドライブで、無いパスはそこで作る。`folder_id` と `drive_id` を同時に渡したときは、フォルダがそのドライブに属している必要がある。`folder` と `folder_id` を同時に渡したときは、パスが一致している必要がある。権限がない、指定先がない、指定が矛盾するときはノートもフォルダも作らず拒否し、マイドライブへは戻さない。ドライブ ID だけでは認可しない。共有ドライブ内のノートはメンバーのみで、`readScope` / `writeScope` / `inheritAccess` は使わない。応答のノートには `id`、`ownerKind`、`ownerId`、`folderId`、`access` が含まれる。
 
 `delete_folder` は `services/folder-delete.ts` の `deleteEmptyFolder` を呼ぶ薄いラッパーで、既存 UI / REST の再帰削除とは別の経路。`folder_id`（UUID、推奨）か自分のドライブ内の `path` が必須で、両方指定した場合は同じフォルダを指す必要がある。`expected_path` には走査時のパスをそのまま渡し、移動・改名後の誤削除を防ぐ。最初に `dry_run: true` を使う。dry run はフォルダと policy / grants / scheme / medallion のメタデータを返すだけで、設定の遅延移行や監査ログを含め書き込みを行わない。
 

@@ -47,6 +47,7 @@ export {
   translateArticleUpdateAudience,
 } from "./article.ts";
 export type {
+  AccessibleDrive,
   DriveRole,
   OwnerKind,
   SharedDriveDomain,

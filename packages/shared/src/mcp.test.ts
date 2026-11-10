@@ -9,6 +9,12 @@ test("MCP_TOOLS includes history tools", () => {
   assert.ok(MCP_TOOLS.includes("restore_revision"));
 });
 
+test("MCP_TOOLS includes drive discovery", () => {
+  assert.ok(MCP_TOOLS.includes("list_drives"));
+  assert.ok(MCP_TOOLS.includes("list_shared_drives"));
+  assert.equal(MCP_TOOLS.filter((name) => name === "list_drives").length, 1);
+});
+
 test("MCP_TOOLS includes single empty-folder deletion", () => {
   assert.ok(MCP_TOOLS.includes("delete_folder"));
   assert.equal(MCP_TOOLS.filter((name) => name === "delete_folder").length, 1);

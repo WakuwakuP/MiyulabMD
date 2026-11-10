@@ -24,7 +24,7 @@ export const toolDefinitions = {
   },
   create_folder: {
     description:
-      "Create one folder. Pass name as a single path segment and parent_id as the parent folder UUID. Omit parent_id to create at the caller's my-drive root. To create inside a shared drive, pass that drive's rootFolderId from list_shared_drives, or a child folder_id from list_folder_entries. Requires edit access (shared drive: editor or manager; my drive: admin on the parent). Viewers and non-members are rejected. Slashes in name are rejected.",
+      "Create one folder. Pass name as a single path segment and parent_id as the parent folder UUID. Omit parent_id to create at the caller's my-drive root. To create inside a shared drive, pass that drive's rootFolderId from list_drives or list_shared_drives, or a child folder_id from list_folder_entries. Requires edit access (shared drive: editor or manager; my drive: admin on the parent). Viewers and non-members are rejected. Slashes in name are rejected.",
     inputSchema: toolInputSchema({
       name: z
         .string()
@@ -39,19 +39,25 @@ export const toolDefinitions = {
     }),
   },
   create_note: {
-    description: `Create a new note. Pass folder_id to place it in that folder, including a shared drive folder from list_shared_drives or list_folder_entries. folder is a path in the caller's own drive and is ignored when folder_id is set. On a shared drive the note is members-only; readScope, writeScope, and inheritAccess are ignored. ${MCP_NOTE_URL_HINT} ${MCP_DIAGRAM_CHECK_HINT}`,
+    description: `Create a new note in a folder the caller can edit. folder alone is a path in the caller's my drive and may create missing folders there. Pass folder_id to create in that folder, including a shared drive folder from list_drives or list_folder_entries. Pass drive_id to create at that drive's root, or drive_id plus folder for an existing path inside that drive. A shared-drive path that does not exist is rejected. If folder_id and drive_id are both set, the folder must belong to that drive. If folder and folder_id are both set, the path must equal that folder. A missing destination, insufficient permission, or contradictory drive/folder specification is rejected: nothing is created and the call does not fall back to the my drive. On a shared drive the note is members-only; readScope, writeScope, and inheritAccess are ignored. The note includes id, ownerKind, ownerId, folderId, and access. ${MCP_NOTE_URL_HINT} ${MCP_DIAGRAM_CHECK_HINT}`,
     inputSchema: toolInputSchema({
+      drive_id: z
+        .string()
+        .optional()
+        .describe(
+          "Drive id from list_drives. The caller's user id is the my drive. A shared drive id creates in that drive. Blank, unknown, or unauthorized ids are rejected",
+        ),
       folder: z
         .string()
         .optional()
         .describe(
-          "Path in the caller's own drive. Ignored when folder_id is set",
+          "Path inside the target drive. With no folder_id or drive_id, this is the caller's my drive. With folder_id, it must equal that folder's path",
         ),
       folder_id: z
         .string()
         .optional()
         .describe(
-          "Folder UUID to create in, including a shared drive folder. Preferred over folder",
+          "Folder UUID, including a shared drive folder. When set with folder or drive_id, those values must agree",
         ),
       inheritAccess: z.boolean().optional(),
       markdown: z.string().optional(),
@@ -250,8 +256,13 @@ export const toolDefinitions = {
       "List unresolved links (missing or ambiguous) across notes the caller can see. Use before renaming or promoting notes.",
     inputSchema: toolInputSchema({}),
   },
+  list_drives: {
+    description:
+      "List drives the caller can use. The first entry is the my drive (kind user, role null, canCreate true) with its rootFolderId. Other entries are shared drives (kind shared_drive, role manager/editor/viewer, canCreate when the role can edit). Each entry has id, name, kind, rootFolderId, role, and canCreate. Browse a rootFolderId with list_folder_entries. Create notes with create_note folder_id or drive_id, and folders with create_folder parent_id. Viewers can read only. Membership is the only access path inside a shared drive.",
+    inputSchema: toolInputSchema({}),
+  },
   list_folder_entries: {
-    description: `List direct children (subfolders and notes) of a folder — one level only. Do not recurse; call again on a child folder_id. Omit folder_id for the caller's my-drive root. Pass a shared drive's rootFolderId from list_shared_drives to browse that drive. If the call fails with a resource-limit error, do not retry immediately. ${MCP_NOTE_URL_HINT}`,
+    description: `List direct children (subfolders and notes) of a folder — one level only. Do not recurse; call again on a child folder_id. Omit folder_id for the caller's my-drive root. Pass a rootFolderId from list_drives or list_shared_drives to browse that drive. If the call fails with a resource-limit error, do not retry immediately. ${MCP_NOTE_URL_HINT}`,
     inputSchema: toolInputSchema({
       cursor: z
         .string()
@@ -261,7 +272,7 @@ export const toolDefinitions = {
         .string()
         .optional()
         .describe(
-          "Folder UUID. Omit for the caller's my-drive root. A shared drive rootFolderId lists that drive",
+          "Folder UUID. Omit for the caller's my-drive root. A rootFolderId from list_drives lists that drive",
         ),
       limit: z
         .number()
@@ -317,7 +328,7 @@ export const toolDefinitions = {
   },
   list_shared_drives: {
     description:
-      "List shared drives the caller belongs to. Each entry has id, name, role (manager, editor, or viewer), and rootFolderId. Browse a drive with list_folder_entries using rootFolderId. Create notes with create_note folder_id and folders with create_folder parent_id. Viewers can read only. Membership is the only access path: scopes and invites do not apply inside a shared drive.",
+      "List shared drives the caller belongs to. Each entry has id, name, role (manager, editor, or viewer), and rootFolderId. list_drives also returns the caller's my drive. Browse a drive with list_folder_entries using rootFolderId. Create notes with create_note folder_id or drive_id and folders with create_folder parent_id. Viewers can read only. Membership is the only access path: scopes and invites do not apply inside a shared drive.",
     inputSchema: toolInputSchema({}),
   },
   medallion_assign_folder: {

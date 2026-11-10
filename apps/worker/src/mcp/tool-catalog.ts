@@ -10,6 +10,7 @@ type ToolName = keyof typeof toolDefinitions;
 const catalogOrder: readonly (readonly [ToolName, (keyof Features)?])[] = [
   ["list_notes"],
   ["list_folder_entries"],
+  ["list_drives"],
   ["list_shared_drives"],
   ["get_note"],
   ["create_note"],

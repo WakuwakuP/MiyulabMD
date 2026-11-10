@@ -65,7 +65,10 @@ import {
   setFolderScheme,
   validateSchemeTree,
 } from "../services/schemes.ts";
-import { listSharedDrives } from "../services/shared-drives.ts";
+import {
+  listAccessibleDrives,
+  listSharedDrives,
+} from "../services/shared-drives.ts";
 
 import { featureConfig } from "./feature-config.ts";
 import { getMcpRequestTarget } from "./request-target.ts";
@@ -636,6 +639,18 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
   );
 
   registerTool(
+    "list_drives",
+    toolDefinitions.list_drives,
+    withToolTiming("list_drives", async () => {
+      const user = requireUser();
+      if (!user) {
+        return textError("Unauthorized");
+      }
+      return textResult({ drives: await listAccessibleDrives(env, user) });
+    }),
+  );
+
+  registerTool(
     "list_shared_drives",
     toolDefinitions.list_shared_drives,
     withToolTiming("list_shared_drives", async () => {
@@ -661,6 +676,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
       async ({
         title,
         markdown,
+        drive_id,
         folder,
         folder_id,
         inheritAccess,
@@ -673,6 +689,7 @@ export async function createMcpServerFactory(context?: McpRequestContext) {
         }
 
         const created = await notes.create(user, {
+          driveId: drive_id,
           folder,
           folderId: folder_id,
           inheritAccess,
