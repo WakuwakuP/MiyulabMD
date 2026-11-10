@@ -177,3 +177,49 @@ test("losing canEdit closes the socket and drops the in-flight write", async () 
   doc.destroy();
   updateDoc.destroy();
 });
+
+test("a mid-session write grant is stored and a later revoke still closes", async () => {
+  const doc = new Y.Doc();
+  const updateDoc = new Y.Doc();
+  updateDoc.getText("markdown").insert(0, "granted write");
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, 0);
+  syncProtocol.writeUpdate(encoder, Y.encodeStateAsUpdate(updateDoc));
+  let flags = { canEdit: true, canView: true };
+  const access = new AccessRecheck(() => Promise.resolve({ ...flags }), 0);
+  let attachment = { canEdit: false, canView: true, userId: "alice" };
+  let closeCode = 0;
+  const socket = {
+    close: (code: number) => {
+      closeCode = code;
+      socket.readyState = WebSocket.CLOSING;
+    },
+    deserializeAttachment: () => ({ ...attachment }),
+    readyState: WebSocket.OPEN,
+    send: () => undefined,
+    serializeAttachment: (value: typeof attachment) => {
+      attachment = value;
+    },
+  };
+  const room = Object.create(DocumentRoom.prototype) as InstanceType<
+    typeof DocumentRoom
+  >;
+  Object.assign(room, {
+    access,
+    ctx: { getWebSockets: () => [socket] },
+    editLock: { locked: () => Promise.resolve(false) },
+    ensureInitialized: () => Promise.resolve(),
+    requireDoc: () => doc,
+  });
+  const payload = encoding.toUint8Array(encoder).buffer as ArrayBuffer;
+  await room.webSocketMessage(socket as unknown as WebSocket, payload);
+  assert.equal(closeCode, 0);
+  assert.equal(attachment.canEdit, true);
+  assert.equal(doc.getText("markdown").toString(), "granted write");
+  flags = { canEdit: false, canView: true };
+  await room.webSocketMessage(socket as unknown as WebSocket, payload);
+  assert.equal(closeCode, WRITE_REVOKED_WS_CLOSE_CODE);
+  assert.equal(attachment.canEdit, false);
+  doc.destroy();
+  updateDoc.destroy();
+});
