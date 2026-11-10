@@ -194,14 +194,66 @@ test("read failure denies cached rights and retries instead of caching failure",
   assert.equal(reads, 3);
 });
 
-test("read failure with no cache denies both writes and viewing", async () => {
-  const access = new AccessRecheck(() =>
-    Promise.reject(new Error("D1 unavailable")),
+test("routine read failure with no cache does not invent a revoke", async () => {
+  let reads = 0;
+  let now = 1_000;
+  const access = new AccessRecheck(
+    () => {
+      reads += 1;
+      return Promise.reject(new Error("D1 unavailable"));
+    },
+    5_000,
+    () => now,
   );
-  assert.deepEqual(await access.flags("guest"), {
+  assert.equal(await access.flags("guest"), null);
+  assert.equal(await access.flags("guest"), null);
+  assert.equal(reads, 1);
+  now += 5_001;
+  assert.equal(await access.flags("guest"), null);
+  assert.equal(reads, 2);
+  assert.deepEqual(await access.flagsNow("guest"), {
     canEdit: false,
     canView: false,
   });
+});
+
+test("routine read failure keeps the last verdict instead of revoking", async () => {
+  let fail = false;
+  let reads = 0;
+  let now = 1_000;
+  const access = new AccessRecheck(
+    () => {
+      reads += 1;
+      if (fail) {
+        return Promise.reject(new Error("D1 unavailable"));
+      }
+      return Promise.resolve({ canEdit: true, canView: true });
+    },
+    5_000,
+    () => now,
+  );
+  assert.deepEqual(await access.flags("guest"), {
+    canEdit: true,
+    canView: true,
+  });
+  fail = true;
+  now += 5_001;
+  assert.deepEqual(await access.flags("guest"), {
+    canEdit: true,
+    canView: true,
+  });
+  assert.deepEqual(await access.flags("guest"), {
+    canEdit: true,
+    canView: true,
+  });
+  assert.equal(reads, 2);
+  fail = false;
+  now += 5_001;
+  assert.deepEqual(await access.flags("guest"), {
+    canEdit: true,
+    canView: true,
+  });
+  assert.equal(reads, 3);
 });
 
 test("invalidate rechecks instead of returning an older in-flight allow verdict", async () => {
@@ -255,6 +307,7 @@ test("ACL read failure after invalidation denies old rights", async () => {
     canEdit: false,
     canView: false,
   });
+  // The throttled path must not resurrect the pre-invalidation allow.
   assert.deepEqual(await access.flags("guest"), {
     canEdit: false,
     canView: false,

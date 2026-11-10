@@ -82,3 +82,49 @@ test("a write suspended on the edit-lock read cannot survive ACL revocation", as
   doc.destroy();
   updateDoc.destroy();
 });
+
+test("a D1 blip during an edit does not revoke the socket", async () => {
+  const doc = new Y.Doc();
+  const updateDoc = new Y.Doc();
+  updateDoc.getText("markdown").insert(0, "keep this");
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, 0);
+  syncProtocol.writeUpdate(encoder, Y.encodeStateAsUpdate(updateDoc));
+  const access = new AccessRecheck(() =>
+    Promise.reject(new Error("D1 unavailable")),
+  );
+  let attachment = { canEdit: true, canView: true, userId: "alice" };
+  let closed = false;
+  const socket = {
+    close: () => {
+      closed = true;
+      socket.readyState = WebSocket.CLOSING;
+    },
+    deserializeAttachment: () => ({ ...attachment }),
+    readyState: WebSocket.OPEN,
+    send: () => undefined,
+    serializeAttachment: (value: typeof attachment) => {
+      attachment = value;
+    },
+  };
+  const room = Object.create(DocumentRoom.prototype) as InstanceType<
+    typeof DocumentRoom
+  >;
+  Object.assign(room, {
+    access,
+    ctx: { getWebSockets: () => [socket] },
+    editLock: { locked: () => Promise.resolve(false) },
+    ensureInitialized: () => Promise.resolve(),
+    requireDoc: () => doc,
+  });
+  await room.webSocketMessage(
+    socket as unknown as WebSocket,
+    encoding.toUint8Array(encoder).buffer as ArrayBuffer,
+  );
+  assert.equal(closed, false);
+  assert.equal(attachment.canEdit, true);
+  assert.equal(attachment.canView, true);
+  assert.equal(doc.getText("markdown").toString(), "keep this");
+  doc.destroy();
+  updateDoc.destroy();
+});

@@ -407,6 +407,8 @@ export class DocumentRoom extends DurableObject<Env> {
   /**
    * Refresh this socket's attachable ACL. Returns the live flags, or null
    * when the socket lost canView and was closed.
+   * A throttled read that throws keeps the current attachment: a D1 blip
+   * must not look like a revoke.
    */
   private async enforceSocketAccess(
     socket: WebSocket,
@@ -417,6 +419,11 @@ export class DocumentRoom extends DurableObject<Env> {
     const flags = fresh
       ? await this.access.flagsNow(actorKey)
       : await this.access.flags(actorKey);
+    if (!flags) {
+      return attachment.canView
+        ? { canEdit: attachment.canEdit, canView: true }
+        : null;
+    }
     return this.applySocketAccess(socket, attachment, flags);
   }
 
