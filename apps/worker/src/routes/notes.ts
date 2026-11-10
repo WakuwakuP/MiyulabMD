@@ -111,9 +111,17 @@ async function applyNotePatch(
     return latest.note;
   } finally {
     // Meta is already committed. A later markdown failure must still drop
-    // sockets that kept the previous ACL.
+    // sockets that kept the previous ACL. A revoke failure must not replace
+    // the committed response; the next recheck still drops the socket.
     if (revokeNoteId) {
-      await documentRoom(revokeNoteId).revokeStaleSockets();
+      try {
+        await documentRoom(revokeNoteId).revokeStaleSockets();
+      } catch (error) {
+        console.error(
+          `failed to revoke stale sockets for ${revokeNoteId}`,
+          error,
+        );
+      }
     }
   }
 }

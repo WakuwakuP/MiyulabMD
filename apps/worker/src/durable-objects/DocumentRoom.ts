@@ -6,6 +6,8 @@ import {
   EDIT_LOCK_WS_CLOSE_CODE,
   EDIT_LOCK_WS_CLOSE_REASON,
   type NoteHistoryActor,
+  WRITE_REVOKED_WS_CLOSE_CODE,
+  WRITE_REVOKED_WS_CLOSE_REASON,
 } from "@miyulabmd/shared";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -442,10 +444,15 @@ export class DocumentRoom extends DurableObject<Env> {
       );
       return null;
     }
-    if (attachment.canEdit !== flags.canEdit || attachment.canView !== true) {
+    const lostWrite = attachment.canEdit && !flags.canEdit;
+    if (lostWrite || attachment.canView !== true) {
       attachment.canEdit = flags.canEdit;
       attachment.canView = true;
       socket.serializeAttachment(attachment);
+    }
+    if (lostWrite) {
+      socket.close(WRITE_REVOKED_WS_CLOSE_CODE, WRITE_REVOKED_WS_CLOSE_REASON);
+      return null;
     }
     return flags;
   }

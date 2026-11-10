@@ -194,6 +194,8 @@ export {
   NOTE_HISTORY_ACTOR_KINDS,
   NOTE_RESTORE_MESSAGE,
   SEARCH_SCOPES,
+  WRITE_REVOKED_WS_CLOSE_CODE,
+  WRITE_REVOKED_WS_CLOSE_REASON,
 } from "./note.ts";
 export type {
   AccessGrant,

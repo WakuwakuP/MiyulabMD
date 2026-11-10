@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   ACCESS_REVOKED_WS_CLOSE_CODE,
   EDIT_LOCK_WS_CLOSE_CODE,
+  WRITE_REVOKED_WS_CLOSE_CODE,
 } from "@miyulabmd/shared";
 
 import { collabCloseAction } from "./editor-page.ts";
@@ -13,6 +14,7 @@ test("collabCloseAction maps DocumentRoom permanent close codes", () => {
     collabCloseAction(ACCESS_REVOKED_WS_CLOSE_CODE),
     "access-revoked",
   );
+  assert.equal(collabCloseAction(WRITE_REVOKED_WS_CLOSE_CODE), "write-revoked");
   assert.equal(collabCloseAction(1000), null);
   assert.equal(collabCloseAction(1006), null);
 });

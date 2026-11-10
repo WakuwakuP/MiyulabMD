@@ -85,6 +85,8 @@ export const EDIT_LOCKED_CODE = "edit_locked";
  */
 export const ACCESS_REVOKED_WS_CLOSE_CODE = 4401;
 export const ACCESS_REVOKED_WS_CLOSE_REASON = "access_revoked";
+export const WRITE_REVOKED_WS_CLOSE_CODE = 4402;
+export const WRITE_REVOKED_WS_CLOSE_REASON = "write_revoked";
 export const EDIT_LOCK_WS_CLOSE_CODE = 4403;
 export const EDIT_LOCK_WS_CLOSE_REASON = "edit_locked";
 

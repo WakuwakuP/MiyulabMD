@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
+import { WRITE_REVOKED_WS_CLOSE_CODE } from "@miyulabmd/shared";
 import * as encoding from "lib0/encoding";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
@@ -125,6 +126,54 @@ test("a D1 blip during an edit does not revoke the socket", async () => {
   assert.equal(attachment.canEdit, true);
   assert.equal(attachment.canView, true);
   assert.equal(doc.getText("markdown").toString(), "keep this");
+  doc.destroy();
+  updateDoc.destroy();
+});
+
+test("losing canEdit closes the socket and drops the in-flight write", async () => {
+  const doc = new Y.Doc();
+  const updateDoc = new Y.Doc();
+  updateDoc.getText("markdown").insert(0, "must not persist");
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, 0);
+  syncProtocol.writeUpdate(encoder, Y.encodeStateAsUpdate(updateDoc));
+  const access = new AccessRecheck(() =>
+    Promise.resolve({ canEdit: false, canView: true }),
+  );
+  let attachment = { canEdit: true, canView: true, userId: "alice" };
+  let closeCode = 0;
+  const socket = {
+    close: (code: number) => {
+      closeCode = code;
+      socket.readyState = WebSocket.CLOSING;
+    },
+    deserializeAttachment: () => ({ ...attachment }),
+    readyState: WebSocket.OPEN,
+    send: () => {
+      throw new Error("revoked writer must not receive data");
+    },
+    serializeAttachment: (value: typeof attachment) => {
+      attachment = value;
+    },
+  };
+  const room = Object.create(DocumentRoom.prototype) as InstanceType<
+    typeof DocumentRoom
+  >;
+  Object.assign(room, {
+    access,
+    ctx: { getWebSockets: () => [socket] },
+    editLock: { locked: () => Promise.resolve(false) },
+    ensureInitialized: () => Promise.resolve(),
+    requireDoc: () => doc,
+  });
+  await room.webSocketMessage(
+    socket as unknown as WebSocket,
+    encoding.toUint8Array(encoder).buffer as ArrayBuffer,
+  );
+  assert.equal(closeCode, WRITE_REVOKED_WS_CLOSE_CODE);
+  assert.equal(attachment.canEdit, false);
+  assert.equal(attachment.canView, true);
+  assert.equal(doc.getText("markdown").toString(), "");
   doc.destroy();
   updateDoc.destroy();
 });

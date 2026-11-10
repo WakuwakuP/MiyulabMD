@@ -3,6 +3,7 @@ import {
   EDIT_LOCK_WS_CLOSE_CODE,
   type Note,
   type SessionUser,
+  WRITE_REVOKED_WS_CLOSE_CODE,
 } from "@miyulabmd/shared";
 import type { MutableRefObject } from "react";
 import * as Y from "yjs";
@@ -156,7 +157,7 @@ export function bindEditorCollab(input: {
     if (action === "edit-locked") {
       input.onEditLocked?.();
     }
-    if (action === "access-revoked") {
+    if (action === "access-revoked" || action === "write-revoked") {
       input.onAccessRevoked?.();
     }
   };
@@ -219,12 +220,15 @@ export function editorSessionWritable(session: YjsSession | null): boolean {
 /** Map a DocumentRoom close code to the editor's mid-session reaction. */
 export function collabCloseAction(
   code: number,
-): "access-revoked" | "edit-locked" | null {
+): "access-revoked" | "edit-locked" | "write-revoked" | null {
   if (code === EDIT_LOCK_WS_CLOSE_CODE) {
     return "edit-locked";
   }
   if (code === ACCESS_REVOKED_WS_CLOSE_CODE) {
     return "access-revoked";
+  }
+  if (code === WRITE_REVOKED_WS_CLOSE_CODE) {
+    return "write-revoked";
   }
   return null;
 }

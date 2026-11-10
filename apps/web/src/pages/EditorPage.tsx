@@ -922,8 +922,9 @@ export function EditorPage() {
       noteId: canEdit ? noteId : undefined,
       offlineEdit: offlineEditable,
       onAccessRevoked: () => {
-        // Mid-session canView loss: drop the live Yjs socket and re-read
-        // the note so a 403/404 replaces the stale editor.
+        // Mid-session canView or canEdit loss: drop the live Yjs socket and
+        // re-read the note. A 403/404 replaces the editor; a remaining view
+        // right comes back read-only.
         teardownCollab(
           unbindCollabRef,
           sessionRef,
