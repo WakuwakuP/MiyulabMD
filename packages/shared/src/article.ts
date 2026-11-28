@@ -119,6 +119,14 @@ export function canManageSharedDriveSource(role: DriveRole | null): boolean {
 }
 
 /**
+ * マイドライブのサイト設定を変えられるのは所有者だけ。
+ * フォルダ編集者の公開実行は canDispatchArticleSource 側。
+ */
+export function canManageArticleSource(isOwner: boolean): boolean {
+  return isOwner;
+}
+
+/**
  * 主体をまたぐ移動で、記事ソースの実行範囲を相手の語彙へ読み替える。
  * 同じ種別のあいだはそのまま。
  */
@@ -173,6 +181,8 @@ export type ArticleSource = {
   updateAudience: ArticleUpdateAudienceValue;
   /** この応答の閲覧者が更新 Webhook を実行できるとき true。未判定なら省略。 */
   canDispatch?: boolean;
+  /** この応答の閲覧者がソース設定を変えられるとき true。未判定なら省略。 */
+  canManage?: boolean;
   schema: ArticleSchemaField[];
   webhookUrl: string | null;
   webhookAuthorizationSet: boolean;
