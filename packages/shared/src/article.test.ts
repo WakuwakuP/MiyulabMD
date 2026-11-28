@@ -9,6 +9,7 @@ import {
   articleSlug,
   canDispatchArticleSource,
   canDispatchSharedDriveSource,
+  canManageArticleSource,
   canManageSharedDriveSource,
   canOfferArticleDispatch,
   isArticleSourceDirty,
@@ -214,6 +215,8 @@ test("site update is the owner or people who can edit the folder", () => {
 });
 
 test("shared drive webhook follows the drive role and the source setting", () => {
+  assert.equal(canManageArticleSource(true), true);
+  assert.equal(canManageArticleSource(false), false);
   assert.equal(canManageSharedDriveSource("manager"), true);
   assert.equal(canManageSharedDriveSource("editor"), false);
   assert.equal(

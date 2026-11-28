@@ -218,6 +218,81 @@ test("dispatch checks authorization first and does not disclose inaccessible inv
   assert.equal(fetch.mock.callCount(), 0);
 });
 
+test("folder editors can dispatch a user source but cannot create, update, or delete it", async (t) => {
+  const { articles, env, fetch, owner, source, sqlite } =
+    await articleFixture(t);
+  const editor = await upsertUserByEmail(
+    env,
+    "editor@example.invalid",
+    "Editor",
+  );
+  sqlite
+    .prepare(
+      "UPDATE article_sources SET update_audience = 'editors', webhook_authorization = ? WHERE id = ?",
+    )
+    .run("Bearer test-token", source.id);
+  sqlite
+    .prepare(
+      "INSERT OR REPLACE INTO folder_policies (owner_id, folder, read_scope, write_scope, updated_at) VALUES (?, 'blog', 'signed_in', 'signed_in', 1)",
+    )
+    .run(owner.id);
+
+  assert.deepEqual(await articles.dispatch(editor, source.id), { ok: true });
+  assert.equal(fetch.mock.callCount(), 1);
+
+  const shared = await articles.listEditableSharedSources(editor);
+  const listed = shared.find((item) => item.id === source.id);
+  assert.ok(listed);
+  assert.equal(listed.canDispatch, true);
+  assert.equal(listed.canManage, false);
+  assert.equal(listed.webhookUrl, null);
+  assert.equal(listed.webhookAuthorizationSet, false);
+
+  const updated = await articles.updateSource(editor, source.id, {
+    webhookUrl: "https://attacker.example.invalid/hook",
+  });
+  assert.equal(updated, null);
+  const stored = sqlite
+    .prepare(
+      "SELECT webhook_url, webhook_authorization FROM article_sources WHERE id = ?",
+    )
+    .get(source.id);
+  assert.equal(stored?.webhook_url, "https://example.invalid/hook");
+  assert.equal(stored?.webhook_authorization, "Bearer test-token");
+
+  assert.equal(await articles.deleteSource(editor, source.id), false);
+  assert.ok(
+    sqlite
+      .prepare("SELECT id FROM article_sources WHERE id = ?")
+      .get(source.id),
+  );
+
+  assert.ok(source.folderId);
+  const planted = await articles.createSource(editor, editor.id, {
+    folderId: source.folderId,
+    name: "planted",
+    schema: [],
+    webhookUrl: "https://attacker.example.invalid/hook",
+  });
+  assert.ok("error" in planted);
+  assert.equal(planted.status, 404);
+
+  const asOwner = await articles.createSource(editor, owner.id, {
+    folder: "blog/other",
+    name: "other",
+    schema: [],
+  });
+  assert.ok("error" in asOwner);
+  assert.equal(asOwner.status, 404);
+
+  const ownerUpdate = await articles.updateSource(owner, source.id, {
+    name: "Blog",
+  });
+  assert.ok(ownerUpdate && !("error" in ownerUpdate));
+  assert.equal(ownerUpdate.canManage, true);
+  assert.equal(ownerUpdate.webhookUrl, "https://example.invalid/hook");
+});
+
 test("article creation still supplies the schema template", async (t) => {
   const { notes, owner } = await articleFixture(t);
   const created = await notes.create(owner, {
@@ -260,6 +335,13 @@ test("shared-drive root dispatch validates with membership-based error visibilit
     webhookUrl: "https://example.invalid/drive-hook",
   });
   assert.ok(!("error" in root));
+  assert.equal(
+    await articles.updateSource(editor, root.id, {
+      webhookUrl: "https://attacker.example.invalid/hook",
+    }),
+    null,
+  );
+  assert.equal(await articles.deleteSource(editor, root.id), false);
   // An empty source is still publishable.
   assert.deepEqual(await articles.dispatch(editor, root.id), { ok: true });
   const created = await notes.create(owner, {

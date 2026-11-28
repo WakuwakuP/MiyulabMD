@@ -27,7 +27,6 @@ import {
   fetchArticleSourceSettings,
   fetchFolderTree,
   fetchSharedDrives,
-  fetchSharedFolders,
   updateArticleSource,
 } from "../../lib/api.ts";
 import { hasSelectableSourceFolders } from "../../lib/folder-tree.ts";
@@ -110,15 +109,8 @@ function sourcePlace(source: ArticleSource, shared: boolean): string {
 
 function selectedWriteScope(
   folders: FolderRecord[],
-  sharedFolders: FolderRecord[],
   draft: Draft,
 ): AccessScope | null {
-  if (draft.sharedFolderId) {
-    return (
-      sharedFolders.find((folder) => folder.id === draft.sharedFolderId)
-        ?.writeScope ?? null
-    );
-  }
   if (!draft.folder) {
     return null;
   }
@@ -143,36 +135,14 @@ function folderFields(
   return {};
 }
 
-function sharedFolderOptions(
-  folders: FolderRecord[],
-  draft: Draft,
-): FolderRecord[] {
-  const editable = folders.filter((folder) => folder.canEdit);
-  if (
-    !draft.sharedFolderId ||
-    editable.some((folder) => folder.id === draft.sharedFolderId)
-  ) {
-    return editable;
-  }
-  return [
-    ...editable,
-    {
-      id: draft.sharedFolderId,
-      name: draft.folder || "共有フォルダ",
-      parentId: null,
-    },
-  ];
-}
-
 function audienceHint(
   audience: ArticleUpdateAudience,
   writeScope: AccessScope | null,
-  sharedFolder: boolean,
 ): string {
   const range = writeScope
     ? `現在の編集範囲は「${ACCESS_SCOPE_LABELS[writeScope]}」です。`
     : "";
-  if (sharedFolder || audience === "editors") {
+  if (audience === "editors") {
     return `このフォルダを編集できる人が「サイトを更新」を押せます。閲覧だけの人は押せません。${range}`;
   }
   return `フォルダの所有者だけが「サイトを更新」を押せます。${range}`;
@@ -246,61 +216,26 @@ function DriveAudienceFields({
 
 function SourceAudienceFields({
   draft,
-  editableShared,
   folders,
   onChange,
-  sharedFolders,
 }: {
   draft: Draft;
-  editableShared: FolderRecord[];
   folders: FolderRecord[];
   onChange: (draft: Draft) => void;
-  sharedFolders: FolderRecord[];
 }) {
-  const showSharedPicker =
-    Boolean(draft.sharedFolderId) || (!draft.id && editableShared.length > 0);
   return (
     <>
-      {!draft.sharedFolderId && (
-        <div className="grid gap-[0.35rem]">
-          <span className="text-[0.85rem] text-muted">
-            ディレクトリ（マイドライブ）
-          </span>
-          <FolderHierarchySelect
-            folders={folders}
-            id="source-folder"
-            onChange={(folder) => onChange({ ...draft, folder })}
-            value={draft.folder}
-          />
-        </div>
-      )}
-      {showSharedPicker && (
-        <Field htmlFor="source-shared-folder" label="共有フォルダ">
-          <Select
-            className="w-full rounded-lg px-3 py-2.5"
-            id="source-shared-folder"
-            onChange={(event) => {
-              const sharedFolderId = event.target.value;
-              onChange({
-                ...draft,
-                folder: "",
-                sharedFolderId,
-                updateAudience: sharedFolderId
-                  ? "editors"
-                  : draft.updateAudience,
-              });
-            }}
-            value={draft.sharedFolderId}
-          >
-            {!draft.id && <option value="">使わない</option>}
-            {sharedFolderOptions(sharedFolders, draft).map((folder) => (
-              <option key={folder.id} value={folder.id}>
-                {folder.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      )}
+      <div className="grid gap-[0.35rem]">
+        <span className="text-[0.85rem] text-muted">
+          ディレクトリ（マイドライブ）
+        </span>
+        <FolderHierarchySelect
+          folders={folders}
+          id="source-folder"
+          onChange={(folder) => onChange({ ...draft, folder })}
+          value={draft.folder}
+        />
+      </div>
       <fieldset className="grid gap-2 border-0 p-0">
         <legend className="text-[0.85rem] text-muted">
           サイトを更新できる人
@@ -308,7 +243,6 @@ function SourceAudienceFields({
         <CheckLabel>
           <input
             checked={draft.updateAudience === "self"}
-            disabled={Boolean(draft.sharedFolderId)}
             name="update-audience"
             onChange={() => onChange({ ...draft, updateAudience: "self" })}
             type="radio"
@@ -329,8 +263,7 @@ function SourceAudienceFields({
         <MutedText>
           {audienceHint(
             draft.updateAudience === "editors" ? "editors" : "self",
-            selectedWriteScope(folders, sharedFolders, draft),
-            Boolean(draft.sharedFolderId),
+            selectedWriteScope(folders, draft),
           )}
         </MutedText>
       </fieldset>
@@ -384,17 +317,12 @@ function applyLoadedSettings(
   loaded: {
     driveResult: Awaited<ReturnType<typeof fetchSharedDrives>>;
     folderResult: Awaited<ReturnType<typeof fetchFolderTree>>;
-    sharedFolderResult:
-      | Awaited<ReturnType<typeof fetchSharedFolders>>
-      | { data: FolderRecord[]; ok: true };
     sourceResult: Awaited<ReturnType<typeof fetchArticleSourceSettings>>;
   },
   apply: {
     setDrives: (drives: SharedDriveSummary[]) => void;
     setError: (error: string) => void;
     setFolders: (folders: FolderRecord[]) => void;
-    setSharedFolders: (folders: FolderRecord[]) => void;
-    setSharedSources: (sources: ArticleSource[]) => void;
     setSources: (sources: ArticleSource[]) => void;
   },
 ) {
@@ -405,21 +333,14 @@ function applyLoadedSettings(
   }
   if (loaded.sourceResult.ok) {
     apply.setSources(loaded.sourceResult.data.sources);
-    apply.setSharedSources(loaded.sourceResult.data.shared);
   } else {
     apply.setError(loaded.sourceResult.error);
     apply.setSources([]);
-    apply.setSharedSources([]);
   }
   if (loaded.folderResult.ok) {
     apply.setFolders(loaded.folderResult.data);
   } else {
     apply.setError(loaded.folderResult.error);
-  }
-  if (loaded.sharedFolderResult.ok) {
-    apply.setSharedFolders(loaded.sharedFolderResult.data);
-  } else {
-    apply.setError(loaded.sharedFolderResult.error);
   }
 }
 
@@ -427,9 +348,7 @@ function applyLoadedSettings(
 export function SiteSettingsPage() {
   const { user } = useOutletContext<AppShellContext>();
   const [sources, setSources] = useState<ArticleSource[]>([]);
-  const [sharedSources, setSharedSources] = useState<ArticleSource[]>([]);
   const [folders, setFolders] = useState<FolderRecord[]>([]);
-  const [sharedFolders, setSharedFolders] = useState<FolderRecord[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [drives, setDrives] = useState<SharedDriveSummary[]>([]);
   const [subjectId, setSubjectId] = useState<string | null>(null);
@@ -445,25 +364,18 @@ export function SiteSettingsPage() {
 
   async function reload(actorId: string, ownerId: string) {
     const drive = ownerId !== actorId;
-    const [sourceResult, folderResult, sharedFolderResult, driveResult] =
-      await Promise.all([
-        fetchArticleSourceSettings({
-          ownerId: drive ? ownerId : undefined,
-          viewerId: actorId,
-        }),
-        fetchFolderTree({
-          ownerId: drive ? ownerId : undefined,
-          viewerId: actorId,
-        }),
-        drive
-          ? Promise.resolve({
-              data: [] as FolderRecord[],
-              ok: true as const,
-            })
-          : fetchSharedFolders({ viewerId: actorId }),
-        fetchSharedDrives(),
-      ]);
-    return { driveResult, folderResult, sharedFolderResult, sourceResult };
+    const [sourceResult, folderResult, driveResult] = await Promise.all([
+      fetchArticleSourceSettings({
+        ownerId: drive ? ownerId : undefined,
+        viewerId: actorId,
+      }),
+      fetchFolderTree({
+        ownerId: drive ? ownerId : undefined,
+        viewerId: actorId,
+      }),
+      fetchSharedDrives(),
+    ]);
+    return { driveResult, folderResult, sourceResult };
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Preserve the existing request lifecycle.
@@ -479,8 +391,6 @@ export function SiteSettingsPage() {
     setDraft(null);
     setFolders([]);
     setSources([]);
-    setSharedFolders([]);
-    setSharedSources([]);
     setError(null);
     void reload(user.id, subjectId ?? user.id)
       .then((loaded) => {
@@ -491,8 +401,6 @@ export function SiteSettingsPage() {
           setDrives,
           setError,
           setFolders,
-          setSharedFolders,
-          setSharedSources,
           setSources,
         });
       })
@@ -561,7 +469,7 @@ export function SiteSettingsPage() {
       name: draft.name.trim(),
       schema,
       ...(driveSubject ? { ownerId: driveSubject.id } : {}),
-      updateAudience: draft.sharedFolderId ? "editors" : draft.updateAudience,
+      updateAudience: draft.updateAudience,
       webhookUrl: draft.webhookUrl.trim() || null,
       ...(draft.webhookAuthorization.trim()
         ? { webhookAuthorization: draft.webhookAuthorization.trim() }
@@ -582,13 +490,9 @@ export function SiteSettingsPage() {
         const refreshed = await reload(user.id, subjectId ?? user.id);
         if (refreshed.sourceResult.ok) {
           setSources(refreshed.sourceResult.data.sources);
-          setSharedSources(refreshed.sourceResult.data.shared);
         }
         if (refreshed.folderResult.ok) {
           setFolders(refreshed.folderResult.data);
-        }
-        if (refreshed.sharedFolderResult.ok) {
-          setSharedFolders(refreshed.sharedFolderResult.data);
         }
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -612,13 +516,9 @@ export function SiteSettingsPage() {
         const refreshed = await reload(user.id, subjectId ?? user.id);
         if (refreshed.sourceResult.ok) {
           setSources(refreshed.sourceResult.data.sources);
-          setSharedSources(refreshed.sourceResult.data.shared);
         }
         if (refreshed.folderResult.ok) {
           setFolders(refreshed.folderResult.data);
-        }
-        if (refreshed.sharedFolderResult.ok) {
-          setSharedFolders(refreshed.sharedFolderResult.data);
         }
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -645,17 +545,13 @@ export function SiteSettingsPage() {
       </section>
     );
   }
-  const editableShared = sharedFolders.filter((folder) => folder.canEdit);
   const managerDrives = drives.filter((drive) => drive.role === "manager");
   const canPickSourceFolder = driveSubject
     ? folders.length > 0
-    : hasSelectableSourceFolders(folders) || editableShared.length > 0;
-  const listed = [
-    ...sources.map((source) => ({ shared: false, source })),
-    ...(driveSubject
-      ? []
-      : sharedSources.map((source) => ({ shared: true, source }))),
-  ];
+    : hasSelectableSourceFolders(folders);
+  const listed = sources
+    .filter((source) => source.canManage !== false)
+    .map((source) => ({ shared: false, source }));
   return (
     <section>
       <h2 className="m-0 text-[1.5em] font-bold">サイト設定</h2>
@@ -687,7 +583,7 @@ export function SiteSettingsPage() {
         はヘッダーの「サイトを更新」から送ります。
         {driveSubject
           ? "実行できる人は、管理者だけか、管理者と編集者かをソースごとに選べます。設定を変えられるのは管理者です。ドライブ全体もソースにできます。"
-          : "押せる人は、自分のみか、そのフォルダを編集できる人かをソースごとに選べます。閲覧だけの人は押せません。編集できる共有フォルダも選べます。"}
+          : "押せる人は、自分のみか、そのフォルダを編集できる人かをソースごとに選べます。閲覧だけの人は押せません。サイト設定と Webhook を変えられるのは所有者です。"}
       </p>
       {error && <ErrorText>{error}</ErrorText>}
       {loading ? (
@@ -786,10 +682,8 @@ export function SiteSettingsPage() {
           ) : (
             <SourceAudienceFields
               draft={draft}
-              editableShared={editableShared}
               folders={folders}
               onChange={setDraft}
-              sharedFolders={sharedFolders}
             />
           )}
           <div>

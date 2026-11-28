@@ -24,6 +24,7 @@ export {
   articleSlug,
   canDispatchArticleSource,
   canDispatchSharedDriveSource,
+  canManageArticleSource,
   canManageSharedDriveSource,
   canOfferArticleDispatch,
   coerceArticleValue,

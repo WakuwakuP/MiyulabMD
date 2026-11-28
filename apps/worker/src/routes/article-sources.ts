@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { canManageSharedDriveSource } from "@miyulabmd/shared";
 import { Elysia } from "elysia";
 
 import { readSession } from "../auth/session.ts";
@@ -7,11 +8,7 @@ import {
   type ArticleSourceWrite,
   createArticleService,
 } from "../services/articles.ts";
-import {
-  canEditSubject,
-  driveRoleFor,
-  isSharedDrive,
-} from "../services/drive-membership.ts";
+import { driveRoleFor, isSharedDrive } from "../services/drive-membership.ts";
 import { moveFolder } from "../services/move.ts";
 
 const articles = createArticleService(env);
@@ -39,11 +36,7 @@ export const articleSourceRoutes = new Elysia({
       const role = (await isSharedDrive(env, ownerId))
         ? await driveRoleFor(env, ownerId, user)
         : null;
-      const allowed =
-        role === "manager" ||
-        role === "editor" ||
-        (role === null && (await canEditSubject(env, ownerId, user)));
-      if (!allowed) {
+      if (role !== "manager" && role !== "editor") {
         set.status = 403;
         return { error: "Forbidden" };
       }
@@ -93,9 +86,9 @@ export const articleSourceRoutes = new Elysia({
     );
     const ownerId = body?.ownerId ?? user.id;
     if (ownerId !== user.id) {
-      const allowed = (await isSharedDrive(env, ownerId))
-        ? (await driveRoleFor(env, ownerId, user)) === "manager"
-        : await canEditSubject(env, ownerId, user);
+      const allowed =
+        (await isSharedDrive(env, ownerId)) &&
+        canManageSharedDriveSource(await driveRoleFor(env, ownerId, user));
       if (!allowed) {
         set.status = 403;
         return { error: "Forbidden" };

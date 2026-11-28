@@ -16,6 +16,8 @@ import {
   articleSlug,
   canDispatchArticleSource,
   canDispatchSharedDriveSource,
+  canManageArticleSource,
+  canManageSharedDriveSource,
   canOfferArticleDispatch,
   type DriveArticleUpdateAudience,
   type DriveRole,
@@ -102,6 +104,7 @@ function parseSchemaJson(raw: string): ArticleSchemaField[] {
 
 type PresentSourceOptions = {
   canDispatch?: boolean;
+  canManage?: boolean;
   folderLabel?: string;
   includeWebhook?: boolean;
   ownerKind: OwnerKind;
@@ -114,6 +117,7 @@ function presentSource(
   const includeWebhook = options.includeWebhook !== false;
   return {
     canDispatch: options.canDispatch,
+    canManage: options.canManage,
     createdAt: row.created_at,
     folder: options.folderLabel ?? row.folder,
     folderId: row.folder_id,
@@ -143,11 +147,17 @@ function presentForUser(
   userId: string,
   ownerKind: OwnerKind,
 ): ArticleSource {
+  const canManage =
+    ownerKind === "shared_drive"
+      ? true
+      : canManageArticleSource(userId === row.owner_id);
   if (userId === row.owner_id || ownerKind === "shared_drive") {
-    return presentSource(row, { ownerKind });
+    return presentSource(row, { canManage, ownerKind });
   }
   return presentSource(row, {
+    canManage,
     folderLabel: folderName(row.folder),
+    includeWebhook: false,
     ownerKind,
   });
 }
@@ -324,16 +334,11 @@ async function canManageSource(
   row: SourceRow,
 ): Promise<boolean> {
   if (await isSharedDrive(env, row.owner_id)) {
-    return (await driveRoleFor(env, row.owner_id, user)) === "manager";
+    return canManageSharedDriveSource(
+      await driveRoleFor(env, row.owner_id, user),
+    );
   }
-  if (user.id === row.owner_id) {
-    return true;
-  }
-  if (normalizeUserAudience(row.update_audience) !== "editors") {
-    return false;
-  }
-  const flags = await folderViewFlags(env, row.owner_id, row.folder, user);
-  return flags.canEdit;
+  return canManageArticleSource(user.id === row.owner_id);
 }
 
 type SourceWriteError = { error: string; status: number };
@@ -415,22 +420,18 @@ async function assertCanUseFolder(
   env: Env,
   user: SessionUser,
   ownerId: string,
-  folder: string,
+  _folder: string,
 ): Promise<SourceWriteError | null> {
-  if (user.id === ownerId) {
+  if (canManageArticleSource(user.id === ownerId)) {
     return null;
   }
   if (await isSharedDrive(env, ownerId)) {
-    if ((await driveRoleFor(env, ownerId, user)) === "manager") {
+    if (canManageSharedDriveSource(await driveRoleFor(env, ownerId, user))) {
       return null;
     }
     return { error: "Forbidden", status: 403 };
   }
-  const flags = await folderViewFlags(env, ownerId, folder, user);
-  if (!flags.canEdit) {
-    return { error: "フォルダが見つかりません", status: 404 };
-  }
-  return null;
+  return { error: "フォルダが見つかりません", status: 404 };
 }
 
 type SourcePlacement = {
@@ -881,7 +882,9 @@ async function sharedSourcesForOwner(
       sources.push(
         presentSource(row, {
           canDispatch: true,
+          canManage: false,
           folderLabel: folderName(row.folder),
+          includeWebhook: false,
           ownerKind: "user",
         }),
       );
@@ -1330,6 +1333,10 @@ export function createArticleService(env: Env) {
           ? await driveRoleFor(env, ownerId, viewer)
           : null;
       const includeWebhook = ownerKind !== "shared_drive" || role === "manager";
+      const canManage =
+        ownerKind === "shared_drive"
+          ? canManageSharedDriveSource(role)
+          : canManageArticleSource(!viewer || viewer.id === ownerId);
       const rows = await db(env)
         .prepare(
           "SELECT * FROM article_sources WHERE owner_id = ? ORDER BY folder",
@@ -1339,6 +1346,7 @@ export function createArticleService(env: Env) {
       return (rows.results ?? []).map((row) =>
         presentSource(row, {
           canDispatch: sourceCanDispatch(row, ownerKind, viewer, role),
+          canManage,
           includeWebhook,
           ownerKind,
         }),
